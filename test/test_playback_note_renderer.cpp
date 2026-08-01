@@ -42,7 +42,7 @@ TickPosition tick_at_sample(const CompiledTempoMap& map, std::int64_t sample) {
 std::shared_ptr<const Project> note_project(const CompiledTempoMap& map,
                                             std::vector<NoteEvent> notes,
                                             std::int64_t clip_end_sample = 1'000) {
-    auto content = take(NoteContent::create(std::move(notes)));
+    auto content = take(MidiContent::create(std::move(notes)));
     const auto clip_duration = tick_at_sample(map, clip_end_sample) - TickPosition{0};
     auto clip = take(Clip::create({20}, {0}, clip_duration, std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));
@@ -370,7 +370,7 @@ TEST_CASE("many note merge sort advances one charged work unit per slice") {
     for (std::size_t index = 0; index < note_count; ++index) {
         const auto start = static_cast<std::int64_t>(index * 2);
         // Descending durations make the compiler's generated off stream
-        // maximally different from the NoteContent start ordering.
+        // maximally different from the MidiContent start ordering.
         const auto end = static_cast<std::int64_t>(2'000 - index);
         notes.push_back(
             note(*map, 1'000 + index, start, end, static_cast<std::uint8_t>(index % 128)));

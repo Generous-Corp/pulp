@@ -21,7 +21,7 @@ inline ClipContentRole clip_content_role(const timeline::Clip& clip) noexcept {
         timeline::ClipContentCases{
             [](const timeline::EmptyContent&) { return ClipContentRole::Silent; },
             [](const timeline::MediaRef&) { return ClipContentRole::Audio; },
-            [](const timeline::NoteContent&) { return ClipContentRole::Notes; },
+            [](const timeline::MidiContent&) { return ClipContentRole::Notes; },
             [](const timeline::RegisteredContent&) { return ClipContentRole::Silent; },
             [](const timeline::OpaqueContent&) { return ClipContentRole::Silent; },
             [](const timeline::SequenceRef&) { return ClipContentRole::Sequence; },

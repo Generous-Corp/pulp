@@ -137,7 +137,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(scan_compiler.status().last_error.item == ItemId{14});
     REQUIRE_FALSE(scan_store.has_value());
 
-    auto skipped_notes = take(NoteContent::create(
+    auto skipped_notes = take(MidiContent::create(
         {NoteEvent{{20}, {20}, {10}, 40'000, 64, 0}, NoteEvent{{21}, {40}, {10}, 40'000, 64, 0}}));
     auto note_scan_clip = take(Clip::create({12}, {0}, {100}, std::move(skipped_notes)));
     auto note_scan_child = take(Sequence::create({10}, "note scan child", TickDuration{100},
@@ -161,7 +161,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(note_scan_compiler.status().last_error.item == ItemId{12});
     REQUIRE_FALSE(note_scan_store.has_value());
 
-    auto invalid_notes = take(NoteContent::create({NoteEvent{{20}, {90}, {20}, 40'000, 64, 0}}));
+    auto invalid_notes = take(MidiContent::create({NoteEvent{{20}, {90}, {20}, 40'000, 64, 0}}));
     auto invalid_note_clip = take(Clip::create({12}, {0}, {100}, invalid_notes));
     auto invalid_child =
         take(Sequence::create({10}, "child", TickDuration{100}, {track(11, {invalid_note_clip})}));
@@ -416,7 +416,7 @@ TEST_CASE("Nested note clipping consumes compile slice work units") {
     for (std::uint64_t index = 0; index < 128; ++index)
         notes.push_back(
             {{1'000 + index}, {static_cast<std::int64_t>(index * 100)}, {50}, 40'000, 64, 0});
-    auto content = take(NoteContent::create(std::move(notes)));
+    auto content = take(MidiContent::create(std::move(notes)));
     auto child_clip = take(Clip::create({12}, {0}, {12'800}, content));
     auto child =
         take(Sequence::create({10}, "child", TickDuration{12'800}, {track(11, {child_clip})}));
@@ -615,7 +615,7 @@ Project modified_nested_project(std::vector<NoteModifier> modifiers, std::uint64
                                 std::int64_t child_note_duration = 240,
                                 std::int64_t reference_source_start = 0,
                                 std::int64_t reference_duration = 960) {
-    auto notes = take(NoteContent::create(
+    auto notes = take(MidiContent::create(
         {NoteEvent{{13}, {child_note_start}, {child_note_duration}, 40'000, 64, 0},
          NoteEvent{{15}, {600}, {120}, 40'000, 67, 0}},
         std::move(modifiers), seed));
@@ -662,7 +662,7 @@ TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
 TEST_CASE("A nested note clip drops modifiers whose notes were trimmed away") {
     // The reference starts one tick after note 13 ends, so note 13 is entirely
     // outside the audible window and is removed by clipping. Its modifier must
-    // be dropped with it: NoteContent::create refuses a modifier that names an
+    // be dropped with it: MidiContent::create refuses a modifier that names an
     // absent note, so passing the companion array through unfiltered would turn
     // this nested sequence into a compile error rather than a valid lowering.
     const auto project = modified_nested_project(

@@ -71,6 +71,10 @@ struct ProjectSnapshotCounts {
     std::size_t chord_scale_events = 0;
     /// Number of groove-template steps.
     std::size_t groove_steps = 0;
+    /// Number of controller/expression lanes across MIDI-content clips.
+    std::size_t midi_lanes = 0;
+    /// Number of controller points across all lanes.
+    std::size_t midi_lane_points = 0;
 };
 
 /// Allocation-light metadata view for project browsers and admission checks.

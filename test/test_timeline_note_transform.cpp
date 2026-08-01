@@ -72,8 +72,8 @@ accept_equivalent_numbers(std::span<const NoteEvent> notes, std::string_view par
     return runtime::Ok(std::vector<NoteEvent>(notes.begin(), notes.end()));
 }
 
-const NoteContent& notes(const Project& project) {
-    return std::get<NoteContent>(clip(project).content());
+const MidiContent& notes(const Project& project) {
+    return std::get<MidiContent>(clip(project).content());
 }
 
 } // namespace

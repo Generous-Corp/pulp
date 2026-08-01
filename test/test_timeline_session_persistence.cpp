@@ -5,7 +5,7 @@
 namespace {
 
 Project session_project(std::string scene_name = "verse") {
-    auto notes = take(NoteContent::create({}));
+    auto notes = take(MidiContent::create({}));
     auto clip = take(
         Clip::create({4}, TickPosition{0}, TickDuration{kTicksPerQuarter}, ClipContent{notes}));
     auto track = take(Track::create({3}, "drums", {clip}));
@@ -37,7 +37,7 @@ Project all_follow_kinds_project() {
         FollowActionKind::Last,     FollowActionKind::Any,  FollowActionKind::Other,
         FollowActionKind::Jump,
     };
-    auto notes = take(NoteContent::create({}));
+    auto notes = take(MidiContent::create({}));
     auto clip = take(
         Clip::create({4}, TickPosition{0}, TickDuration{kTicksPerQuarter}, ClipContent{notes}));
     auto track = take(Track::create({3}, "drums", {clip}));

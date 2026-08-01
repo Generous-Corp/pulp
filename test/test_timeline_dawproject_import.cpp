@@ -51,7 +51,7 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     REQUIRE(lead_clips.size() == 1);
     REQUIRE(lead_clips[0].start().value == 4 * kBeat);
     REQUIRE(lead_clips[0].duration().value == 4 * kBeat);
-    const auto& notes = std::get<NoteContent>(lead_clips[0].content()).notes();
+    const auto& notes = std::get<MidiContent>(lead_clips[0].content()).notes();
     REQUIRE(notes.size() == 2);
     REQUIRE(notes[0].start.value == 0);
     REQUIRE(notes[0].duration.value == 1 * kBeat);

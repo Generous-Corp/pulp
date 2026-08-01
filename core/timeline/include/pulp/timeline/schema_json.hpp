@@ -133,6 +133,10 @@ struct DecodeLimits {
     std::size_t max_chord_scale_events = 1'000'000;
     /// Maximum groove-template steps.
     std::size_t max_groove_steps = 100'000;
+    /// Maximum controller/expression lanes across all MIDI content.
+    std::size_t max_midi_lanes = 100'000;
+    /// Maximum controller points across all lanes.
+    std::size_t max_midi_lane_points = 5'000'000;
 
     /// Returns tighter ceilings suitable for memory-constrained web runtimes.
     static DecodeLimits web_defaults() noexcept;

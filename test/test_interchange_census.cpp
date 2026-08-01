@@ -31,7 +31,7 @@ MediaAsset asset(ItemId id, AssetStoragePolicy policy, char digit) {
 // is a complete statement of what the model can express today.
 Project rich_project() {
     auto note_clip = take_value(
-        Clip::create({5}, {200}, {100}, take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}))));
+        Clip::create({5}, {200}, {100}, take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}))));
     auto media_clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{11}, {25}, 100},
                                               ClipPlaybackProperties{0.5f, 16, 32}));
     auto nested_clip =
@@ -233,7 +233,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     NoteModifier chance;
     chance.note_id = {8};
     chance.probability = 0x4000;
-    auto content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
+    auto content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
     auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
     auto track = take_value(Track::create({6}, "musical", {clip}));
     auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
@@ -249,7 +249,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
 
     // The same notes without a modifier record only the note concept, so the
     // new row cannot be a constant that fires on every note clip.
-    auto plain_content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
     auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
     auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
     auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
@@ -264,7 +264,7 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     // neutral defaults. Formats that cannot carry it must still disclose the
     // loss rather than silently changing future probability decisions.
     auto seeded_content =
-        take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
+        take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
     auto seeded_clip =
         take_value(Clip::create({5}, {200}, {100}, std::move(seeded_content)));
     auto seeded_track = take_value(Track::create({6}, "musical", {seeded_clip}));
@@ -370,7 +370,7 @@ TEST_CASE("a census records markers, regions, and the session timecode origin",
 
 TEST_CASE("a census names empty clips and continuous tempo ramps", "[interchange]") {
     auto empty = take_value(Clip::create({4}, {0}, {100}, EmptyContent{}));
-    auto note_content = take_value(NoteContent::create(
+    auto note_content = take_value(MidiContent::create(
         {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 40'000, 60, 0}}));
     auto note = take_value(Clip::create({7}, {100}, {100}, std::move(note_content)));
     auto track =
@@ -399,7 +399,7 @@ TEST_CASE("a census names empty clips and continuous tempo ramps", "[interchange
 
 TEST_CASE("a census names a zero velocity that cannot be a sounding SMF Note On",
           "[interchange]") {
-    auto notes = take_value(NoteContent::create(
+    auto notes = take_value(MidiContent::create(
         {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 0, 60, 0}}));
     auto clip = take_value(Clip::create({7}, {0}, {100}, std::move(notes)));
     auto track = take_value(Track::create({5}, "silent", {std::move(clip)}));

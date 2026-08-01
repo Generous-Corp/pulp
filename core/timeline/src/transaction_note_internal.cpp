@@ -21,7 +21,7 @@ bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
 
 runtime::Result<Project, TransactionError> replace_note_content(
     const Project& project, const Sequence& sequence, const Track& track, const Clip& clip,
-    NoteContent content, std::span<const IdentityMutation> identities,
+    MidiContent content, std::span<const IdentityMutation> identities,
     std::optional<std::uint64_t> next_item_id, const Transaction& transaction, CommandId command) {
     auto next_clip = clip.with_content(std::move(content));
     if (!next_clip)
@@ -51,7 +51,7 @@ reduce_set_note_velocity(const Project& project, const SetNoteVelocity& velocity
     const auto* sequence = project.find_sequence(velocity.sequence_id);
     const auto* track = sequence->find_track(velocity.track_id);
     const auto* clip = track->find_clip(velocity.clip_id);
-    const auto* notes = std::get_if<NoteContent>(&clip->content());
+    const auto* notes = std::get_if<MidiContent>(&clip->content());
     if (!notes)
         return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
                                                       command, velocity.clip_id);
@@ -96,12 +96,12 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
     const auto* sequence = project.find_sequence(replace.sequence_id);
     const auto* track = sequence->find_track(replace.track_id);
     const auto* clip = track->find_clip(replace.clip_id);
-    const auto* notes = std::get_if<NoteContent>(&clip->content());
+    const auto* notes = std::get_if<MidiContent>(&clip->content());
     if (!notes)
         return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
                                                       command, replace.clip_id);
 
-    auto expected_notes = NoteContent::create(replace.expected);
+    auto expected_notes = MidiContent::create(replace.expected);
     if (!expected_notes)
         return runtime::Err(model_failure(transaction, command, expected_notes.error()));
     if (notes->notes().size() != expected_notes->notes().size() ||
@@ -110,7 +110,12 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
         return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
                                                       transaction, command, replace.clip_id);
 
-    auto next_notes = NoteContent::create(replace.replacement);
+    // The command's payload is notes, so the clip's controller and expression
+    // lanes carry across unchanged. Rebuilding from the notes alone would let a
+    // command that predates lanes silently delete them.
+    auto next_notes = MidiContent::create(
+        replace.replacement, {}, 0,
+        std::vector<MidiExpressionLane>(notes->lanes().begin(), notes->lanes().end()));
     if (!next_notes)
         return runtime::Err(model_failure(transaction, command, next_notes.error()));
 

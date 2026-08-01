@@ -141,6 +141,8 @@ void collect_summary(std::vector<std::pair<std::string, std::string>>& out,
     out.emplace_back("counts.take_lanes", to_text(counts.take_lanes));
     out.emplace_back("counts.takes", to_text(counts.takes));
     out.emplace_back("counts.take_comp_segments", to_text(counts.take_comp_segments));
+    out.emplace_back("counts.midi_lanes", to_text(counts.midi_lanes));
+    out.emplace_back("counts.midi_lane_points", to_text(counts.midi_lane_points));
 }
 
 /// Records every concept the census found, keyed by its stable generated id so

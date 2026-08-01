@@ -50,6 +50,12 @@ enum class CompileErrorCode : std::uint8_t {
     ExpansionBudgetExceeded,
     NoteProgramCapacityExceeded,
     OfflineStretchFailed,
+    // A nested clip needed trimming while its MIDI content carried controller
+    // or expression lanes. Trimming has no defined answer for a lane: a point
+    // before the retained window can still be the value sounding inside it, so
+    // dropping it and carrying it are both wrong. Lowering such a clip requires
+    // the chase rule that decides which point the window inherits.
+    TrimmedMidiLaneUnsupported,
 };
 
 struct CompileError {

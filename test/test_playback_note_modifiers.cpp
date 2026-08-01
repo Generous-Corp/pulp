@@ -43,7 +43,7 @@ std::shared_ptr<const Project> modifier_project(std::vector<NoteModifier> modifi
         {{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0},
         {{31}, {kTicksPerQuarter * 2}, {kTicksPerQuarter}, 0xffff, 64, 0},
     };
-    auto content = take(NoteContent::create(std::move(notes), std::move(modifiers), seed));
+    auto content = take(MidiContent::create(std::move(notes), std::move(modifiers), seed));
     auto clip = take(Clip::create({20}, {0}, kLoopLength, std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));
     auto sequence = take(Sequence::create({2}, "root", kLoopLength, {std::move(track)}));
@@ -512,7 +512,7 @@ TEST_CASE("A ratchet that would collapse below one rendered sample is refused",
 
     // A note one tick long cannot be split, so the compiler must refuse rather
     // than emit a note-on with no matching off.
-    auto content = take(NoteContent::create({{{30}, {0}, {1}, 0xffff, 60, 0}}, {ratchet}, 0));
+    auto content = take(MidiContent::create({{{30}, {0}, {1}, 0xffff, 60, 0}}, {ratchet}, 0));
     auto clip = take(Clip::create({20}, {0}, kLoopLength, std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));
     auto sequence = take(Sequence::create({2}, "root", kLoopLength, {std::move(track)}));
@@ -540,7 +540,7 @@ TEST_CASE("Ratchet expansion respects the compiled event budget",
     const auto map = modifier_tempo_map();
     NoteModifier ratchet = chance(30, note_probability_certain);
     ratchet.ratchet_count = 4;
-    auto content = take(NoteContent::create(
+    auto content = take(MidiContent::create(
         {{{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0}}, {ratchet}, 0));
     auto clip = take(Clip::create({20}, {0}, kLoopLength, std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));

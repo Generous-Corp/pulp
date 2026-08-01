@@ -1034,7 +1034,7 @@ class StructuralScanner {
                    require_member(content_data, "source_start", StringShape, content_path);
         }
         const bool is_notes = content_type == "pulp.timeline.content.notes";
-        if (!is_notes || version > 2 || version == 0) {
+        if (!is_notes || version > 3 || version == 0) {
             const auto* schema =
                 registry_ ? registry_->find(SchemaDomain::Content, content_type) : nullptr;
             const auto raw_size = content.end - content.begin;
@@ -1055,9 +1055,59 @@ class StructuralScanner {
                       path + "/data/content/data/notes");
             return false;
         }
+        // The lane container arrived with v3, so an older envelope must still
+        // preflight without it — the migration is what adds the member.
+        if (version >= 3) {
+            const auto content_path = path + "/data/content/data";
+            if (!require_member(content_data, "lanes", ArrayShape, content_path))
+                return false;
+            Span lanes;
+            bool has_lanes = false;
+            if (!member(content_data, "lanes", lanes, has_lanes))
+                return false;
+            if (!governed_array(
+                    lanes, counts_.midi_lanes, limits_.max_midi_lanes, content_path + "/lanes",
+                    [&](Span lane, std::size_t lane_index) {
+                        const auto lane_path =
+                            content_path + "/lanes/" + std::to_string(lane_index);
+                        if (!has_shape(lane, ObjectShape)) {
+                            set_error(PersistenceErrorCode::InvalidSchema, lane.begin, 0, 0,
+                                      lane_path);
+                            return false;
+                        }
+                        if (!require_member(lane, "bank", NumberShape, lane_path) ||
+                            !require_member(lane, "channel", NumberShape, lane_path) ||
+                            !require_member(lane, "group", NumberShape, lane_path) ||
+                            !require_member(lane, "id", StringShape, lane_path) ||
+                            !require_member(lane, "index", NumberShape, lane_path) ||
+                            !require_member(lane, "points", ArrayShape, lane_path) ||
+                            !require_member(lane, "status", NumberShape, lane_path))
+                            return false;
+                        Span points;
+                        bool has_points = false;
+                        if (!member(lane, "points", points, has_points))
+                            return false;
+                        return governed_array(
+                            points, counts_.midi_lane_points, limits_.max_midi_lane_points,
+                            lane_path + "/points", [&](Span point, std::size_t point_index) {
+                                const auto point_path =
+                                    lane_path + "/points/" + std::to_string(point_index);
+                                if (!has_shape(point, ObjectShape)) {
+                                    set_error(PersistenceErrorCode::InvalidSchema, point.begin, 0,
+                                              0, point_path);
+                                    return false;
+                                }
+                                return require_member(point, "id", StringShape, point_path) &&
+                                       require_member(point, "position_ticks", StringShape,
+                                                      point_path) &&
+                                       require_member(point, "value", NumberShape, point_path);
+                            });
+                    }))
+                return false;
+        }
         // The modifier companion array arrived with v2, so a v1 envelope must
         // still preflight without it — the migration is what adds the members.
-        if (version == 2) {
+        if (version >= 2) {
             const auto content_path = path + "/data/content/data";
             if (!require_member(content_data, "modifier_seed", StringShape, content_path) ||
                 !require_member(content_data, "modifiers", ArrayShape, content_path))
