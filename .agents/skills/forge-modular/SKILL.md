@@ -151,6 +151,29 @@ could not be regenerated from a clone at all.
 A module built from the app lands in the INSTALLED pack only.
 `tools/rack/copy_back.py` lists what is stranded; `--apply` brings it here.
 
+## Two paths draw a module's controls, and they must agree
+
+OURS come from the manifest a panel was emitted from — always present, exact,
+never needs a scan. ANYBODY ELSE'S come from what CARTOG measured inside Rack,
+because a vendor's control positions exist only in compiled widget code.
+
+Both must follow the same rule: **draw what you know, skip what you don't.** A
+slider or a switch drawn as a circle is wrong in a way a reader cannot see, so
+the manifest path maps four knob kinds to diameters and skips the rest. The
+measured path used to push every control as a knob sized `min(w, h)`, which
+turned a vendor's fader into a small dial — the exact thing the other path
+exists to prevent. `PortMap::draws_as_knob()` is the shared rule now.
+
+An **empty** `kind` means the scan predates classification and must still draw;
+refusing those empties panels that are correct today. Absent is *unknown*,
+never *knob*. Same shape as the port map's scan version: "no data" and "data
+saying no" are different answers and collapsing them is the bug.
+
+CARTOG still writes `lights`, `displays` and `type` that nothing reads.
+`tools/rack/test_portmap_fields.py` lists them with reasons so a dropped field
+is a decision rather than an oversight, and fails on one that appears without
+one.
+
 ## The port map is merged, so entries outlive their scanner
 
 CARTOG writes `~/Library/Application Support/Rack2/forge-portmap.json` and each
