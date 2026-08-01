@@ -177,6 +177,46 @@ TEST_CASE("authenticated domain mutation applies on main before response",
     CHECK_FALSE(response.is_error);
 }
 
+TEST_CASE("rejected post operation destruction can cancel RPC",
+          "[inspect][client][main-thread][post-rejected][reentrant]") {
+    struct ReentrantState {
+        std::shared_ptr<InspectorMainThreadRpc> rpc;
+        std::atomic<bool> armed{false};
+        std::atomic<bool> reentered{false};
+    };
+    struct ReentrantCapture {
+        std::shared_ptr<ReentrantState> state;
+
+        ~ReentrantCapture() {
+            if (!state->armed.load(std::memory_order_acquire) ||
+                state->reentered.exchange(true, std::memory_order_acq_rel)) {
+                return;
+            }
+            state->rpc->cancel();
+        }
+    };
+    auto reentrant_state = std::make_shared<ReentrantState>();
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [reentrant_state](auto) {
+            reentrant_state->armed.store(true, std::memory_order_release);
+            return false;
+        },
+        [] { return false; });
+    reentrant_state->rpc = rpc;
+    InspectorMainThreadRpc::Operation operation =
+        [capture = ReentrantCapture{reentrant_state}] {
+            return make_response(1, "{}");
+        };
+
+    const auto response = rpc->call(1, std::move(operation));
+    CHECK(reentrant_state->reentered.load(std::memory_order_acquire));
+    CHECK(response.error_code == "main_thread_unavailable");
+
+    REQUIRE(rpc->set_posted_lifetime_callbacks({}, {}));
+    CHECK_FALSE(rpc->set_posted_lifetime_callbacks({}, {}));
+}
+
 TEST_CASE("oversized inspector responses return a bounded protocol error",
           "[inspect][client][resource-limit]") {
     TemporaryDirectory temporary;

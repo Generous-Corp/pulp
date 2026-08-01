@@ -15,7 +15,9 @@ namespace pulp::inspect {
 /// execution starts returns a fenced `mayHaveApplied` error at the deadline;
 /// the posted task retains its own state and discards any late response.
 /// Operations must therefore own everything they may access until they return.
-/// Calls already executing inline on the main thread cannot be preempted.
+/// Calls already executing inline on the main thread cannot be preempted. A
+/// Post implementation owns every callable copy it accepts until that copy is
+/// destroyed, including cancelled callables that will never execute.
 class InspectorMainThreadRpc {
 public:
     using Operation = std::function<InspectorMessage()>;
@@ -50,10 +52,19 @@ public:
     /// for. Safe to call repeatedly during host teardown.
     void cancel();
     /// Cancel queued work and wait for every operation already executing on
-    /// another thread to reach its completion callback. When called from the
-    /// executing operation itself, cancellation is applied but waiting is
-    /// skipped so reentrant host teardown cannot deadlock.
+    /// another thread to reach its completion callback. Accepted dispatcher
+    /// closures that have not run are cancelled but remain owned by the
+    /// dispatcher; this operation does not wait for their callable storage to
+    /// be released. When called from the executing operation itself,
+    /// cancellation is applied but waiting is skipped so reentrant host
+    /// teardown cannot deadlock.
     void cancel_and_wait();
+    /// Install callbacks bracketing the aggregate lifetime of each posted
+    /// callable handed to Post. Copies made by Post share one lifetime. The end
+    /// callback runs only when the final callable copy is destroyed. May be
+    /// installed only once and while no posted callable lifetime is
+    /// outstanding; returns false otherwise.
+    bool set_posted_lifetime_callbacks(Completion begin, Completion end);
     bool executing_on_current_thread() const;
     /// Queue teardown work for the exact point at which the current operation
     /// has delivered its completion and left RPC execution. Returns false when

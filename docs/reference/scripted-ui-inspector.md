@@ -117,8 +117,10 @@ publication or domain callback may destroy the server wrapper, capture
 `server.shutdown_fence()` first. Retain the bridge and other attached sources,
 then wait on that fence from a non-callback thread before clearing them or
 unloading the module. The fence remains closed through any causal server
-callback still unwinding after deferred teardown. Waiting on the cleanup worker
-itself returns `false` instead of deadlocking.
+callback still unwinding after deferred teardown and until the dispatcher
+releases every accepted main-thread RPC callable. A custom dispatcher must
+therefore destroy cancelled queued callables even though they are inert.
+Waiting on the cleanup worker itself returns `false` instead of deadlocking.
 
 `ScriptInspectorBridge` re-attaches to the engine across hot reloads, so the
 debug console survives a reload. Without this wiring, `Runtime.evaluate` /
