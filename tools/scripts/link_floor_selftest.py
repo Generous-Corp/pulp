@@ -7,7 +7,7 @@ configure rather than a string comparison: each case writes a small project with
 a known graph, runs the checker over it, and asserts the verdict and the reason
 given. Both bounds are covered: TIER rejects a module that is reached and not
 declared, REQUIRE rejects one that is declared and not reached. A green repo
-says nothing on its own — `--mutate` then weakens the checker itself in eleven
+says nothing on its own — `--mutate` then weakens the checker itself in fourteen
 ways and requires the battery to go red for each, so a pass cannot be the walk
 quietly failing to arrive.
 
@@ -156,6 +156,68 @@ CASES: list[tuple[str, str, bool, str]] = [
         "debt entry 'alpha' is already inside tier",
     ),
     (
+        # The configuration axis, and the second half of a PAIR: this case and
+        # `debt_cannot_outlive_its_edge` differ only in which list names `zeta`,
+        # and they must reach opposite verdicts. Read alone this case is weak —
+        # it also passes against a checker with no conditional support, because
+        # an unreached module no debt list named was never anyone's error. The
+        # `rot-checks the entries it was told a guard may remove` mutation is
+        # what gives it teeth.
+        #
+        # The state itself is what a guarded subdirectory (core/render behind
+        # PULP_ENABLE_GPU) or a guarded edge (core/host behind NOT IOS) produces
+        # in every narrower configure. An upper bound is not violated by reaching
+        # less, so this passes where the plain debt list fails.
+        "conditional_debt_may_be_absent",
+        case(tier("alpha", "beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_probe zeta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # Exempt from the absence check only. A conditional entry still has to be
+        # allowed in the closure, or moving an entry across would trade one
+        # failure for the opposite one.
+        "conditional_debt_absorbs_a_reached_edge",
+        case(tier("beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_probe alpha)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        "conditional_debt_cannot_shadow_its_tier",
+        case(tier("alpha", "beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_probe alpha)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "conditional debt entry 'alpha' is already inside tier",
+    ),
+    (
+        # Declaring an entry both ways asks for it to be rot-checked and exempted
+        # at once. Reported as the contradiction it is, rather than letting the
+        # laxer list silently win.
+        "entry_cannot_be_both_debt_and_conditional",
+        case(tier("beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_probe alpha)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "is in both PULP_LINK_FLOOR_DEBT_probe and",
+    ),
+    (
+        # CONDITIONAL relaxes the absence check for its own entries and nothing
+        # else: a plain debt entry sitting beside one is still rot.
+        "conditional_does_not_exempt_the_plain_debt_list",
+        case(tier("beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_probe alpha zeta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_probe delta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "debt entry 'zeta' is no longer linked",
+    ),
+    (
         # core/host links pulp::format while format reaches back through view,
         # so a walk that does not close over what it has seen hangs on the real
         # repo. Reproduced here in two targets; the case is bounded by the
@@ -251,7 +313,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "accepts any module it finds",
-        "if(_module IN_LIST _allowed OR _module IN_LIST _debt)",
+        "if(_module IN_LIST _allowed OR _module IN_LIST _debt\n"
+        "                OR _module IN_LIST _conditional)",
         "if(TRUE)",
     ),
     (
@@ -261,8 +324,37 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "lets a debt entry shadow its own tier",
-        "if(_entry IN_LIST _allowed)",
-        "if(FALSE)",
+        "    foreach(_entry IN LISTS _debt)\n        if(_entry IN_LIST _allowed)",
+        "    foreach(_entry IN LISTS _debt)\n        if(FALSE)",
+    ),
+    (
+        # The conditional list must not become a way to smuggle a module past
+        # the upper bound: an entry there is allowed in the closure, so a walk
+        # that stopped checking it would pass anything named there.
+        "lets a conditional entry shadow its own tier",
+        "    foreach(_entry IN LISTS _conditional)\n        if(_entry IN_LIST _allowed)",
+        "    foreach(_entry IN LISTS _conditional)\n        if(FALSE)",
+    ),
+    (
+        "lets one entry be both rot-checked and exempt from that check",
+        "elseif(_entry IN_LIST _debt)",
+        "elseif(FALSE)",
+    ),
+    (
+        # What makes `conditional_debt_may_be_absent` load-bearing rather than
+        # decorative. That case passes against a checker with no conditional
+        # support at all — an unreached entry the debt list never named was
+        # already nobody's error — so on its own it proves nothing. This
+        # weakening rot-checks conditional entries the way plain debt is
+        # checked, which is precisely the behaviour the iOS and GPU=OFF
+        # configures hit, and the case has to go red for it.
+        "rot-checks the entries it was told a guard may remove",
+        "        elseif(_entry IN_LIST _debt)\n            set(_over TRUE)\n"
+        "            string(CONCAT _line\n"
+        '                "  \'${_entry}\' is in both PULP_LINK_FLOOR_DEBT_${target} and "',
+        "        elseif(NOT _entry IN_LIST _modules)\n            set(_over TRUE)\n"
+        "            string(CONCAT _line\n"
+        '                "  \'${_entry}\' is in both PULP_LINK_FLOOR_DEBT_${target} and "',
     ),
     (
         "treats a compile-only usage requirement as a link",
@@ -286,7 +378,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "lets REQUIRE name a module no tier or debt list declares",
-        "if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)",
+        "if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt\n"
+        "                AND NOT _required IN_LIST _conditional)",
         "if(FALSE)",
     ),
 ]

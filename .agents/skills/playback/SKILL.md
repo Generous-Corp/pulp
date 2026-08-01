@@ -890,6 +890,16 @@ editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
 
+**"Every Pulp plugin links `playback`" is true of a desktop configure only.**
+The chain runs through `pulp-host`, and `core/host` is behind `NOT IOS` — iOS
+disallows dlopen of third-party plugins, so hosting is not built there and the
+`pulp-view-core -> pulp::host` edge is dropped too. One guard therefore removes
+`host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
+plugin's only route to all three. Anything asserting `playback` is present in a
+plugin binary must say which configure it means; entries a guard can remove
+belong in `PULP_LINK_FLOOR_DEBT_CONDITIONAL_<target>`, not the plain debt list,
+which reads their absence as rot. See the `timeline` skill for the full rule.
+
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor
 rung — while the binary links neither, and still pass. If what you need to show

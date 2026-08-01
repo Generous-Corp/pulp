@@ -85,6 +85,16 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 # pulp_assert_link_floor() rejects a debt entry that is no longer reached and a
 # debt entry that duplicates its tier, so the list cannot outlive its subject.
 #
+# That "no longer reached" check measures one configure, and a project does not
+# have one closure. A module whose subdirectory is behind an option is absent by
+# construction wherever the option is off, and an edge behind a platform guard
+# takes everything it alone reached with it. Read as rot, that absence fails the
+# gate in its healthy direction — it asks for an entry to be DELETED because a
+# narrower configure could not reach it, and deleting it then breaks the wider
+# configure where the link genuinely exists. An upper bound is not violated by
+# reaching less, so entries that a documented guard can remove are declared
+# CONDITIONAL below and exempted from that one check only.
+#
 # StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
 # write and cannot cut from its own CMakeLists account for all of it.
 #
@@ -109,8 +119,33 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas events graph host native-components playback render
-    sample_bank_manifest signal state timeline view)
+    canvas events graph native-components sample_bank_manifest signal state view)
+
+# The four entries above that a guard can remove, and the guard that removes
+# each. They are still debt — reached on an ordinary desktop configure, and
+# still rejected if they appear where the tier already grants them — but their
+# ABSENCE is not rot, so it is not reported as such.
+#
+#   render    — CMakeLists.txt gates `add_subdirectory(core/render)` on
+#               PULP_ENABLE_GPU, so with GPU off the pulp-render target is never
+#               defined and no closure can contain it. A worktree whose
+#               external/skia-build is headers-only forces exactly that, which
+#               is an ordinary fresh-checkout state rather than an exotic one.
+#
+#   host      — CMakeLists.txt gates `add_subdirectory(core/host)` on NOT IOS,
+#   playback    and core/view drops the pulp-view-core -> pulp::host edge there
+#   timeline    too: iOS disallows dlopen of third-party plugins, so hosting is
+#               not built at all. That single edge is the plugin's only route to
+#               all three (StepSequencer_CLAP -> pulp-view -> pulp-view-script
+#               -> pulp-view-core -> pulp-host -> pulp-playback -> pulp-timeline),
+#               so the guard takes the chain, not just its first rung.
+#
+# An entry here is a weaker claim than a plain debt entry: nothing detects it
+# going stale, because "absent" is indistinguishable from "absent for the
+# declared reason". Keep the list short, and move an entry back to the debt list
+# above the moment its guard stops applying to it.
+set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_StepSequencer_CLAP
+    host playback render timeline)
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 
@@ -327,13 +362,18 @@ function(pulp_assert_link_floor target)
     endif()
     set(_allowed ${PULP_LINK_FLOOR_TIER_${PALF_TIER}})
     set(_debt ${PULP_LINK_FLOOR_DEBT_${target}})
+    # Conditional debt: allowed in the closure exactly as debt is, but exempt
+    # from the "no longer linked" check, because a guarded subdirectory or a
+    # guarded edge legitimately removes it in a narrower configure.
+    set(_conditional ${PULP_LINK_FLOOR_DEBT_CONDITIONAL_${target}})
 
     pulp_link_closure(${target} MODULES_OUT _modules PATHS_OUT _paths)
 
     set(_failures "")
     set(_over FALSE)
     foreach(_module IN LISTS _modules)
-        if(_module IN_LIST _allowed OR _module IN_LIST _debt)
+        if(_module IN_LIST _allowed OR _module IN_LIST _debt
+                OR _module IN_LIST _conditional)
             continue()
         endif()
         set(_over TRUE)
@@ -365,6 +405,29 @@ function(pulp_assert_link_floor target)
         endif()
     endforeach()
 
+    # Conditional entries keep every declaration check that does not depend on
+    # this configure reaching them. Only the absence check is relaxed; naming a
+    # module the tier already grants is still a stale declaration, and naming
+    # one in both lists is a contradiction rather than a belt-and-braces.
+    foreach(_entry IN LISTS _conditional)
+        if(_entry IN_LIST _allowed)
+            set(_over TRUE)
+            # One string, not two arguments: list(APPEND) would make a second
+            # element and the JOIN below would break the sentence across lines.
+            string(CONCAT _line
+                "  conditional debt entry '${_entry}' is already inside tier "
+                "'${PALF_TIER}'; delete it")
+            list(APPEND _failures "${_line}")
+        elseif(_entry IN_LIST _debt)
+            set(_over TRUE)
+            string(CONCAT _line
+                "  '${_entry}' is in both PULP_LINK_FLOOR_DEBT_${target} and "
+                "PULP_LINK_FLOOR_DEBT_CONDITIONAL_${target}; an entry is either "
+                "checked for rot or exempt from that check, not both")
+            list(APPEND _failures "${_line}")
+        endif()
+    endforeach()
+
     # The lower bound. Absence is the failure mode an upper bound cannot see, so
     # it is checked against the same measured closure rather than against the
     # declaration: a REQUIRE entry is satisfied by the module being reached, by
@@ -377,7 +440,8 @@ function(pulp_assert_link_floor target)
             list(APPEND _failures
                 "  pulp/${_required} is required by this target but is not linked at all")
         endif()
-        if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)
+        if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt
+                AND NOT _required IN_LIST _conditional)
             set(_undeclared TRUE)
             # One string, not two arguments: list(APPEND) would make a second
             # element and the JOIN below would break the sentence across lines.
