@@ -187,6 +187,29 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## Count the readers before you trust a format
+
+Every shared format here had more parsers than anybody was checking, and the
+gap is invisible because each reader works perfectly in isolation:
+
+| format | readers | tested before |
+|---|---|---|
+| the success line `built N modules, M cables → path` | 4 | 1 |
+| the generators' endings (`raise SystemExit`) | 4 | 0 |
+| the port map | 3 | 1 |
+| the `.why.json` sidecar | 1 | 1 |
+
+The success line is parsed by `drive_app`'s regex, the app's scan for a `.vcv`,
+and a `sed` of its own in each prove script — so pinning one is pinning
+nothing, and a prove script that finds no path reports a PASS with nothing to
+open. The port map is read by the app for drawing AND by `patch.py` for real
+jack names, so a renamed field costs every explanation its labels silently.
+
+So before trusting a format: `grep -rl` the filename or a distinctive phrase,
+count what comes back, and check them all against the producer's own source.
+Never against a fixture — a fixture written by the same person as the parser
+agrees with it by construction, which is how three of these stayed hidden.
+
 ## Everything here reads a log, and every reader was blind
 
 Four things watch the generator's output and turn it into a verdict: the app's
