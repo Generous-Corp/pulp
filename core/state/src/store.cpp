@@ -660,6 +660,41 @@ void StateStore::release_gesture(ParamID id) {
         on_end_gesture_(id);
 }
 
+void StateStore::defer_gesture_release(ParamID id) {
+    const auto found = gesture_leases_.find(id);
+    if (found == gesture_leases_.end()) return;
+    const bool final_lease = found->second == 1;
+    const bool should_end = final_lease &&
+        direct_gestures_.find(id) == direct_gestures_.end() &&
+        open_gestures_.find(id) != open_gestures_.end() &&
+        static_cast<bool>(on_end_gesture_);
+    // Allocate before mutating lease/open state. If allocation fails, the
+    // caller can still abandon a deadline reset with the gesture intact.
+    if (should_end)
+        deferred_gesture_releases_.push_back(id);
+    if (!final_lease) {
+        --found->second;
+        return;
+    }
+    gesture_leases_.erase(found);
+    if (direct_gestures_.find(id) == direct_gestures_.end())
+        open_gestures_.erase(id);
+}
+
+void StateStore::flush_deferred_gesture_releases() noexcept {
+    auto pending = std::move(deferred_gesture_releases_);
+    deferred_gesture_releases_.clear();
+    for (const auto id : pending) {
+        try {
+            if (on_end_gesture_)
+                on_end_gesture_(id);
+        } catch (...) {
+            // Bookkeeping was already closed when the release was deferred.
+            // One hostile host callback must not suppress later queued ends.
+        }
+    }
+}
+
 void StateStore::release_open_gestures() {
     if (gesture_off_main_thread()) {
         gesture_thread_violations_.fetch_add(1, std::memory_order_relaxed);

@@ -558,6 +558,179 @@ TEST_CASE("InspectorSession enforces capability and controller lease before disp
     CHECK_FALSE(reacquired.is_error);
 }
 
+TEST_CASE("InspectorSession concurrent handlers preserve policy lease audit and cleanup",
+          "[inspect][session][dispatch][concurrency][audit]") {
+    auto audit = std::make_shared<pulp::inspect::InspectorAuditLog>();
+    std::atomic<int> concurrent_dispatches{0};
+    auto concurrent_policy = policy(InspectorProfile::Develop);
+    concurrent_policy.runtime_eval_enabled = true;
+    InspectorSession session(
+        {"session-concurrent-authority", "instance-1", "fixture"},
+        std::move(concurrent_policy),
+        [](const auto& request) {
+            return make_response(request.id, R"({"fallback":true})");
+        });
+    session.set_audit_log(audit);
+    session.set_concurrent_request_handler(
+        "Runtime.evaluate",
+        [&](const auto& context,
+            const auto& request) -> pulp::inspect::InspectorMessage {
+            CHECK(context.client_id == "alpha");
+            ++concurrent_dispatches;
+            if (request.id == 3)
+                throw std::runtime_error("concurrent fixture failure");
+            return make_response(request.id, R"({"evaluated":true})");
+        });
+
+    const auto missing_lease = session.handle(
+        "alpha", make_request(1, "Runtime.evaluate"));
+    REQUIRE(missing_lease.is_error);
+    CHECK(missing_lease.error_code == "controller_lease_required");
+    CHECK(concurrent_dispatches.load() == 0);
+
+    REQUIRE_FALSE(
+        session.handle("alpha",
+                       make_request(2, "Session.acquireController"))
+            .is_error);
+    const auto threw = session.handle(
+        "alpha", make_request(3, "Runtime.evaluate"));
+    REQUIRE(threw.is_error);
+    CHECK(threw.error_code == "dispatch_failed");
+    CHECK(threw.params_json.find("concurrent fixture failure") !=
+          std::string::npos);
+
+    const auto recovered = session.handle(
+        "alpha", make_request(4, "Runtime.evaluate"));
+    CHECK_FALSE(recovered.is_error);
+    CHECK(concurrent_dispatches.load() == 2);
+    REQUIRE_FALSE(
+        session.handle("alpha",
+                       make_request(5, "Session.releaseController"))
+            .is_error);
+    CHECK_FALSE(
+        session.handle("beta",
+                       make_request(6, "Session.acquireController"))
+            .is_error);
+
+    const auto entries = audit->snapshot();
+    REQUIRE(entries.size() == 3);
+    CHECK(entries[0].request_id == 1);
+    CHECK(entries[0].outcome ==
+          pulp::inspect::InspectorAuditOutcome::Denied);
+    CHECK(entries[0].error_code == "controller_lease_required");
+    CHECK(entries[1].request_id == 3);
+    CHECK(entries[1].outcome ==
+          pulp::inspect::InspectorAuditOutcome::Rejected);
+    CHECK(entries[1].error_code == "dispatch_failed");
+    CHECK(entries[2].request_id == 4);
+    CHECK(entries[2].outcome ==
+          pulp::inspect::InspectorAuditOutcome::Applied);
+    CHECK(entries[2].error_code.empty());
+
+    auto denied_config = policy(InspectorProfile::Observe);
+    denied_config.runtime_eval_enabled = true;
+    auto denied_audit =
+        std::make_shared<pulp::inspect::InspectorAuditLog>();
+    std::atomic<int> denied_dispatches{0};
+    InspectorSession denied_session(
+        {"session-concurrent-denied", "instance-1", "fixture"},
+        std::move(denied_config),
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    denied_session.set_audit_log(denied_audit);
+    denied_session.set_concurrent_request_handler(
+        "Runtime.evaluate", [&](const auto&, const auto& request) {
+            ++denied_dispatches;
+            return make_response(request.id, "{}");
+        });
+
+    const auto denied = denied_session.handle(
+        "observer", make_request(7, "Runtime.evaluate"));
+    REQUIRE(denied.is_error);
+    CHECK(denied.error_code == "capability_denied");
+    CHECK(denied_dispatches.load() == 0);
+    const auto denied_entries = denied_audit->snapshot();
+    REQUIRE(denied_entries.size() == 1);
+    CHECK(denied_entries.front().outcome ==
+          pulp::inspect::InspectorAuditOutcome::Denied);
+    CHECK(denied_entries.front().error_code == "capability_denied");
+}
+
+TEST_CASE("InspectorSession closes concurrent admission before draining active work",
+          "[inspect][session][dispatch][concurrency][teardown]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool release = false;
+    std::atomic<bool> admission_closed{false};
+    std::atomic<bool> drain_returned{false};
+    std::atomic<int> concurrent_dispatches{0};
+    auto concurrent_policy = policy(InspectorProfile::Develop);
+    concurrent_policy.runtime_eval_enabled = true;
+    InspectorSession session(
+        {"session-concurrent-drain", "instance-1", "fixture"},
+        std::move(concurrent_policy),
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    session.set_concurrent_request_handler(
+        "Runtime.interrupt", [&](const auto&, const auto& request) {
+            ++concurrent_dispatches;
+            std::unique_lock lock(mutex);
+            entered = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(request.id, R"({"interrupted":true})");
+        });
+    REQUIRE_FALSE(
+        session.handle("alpha",
+                       make_request(1, "Session.acquireController"))
+            .is_error);
+
+    pulp::inspect::InspectorMessage active_response;
+    std::thread active([&] {
+        active_response = session.handle(
+            "alpha", make_request(2, "Runtime.interrupt"));
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return entered; }));
+    }
+
+    std::thread closer([&] {
+        session.close_dispatch_admission();
+        admission_closed.store(true, std::memory_order_release);
+    });
+    const auto close_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!admission_closed.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < close_deadline) {
+        std::this_thread::yield();
+    }
+    CHECK(admission_closed.load(std::memory_order_acquire));
+    closer.join();
+    CHECK_FALSE(session.dispatches_accepting());
+
+    const auto rejected = session.handle(
+        "alpha", make_request(3, "Runtime.interrupt"));
+    REQUIRE(rejected.is_error);
+    CHECK(rejected.error_code == "dispatch_cancelled");
+    CHECK(concurrent_dispatches.load() == 1);
+
+    std::thread drainer([&] {
+        session.suspend_dispatches();
+        drain_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(20ms);
+    CHECK_FALSE(drain_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    cv.notify_all();
+    active.join();
+    drainer.join();
+
+    CHECK_FALSE(active_response.is_error);
+    CHECK(drain_returned.load(std::memory_order_acquire));
+}
+
 TEST_CASE("InspectorSession invokes domain handlers outside its lease mutex",
           "[inspect][session][dispatch][concurrency]") {
     auto config = policy(InspectorProfile::Develop);

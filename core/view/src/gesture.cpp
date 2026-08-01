@@ -924,4 +924,8 @@ void GestureArbiter::reset() {
     sessions_.clear();
 }
 
+void GestureArbiter::abandon() noexcept {
+    sessions_.clear();
+}
+
 }  // namespace pulp::view

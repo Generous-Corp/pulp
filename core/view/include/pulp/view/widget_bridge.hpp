@@ -24,6 +24,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -62,6 +63,7 @@ struct WidgetReloadSnapshot {
 // layout, style, and interact with widgets.
 class WidgetBridge {
 public:
+    using DeadlineCheck = std::function<void()>;
     // `granted_capabilities` scopes the EFFECTFUL bridge-API groups (exec,
     // clipboard, filesystem, storage, ai, runtime_import). Ungranted groups are
     // never registered — the JS symbol is absent. The default all() leaves every
@@ -176,7 +178,18 @@ public:
     void sync_from_store();
 
     // Hot reload support: clear all JS-created widgets
-    void clear();
+    void clear(const DeadlineCheck& deadline_check = {});
+    // Runtime.evaluate realm replacement must never execute cleanup code in the
+    // evaluated realm: user code can replace those helpers and wedge teardown.
+    void clear_for_realm_replacement(const DeadlineCheck& deadline_check = {});
+    // Owner-teardown cleanup for a quarantined realm. Removes only this
+    // bridge's root children so a replacement session already attached to the
+    // shared root remains intact.
+    void clear_quarantined_realm();
+    // Constant-work fail-close used when the realm-replacement deadline has
+    // already expired. The retained realm is hidden and removed from every
+    // host pump/fan-out path, then reclaimed with the owning session.
+    void quarantine_realm() noexcept;
 
     // Forward a key event to JS (called by host for global shortcuts).
     // Per-instance entry; usually invoked by `dispatch_global_key` below.
@@ -205,11 +218,15 @@ public:
                                         const std::string& event_json_literal);
 
     // Snapshot widget values for preservation across hot reload
-    void snapshot_values(WidgetReloadSnapshot& out) const;
+    void snapshot_values(WidgetReloadSnapshot& out,
+                         const DeadlineCheck& deadline_check = {},
+                         bool include_custom_state = true) const;
     void snapshot_values(std::unordered_map<std::string, float>& out) const;
 
     // Restore widget values after hot reload rebuild
-    void restore_values(const WidgetReloadSnapshot& snapshot);
+    void restore_values(const WidgetReloadSnapshot& snapshot,
+                        const DeadlineCheck& deadline_check = {},
+                        bool include_custom_state = true);
     void restore_values(const std::unordered_map<std::string, float>& snapshot);
 
     // Deliver any pending async shell results back onto the JS thread.
@@ -244,6 +261,13 @@ public:
 
     // Number of live param/meter bindings (diagnostics + tests).
     std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }
+    // Exact live creation identities retained for scoped realm cleanup.
+    std::size_t owned_widget_identity_count() const noexcept {
+        return owned_widgets_.size();
+    }
+    std::size_t widget_cache_count() const noexcept {
+        return widgets_.size();
+    }
 
     // Deliver `paramchange` to JS subscriptions whose param moved since the
     // last frame. Polled, not pushed — see state_binding_api.cpp for why that
@@ -320,6 +344,13 @@ public:
 
 private:
     struct NativeGpuBridgeState;
+    // Clearing a live realm may notify its JS callback registry. Realm
+    // replacement must skip that call because evaluated code can replace the
+    // cleanup helper and wedge the bounded reset path.
+    enum class RealmClearPolicy : std::uint8_t {
+        NotifyCurrentRealm,
+        SkipRealmCallbacks,
+    };
     // One capability-gated entry in register_api()'s registration table.
     // Defined in widget_bridge.cpp — the table is an implementation detail.
     struct ApiGroup;
@@ -346,15 +377,68 @@ private:
     struct BridgeWidgetState {
         View* view = nullptr;
         std::uint64_t validated_generation = 0;
+        std::uint64_t instance_id = 0;
         BridgeWidgetState() = default;
-        BridgeWidgetState(View* v) : view(v) {}          // NOLINT: intentional implicit
-        BridgeWidgetState& operator=(View* v) { view = v; validated_generation = 0; return *this; }
+        BridgeWidgetState(View* v)                       // NOLINT: intentional implicit
+            : view(v),
+              instance_id(v ? v->import_binding_instance_id() : 0) {}
+        BridgeWidgetState& operator=(View* v) {
+            view = v;
+            validated_generation = 0;
+            instance_id = v ? v->import_binding_instance_id() : 0;
+            return *this;
+        }
         operator View*() const { return view; }
         View* operator->() const { return view; }
+        bool identifies(const View* candidate) const {
+            return view == candidate && candidate &&
+                   instance_id == candidate->import_binding_instance_id();
+        }
+    };
+
+    class WidgetRegistry
+        : public std::unordered_map<std::string, BridgeWidgetState> {
+        using Base = std::unordered_map<std::string, BridgeWidgetState>;
+
+    public:
+        explicit WidgetRegistry(std::vector<BridgeWidgetState>& owned_widgets)
+            : owned_widgets_(owned_widgets) {}
+
+        class AssignmentSlot {
+        public:
+            AssignmentSlot(BridgeWidgetState& state,
+                           std::vector<BridgeWidgetState>& owned_widgets)
+                : state_(state), owned_widgets_(owned_widgets) {}
+
+            AssignmentSlot& operator=(View* view) {
+                if (view)
+                    owned_widgets_.emplace_back(view);
+                state_ = view;
+                return *this;
+            }
+
+        private:
+            BridgeWidgetState& state_;
+            std::vector<BridgeWidgetState>& owned_widgets_;
+        };
+
+        AssignmentSlot operator[](const std::string& id) {
+            return AssignmentSlot(Base::operator[](id), owned_widgets_);
+        }
+
+        void cache(const std::string& id, View* view) {
+            Base::operator[](id) = view;
+        }
+
+    private:
+        std::vector<BridgeWidgetState>& owned_widgets_;
     };
 
     // Track widgets by ID for JS access
-    std::unordered_map<std::string, BridgeWidgetState> widgets_;
+    // Exact live creation identities, independent of the mutable ID registry,
+    // so duplicate IDs cannot lose delayed-quarantine ownership.
+    std::vector<BridgeWidgetState> owned_widgets_;
+    WidgetRegistry widgets_;
 
     // Idempotency guards for native-event registrations, one record per widget
     // id. Each registrar (registerPointer / registerWheel / etc.) wraps the
@@ -443,6 +527,19 @@ private:
     // (not as a static thread_local on `this`, because heap reuse across tests
     // gave duplicate addresses → spurious skip).
     bool runtime_import_installed_ = false;
+    bool realm_quarantined_ = false;
+    bool realm_retired_ = false;
+    // Deadline-mode realm replacement detaches the old native tree without
+    // destroying it. ScriptedUiSession retains this bridge until the next UI
+    // pump, after the Runtime.evaluate response fence has closed.
+    std::vector<std::unique_ptr<View>> retired_root_children_;
+    std::unique_ptr<ActiveDrag> retired_root_drag_;
+    std::unique_ptr<View::RootInteractionState> retired_root_interaction_;
+    // Moving the old bridge-owned root callback here clears the shared root in
+    // constant work while deferring arbitrary capture destruction with the
+    // rest of the retired realm.
+    std::function<void(const std::string&, uint16_t)>
+        retired_root_click_callback_;
 
     // Native-side timer queue for setTimeout / setInterval. Callbacks
     // themselves live in JS (`__timerCallbacks__`); native tracks (id,
@@ -552,10 +649,23 @@ private:
         const std::shared_ptr<ParamGestureRoute>& route);
     void release_param_gesture_route(const std::string& widget_id) noexcept;
     void release_all_param_gesture_routes() noexcept;
+    void defer_all_param_gesture_routes();
     // Forget every native bridge reference to the removed subtree. This is
     // stronger than erasing widgets_: native event-registration guards are also
     // keyed by id and must be cleared before recycled ids can be rewired.
-    void forget_widget_subtree(View* node, bool preserve_js_dom_state = false);
+    void forget_widget_subtree(View* node, bool preserve_js_dom_state = false,
+                               const DeadlineCheck& deadline_check = {},
+                               bool notify_js = true);
+    void clear_realm(RealmClearPolicy policy,
+                     const DeadlineCheck& deadline_check,
+                     bool owned_root_children_only = false);
+    void unregister_global_dispatch() noexcept;
+    void unregister_global_dispatch(const DeadlineCheck& deadline_check);
+    void begin_root_quarantine() noexcept;
+    void end_root_quarantine() noexcept;
+    void invalidate_cached_subtrees_everywhere(
+        const std::vector<View*>& nodes,
+        const DeadlineCheck& deadline_check = {});
     // Clear event/callback state for a widget that remains alive, such as a
     // recycled VirtualList row container before it is rebound to a new index.
     void forget_widget_event_state(View& view);

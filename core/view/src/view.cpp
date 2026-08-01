@@ -647,6 +647,65 @@ std::unique_ptr<View> View::remove_child(View* child) {
     return owned;
 }
 
+void View::prepare_children_for_realm_reset() {
+    std::vector<GestureRecognizer*> removed_recognizers;
+    const auto collect = [&](auto&& self, View& node) -> void {
+        if (node.gesture_arbiter_)
+            node.gesture_arbiter_->abandon();
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (recognizer)
+                removed_recognizers.push_back(recognizer.get());
+        }
+        for (auto& child : node.children_)
+            self(self, *child);
+    };
+    for (auto& child : children_)
+        collect(collect, *child);
+    if (gesture_arbiter_)
+        gesture_arbiter_->abandon();
+
+    const auto scrub = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (!recognizer) continue;
+            for (auto* removed : removed_recognizers) {
+                if (removed && removed != recognizer.get())
+                    recognizer->remove_relationships_to(*removed);
+            }
+        }
+        for (auto& child : node.children_)
+            self(self, *child);
+    };
+    scrub(scrub, *this);
+}
+
+void View::retire_interaction_state_for_realm_reset(
+    std::unique_ptr<ActiveDrag>& retired_drag,
+    std::unique_ptr<RootInteractionState>& retired_interaction) noexcept {
+    assert(retired_drag == nullptr);
+    assert(retired_interaction == nullptr);
+    retired_drag = std::move(active_drag_);
+    if (interaction_state_) {
+        if (focused_input_ == interaction_state_->focused_input)
+            focused_input_ = nullptr;
+        if (active_overlay_ == interaction_state_->active_overlay)
+            active_overlay_ = nullptr;
+        retired_interaction = std::move(interaction_state_);
+    }
+}
+
+void View::retire_children_for_realm_reset(
+    std::vector<std::unique_ptr<View>>& retired) noexcept {
+    // The deadline path owns one empty retirement slot. Swapping the vector is
+    // constant-work and cannot enter a widget destructor or host callback.
+    // Keep parent_ intact until deferred destruction. The root interaction
+    // record was retired alongside this tree, so no live platform route keeps
+    // pointers into it.
+    assert(retired.empty());
+    retired.swap(children_);
+    g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
+    invalidate_subtree_caches_up();
+}
+
 std::uint64_t View::structure_generation() noexcept {
     return g_view_structure_generation.load(std::memory_order_relaxed);
 }

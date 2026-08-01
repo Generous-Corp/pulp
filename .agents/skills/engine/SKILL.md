@@ -190,6 +190,15 @@ exception on the engine thread). Gotchas:
   flag on the next interrupt check, which fires only during JS execution. So
   callers must arm the interrupt only while an evaluation is actually in flight
   (`ScriptInspectorBridge` enforces this).
+- **Inspector evaluation is bounded before values become generic CHOC data.**
+  QuickJS implements `evaluate_bounded_json()` by walking the live `JSValue`
+  with byte, depth, and cycle limits. Keep that serializer in the backend;
+  materializing an unbounded object graph first defeats the result-size limit.
+  The bridge gives evaluation two seconds, then a fixed 500 ms grace for the
+  mandatory realm rebuild, all inside the standalone inspector's three-second
+  main-thread RPC fence. The server's owned asynchronous worker leaves the same
+  authenticated controller connection free to deliver `Runtime.interrupt` and
+  is included in the module-unload shutdown fence.
 - **Mainline QuickJS has NO source-line debugger protocol.** No breakpoints,
   stepping, suspended frames, or local-scope inspection — those live only in
   QuickJS *forks* (quickjs-ng / koush) Pulp does not vendor. The scripted-UI

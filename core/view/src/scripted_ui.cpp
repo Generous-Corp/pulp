@@ -3,15 +3,17 @@
 #include <pulp/runtime/log.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <thread>
 
 namespace pulp::view {
 
 namespace {
 
-std::atomic<std::uint64_t> next_scripted_ui_session_identity{1};
+std::atomic<std::uint64_t> next_scripted_ui_identity{0};
 
 LogCallback default_log_callback() {
     return [](std::string_view level, std::string_view msg) {
@@ -32,13 +34,55 @@ std::optional<std::filesystem::file_time_type> safe_last_write_time(const std::f
     return time;
 }
 
+void load_script_before_deadline(
+    WidgetBridge& bridge, ScriptEngine& engine, const std::string& code,
+    std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline) {
+    if (!deadline) {
+        bridge.load_script(code);
+        return;
+    }
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    bool interrupt_issued = false;
+    std::thread watchdog([&] {
+        std::unique_lock<std::mutex> lock(mutex);
+        if (cv.wait_until(lock, *deadline, [&] { return done; }))
+            return;
+        interrupt_issued = true;
+        engine.request_interrupt();
+    });
+
+    std::exception_ptr load_error;
+    try {
+        bridge.load_script(code);
+    } catch (...) {
+        load_error = std::current_exception();
+    }
+
+    bool deadline_exhausted = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        deadline_exhausted = std::chrono::steady_clock::now() >= *deadline;
+        done = true;
+    }
+    cv.notify_all();
+    watchdog.join();
+    if (interrupt_issued)
+        engine.clear_pending_interrupt();
+    if (deadline_exhausted)
+        throw std::runtime_error("Runtime.evaluate realm reset timed out");
+    if (load_error)
+        std::rethrow_exception(load_error);
+}
+
 } // namespace
 
 ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
-    : root_(root)
+    : identity_(next_scripted_ui_identity.fetch_add(1, std::memory_order_relaxed) + 1)
+    , root_(root)
     , store_(store)
-    , identity_(next_scripted_ui_session_identity.fetch_add(
-          1, std::memory_order_relaxed))
     , script_path_(std::move(options.script_path))
     , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
                                              : std::move(options.theme_path))
@@ -54,6 +98,8 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
                         const ValueChannelVisitor& visitor) { visitor(channels); }})
     , log_callback_(default_log_callback())
 {
+    inspector_bridge_.set_post_evaluation_reset(
+        [this](auto deadline) { return reset_after_runtime_evaluation(deadline); });
 }
 
 void ScriptedUiSession::set_log_callback(LogCallback callback) {
@@ -102,9 +148,16 @@ ScriptedUiSession::~ScriptedUiSession() {
     // and no later pump touches the engine being destroyed. NOTE: this wakes a
     // *blocked* waiter but does not join a background thread mid-interrupt()/
     // capabilities(); a host that wired the bridge to an InspectorServer must
-    // stop that server's reader thread and DomainHandler::set_script_inspector
-    // (nullptr) BEFORE destroying this session. See set_script_inspector.
+    // stop that server's reader thread, clear DomainHandler's borrowed runtime
+    // evaluator, and destroy the evaluator BEFORE destroying this session.
     inspector_bridge_.detach();
+    // A deadline-failed Runtime.evaluate retains its compromised realm so the
+    // request can return within the absolute fence. Owner teardown is the safe
+    // unbounded point to discard that native tree; do it before bridge_/engine_
+    // destruction so no root-owned widget callback can retain a dead bridge.
+    if (runtime_realm_quarantined_ && bridge_)
+        bridge_->clear_quarantined_realm();
+    store_.flush_deferred_gesture_releases();
 }
 
 // Late-attach of the host's GpuSurface. Hosts (e.g. au_view_controller_ios.mm)
@@ -113,7 +166,7 @@ ScriptedUiSession::~ScriptedUiSession() {
 // shim routes through Pulp's live Dawn instance instead of a mock.
 void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     gpu_surface_ = gpu_surface;
-    if (bridge_) {
+    if (!runtime_realm_quarantined_ && bridge_) {
         bridge_->attach_gpu_surface(gpu_surface);
     }
     // Stashed in gpu_surface_ so that the next hot-reload rebuild_from_code
@@ -121,13 +174,17 @@ void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
 }
 
 bool ScriptedUiSession::load(std::string* error) {
+    if (runtime_realm_quarantined_) {
+        if (error) *error = "scripted UI runtime realm is quarantined";
+        return false;
+    }
     auto code = read_text_file(script_path_);
     if (code.empty()) {
         if (error) *error = "could not read script file: " + script_path_.string();
         return false;
     }
 
-    if (!rebuild_from_code(code, false, error)) {
+    if (!rebuild_from_code(code, script_path_, false, error)) {
         return false;
     }
 
@@ -146,7 +203,7 @@ bool ScriptedUiSession::load(std::string* error) {
         }
         reloader_ = std::make_unique<HotReloader>(script_path_, [this](const std::string& next_code) {
             std::string reload_error;
-            if (!rebuild_from_code(next_code, true, &reload_error)) {
+            if (!rebuild_from_code(next_code, script_path_, true, &reload_error)) {
                 runtime::log_error("Scripted UI hot reload failed for '{}': {}",
                                    script_path_.string(), reload_error);
                 return;
@@ -161,6 +218,10 @@ bool ScriptedUiSession::load(std::string* error) {
 }
 
 bool ScriptedUiSession::reload(std::string* error) {
+    if (runtime_realm_quarantined_) {
+        if (error) *error = "scripted UI runtime realm is quarantined";
+        return false;
+    }
     auto code = read_text_file(script_path_);
     if (code.empty()) {
         if (error) *error = "could not read script file: " + script_path_.string();
@@ -169,7 +230,7 @@ bool ScriptedUiSession::reload(std::string* error) {
     // preserve_state=true: keep widget values across the rebuild; rebuild_from_code
     // probes the new code on a throwaway tree first, so a bad reload leaves the
     // current UI intact.
-    return rebuild_from_code(code, /*preserve_state=*/true, error);
+    return rebuild_from_code(code, script_path_, /*preserve_state=*/true, error);
 }
 
 bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::string* error) {
@@ -181,6 +242,23 @@ bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::stri
 }
 
 bool ScriptedUiSession::poll(std::string* error) {
+    // Destruction of the realm retired by the previous inspector pump may call
+    // platform hosts or user-supplied widget releasers. Run it before this
+    // frame's request pump, never inside the previous response deadline.
+    // Destruction may enter host/user widget releasers, which can re-enter
+    // owner-thread Runtime.evaluate and append a fresh retirement. Swap the
+    // previous batch out first so such appends target a stable, empty member
+    // and survive until a later poll.
+    std::vector<RetiredRuntimeRealm> retired_batch;
+    retired_batch.swap(retired_runtime_realms_);
+    retired_batch.clear();
+    // Deadline cleanup may close a gesture lease without synchronously entering
+    // host code. Deliver those end notifications on the following UI pump,
+    // outside the Runtime.evaluate response fence (even if the realm stayed
+    // quarantined).
+    store_.flush_deferred_gesture_releases();
+    if (runtime_realm_quarantined_)
+        return false;
     bool changed = false;
     if (bridge_) {
         // pulp #1412 — host idle pump must drain BOTH async-shell results
@@ -198,9 +276,12 @@ bool ScriptedUiSession::poll(std::string* error) {
     }
     // Drain one queued inspector evaluate on the engine thread here — after the
     // frame pump, never mid-paint / mid-layout — so an off-thread
-    // Runtime.evaluate never races the render. Off-thread requests block until
-    // this runs.
-    inspector_bridge_.pump();
+    // Runtime.evaluate never races the render. Rebuild the realm before another
+    // frame pump can run: arbitrary evaluated code may have queued timers,
+    // animation frames, Promise jobs, or event callbacks that would otherwise
+    // escape the request watchdog and execute later without a deadline.
+    if (inspector_bridge_.pump())
+        changed = true;
     if (reloader_ && reloader_->poll_reload()) {
         changed = true;
     }
@@ -210,6 +291,25 @@ bool ScriptedUiSession::poll(std::string* error) {
     return changed;
 }
 
+std::string ScriptedUiSession::reset_after_runtime_evaluation(
+    ScriptInspectorBridge::EvaluationDeadline deadline) {
+    std::string reset_error;
+    if (!last_good_code_.empty() && !last_good_script_path_.empty()
+        && rebuild_from_code(
+            last_good_code_, last_good_script_path_, true, &reset_error, deadline))
+        return {};
+    if (reset_error.empty())
+        reset_error = "no cached last-good scripted UI source";
+
+    runtime::log_error(
+        "Scripted UI reset after Runtime.evaluate failed: {}", reset_error);
+    inspector_bridge_.detach();
+    if (bridge_)
+        bridge_->quarantine_realm();
+    runtime_realm_quarantined_ = true;
+    return reset_error;
+}
+
 void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
     repaint_callback_ = std::move(cb);
     if (bridge_) {
@@ -217,7 +317,10 @@ void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
     }
 }
 
-bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve_state, std::string* error) {
+bool ScriptedUiSession::rebuild_from_code(
+    const std::string& code, const std::filesystem::path& source_path,
+    bool preserve_state, std::string* error,
+    std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline) {
     // JS-axis reload timings (item 1.2). steady_clock; UI/control thread only.
     using clock = std::chrono::steady_clock;
     const auto t0 = clock::now();
@@ -225,25 +328,71 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
     last_reload_metrics_ = ReloadMetrics{};   // reset; stays partial on early failure
+    std::unique_ptr<ScriptEngine> next_engine;
+    std::unique_ptr<WidgetBridge> next_bridge;
+    const auto retain_provisional_realm = [&] {
+        if (!next_bridge)
+            return;
+        if (!deadline) {
+            // A normal reload has no fixed cleanup budget. Discard the failed
+            // provisional realm through native-only cleanup so callbacks and
+            // timers installed before the throw cannot remain pumpable, while
+            // leaving the session retryable after the source is corrected.
+            next_bridge->clear_for_realm_replacement();
+            next_bridge.reset();
+            next_engine.reset();
+            inspector_bridge_.detach();
+            bridge_.reset();
+            engine_.reset();
+            return;
+        }
+        // The old bridge was already cleared and destroyed before this
+        // provisional bridge could be constructed. Retain the partial realm in
+        // the session so reset_after_runtime_evaluation() can quarantine it in
+        // constant work; destroying it here would leave its root-owned widgets
+        // and callbacks dangling after the deadline.
+        inspector_bridge_.detach();
+        engine_ = std::move(next_engine);
+        bridge_ = std::move(next_bridge);
+        inspector_bridge_.attach(engine_.get());
+        // The deadline reset's caller quarantines this retained realm in
+        // constant work.
+    };
     try {
-        const auto theme_for_reload = preserve_state ? base_theme_ : root_.theme();
+        const auto check_deadline = [&] {
+            if (deadline && clock::now() >= *deadline)
+                throw std::runtime_error("Runtime.evaluate realm reset timed out");
+        };
+        check_deadline();
+        // Realm reset restores the cached last-good effective theme. It must
+        // neither trust evaluated live-theme mutations nor do filesystem I/O
+        // or parse a theme file inside the fixed post-evaluation grace window.
+        const auto theme_for_reload = deadline
+            ? last_good_effective_theme_
+            : (preserve_state ? base_theme_ : root_.theme());
+        check_deadline();
         auto probe_engine = make_engine();
+        check_deadline();
         View probe_root;
         probe_root.set_theme(theme_for_reload);
         probe_root.flex().direction = FlexDirection::column;
         state::StateStore probe_store;
         for (const auto& group : store_.all_groups()) {
+            check_deadline();
             probe_store.add_group(group);
         }
         for (const auto& param : store_.all_params()) {
+            check_deadline();
             probe_store.add_parameter(param);
             probe_store.set_value(param.id, store_.get_value(param.id));
         }
+        check_deadline();
         auto probe_bridge = std::make_unique<WidgetBridge>(
             *probe_engine, probe_root, probe_store, nullptr, granted_capabilities_);
+        check_deadline();
         probe_bridge->set_asset_roots(asset_roots_);
-        probe_bridge->set_script_base_dir(script_path_.parent_path());
-        probe_bridge->load_script(code);
+        probe_bridge->set_script_base_dir(source_path.parent_path());
+        load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         const auto t_probe = clock::now();
 
         // Pre-resolve the theme override HERE — the last FALLIBLE step — BEFORE
@@ -251,9 +400,9 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         // live UI fully intact instead of AFTER the bridge is already swapped
         // (rollback-safety, item 1.5). The apply past the commit is infallible.
         Theme resolved_theme = theme_for_reload;
-        bool next_theme_exists = false;
-        std::optional<std::filesystem::file_time_type> next_theme_write_time;
-        if (theme_reload_enabled_ &&
+        bool next_theme_exists = last_theme_exists_;
+        auto next_theme_write_time = last_theme_write_time_;
+        if (!deadline && theme_reload_enabled_ &&
             !resolve_theme_override(theme_for_reload, resolved_theme, next_theme_exists,
                                     next_theme_write_time, error)) {
             last_reload_metrics_.probe_ms = ms(t0, t_probe);
@@ -263,24 +412,53 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
 
         WidgetReloadSnapshot saved_values;
         if (preserve_state && bridge_) {
-            bridge_->snapshot_values(saved_values);
-            bridge_->clear();
+            // Allocate the retirement slot before the old realm's commit. Once
+            // clear_for_realm_replacement succeeds, filling it is pointer moves
+            // only and cannot destroy a realm inside this response fence.
+            if (deadline)
+                retired_runtime_realms_.emplace_back();
+            bridge_->snapshot_values(
+                saved_values, check_deadline, /*include_custom_state=*/!deadline);
+            if (deadline) {
+                try {
+                    bridge_->clear_for_realm_replacement(check_deadline);
+                } catch (...) {
+                    retired_runtime_realms_.pop_back();
+                    throw;
+                }
+            } else {
+                bridge_->clear();
+            }
+            if (deadline) {
+                auto& retired = retired_runtime_realms_.back();
+                retired.engine = std::move(engine_);
+                retired.bridge = std::move(bridge_);
+            } else {
+                // Normal reload has no response fence and can destroy now.
+                bridge_.reset();
+            }
         }
+        check_deadline();
         const auto t_snapshot = clock::now();
 
         root_.set_theme(theme_for_reload);
-        auto next_engine = make_engine(engine_log_callback());
-        auto next_bridge = std::make_unique<WidgetBridge>(
+        check_deadline();
+        next_engine = make_engine(engine_log_callback());
+        check_deadline();
+        next_bridge = std::make_unique<WidgetBridge>(
             *next_engine, root_, store_, gpu_surface_, granted_capabilities_);
+        check_deadline();
         // Re-attach on every reload without retaining a processor generation.
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
-        next_bridge->set_script_base_dir(script_path_.parent_path());
+        next_bridge->set_script_base_dir(source_path.parent_path());
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }
-        next_bridge->load_script(code);
-        base_theme_ = root_.theme();
+        load_script_before_deadline(*next_bridge, *next_engine, code, deadline);
+        check_deadline();
+        if (!deadline)
+            base_theme_ = root_.theme();
 
         // Detach the bridge from the OLD engine BEFORE the move destroys it, so
         // an off-thread interrupt() can't dereference a freed ScriptEngine. The
@@ -296,17 +474,23 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         // thread (same thread as poll()'s pump), which it records for
         // inline-eval detection.
         inspector_bridge_.attach(engine_.get());
+        check_deadline();
         // Infallible apply of the pre-resolved theme — no failure point past the
-        // commit (item 1.5).
-        if (theme_reload_enabled_) {
+        // commit (item 1.5). A deadline reset must reapply the cached effective
+        // theme after source load because the source itself may call setTheme().
+        if (deadline || theme_reload_enabled_) {
             root_.set_theme(resolved_theme);
+        }
+        if (!deadline && theme_reload_enabled_) {
             last_theme_exists_ = next_theme_exists;
             last_theme_write_time_ = next_theme_write_time;
         }
         const auto t_rebuild = clock::now();
         if (preserve_state) {
-            bridge_->restore_values(saved_values);
+            bridge_->restore_values(
+                saved_values, check_deadline, /*include_custom_state=*/!deadline);
         }
+        check_deadline();
         const auto t_restore = clock::now();
 
         last_reload_metrics_.probe_ms = ms(t0, t_probe);
@@ -314,12 +498,18 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         last_reload_metrics_.rebuild_ms = ms(t_snapshot, t_rebuild);
         last_reload_metrics_.restore_ms = ms(t_rebuild, t_restore);
         last_reload_metrics_.total_ms = ms(t0, t_restore);
+        last_good_code_ = code;
+        last_good_script_path_ = source_path;
+        if (!deadline)
+            last_good_effective_theme_ = root_.theme();
         return true;
     } catch (const std::exception& e) {
+        retain_provisional_realm();
         if (error) *error = e.what();
         last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;
     } catch (...) {
+        retain_provisional_realm();
         if (error) *error = describe_exception();
         last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;
@@ -368,6 +558,7 @@ bool ScriptedUiSession::apply_theme_override(std::string* error) {
         return false;
     }
     root_.set_theme(merged);           // infallible apply
+    last_good_effective_theme_ = merged;
     last_theme_exists_ = exists;
     last_theme_write_time_ = write_time;
     return true;

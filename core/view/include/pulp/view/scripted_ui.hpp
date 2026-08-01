@@ -75,7 +75,9 @@ public:
     /// this session is destroyed, and survives engine hot reloads.
     std::uint64_t add_log_callback(LogCallback callback);
     void remove_log_callback(std::uint64_t token);
-    WidgetBridge* bridge() const { return bridge_.get(); }
+    WidgetBridge* bridge() const {
+        return runtime_realm_quarantined_ ? nullptr : bridge_.get();
+    }
     /// Actual effectful API grants installed in the live bridge, or the grants
     /// that will be installed before the first successful load. Returned by
     /// value so inspector policy cannot mutate the realm.
@@ -85,16 +87,20 @@ public:
 
     /// The runtime-inspector bridge for this session's JS engine. Always
     /// present (even before load()); it tracks the live engine across hot
-    /// reloads and is pumped once per poll(). A host wires it to the inspector
-    /// protocol via DomainHandler::set_script_inspector() so `Runtime.evaluate`
-    /// / `Runtime.getCapabilities` / `Runtime.interrupt` reach the live UI.
+    /// reloads and is pumped once per poll(). A host passes it to the separately
+    /// linked make_script_runtime_evaluator() adapter, retains that adapter, and
+    /// lends the adapter to DomainHandler::set_runtime_evaluator() so the
+    /// Runtime.* methods reach the live UI.
     ///
     /// TEARDOWN CONTRACT: the bridge is owned by (and lives as long as) this
     /// session, but its off-thread methods are called from an InspectorServer
     /// reader thread. A host that wires it MUST, before destroying this session,
-    /// stop that reader thread and call `DomainHandler::set_script_inspector(
-    /// nullptr)` so no background call dereferences the bridge post-destruction.
+    /// stop that reader thread, clear DomainHandler's evaluator pointer, and
+    /// destroy the retained evaluator before this session, so no background
+    /// call dereferences the bridge post-destruction.
     ScriptInspectorBridge* script_inspector() { return &inspector_bridge_; }
+    /// Process-unique identity for borrowed-source lifetime/ABA checks.
+    std::uint64_t identity() const noexcept { return identity_; }
 
     /// JS-axis reload timings, ms. Populated on every
     /// rebuild_from_code() — full on success, partial (later phases 0) on an
@@ -132,15 +138,15 @@ public:
         return reloader_ && reloader_->has_pending_reload();
     }
     bool theme_reload_enabled() const { return theme_reload_enabled_; }
-    /// Stable identity for this session object, including across in-place JS reloads.
-    std::uint64_t identity() const noexcept { return identity_; }
 
 private:
+    const std::uint64_t identity_;
     View& root_;
     state::StateStore& store_;
-    const std::uint64_t identity_;
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
+    std::string last_good_code_;
+    std::filesystem::path last_good_script_path_;
     std::vector<std::filesystem::path> asset_roots_;
     CapabilitySet granted_capabilities_ = CapabilitySet::all();
     bool hot_reload_enabled_ = false;
@@ -149,6 +155,14 @@ private:
 
     std::unique_ptr<ScriptEngine> engine_;
     std::unique_ptr<WidgetBridge> bridge_;
+    struct RetiredRuntimeRealm {
+        std::unique_ptr<ScriptEngine> engine;
+        std::unique_ptr<WidgetBridge> bridge;
+    };
+    // Owner-thread evaluate may run inline more than once between UI polls, so
+    // retain every old realm until the next poll rather than overwriting one
+    // slot inside a later response fence.
+    std::vector<RetiredRuntimeRealm> retired_runtime_realms_;
     // Marshals off-thread inspector evaluate/interrupt requests onto the engine
     // thread. Re-attached to the live engine after every rebuild_from_code().
     ScriptInspectorBridge inspector_bridge_;
@@ -160,11 +174,16 @@ private:
     render::GpuSurface* gpu_surface_ = nullptr;
 
     Theme base_theme_;
+    Theme last_good_effective_theme_;
+    bool runtime_realm_quarantined_ = false;
     ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 
-    bool rebuild_from_code(const std::string& code, bool preserve_state, std::string* error);
+    bool rebuild_from_code(
+        const std::string& code, const std::filesystem::path& source_path,
+        bool preserve_state, std::string* error,
+        std::optional<ScriptInspectorBridge::EvaluationDeadline> deadline = std::nullopt);
     bool apply_theme_override(std::string* error);
     // Read + parse the sibling theme override onto `base` WITHOUT mutating any
     // live state — the FALLIBLE half of a theme apply, split out so a reload can
@@ -174,6 +193,8 @@ private:
                                 std::optional<std::filesystem::file_time_type>& out_write_time,
                                 std::string* error) const;
     bool poll_theme_reload(std::string* error);
+    std::string reset_after_runtime_evaluation(
+        ScriptInspectorBridge::EvaluationDeadline deadline);
     LogCallback engine_log_callback();
     void dispatch_log(std::string_view level, std::string_view message);
 

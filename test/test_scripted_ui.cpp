@@ -7,11 +7,13 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <vector>
 #include <filesystem>
 #include <fstream>
@@ -23,7 +25,20 @@ using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
 
+static_assert(offsetof(ScriptedUiOptions, granted_capabilities)
+              < offsetof(ScriptedUiOptions, enable_hot_reload));
+
 namespace {
+
+TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
+          "[view][scripted-ui][compat]") {
+    ScriptedUiOptions options{
+        fs::path{"ui.js"}, fs::path{"theme.json"}, {}, CapabilitySet{},
+        true, false, nullptr, {}};
+    REQUIRE(options.enable_hot_reload);
+    REQUIRE_FALSE(options.enable_theme_reload);
+    REQUIRE_FALSE(options.granted_capabilities.has(ReloadCapability::Exec));
+}
 
 fs::path make_temp_dir(const char* stem) {
     auto unique = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());

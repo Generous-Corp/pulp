@@ -366,10 +366,16 @@ the tool takes arguments:
   inspector method returns a real payload.
 - **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
   `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
-  (device-log cursor poll) reach the live JS engine when a host calls
-  `DomainHandler::set_script_inspector(session.script_inspector())`. Evaluate is
+  (device-log cursor poll) reach the live JS engine when a host retains the
+  result of `make_script_runtime_evaluator(session.script_inspector())` and
+  passes its borrowed pointer through
+  `DomainHandler::handle_runtime_with_evaluator()` for the exact request.
+  Destroy the evaluator before destroying the scripted-UI session. Evaluate is
   marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
-  ~2 s timeout, auto-interrupt on hang. It is an honest evaluate/inspect console,
+  ~2 s timeout, auto-interrupt on hang. The standalone server uses one owned,
+  bounded asynchronous worker so the same authenticated controller connection
+  can deliver `Runtime.interrupt`, and its shutdown fence includes that worker.
+  It is an honest evaluate/inspect console,
   NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
   `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
   in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`

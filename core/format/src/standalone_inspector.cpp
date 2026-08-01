@@ -1,7 +1,7 @@
 #include <pulp/format/detail/standalone_inspector.hpp>
-
 #include "standalone_inspector_capture.hpp"
-
+#include "standalone_inspector_policy.hpp"
+#include "standalone_runtime_eval_dispatch.hpp"
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
@@ -118,48 +118,27 @@ std::int64_t mtime_unix_ms(const std::filesystem::path& path) {
     return system_time.time_since_epoch().count();
 }
 
-std::optional<inspect::InspectorProfile> parse_profile(std::string_view profile) {
-    if (profile.empty() || profile == "off")
-        return inspect::InspectorProfile::Off;
-    return inspect::profile_from_id(profile);
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
+png_dimensions(const std::vector<std::uint8_t>& png) {
+    constexpr std::uint8_t signature[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+    if (png.size() < 24 || !std::equal(std::begin(signature), std::end(signature), png.begin())
+        || !std::equal(png.begin() + 12, png.begin() + 16, "IHDR")) {
+        return std::nullopt;
+    }
+    const auto read_be32 = [&png](std::size_t offset) {
+        return (static_cast<std::uint32_t>(png[offset]) << 24u)
+             | (static_cast<std::uint32_t>(png[offset + 1]) << 16u)
+             | (static_cast<std::uint32_t>(png[offset + 2]) << 8u)
+             | static_cast<std::uint32_t>(png[offset + 3]);
+    };
+    const auto width = read_be32(16);
+    const auto height = read_be32(20);
+    if (width == 0 || height == 0)
+        return std::nullopt;
+    return std::pair{width, height};
 }
-
-std::vector<inspect::InspectorCapability>
-standalone_capabilities(bool back_buffer_capture, bool runtime_eval_enabled) {
-    using C = inspect::InspectorCapability;
-    std::vector<inspect::InspectorCapability> result{
-        C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
-        C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::TestInput,
-        C::AuthoringTweaks, C::TelemetryStream};
-    if (back_buffer_capture)
-        result.push_back(C::CaptureImage);
-    if (runtime_eval_enabled)
-        result.push_back(C::RuntimeEval);
-    return result;
-}
-
-bool standalone_capability_available(inspect::InspectorCapability capability,
-                                     bool back_buffer_capture,
-                                     bool runtime_eval_enabled) {
-    const auto available = standalone_capabilities(back_buffer_capture,
-                                                   runtime_eval_enabled);
-    return std::find(available.begin(), available.end(), capability) != available.end();
-}
-
-
 
 } // namespace
-
-std::optional<std::string>
-standalone_runtime_eval_realm_denial(const view::ScriptedUiSession* scripted_ui) {
-    if (!scripted_ui)
-        return std::nullopt;
-    const auto effectful = scripted_ui->granted_capabilities().first_effectful();
-    if (!effectful)
-        return std::nullopt;
-    return "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '" +
-        std::string(view::capability_name(*effectful)) + "'";
-}
 
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
                                                public inspect::InspectorCaptureSource,
@@ -193,7 +172,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                      {}),
 #endif
           rpc_(std::make_shared<inspect::InspectorMainThreadRpc>(
-              inspect::InspectorMainThreadRpc::Config{},
+              inspect::InspectorMainThreadRpc::Config{
+                  .timeout = inspect::kRuntimeEvalDeadline + std::chrono::seconds(1)},
               [](std::function<void()> task) {
 #if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
                   if (const auto post_override = current_rpc_post_override()) {
@@ -220,6 +200,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                        return domains_.handle(request);
                    }) {
         session_.set_audit_log(audit_log_);
+        runtime_eval_dispatch_.install(
+            session_, rpc_, [this](const inspect::InspectorMessage& request) {
+                return handle_runtime_request(request);
+            });
         domains_.set_runtime_eval_enabled(runtime_eval_requested_);
         telemetry_.set_event_sink(
             [this](std::string_view client_id,
@@ -282,6 +266,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         config.max_clients = 16;
         config.domain_bindings = &domains_;
         config.main_thread_rpc = rpc_;
+        config.asynchronous_methods = {std::string(inspect::methods::kRuntimeEvaluate)};
+        config.max_asynchronous_requests = 1;
         if (!server_->start_authenticated(std::move(config))) {
             return false;
         }
@@ -368,7 +354,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         domains_.set_runtime_evaluator(nullptr);
         log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel);
         bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
-            if (current && log_subscription_ != 0 && log_subscription_session_identity_
+            if (current && log_subscription_ != 0
+                && log_subscription_session_identity_
                 && *log_subscription_session_identity_ == current->identity()) {
                 current->remove_log_callback(log_subscription_);
             }
@@ -506,19 +493,16 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 ? inspect::make_script_runtime_evaluator(
                       scripted->script_inspector())
                 : nullptr;
-            domains_.set_runtime_evaluator(evaluator.get());
-            struct ResetRuntimeEvaluator {
-                inspect::DomainHandler& domains;
-                ~ResetRuntimeEvaluator() {
-                    domains.set_runtime_evaluator(nullptr);
-                }
-            } reset{domains_};
-            response = domains_.handle(request);
+            response = runtime_eval_dispatch_.with_evaluator(
+                request, evaluator.get(), [this, &request](auto* active) {
+                    return domains_.handle_runtime_with_evaluator(request, active);
+                });
         });
-        if (!visited) {
-            domains_.set_runtime_evaluator(nullptr);
-            response = domains_.handle(request);
-        }
+        if (!visited)
+            response = runtime_eval_dispatch_.with_evaluator(
+                request, nullptr, [this, &request](auto* active) {
+                    return domains_.handle_runtime_with_evaluator(request, active);
+                });
         return response;
     }
 
@@ -598,11 +582,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         const auto generation = processor_.supports_editor_reload()
             ? processor_.editor_reload_generation()
             : 0;
-        if (log_subscription_generation_
-            && *log_subscription_generation_ == generation) {
-            return;
-        }
-
         bridge_.visit_scripted_ui([this, generation](view::ScriptedUiSession* current) {
             refresh_scripted_source(current, generation);
         });
@@ -610,8 +589,12 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
 
     void refresh_scripted_source(view::ScriptedUiSession* current,
                                  std::uint64_t generation) {
+        const auto current_identity = current
+            ? std::optional<std::uint64_t>{current->identity()}
+            : std::nullopt;
         if (log_subscription_generation_
-            && *log_subscription_generation_ == generation) {
+            && *log_subscription_generation_ == generation
+            && log_subscription_session_identity_ == current_identity) {
             return;
         }
         const auto callback_epoch =
@@ -675,7 +658,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         inspect::InspectorPolicyConfig policy;
         policy.profile = profile;
         policy.custom_capabilities = std::move(custom);
-        policy.available_capabilities = standalone_capabilities(
+        policy.available_capabilities = standalone_inspector_capabilities(
             back_buffer_capture, runtime_eval_enabled);
         policy.runtime_eval_enabled = runtime_eval_enabled;
         return policy;
@@ -695,6 +678,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     std::filesystem::path executable_;
     inspect::InspectorDiscoveryPublisher publisher_;
     inspect::DomainHandler domains_;
+    StandaloneRuntimeEvalDispatch runtime_eval_dispatch_;
     inspect::StateInspector state_;
     std::shared_ptr<inspect::ConsoleCapture> console_ =
         std::make_shared<inspect::ConsoleCapture>();
@@ -857,7 +841,7 @@ StandaloneInspectorRuntime::~StandaloneInspectorRuntime() {
 }
 
 bool StandaloneInspectorRuntime::profile_is_off(std::string_view profile) {
-    const auto parsed_profile = parse_profile(profile);
+    const auto parsed_profile = parse_standalone_inspector_profile(profile);
     return parsed_profile && *parsed_profile == inspect::InspectorProfile::Off;
 }
 
@@ -868,7 +852,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
                                    std::vector<std::string> custom_capabilities,
                                    bool runtime_eval_enabled) {
     const bool local_only = profile == "local";
-    const auto parsed_profile = parse_profile(profile);
+    const auto parsed_profile = parse_standalone_inspector_profile(profile);
     if (!local_only && !parsed_profile)
         return nullptr;
     if (!local_only && *parsed_profile == inspect::InspectorProfile::Off)
@@ -923,7 +907,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         for (const auto& id : custom_capabilities) {
             const auto capability = inspect::capability_from_id(id);
             if (!capability || !inspect::capability_is_grantable(*capability) ||
-                !standalone_capability_available(
+                !standalone_inspector_capability_available(
                     *capability, standalone_capture_available(root, window),
                     runtime_eval_enabled)) {
                 runtime::log_error("Standalone: invalid custom inspector capability '{}'", id);

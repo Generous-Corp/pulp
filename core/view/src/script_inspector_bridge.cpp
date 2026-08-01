@@ -9,6 +9,24 @@
 
 namespace pulp::view {
 
+namespace {
+constexpr auto kPostEvaluationResetGrace = std::chrono::milliseconds(500);
+
+std::string invoke_realm_reset(
+    const std::function<std::string(ScriptInspectorBridge::EvaluationDeadline)>& reset,
+    ScriptInspectorBridge::EvaluationDeadline deadline) noexcept {
+    if (!reset)
+        return {};
+    try {
+        return reset(deadline);
+    } catch (const std::exception& e) {
+        return e.what();
+    } catch (...) {
+        return "unknown realm reset error";
+    }
+}
+}
+
 ScriptInspectorBridge::~ScriptInspectorBridge() {
     detach();
 }
@@ -40,6 +58,8 @@ void ScriptInspectorBridge::detach() {
     std::shared_ptr<Request> running;
     {
         std::unique_lock<std::mutex> lock(mutex_);
+        const bool reset_reentry =
+            reset_in_progress_ && std::this_thread::get_id() == reset_thread_;
         engine_ = nullptr;
         caps_ = Capabilities{};
         stranded = std::move(pending_);
@@ -49,15 +69,22 @@ void ScriptInspectorBridge::detach() {
             result.error = "engine detached before evaluation ran";
             finish_locked(stranded, std::move(result));
         }
-        if (running_) {
+        if (running_ && !reset_reentry) {
             running_->detach_requested = true;
             running = running_;
         }
         if (running)
             interrupt_if_active_locked(running);
 
-        state_cv_.wait(lock, [&] { return !running_; });
+        if (!reset_reentry)
+            state_cv_.wait(lock, [&] { return !running_; });
     }
+}
+
+void ScriptInspectorBridge::set_post_evaluation_reset(
+    std::function<std::string(EvaluationDeadline)> reset) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    post_evaluation_reset_ = std::move(reset);
 }
 
 ScriptInspectorBridge::EvalResult
@@ -86,6 +113,8 @@ ScriptInspectorBridge::EvalResult
 ScriptInspectorBridge::evaluate(const std::string& code,
                                 std::chrono::milliseconds timeout,
                                 std::size_t max_result_bytes) {
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::max(timeout, std::chrono::milliseconds::zero());
     std::shared_ptr<Request> req;
     ScriptEngine* engine = nullptr;
     bool owner_thread = false;
@@ -112,6 +141,7 @@ ScriptInspectorBridge::evaluate(const std::string& code,
         req = std::make_shared<Request>();
         req->code = code;
         req->max_result_bytes = max_result_bytes;
+        req->deadline = deadline;
         engine = engine_;
         owner_thread = have_engine_thread_ && std::this_thread::get_id() == engine_thread_;
         if (owner_thread) {
@@ -126,47 +156,8 @@ ScriptInspectorBridge::evaluate(const std::string& code,
         state_cv_.notify_all();
     }
 
-    const auto deadline = std::chrono::steady_clock::now()
-                        + std::max(timeout, std::chrono::milliseconds::zero());
-
-    if (owner_thread) {
-        std::thread watchdog([this, req, deadline] {
-            std::unique_lock<std::mutex> lock(mutex_);
-            if (req->cv.wait_until(lock, deadline,
-                                   [&] { return req->state == RequestState::finished; }))
-                return;
-            req->timeout_requested = true;
-            interrupt_if_active_locked(req);
-        });
-
-        EvalResult result = serialize_eval(engine, code, max_result_bytes);
-        bool interrupt_was_issued = false;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            interrupt_was_issued = !req->interrupt_window_open;
-            req->interrupt_window_open = false;
-        }
-        if (interrupt_was_issued)
-            engine->clear_pending_interrupt();
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (req->detach_requested) {
-                result = EvalResult{};
-                result.detached = true;
-                result.error = "engine detached during evaluation";
-            } else if (req->timeout_requested) {
-                result = EvalResult{};
-                result.timed_out = true;
-                result.error = "evaluation timed out";
-            } else if (req->interrupt_requested) {
-                result = EvalResult{};
-                result.error = "evaluation interrupted";
-            }
-            finish_locked(req, std::move(result));
-        }
-        watchdog.join();
-        return req->result;
-    }
+    if (owner_thread)
+        return run_claimed_request(req, engine);
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (req->cv.wait_until(lock, deadline,
@@ -236,10 +227,25 @@ bool ScriptInspectorBridge::pump() {
         state_cv_.notify_all();
     }
 
+    (void)run_claimed_request(req, engine);
+    return true;
+}
+
+ScriptInspectorBridge::EvalResult ScriptInspectorBridge::run_claimed_request(
+    const std::shared_ptr<Request>& req, ScriptEngine* engine) {
+    std::thread watchdog([this, req] {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (req->cv.wait_until(lock, req->deadline,
+                               [&] { return req->evaluation_finished; }))
+            return;
+        req->timeout_requested = true;
+        interrupt_if_active_locked(req);
+    });
+
     EvalResult result;
-    if (engine) {
+    if (engine)
         result = serialize_eval(engine, req->code, req->max_result_bytes);
-    } else {
+    else {
         result.detached = true;
         result.error = "engine detached before evaluation ran";
     }
@@ -252,9 +258,29 @@ bool ScriptInspectorBridge::pump() {
     if (interrupt_was_issued && engine)
         engine->clear_pending_interrupt();
 
+    std::function<std::string(EvaluationDeadline)> reset;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        req->evaluation_finished = true;
+        reset_in_progress_ = true;
+        reset_thread_ = std::this_thread::get_id();
+        reset = post_evaluation_reset_;
+        req->cv.notify_all();
+    }
+    watchdog.join();
+    // Evaluation owns the advertised request deadline. Realm reconstruction is
+    // mandatory even when that deadline fired, so give only that cleanup step
+    // a small, fixed grace window. The standalone RPC fence is deliberately
+    // longer and still bounds the complete evaluate-plus-reset operation.
+    const auto reset_error = invoke_realm_reset(
+        reset, req->deadline + kPostEvaluationResetGrace);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        reset_in_progress_ = false;
+        reset_thread_ = {};
         if (req->detach_requested) {
+            engine_ = nullptr;
+            caps_ = Capabilities{};
             result = EvalResult{};
             result.detached = true;
             result.error = "engine detached during evaluation";
@@ -262,13 +288,16 @@ bool ScriptInspectorBridge::pump() {
             result = EvalResult{};
             result.timed_out = true;
             result.error = "evaluation timed out";
+        } else if (!reset_error.empty()) {
+            result = EvalResult{};
+            result.error = "evaluated realm reset failed: " + reset_error;
         } else if (req->interrupt_requested) {
             result = EvalResult{};
             result.error = "evaluation interrupted";
         }
         finish_locked(req, std::move(result));
     }
-    return true;
+    return req->result;
 }
 
 bool ScriptInspectorBridge::is_busy() const {
