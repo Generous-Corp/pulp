@@ -55,7 +55,26 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         // ABOVE succeeded, so counting it would make a recovered run report
         // failed and hide the artifact it had just built — verified against a
         // real log with two gate failures and a patch at the end.
-        contains(lower, "gave up after")) {
+        // Every way the two generators END without an artifact. Each is a
+        // `raise SystemExit(...)` in patch.py or generate.py, and each one
+        // missing here is a build the app watches forever: the outcome stays
+        // `running`, the stage never resolves, and there is nothing to open.
+        //
+        // "model call failed" matters most — it is what a machine whose model
+        // CLI cannot reach its credential prints, which is the state of any
+        // SSH session and of a locked keychain.
+        //
+        // tools/rack/test_generator_endings.py keeps this list and the
+        // generators' own SystemExit strings in step.
+        contains(lower, "gave up after") ||
+        contains(lower, "model call failed") ||
+        contains(lower, "model cli is not logged in") ||
+        contains(lower, "could not fetch the library catalog") ||
+        contains(lower, "could not fetch the module index") ||
+        contains(lower, "is not sound") ||
+        contains(lower, "did not contain both a json") ||
+        contains(lower, "duplicate addmodel") ||
+        contains(lower, "sdk not found")) {
         return BuildLine::Kind::error;
     }
 
