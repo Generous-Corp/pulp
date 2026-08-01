@@ -239,6 +239,14 @@ public:
     view::ScriptedUiSession* scripted_ui();
     const view::ScriptedUiSession* scripted_ui() const;
 
+    /// Borrow the active scripted UI only for the duration of `visitor`.
+    /// Processor-owned sessions are visited under the processor's lifetime
+    /// discipline; framework-owned sessions are already owned by this bridge.
+    void visit_scripted_ui(
+        const std::function<void(view::ScriptedUiSession*)>& visitor);
+    void visit_scripted_ui(
+        const std::function<void(const view::ScriptedUiSession*)>& visitor) const;
+
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
     const ViewSize& size_hints() const { return size_hints_; }
