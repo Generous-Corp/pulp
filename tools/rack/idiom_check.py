@@ -203,18 +203,44 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
                        if any(roles["roles"].get(r, {}).get("transparent")
                               and _module_matches(r, _entry(inv, m), roles)
                               for r in roles["roles"])}
+        # The widening is KIND-AWARE. A relayed source is exempt from the
+        # port check at the far end -- a mult's own jacks are "1 2 3" and role
+        # Cv whatever is fed in -- so the kind has to be established at the
+        # cable that ENTERS the chain, or the exemption would let anything
+        # through a multiple satisfy any requirement: an audio signal into an
+        # envelope's trigger would read as a gate.
+        # `relayed` is tracked SEPARATELY from `reached`, not as the part of it
+        # that was added late. When from_module is "any" every module is a
+        # candidate already, so "was it added by widening" is always false --
+        # and the exemption below became dead code for exactly the
+        # requirements that need it most, the ones that say a gate may come
+        # from anything. Direct wiring held and the same patch through a
+        # multiple did not.
         reached = set(froms)
-        relayed = set()          # reached only by passing through a mult etc.
+        relayed = set()          # arrived by passing through a mult etc.
         changed = True
         while changed:
             changed = False
             for c in patch.get("cables", []):
                 src, dst = c.get("outputModuleId"), c.get("inputModuleId")
-                if src in reached and dst in transparent and dst not in reached:
-                    reached.add(dst)
-                    relayed.add(dst)
-                    changed = True
-        froms = reached
+                if dst not in transparent or dst in relayed:
+                    continue
+                if src not in reached and src not in relayed:
+                    continue
+                if src in relayed:
+                    pass                      # already vouched for upstream
+                else:
+                    origin = by_id.get(src)
+                    if origin is None:
+                        continue
+                    orole, olabel = _port_info(inv, origin, "out",
+                                               c.get("outputId", 0))
+                    if not _port_matches(from_port, orole, olabel, roles) \
+                       and not _uncartographed(inv, origin, "out"):
+                        continue              # wrong kind entering the chain
+                relayed.add(dst)
+                changed = True
+        froms = reached | relayed
 
         found = False
         for c in patch.get("cables", []):

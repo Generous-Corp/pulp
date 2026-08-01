@@ -555,6 +555,60 @@ def main() -> int:
     else:
         print("  ok     every gate requirement has a module that can emit one")
 
+    # Relaying through a multiple keeps the signal's KIND, and only its kind.
+    #
+    # Two bugs met here. The widening asked the MULT's own jack to look like a
+    # gate -- a mult's outputs are "1 2 3", role Cv, whatever is fed in -- so a
+    # kick clocked through one was told nothing triggered it. Exempting the
+    # relayed jack then let ANY signal through a multiple satisfy any
+    # requirement, so the kind is checked where it is actually settled: the
+    # cable entering the chain.
+    #
+    # And the exemption was dead code at first. It marked "modules added by
+    # widening", but when from_module is "any" every module is a candidate
+    # already, so nothing was ever added -- which is exactly the requirement
+    # that needs it. Both cases are here because only having the positive one
+    # would pass with the check removed.
+    mods = [{"id": 1, "plugin": "ForgeModular", "model": "LFO"},
+            {"id": 2, "plugin": "ForgeModular", "model": "MULT"},
+            {"id": 3, "plugin": "ForgeModular", "model": "DUALAD"},
+            {"id": 4, "plugin": "ForgeModular", "model": "VCO"},
+            {"id": 5, "plugin": "ForgeModular", "model": "VCA"},
+            {"id": 6, "plugin": "Core", "model": "AudioInterface2"}]
+    rest = [{"outputModuleId": 3, "outputId": 1, "inputModuleId": 4, "inputId": 0},
+            {"outputModuleId": 3, "outputId": 3, "inputModuleId": 5, "inputId": 0},
+            {"outputModuleId": 4, "outputId": 3, "inputModuleId": 5, "inputId": 1},
+            {"outputModuleId": 5, "outputId": 0, "inputModuleId": 6, "inputId": 0}]
+
+    def through_mult(out_port):
+        return {"modules": mods,
+                "cables": [{"outputModuleId": 1, "outputId": out_port,
+                            "inputModuleId": 2, "inputId": 0},
+                           {"outputModuleId": 2, "outputId": 0,
+                            "inputModuleId": 3, "inputId": 0}] + rest}
+
+    import patch as patch_mod
+    live_inv = patch_mod.inventory()
+
+    def triggered(patch):
+        return [p for p in idiom_check.check(patch, live_inv,
+                                             idioms["kick-drum"])
+                if "trigger" in p]
+
+    # LFO out1 is SQR, a gate. out0 is TRI, which is not.
+    if triggered(through_mult(1)):
+        print("  WRONG  a gate relayed through a multiple is not accepted — "
+              "the ordinary way to fire two envelopes from one clock")
+        bad += 1
+    else:
+        print("  ok     a gate relayed through a multiple counts as a trigger")
+    if triggered(through_mult(0)):
+        print("  ok     a non-gate through the same multiple does not")
+    else:
+        print("  WRONG  a triangle wave through a multiple satisfied a GATE "
+              "requirement — the relay exemption is unconditional")
+        bad += 1
+
     print("\nFAILED" if bad else "\nall good")
     return 1 if bad else 0
 
