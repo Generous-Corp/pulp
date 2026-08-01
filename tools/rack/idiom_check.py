@@ -123,6 +123,15 @@ def _port_matches(kind: str, role, label: str | None,
     mine = set(role) if isinstance(role, list) else ({role} if role else set())
     if mine & ok_roles:
         return True
+    # A role that rules the kind OUT, whatever the label says. SQR and PLS are
+    # gate labels because an LFO's square fires an envelope -- but an
+    # oscillator's pulse output carries the same label at audio rate, and it
+    # matched, so a VCO retriggering an envelope thousands of times a second
+    # read as "something triggers it". The label fallback exists for modules
+    # with no roles at all; it must not overrule a role that is present and
+    # says otherwise.
+    if mine & {s for s in (spec.get("not_ports") or [])}:
+        return False
     # The label fallback matters: a module nobody has cartographed has no port
     # roles at all, and skipping those patches would exempt the modules most
     # likely to be miswired.

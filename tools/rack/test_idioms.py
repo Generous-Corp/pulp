@@ -595,6 +595,28 @@ def main() -> int:
                                              idioms["kick-drum"])
                 if "trigger" in p]
 
+    # An oscillator's PULSE carries the same label as an LFO's square and is
+    # not a clock. Widening gate_out to accept SQR/PLS made a VCO retriggering
+    # an envelope at audio rate read as "something triggers it", because the
+    # label fallback overruled a role that was present and said Audio.
+    def from_source(model, out_port):
+        m = [{"id": 1, "plugin": "ForgeModular", "model": model}] + mods[2:]
+        return {"modules": m,
+                "cables": [{"outputModuleId": 1, "outputId": out_port,
+                            "inputModuleId": 3, "inputId": 0}] + rest}
+
+    if triggered(from_source("LFO", 1)):
+        print("  WRONG  an LFO's square is not accepted as a trigger")
+        bad += 1
+    else:
+        print("  ok     an LFO's square fires an envelope")
+    if triggered(from_source("VCO", 1)):
+        print("  ok     an oscillator's pulse does not count as a clock")
+    else:
+        print("  WRONG  a VCO's audio-rate PULSE satisfied a gate requirement "
+              "— a label must not overrule a role that says Audio")
+        bad += 1
+
     # LFO out1 is SQR, a gate. out0 is TRI, which is not.
     if triggered(through_mult(1)):
         print("  WRONG  a gate relayed through a multiple is not accepted — "

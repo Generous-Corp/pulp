@@ -261,7 +261,10 @@
       ]
     },
     "gate_out": {
-      "$comment": "SQR and PLS are here because a square or pulse output IS a gate signal -- driving an envelope's trigger from an LFO's square is how a drum gets fired, and leaving them out made the kick drum unsatisfiable with the only clock modules anybody has.",
+      "$comment": "SQR and PLS are here because a square or pulse output IS a gate signal -- driving an envelope's trigger from an LFO's square is how a drum gets fired, and leaving them out made the kick drum unsatisfiable with the only clock modules anybody has. not_ports keeps that from reading an OSCILLATOR's pulse as a clock: same label, audio rate, and it would retrigger an envelope thousands of times a second.",
+      "not_ports": [
+        "Audio"
+      ],
       "ports": [
         "Gate",
         "Trigger"
