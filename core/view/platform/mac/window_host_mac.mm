@@ -287,9 +287,8 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
 // and any enclosing ScrollView (whose scroll would otherwise close the popup).
 - (pulp::view::ComboBox*)routeToOpenComboPopup:(pulp::view::Point)pt
                                      configure:(void (^)(pulp::view::MouseEvent&))configure {
-    // Scoped to THIS window's root: a second window (or a hosted plugin editor
-    // sharing the process) must not receive this window's pointer just because
-    // it holds the process-wide `active_popup_` mirror.
+    // THIS window's root, never the process-wide `active_popup_` mirror, which
+    // can name another window's (or a hosted plugin editor's) open menu.
     if (!self.rootView) return nullptr;
     auto* combo = pulp::view::ComboBox::active_popup_in(*self.rootView);
     if (!combo) return nullptr;

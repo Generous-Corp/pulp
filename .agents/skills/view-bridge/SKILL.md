@@ -1003,6 +1003,38 @@ AUv3 avoids constructing `PluginViewHost`. Do not replace this with
 post-hoc window cleanup; the contract is that no native editor host is
 created in the first place.
 
+## Several editors in one process — scope every routing read to the event's root
+
+A DAW puts many Audio Units in ONE `AUHostingServiceXPC` process, so a product
+family (MIDI FX + instrument + audio FX) is several editors of the SAME binary
+sharing an address space — and, because they are the same binary, sharing
+IDENTICAL editor geometry. That last part is what turns a process-global slot
+into a routing bug rather than a theoretical one: a pointer at (x, y) in editor
+B lands at the same (x, y) in editor A's tree, so any rect test against a
+globally-named widget passes for the wrong editor.
+
+`View::focused_input_`, `View::active_overlay_`, and `ComboBox::active_popup_`
+are process-global SHIM MIRRORS naming the most-recently-acted slot
+process-wide. The per-root source of truth is `View::interaction()`. When you
+add or edit a host/routing path:
+
+- Read focus through `focused_input_under_root(root)` — never the raw mirror.
+- Read the open dropdown through `ComboBox::active_popup_in(scope)` and close it
+  through `close_active_popup_in(scope)` — never `active_popup_` /
+  `close_active_popup()`, which act on whichever editor moved last. Reading the
+  mirror sent editor B's wheel, click, and hover into editor A's open menu, and
+  made the mac plugin host capture a drag target owned by a tree it does not own
+  (`plugin_view_host_mac.mm` re-validates with `view_is_in_tree` on the next
+  event, so the release is safe — but the event was already delivered wrong).
+- The three-editor proof is `test/test_multi_plugin_coexistence.cpp`; the
+  two-tree state proof is `test/test_interaction_multiinstance.cpp`.
+
+Still process-wide and unscoped, so do not reach for them from a plugin host:
+`WidgetBridge::dispatch_global_key` / `dispatch_document_event` fan out to EVERY
+registered bridge in the process. Only the STANDALONE window host calls them
+today; wiring either into the plugin host would fire one keystroke into every
+open editor's JS runtime.
+
 ## Keyboard-focus host etiquette — never hold the host's first responder when idle
 
 A plugin editor embeds an `NSView` in the DAW's window. If that view returns
