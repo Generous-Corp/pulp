@@ -24,7 +24,10 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   recorder, or durable session. Keep document mutation in `DocumentSession`,
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
   immutable programs and transport snapshots, and capture publication as
-  ordinary timeline commands.
+  ordinary timeline commands. A `ProgramCompileRequest` must declare its exact
+  `sample_rate` explicitly and carry a `CompiledTempoMap` built at the same
+  normalized `RationalRate`; omission or disagreement is a synchronous invalid
+  request rather than an inferred default.
 - Link the optional `Pulp::dawproject-import` SDK target only when ingesting
   DAWproject XML, and `Pulp::smf-interop` only when reading or writing Standard
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
