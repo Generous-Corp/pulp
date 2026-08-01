@@ -84,3 +84,17 @@ sys.exit(0)
         TIMEOUT 30
         WILL_FAIL TRUE)
 endif()
+
+add_test(NAME project-package-compile-out
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DPULP_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPULP_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DPULP_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+        "-DPULP_C_COMPILER=${CMAKE_C_COMPILER}"
+        "-DPULP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/test_project_package_compile_out.cmake")
+set_tests_properties(project-package-compile-out PROPERTIES
+    LABELS "timeline;cmake;sdk;slow"
+    TIMEOUT 1200)

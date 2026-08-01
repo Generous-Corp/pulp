@@ -1042,14 +1042,17 @@ scene-to-track arbitration.
 
 ## project_package
 
-Crash-consistent publication for project files and directories. A publisher
-creates a private sibling staging directory, accepts only safe package-relative
-paths, and publishes without replacing a destination that already exists.
-Successful commit means the staged bytes and the directory metadata that names
-them have crossed the platform durability fences. An interrupted unpublished
-stage remains unreachable and cannot expose a durable reference to unfenced
-content; package-wide abandoned-stage recovery and reachability GC belong to
-the follow-on recovery layer.
+Crash-consistent publication for stable project-package roots and generic
+files or directories. `AtomicPublisher` creates a private sibling staging
+directory, accepts only safe package-relative paths, and publishes a previously
+absent destination without replacing it. `PackageWriter` instead maintains one
+stable package root: `stage_blob()` hash-verifies and fences content-addressed
+blobs before publishing them no-replace, while `publish()` validates every
+package-relative asset reference before atomically replacing the root's
+`project.json` generation and fencing the root directory. An interrupted stage
+remains unreachable and cannot expose a durable reference to unfenced content;
+package-wide abandoned-stage recovery and reachability GC belong to the
+follow-on recovery layer.
 
 **Link:** `pulp::project-package` · **Include prefix:**
 `<pulp/project_package/...>`
@@ -1062,7 +1065,7 @@ using namespace pulp::project_package;
 auto publisher = AtomicPublisher::create(destination);
 if (!publisher)
     return;
-auto staged = publisher->write("project.json", canonical_project_json);
+auto staged = publisher->write("render-manifest.json", manifest_json);
 if (!staged || !staged.value())
     return;
 
@@ -1070,6 +1073,45 @@ auto outcome = publisher->commit_directory();
 if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
     return;
 ```
+
+Use `PackageWriter` when the destination is a stable project-package root.
+Stage each referenced blob first, then publish the Project that references it;
+opening the package revalidates both the generation and its references:
+
+```cpp
+#include <pulp/project_package/project_package.hpp>
+
+using namespace pulp::project_package;
+using pulp::timeline::make_builtin_timeline_registry;
+
+auto registry = make_builtin_timeline_registry();
+if (!registry)
+    return;
+auto writer = PackageWriter::create(package_root, registry.value());
+if (!writer)
+    return;
+
+auto blob = writer.value().stage_blob(BlobStore::Media, media_hash, media_bytes);
+if (!blob)
+    return;
+// `project` contains the matching package-relative asset reference.
+auto outcome = writer.value().publish(project);
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+
+auto opened = open_package(package_root, registry.value());
+if (!opened)
+    return;
+```
+
+`PublishedDurabilityUncertain` means the new `project.json` may already be
+visible even though the final directory fence failed; callers must not report
+that outcome as a definite rollback.
+
+Source builds may set `PULP_ENABLE_PROJECT_PACKAGE=OFF` to omit this component
+and the dependent Timeline authoring tools. The resulting installed SDK does
+not export `Pulp::project-package`, so requesting the `project-package`
+component with `find_package(Pulp REQUIRED COMPONENTS ...)` fails.
 
 The module owns publication and bounded exact-prefix cleanup of its private
 staging files, not package-wide recovery, reachability GC, a project schema, or

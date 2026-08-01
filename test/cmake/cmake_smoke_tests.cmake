@@ -361,11 +361,13 @@ if(UNIX)
     set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
 endif()
 if(Python3_Interpreter_FOUND)
-    add_test(NAME pulp-mcp-binary-smoke
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
-                $<TARGET_FILE:pulp-mcp>)
-    set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    if(TARGET pulp-mcp)
+        add_test(NAME pulp-mcp-binary-smoke
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
+                    $<TARGET_FILE:pulp-mcp>)
+        set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    endif()
     # Visual-fidelity diff harness unit + integration tests (PIL-based). The
     # tool (tools/import-design/fidelity_diff.py) measures how close an
     # imported + rendered design is to its captured Figma references. The

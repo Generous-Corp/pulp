@@ -58,8 +58,10 @@ adapts its own instrument/effect ports; the caller owns audio-device I/O.
 
 Canonical Timeline JSON remains a document-model concern. When an application
 needs to publish that JSON together with package-relative assets, request the
-separate project-package component for kill-atomic no-replace publication and
-isolation of unpublished staging:
+separate project-package component. It no-replace publishes hash-verified,
+fenced content-addressed blobs, then validates their references before
+atomically replacing `project.json` inside the stable package root. Unpublished
+staging remains unreachable:
 
 ```cmake
 find_package(Pulp REQUIRED COMPONENTS project-package)
@@ -67,7 +69,13 @@ target_link_libraries(my_timeline_app PRIVATE Pulp::project-package)
 ```
 
 This component does not add an archive format or interchange policy. Those stay
-in the DAWproject, SMF, and interchange components below.
+in the DAWproject, SMF, and interchange components below. Its lower-level
+generic file and directory publisher is also no-replace; that guarantee does
+not apply to the stable root's replaceable `project.json` generation.
+Configuring Pulp from source with `-DPULP_ENABLE_PROJECT_PACKAGE=OFF` omits this
+component and the Timeline authoring tools that depend on it. An SDK installed
+from that build cannot satisfy `find_package(Pulp REQUIRED COMPONENTS
+project-package)`.
 
 ## Optional DAWproject importer
 
