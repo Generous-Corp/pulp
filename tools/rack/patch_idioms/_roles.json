@@ -114,11 +114,13 @@
       "is": "something that divides, multiplies or shifts a clock"
     },
     "mixer": {
+      "$comment": "Transparent: a signal through a mixer is still that signal. An oscillator reaching a filter by way of a mixer is how anybody patches two oscillators into one filter, and it was read as never reaching the filter at all.",
       "tags": [
         "Mixer"
       ],
       "is": "something that sums signals",
-      "fan_in": true
+      "fan_in": true,
+      "transparent": true
     },
     "attenuator": {
       "tags": [
@@ -188,10 +190,12 @@
       "is": "something that combines gates by rule"
     },
     "quantizer": {
+      "$comment": "Transparent: a quantizer snaps a pitch voltage and passes it on, so a register reaching a pitch input THROUGH one still reaches it -- and quantized-voice requires a quantizer in exactly that path.",
       "tags": [
         "Quantizer"
       ],
-      "is": "something that snaps a voltage to a scale"
+      "is": "something that snaps a voltage to a scale",
+      "transparent": true
     },
     "output": {
       "tags": [
