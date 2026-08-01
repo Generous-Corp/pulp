@@ -694,6 +694,32 @@ void ForgeModularShell::show_rack(std::vector<RackModule> modules,
                                   std::vector<Connection> connections) {
     if (!rack_preview_) return;
     const bool have_rack = !modules.empty();
+
+    // Say what an UNMAPPED badge means and what clears it.
+    //
+    // The badge is honest — those modules are drawn without their controls
+    // because nothing has measured them — but on its own it names a state and
+    // no remedy, and the remedy is not guessable: the module has to be ON
+    // SCREEN in Rack when SCAN runs, so scanning once leaves every module that
+    // was not visible still badged. Somebody would reasonably read that as the
+    // scan having failed.
+    std::vector<std::string> unmapped;
+    for (const auto& m : modules)
+        if (!m.controls_measured && m.available)
+            unmapped.push_back(m.name.empty() ? m.id : m.name);
+    unmapped_note_.clear();
+    if (!unmapped.empty()) {
+        std::string names = unmapped[0];
+        for (std::size_t i = 1; i < unmapped.size() && i < 3; ++i)
+            names += ", " + unmapped[i];
+        if (unmapped.size() > 3)
+            names += " and " + std::to_string(unmapped.size() - 3) + " more";
+        unmapped_note_ =
+            names + (unmapped.size() == 1 ? " is drawn" : " are drawn") +
+            " without controls — nothing has measured them. Put "
+            + (unmapped.size() == 1 ? "it" : "them") +
+            " on screen in Rack and press SCAN on the MAP module.";
+    }
     if (explanation_) {
         explanation_->set_connections(connections, modules);
         explanation_->set_depth(static_cast<ExplainDepth>(depth_));
@@ -704,6 +730,7 @@ void ForgeModularShell::show_rack(std::vector<RackModule> modules,
     if (auto* c = chrome()) {
         c->show_stage_accessory(have_rack);
         c->show_chat_accessory(have_rack);
+        if (!unmapped_note_.empty()) c->set_status_note(unmapped_note_);
     }
 }
 

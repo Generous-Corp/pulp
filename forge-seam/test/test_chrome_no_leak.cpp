@@ -6584,3 +6584,42 @@ TEST_CASE("every generator ending is classified as a failure",
         CHECK(kind != BuildLine::Kind::success);
     }
 }
+
+// The UNMAPPED badge comes with a remedy, and only when it is earned.
+//
+// The badge names a state and no way out, and the way out is not guessable:
+// the module has to be ON SCREEN in Rack when SCAN runs, so scanning once
+// leaves every module that was not visible still badged. Somebody would
+// reasonably read that as the scan having failed.
+TEST_CASE("an unmapped module says how to fix it", "[portmap][note]") {
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto rack = [](bool measured) {
+        std::vector<forge_modular::RackModule> mods;
+        forge_modular::RackModule m;
+        m.id = "lfo"; m.brand = "Fundamental"; m.name = "LFO"; m.hp = 9;
+        m.placed = true; m.available = true;
+        m.controls_measured = measured;
+        mods.push_back(std::move(m));
+        return mods;
+    };
+
+    // Measured: nothing to say.
+    shell.show_rack(rack(true), {});
+    CHECK(shell.unmapped_note().empty());
+
+    // Unmeasured: names the module AND what to do about it.
+    shell.show_rack(rack(false), {});
+    const auto note = shell.unmapped_note();
+    INFO("note: " << note);
+    CHECK_FALSE(note.empty());
+    CHECK(note.find("LFO") != std::string::npos);
+    // The remedy, not just the diagnosis. Without it the badge is a dead end.
+    CHECK(note.find("SCAN") != std::string::npos);
+    CHECK(note.find("on screen") != std::string::npos);
+}

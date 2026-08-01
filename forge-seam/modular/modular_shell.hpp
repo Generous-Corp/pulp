@@ -200,6 +200,7 @@ public:
     /// What the presence pill currently says. Exposed so a test can read the
     /// words a person is actually shown rather than the flags behind them.
     const std::string& rack_presence_phrase() const { return rack_phrase_; }
+    const std::string& unmapped_note() const { return unmapped_note_; }
 
     /// Re-probe for Rack and update the pill. Called from the poll, throttled;
     /// exposed so a test need not wait for a timer.
@@ -353,6 +354,9 @@ private:
 
     MentionOverlay mentions_;
     bool key_hook_installed_ = false;
+    /// What the last shown rack lacks measurements for, and how to fix it.
+    /// Exposed so a test can read it rather than scrape the chrome.
+    std::string unmapped_note_;
     BuildMonitor monitor_;
     bool watching_ = false;
     std::string monitor_log_path_;
