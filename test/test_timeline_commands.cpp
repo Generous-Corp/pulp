@@ -89,6 +89,132 @@ TEST_CASE("Timeline move and note velocity commands enforce typed preconditions"
     REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
 }
 
+namespace {
+
+NoteEvent modifier_note(std::uint64_t id, std::int64_t start, std::uint8_t pitch) {
+    return {{id}, {start}, {kTicksPerQuarter / 4}, 1000, pitch, 0};
+}
+
+NoteModifier chance(std::uint64_t note, std::uint16_t probability) {
+    NoteModifier modifier;
+    modifier.note_id = {note};
+    modifier.probability = probability;
+    return modifier;
+}
+
+// Two streams on different channels, so a lane is found by its address rather
+// than by an index the canonical ordering happens to produce.
+constexpr MidiLaneAddress kModulation{0, 0, 11, 0, 1};
+constexpr MidiLaneAddress kExpression{0, 1, 11, 0, 74};
+
+// A one-track project whose only clip carries everything a MIDI clip authors
+// beside its notes: a modifier on each note, a non-zero seed, and two
+// controller lanes.
+Project make_authored_clip_project() {
+    auto notes = MidiContent::create(
+        {modifier_note(6, 0, 60), modifier_note(7, kTicksPerQuarter / 2, 64)},
+        {chance(6, 1024), chance(7, 4096)}, 0xABCDEF,
+        {MidiExpressionLane{{9}, kModulation, {{{10}, {0}, 0x40000000}}},
+         MidiExpressionLane{{11}, kExpression, {{{12}, {kTicksPerQuarter / 2}, 0x80000000}}}});
+    assert(notes);
+    auto value = Clip::create({5}, {0}, {kTicksPerQuarter}, std::move(notes).value());
+    assert(value);
+    auto track = Track::create({4}, "track", {std::move(value).value()});
+    assert(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    assert(sequence);
+    auto project = Project::create({{1}, "project", 20, {3}, {}, {std::move(sequence).value()}});
+    assert(project);
+    return std::move(project).value();
+}
+
+const MidiContent& midi_content(const Project& project) {
+    return std::get<MidiContent>(clip(project).content());
+}
+
+// Lanes address a controller stream and name no note, so every edit below
+// leaves both of them whole no matter which notes it keeps.
+void check_lanes_intact(const MidiContent& content) {
+    REQUIRE(content.lanes().size() == 2);
+    const auto* modulation = content.lane_for(kModulation);
+    REQUIRE(modulation != nullptr);
+    REQUIRE(modulation->points.size() == 1);
+    CHECK(modulation->points[0].id == ItemId{10});
+    CHECK(modulation->points[0].value == 0x40000000);
+    const auto* expression = content.lane_for(kExpression);
+    REQUIRE(expression != nullptr);
+    REQUIRE(expression->points.size() == 1);
+    CHECK(expression->points[0].id == ItemId{12});
+    CHECK(expression->points[0].value == 0x80000000);
+}
+
+} // namespace
+
+TEST_CASE("ReplaceNoteContent carries the modifiers, seed, and lanes of the notes it retains") {
+    const auto original = make_authored_clip_project();
+    // The fixture builds under NDEBUG, where its asserts vanish: state what the
+    // clip carries before the edit so the checks below cannot pass vacuously.
+    REQUIRE(midi_content(original).modifiers().size() == 2);
+    REQUIRE(midi_content(original).modifier_seed() == 0xABCDEF);
+    check_lanes_intact(midi_content(original));
+
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 67),
+                                             modifier_note(7, kTicksPerQuarter / 2, 64)};
+
+    auto edit =
+        transaction({1}, 1, 1, {}, {ReplaceNoteContent{{3}, {4}, {5}, expected, replacement}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+
+    const auto& after = midi_content(changed->project);
+    REQUIRE(after.notes().size() == 2);
+    CHECK(after.notes()[0].pitch == 67);
+    CHECK(after.modifier_seed() == 0xABCDEF);
+    CHECK(after.modifiers().size() == 2);
+    REQUIRE(after.modifier_for({6}) != nullptr);
+    CHECK(after.modifier_for({6})->probability == 1024);
+    REQUIRE(after.modifier_for({7}) != nullptr);
+    CHECK(after.modifier_for({7})->probability == 4096);
+    check_lanes_intact(after);
+
+    auto inverse = transaction({1}, 2, 2, {}, changed->inverses);
+    auto restored = reduce_transaction(changed->project, inverse);
+    REQUIRE(restored);
+    const auto& back = midi_content(restored->project);
+    CHECK(back.notes()[0].pitch == 60);
+    CHECK(back.modifier_seed() == 0xABCDEF);
+    CHECK(back.modifiers().size() == 2);
+    check_lanes_intact(back);
+}
+
+TEST_CASE("ReplaceNoteContent drops only the modifier whose note it removes") {
+    const auto original = make_authored_clip_project();
+    REQUIRE(midi_content(original).modifiers().size() == 2);
+    REQUIRE(midi_content(original).modifier_for({7}) != nullptr);
+
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
+
+    auto edit =
+        transaction({1}, 1, 1, {}, {ReplaceNoteContent{{3}, {4}, {5}, expected, replacement}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+
+    const auto& after = midi_content(changed->project);
+    REQUIRE(after.notes().size() == 1);
+    CHECK(after.modifier_seed() == 0xABCDEF);
+    CHECK(after.modifiers().size() == 1);
+    REQUIRE(after.modifier_for({6}) != nullptr);
+    CHECK(after.modifier_for({6})->probability == 1024);
+    CHECK(after.modifier_for({7}) == nullptr);
+    CHECK_FALSE(changed->project.locate({7})->active);
+    check_lanes_intact(after);
+}
+
 TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
     const ClipPlaybackProperties playback{0.375f, 120, 240};
     const ClipPlaybackProperties replacement{0.75f, 60, 90};
