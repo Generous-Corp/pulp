@@ -15,6 +15,7 @@
 // user does not have produces a patch that cannot make sound, which is the
 // failure this distinction exists to prevent.
 
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/view.hpp>
 
 #include <functional>
@@ -86,6 +87,17 @@ public:
     /// silence reads as a broken list. Reported as: "you cannot pick this, and
     /// here is what to do about it."
     std::function<void(const MentionCandidate& what)> on_refused;
+
+    /// Say something beside the composer that outlives the list closing.
+    ///
+    /// The list is hidden the moment a row is chosen, and the run card does
+    /// not exist until a build starts, so neither can carry a message about
+    /// the pick that just happened.
+    void show_notice(const std::string& text);
+    /// The label the notice is drawn into. Owned by the shell, because it
+    /// has to survive the list being hidden.
+    void attach_notice(pulp::view::Label* label);
+    const std::string& notice() const { return notice_text_; }
 
     /// Feed it the prompt text and the caret. Returns true when the overlay
     /// wants the keystroke -- the composer must not also act on it, or Enter
@@ -160,6 +172,8 @@ private:
     std::string query_;
     int selected_ = 0;
     bool open_ = false;
+    pulp::view::Label* notice_ = nullptr;
+    std::string notice_text_;
 };
 
 }  // namespace forge_modular

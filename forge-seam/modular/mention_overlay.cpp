@@ -104,6 +104,24 @@ std::unique_ptr<View> MentionOverlay::build() {
     list_ = list.get();
     list->flex().direction = FlexDirection::column;
     root->add_child(std::move(list));
+
+    // A notice that outlives the rows. Picking a module the machine does not
+    // have inserts it and says so — and it has to say so where somebody
+    // typing is looking. The run card cannot: it does not exist until a build
+    // starts, so the first version of this message reached nobody.
+    auto notice = std::make_unique<Label>("");
+    notice_ = notice.get();
+    notice->set_font_family(forge::design::type::mono);
+    notice->set_font_size(10);
+    notice->set_multi_line(true);
+    notice->set_text_color(forge::design::color::amber);
+    notice->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    notice->flex().padding_left = 10;
+    notice->flex().padding_right = 10;
+    notice->flex().padding_top = 6;
+    notice->flex().padding_bottom = 6;
+    notice->set_visible(false);
+    root->add_child(std::move(notice));
     return root;
 }
 
@@ -115,11 +133,14 @@ void MentionOverlay::refresh(const std::string& query) {
     // anything could ask for them, so a list of two hundred silently became a
     // list of six.
     first_visible_ = 0;
+    // Every row is choosable, so the selection starts at the top rather than
+    // hunting for an installed one — skipping rows a person can see is the
+    // same confusion as refusing them.
     // Land on something insertable if there is one, so Enter does the useful
     // thing rather than picking a module the user cannot wire.
     selected_ = 0;
     for (std::size_t i = 0; i < candidates_.size(); ++i) {
-        if (candidates_[i].insertable()) { selected_ = static_cast<int>(i); break; }
+        { selected_ = static_cast<int>(i); break; }
     }
     rebuild_rows();
 }
@@ -151,13 +172,19 @@ void MentionOverlay::choose(std::size_t index) {
     // Choosing a module that is not installed does nothing rather than
     // inserting it: a patch wired to a module the user does not have cannot
     // make sound, and silently producing one is worse than refusing.
-    if (!c.insertable()) {
-        // Refused, and SAID so. Doing nothing was indistinguishable from a
-        // dead list, which is how it was reported: "i cannot select things
-        // with GET next to them, unclear if that's a premium money thing".
-        if (on_refused) on_refused(c);
-        return;
-    }
+    // EVERY row inserts, installed or not.
+    //
+    // This refused anything not installed, on the grounds that a patch wired
+    // to a module nobody has cannot sound. That is true and it was the wrong
+    // place to enforce it: somebody types @, sees six rows, and can select
+    // none of them — reported twice as the list being broken, which is what it
+    // is from the outside. The check also duplicates one the generator already
+    // makes, with wording it already shows ("hold on — this asks for something
+    // you don\'t have installed") at the moment it actually matters.
+    //
+    // So the name goes in the prompt, and anything not installed is announced
+    // rather than silently dropped.
+    if (!c.insertable() && on_refused) on_refused(c);
     if (on_choose) on_choose(c.slug);
     close();
 }
@@ -287,12 +314,15 @@ void MentionOverlay::rebuild_rows() {
 }
 
 bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
+    // A new keystroke supersedes whatever the last pick said.
+    if (!notice_text_.empty()) show_notice({});
     const auto token = active_token(text, caret);
     if (!token) {
         if (open_) close();
         return false;
     }
     open_ = true;
+    if (list_) list_->set_visible(true);
     if (root_) root_->set_visible(true);
     refresh(*token);
     // Opening on '@' does not consume the '@' itself -- the character belongs in
@@ -346,7 +376,39 @@ bool MentionOverlay::handle_key(int key_code) {
 
 void MentionOverlay::close() {
     open_ = false;
-    if (root_) root_->set_visible(false);
+    if (list_) list_->set_visible(false);
+    // The panel stays up while it is carrying a notice: the notice is ABOUT
+    // the pick that just closed the list, so hiding it with the rows would
+    // take the message away in the same frame it appeared.
+    if (root_) root_->set_visible(!notice_text_.empty());
+}
+
+void MentionOverlay::attach_notice(pulp::view::Label* label) {
+    notice_ = label;
+    if (notice_) {
+        notice_->set_text(notice_text_);
+        notice_->set_visible(!notice_text_.empty());
+    }
+}
+
+void MentionOverlay::show_notice(const std::string& text) {
+    // Its OWN strip, not the list's and not the status card's.
+    //
+    // The first attempt at this wrote to the status card, which lives on the
+    // run card and only exists while a build is happening — so somebody typing
+    // a prompt saw nothing at all, which is indistinguishable from the pick
+    // having done nothing. That is exactly what was reported, twice.
+    //
+    // The list is hidden the moment a row is chosen, so a label inside it
+    // disappears with it. This sits beside the list and stays until the next
+    // keystroke.
+    notice_text_ = text;
+    if (!notice_) return;
+    notice_->set_text(text);
+    notice_->set_visible(!text.empty());
+    // The panel carries it, so the panel has to be up even with the rows gone.
+    if (root_ && !open_) root_->set_visible(!text.empty());
+    notice_->request_repaint();
 }
 
 }  // namespace forge_modular

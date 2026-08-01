@@ -993,28 +993,42 @@ TEST_CASE("the mention list is keyboard-first", "[mention]") {
     CHECK(chosen.empty());
 }
 
-TEST_CASE("only an installed module can be inserted", "[mention]") {
-    // Rack keeps missing modules as placeholders and offers to fetch them, so an
-    // unavailable mention is an offer -- but wiring a patch to a module the user
-    // does not have produces a patch that cannot sound. Enter refuses rather
-    // than silently making one.
+TEST_CASE("a module you do not have can still be named", "[mention]") {
+    // This used to refuse: wiring a patch to a module nobody has produces a
+    // patch that cannot sound, so Enter did nothing on those rows.
+    //
+    // It was the wrong place for that check. Somebody types @, sees six rows,
+    // and can select none of them — reported twice as the list being broken,
+    // which is what it is from the outside. The generator already refuses an
+    // uninstalled module at build time, in words it already shows.
+    //
+    // So the name goes in, and the row says what still has to happen.
     forge_modular::MentionOverlay overlay;
     auto view = overlay.build();
     overlay.set_source(test_library);
     std::string chosen;
     overlay.on_choose = [&](const std::string& slug) { chosen = slug; };
+    forge_modular::MentionCandidate announced;
+    overlay.on_refused = [&](const forge_modular::MentionCandidate& c) {
+        announced = c;
+    };
 
     overlay.handle_text("@drum", 5);
     REQUIRE(overlay.candidates().size() == 1);
     CHECK_FALSE(overlay.candidates()[0].insertable());     // 4ms, not installed
 
-    CHECK(overlay.handle_key(36));      // consumed, so the prompt is not submitted
-    CHECK(chosen.empty());             // but nothing was inserted
-    CHECK(overlay.is_open());          // and it stays up rather than vanishing
+    CHECK(overlay.handle_key(36));                 // Enter
+    CHECK(chosen == "4ms-ProducerPack/DrumBus");   // it went in
+    CHECK_FALSE(overlay.is_open());                // and the list closed
+    // And it was announced rather than inserted in silence.
+    CHECK(announced.name == "DrumBus");
 }
 
-TEST_CASE("the selection lands on something insertable", "[mention]") {
-    // Opening with an uninstallable row first would put Enter on a dead choice.
+TEST_CASE("the selection starts on the first row", "[mention]") {
+    // It used to skip to the first INSTALLED row, so the highlight landed
+    // somewhere other than where the eye does. That made sense while the other
+    // rows could not be chosen; now that every row can, skipping past what
+    // somebody is looking at is the same confusion in a smaller form.
     forge_modular::MentionOverlay overlay;
     auto view = overlay.build();
     overlay.set_source([](const std::string&) {
@@ -1025,8 +1039,12 @@ TEST_CASE("the selection lands on something insertable", "[mention]") {
         };
     });
     overlay.handle_text("@", 1);
-    CHECK(overlay.selected_index() == 1);
-    CHECK(overlay.candidates()[overlay.selected_index()].insertable());
+    CHECK(overlay.selected_index() == 0);
+    // And the first row is choosable, which is the point.
+    std::string chosen;
+    overlay.on_choose = [&](const std::string& slug) { chosen = slug; };
+    overlay.handle_key(36);
+    CHECK(chosen == "Vult/Freak");
 }
 
 // ── the generator log ────────────────────────────────────────────────────────
@@ -5812,7 +5830,8 @@ TEST_CASE("arrows move the mention list without clicking into it",
 // unclear if that's a premium money thing". It refused correctly — a patch
 // wired to a module nobody has cannot sound — and refused in silence, which
 // is indistinguishable from a list that does not work.
-TEST_CASE("an uninstallable pick explains itself", "[mention][refusal]") {
+TEST_CASE("an uninsalled pick inserts AND explains itself",
+          "[mention][refusal]") {
     forge_modular::MentionOverlay overlay;
     std::string said;
     forge_modular::MentionCandidate refused;
@@ -5841,8 +5860,8 @@ TEST_CASE("an uninstallable pick explains itself", "[mention][refusal]") {
     enter.is_down = true;
     CHECK(overlay.handle_key_event(enter));
 
-    // It must not be wired into a patch, and it must not be silent.
-    CHECK_FALSE(inserted);
+    // It goes in AND it is announced. Refusing the insert was the bug.
+    CHECK(inserted);
     INFO("said: " << said);
     CHECK(said == "Fehler Fabrik PSI OP");
     CHECK(refused.state ==
@@ -6096,6 +6115,18 @@ TEST_CASE("render the mention list for a look", "[.mention-look]") {
     REQUIRE(view != nullptr);
     overlay.handle_text("@br", 3);
     REQUIRE(overlay.is_open());
+    // Wired the way the shell wires it, or the picture shows an empty panel
+    // and proves only that the test forgot the callback.
+    overlay.on_refused = [&](const forge_modular::MentionCandidate& c) {
+        overlay.show_notice(
+            c.brand + " " + c.name +
+            " is not installed yet — get it free in Rack's Library, then "
+            "rescan. The prompt can still name it.");
+    };
+    // Pick the top row, which is not installed, so the picture shows the
+    // notice that has to survive the list closing.
+    overlay.handle_key(36);
+    REQUIRE_FALSE(overlay.notice().empty());
     // Tall enough to CONTAIN the list. It places itself under the composer,
     // ~448 points down, so a 300-point frame renders it off the bottom — and
     // a blank picture passes every assertion here just as well as a good one.

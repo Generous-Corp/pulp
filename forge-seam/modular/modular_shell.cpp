@@ -433,18 +433,21 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
     // A pick that cannot be honoured says why, and what to do. "GET" alone
     // does not distinguish free-and-installable from paid, and a row that
     // ignores a click reads as broken rather than as refusing.
+    // Named, not refused. The pick goes into the prompt either way; this only
+    // says the module still has to be installed before a patch using it will
+    // load, and it says it BESIDE THE COMPOSER — the status card this used to
+    // write to belongs to the run card and does not exist while somebody is
+    // typing, so the message reached nobody and the pick looked like it had
+    // done nothing at all.
     mentions_.on_refused = [this](const MentionCandidate& what) {
-        if (auto* c = chrome()) {
-            const std::string who = what.brand.empty()
-                                        ? what.name
-                                        : what.brand + " " + what.name;
-            c->set_status_note(
-                what.state == MentionCandidate::Availability::paid
-                    ? who + " is a paid module — buy it from the VCV Library "
-                            "(or with VCV+), then rescan to use it here"
-                    : who + " is not installed — get it free from the VCV "
-                            "Library, then rescan to use it here");
-        }
+        const std::string who = what.brand.empty()
+                                    ? what.name
+                                    : what.brand + " " + what.name;
+        mentions_.show_notice(
+            what.state == MentionCandidate::Availability::paid
+                ? who + " is paid — buy it in Rack's Library, then rescan"
+                : who + " is not installed yet — get it free in Rack's "
+                        "Library, then rescan. The prompt can still name it.");
     };
     mentions_.on_choose = [this](const std::string& slug) {
         if (auto* c = chrome()) {
