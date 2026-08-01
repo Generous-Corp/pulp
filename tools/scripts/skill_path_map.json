@@ -558,6 +558,8 @@
         "test/test_timeline_replay_golden.cpp",
         "test/cmake/sampler_runtime_tests.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         "tools/scripts/*web_timeline_source_closure_check.py",
         ".agents/skills/playback/**"
       ]
@@ -592,6 +594,8 @@
         "tools/timeline/**",
         "tools/mcp/mcp_timeline_tools.cpp",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         ".agents/skills/timeline/**"
       ]
     },
