@@ -300,13 +300,17 @@ when the pixels themselves must show live signal.
 
 Standalone inspector activation requires a GPU-enabled desktop build and a
 window host that can drain accepted owning-thread work while its event loop
-exits. Pulp currently supplies that complete host contract in its built-in macOS
+exits and defer a startup-failure close to a later native event turn. Pulp
+currently supplies that complete host contract in its built-in macOS
 standalone window hosts, for both rendering paths. On Windows and Linux,
 `WindowHost` instances come from an external factory. A factory host that wants
-to support an active inspector profile must override both
-`event_loop_supports_exit_drain()` and `run_event_loop_until()`, keeping its
-owning-thread dispatcher live until the readiness callback returns true. Active
-profiles fail closed when that contract is absent. A build with
+to support an active inspector profile must override
+`event_loop_supports_exit_drain()`, `run_event_loop_until()`,
+`supports_deferred_close()`, and `request_close_deferred()`. The exit drain must
+keep its owning-thread dispatcher live until the readiness callback returns
+true, and deferred close must never invoke the close callback in the idle-pump
+stack that requested it. Active profiles fail closed when either contract is
+absent. A build with
 `PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
 even when the protocol/client SDK components are present.
 

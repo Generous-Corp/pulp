@@ -5,9 +5,10 @@ GPU-enabled desktop build with a compatible window host,
 `pulp run --inspect[=PROFILE]` constructs an authenticated network session for
 the selected standalone window and displays a visual Cmd+I indicator. Pulp's
 built-in macOS standalone window hosts currently provide the required event-loop
-exit drain. Windows and Linux use external `WindowHost` factories; an external
-host must explicitly implement the exit-drain contract before active inspector
-profiles are accepted. A run without `--inspect`, a host without that contract,
+exit drain and deferred-close turn. Windows and Linux use external `WindowHost`
+factories; an external host must explicitly implement both contracts before
+active inspector profiles are accepted. A run without `--inspect`, a host
+without those contracts,
 a GPU-disabled or mobile build, and every plugin-format launch constructs no
 endpoint. The low-level CLI and MCP clients remain experimental source-checkout
 surfaces.
@@ -50,7 +51,7 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Area | Present | Missing |
 |---|---|---|
 | Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for a compatible GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership |
-| Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` and `run_event_loop_until()` to opt into active profiles |
+| Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires, and schedule startup-failure close on a later native event turn | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` with `run_event_loop_until()`, plus `supports_deferred_close()` with `request_close_deferred()`, to opt into active profiles |
 | Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses | Processor-level editor replacement remains fail-closed |
 | Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |
