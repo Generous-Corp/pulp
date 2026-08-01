@@ -124,9 +124,33 @@ func ownerAt(x: Double, y: Double) -> String {
     return ""
 }
 
+/// A named key, as a virtual key code.
+///
+/// Typing goes through setUnicodeString, which carries no key code -- right for
+/// text, and useless for a key that produces no text. An arrow, Return or Tab
+/// has to be sent as the code, or the app's key handler never sees a key at
+/// all. Without this the mention list's arrow selection could not be driven
+/// from outside the process, so it was only ever proven by unit test -- which
+/// is exactly how a hook installed on the wrong view stayed broken through two
+/// rounds of "fixed".
+let namedKeys: [String: CGKeyCode] = [
+    "down": 125, "up": 126, "left": 123, "right": 124,
+    "return": 36, "enter": 36, "tab": 48, "escape": 53, "delete": 51,
+]
+
+func key(_ code: CGKeyCode) {
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+    else { fail("could not build the key events") }
+    down.post(tap: .cghidEventTap)
+    usleep(12_000)
+    up.post(tap: .cghidEventTap)
+    usleep(30_000)
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else {
-    fail("usage: uidriver click <x> <y> | uidriver type <text>")
+    fail("usage: uidriver click <x> <y> | type <text> | key <name|code>")
 }
 
 switch command {
@@ -141,11 +165,25 @@ case "type":
     requireAccessibility()
     // Everything after the verb, so an unquoted prompt still arrives whole.
     type(args.dropFirst().joined(separator: " "))
+case "key":
+    guard args.count >= 2 else {
+        fail("usage: uidriver key <" + namedKeys.keys.sorted().joined(separator: "|") + "|code>")
+    }
+    requireAccessibility()
+    let want = args[1].lowercased()
+    if let code = namedKeys[want] {
+        key(code)
+    } else if let raw = UInt16(want) {
+        key(CGKeyCode(raw))
+    } else {
+        fail("unknown key \(args[1]) — expected one of " +
+             namedKeys.keys.sorted().joined(separator: ", ") + ", or a key code")
+    }
 case "at":
     guard args.count >= 3, let x = Double(args[1]), let y = Double(args[2]) else {
         fail("usage: uidriver at <x> <y>")
     }
     print(ownerAt(x: x, y: y))
 default:
-    fail("unknown command \(command) — expected click, type or at")
+    fail("unknown command \(command) — expected click, type, key or at")
 }

@@ -106,14 +106,65 @@ def generating() -> bool:
     return False
 
 
+def instances() -> list[str]:
+    """Every running Forge Modular, by the executable each one was launched
+    from -- not by name.
+
+    Matching on the NAME is how this drove the wrong binary for a whole
+    session. A copy in ~/Applications from an earlier build was already
+    running; `pgrep -f "Forge Modular"` found it, `running()` said yes, so the
+    freshly built app was never launched, and every click and key went to a
+    binary without the fix being tested. The report was "the fix does not
+    work". The fix was never loaded.
+    """
+    # `pgrep -a` is a Linux flag; macOS pgrep accepts it and prints bare PIDs,
+    # so asking pgrep for the path returns a list of numbers that no path ever
+    # matches -- an empty answer that reads exactly like "nothing is running".
+    # `ps -o comm=` gives the executable, and is what macOS actually supports.
+    pids = subprocess.run(["pgrep", "-f", NAME], capture_output=True,
+                          text=True).stdout.split()
+    paths = []
+    for pid in pids:
+        comm = subprocess.run(["ps", "-p", pid, "-o", "comm="],
+                              capture_output=True, text=True).stdout.strip()
+        # A shell or editor that merely MENTIONS the name also matches; only an
+        # executable inside a .app is an instance.
+        if "/Contents/MacOS/" in comm:
+            paths.append(comm)
+    return paths
+
+
 def running() -> bool:
-    return subprocess.run(["pgrep", "-f", NAME],
-                          capture_output=True).returncode == 0
+    """True when the app UNDER TEST is running -- not merely one of its name."""
+    want = os.path.realpath(os.path.join(APP, "Contents/MacOS"))
+    return any(os.path.realpath(os.path.dirname(p)) == want
+               for p in instances())
+
+
+def require_only_ours() -> None:
+    """Stop if another copy of the app is running.
+
+    macOS activates by application, so a second copy already open will take the
+    focus and the clicks. There is no way to tell from a screenshot which
+    binary answered, so this refuses rather than measuring the wrong one.
+    """
+    want = os.path.realpath(os.path.join(APP, "Contents/MacOS"))
+    strangers = sorted({p for p in instances()
+                        if os.path.realpath(os.path.dirname(p)) != want})
+    if not strangers:
+        return
+    print(f"another {NAME} is running, from a different build:")
+    for p in strangers:
+        print(f"  {p}")
+    print(f"the one under test is:\n  {APP}")
+    sys.exit("refusing to drive: quit the other copy first, or set "
+             "FORGE_MODULAR_APP to the one you mean")
 
 
 def focus() -> None:
     """Bring the app forward, or stop. A click into the wrong window is worse
     than no click: it reads as the app ignoring input."""
+    require_only_ours()
     if not running():
         sys.exit(f"{NAME} is not running — `drive_app.py launch` first")
     osa(f'tell application "System Events" to tell process "{NAME}" '
@@ -156,17 +207,23 @@ def on_home() -> bool:
     accent Build button at this spot; the Build screen has a dark preview
     there.
     """
-    shot("/tmp/drive-probe.png")
+    # Captured by POINTS, with `screencapture -R`, rather than by scaling a
+    # full-screen capture. The scaled version multiplied by a hardcoded 2, so on
+    # a display that captures 1:1 the sample box landed off the right-hand edge
+    # of the image entirely -- an empty crop, no mint in it, and the report
+    # "the composer's Build button is not where it should be" while the button
+    # was plainly on screen. A probe that cannot see is indistinguishable from
+    # a thing that is not there.
+    shot("/tmp/drive-probe.png")   # kept: it is what a human is pointed at
+    bx, by = point("build")
+    rect = f"{int(bx - 20)},{int(by - 8)},40,16"
+    probe = "/tmp/drive-probe-button.png"
+    if subprocess.run(["screencapture", "-x", "-o", "-R", rect, probe],
+                      capture_output=True).returncode != 0:
+        return False
     try:
         from PIL import Image
-        im = Image.open("/tmp/drive-probe.png").convert("RGB")
-        x, y, w, h = window()
-        bx, by = point("build")
-        # A small box centred on where the Build button would be, in capture
-        # pixels (the display is 2x).
-        box = (int((bx - 20) * 2), int((by - 8) * 2),
-               int((bx + 20) * 2), int((by + 8) * 2))
-        crop = im.crop(box)
+        crop = Image.open(probe).convert("RGB")
         # Forge's accent is a distinctive mint. Nothing on the Build screen is
         # that colour at this position.
         for r, g, b in crop.getdata():

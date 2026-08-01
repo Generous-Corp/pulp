@@ -185,7 +185,10 @@ void MentionOverlay::choose(std::size_t index) {
     // So the name goes in the prompt, and anything not installed is announced
     // rather than silently dropped.
     if (!c.insertable() && on_refused) on_refused(c);
+    // Set across on_choose, whose whole job is to rewrite the field.
+    inserting_ = true;
     if (on_choose) on_choose(c.slug);
+    inserting_ = false;
     close();
 }
 
@@ -314,8 +317,13 @@ void MentionOverlay::rebuild_rows() {
 }
 
 bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
-    // A new keystroke supersedes whatever the last pick said.
-    if (!notice_text_.empty()) show_notice({});
+    // A new keystroke supersedes whatever the last pick said -- but the PICK
+    // is not a keystroke. Choosing a row rewrites the field, the field reports
+    // a change, and this ran and cleared the notice in the same frame it was
+    // raised: the message existed for one call and reached nobody, which is
+    // the second time this exact message has failed to be seen. `inserting_`
+    // is set for exactly the duration of the rewrite.
+    if (!inserting_ && !notice_text_.empty()) show_notice({});
     const auto token = active_token(text, caret);
     if (!token) {
         if (open_) close();
@@ -381,6 +389,15 @@ void MentionOverlay::close() {
     // the pick that just closed the list, so hiding it with the rows would
     // take the message away in the same frame it appeared.
     if (root_) root_->set_visible(!notice_text_.empty());
+    // Same reason as show_notice: visibility is layout, not paint, and the
+    // panel that stays up for the notice has to be re-measured now that the
+    // rows it was sized around are gone.
+    if (list_) list_->invalidate_layout();
+    if (root_) {
+        root_->invalidate_layout();
+        for (auto* p = root_->parent(); p; p = p->parent())
+            p->invalidate_layout();
+    }
 }
 
 void MentionOverlay::attach_notice(pulp::view::Label* label) {
@@ -408,6 +425,18 @@ void MentionOverlay::show_notice(const std::string& text) {
     notice_->set_visible(!text.empty());
     // The panel carries it, so the panel has to be up even with the rows gone.
     if (root_ && !open_) root_->set_visible(!text.empty());
+    // Showing a view is a LAYOUT change, not a paint change. A repaint alone
+    // draws the label at the size it last had, which for a view that has never
+    // been visible is nothing at all -- the notice was set, was visible, and
+    // occupied zero height. The headless render missed it because rendering to
+    // a PNG lays the tree out from scratch every time; only the running app
+    // reuses a stale layout.
+    notice_->invalidate_layout();
+    if (root_) {
+        root_->invalidate_layout();
+        for (auto* p = root_->parent(); p; p = p->parent())
+            p->invalidate_layout();
+    }
     notice_->request_repaint();
 }
 

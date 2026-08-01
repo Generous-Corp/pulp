@@ -174,6 +174,9 @@ private:
     bool open_ = false;
     pulp::view::Label* notice_ = nullptr;
     std::string notice_text_;
+    /// True only while choose() is rewriting the field, so the change that
+    /// rewrite provokes is not mistaken for the user typing.
+    bool inserting_ = false;
 };
 
 }  // namespace forge_modular

@@ -1425,6 +1425,26 @@ void ForgeModularShell::ensure_key_hook() {
     //
     // Comparing the view we installed on costs a pointer and survives the tree
     // being re-parented at any time.
+    // The field first, the root second.
+    //
+    // AppKit offers every key-down to performKeyEquivalent: before keyDown:,
+    // and that path asks the FOCUSED view before the root's global handler.
+    // The composer is multi-line, so it claims Up and Down for line movement
+    // and returns consumed -- the root hook was never reached for an arrow
+    // while somebody was typing, which is the only time the mention list is
+    // up. Measured, not reasoned: with the list open and 35 candidates, every
+    // arrow arrived at the root hook with is_down=false only, i.e. as the
+    // key-UP after a key-down the field had already eaten. It is also why
+    // clicking a row made the arrows start working -- that moves focus off the
+    // field.
+    //
+    // The root hook stays: it is what carries the keys when focus is anywhere
+    // else, and dropping it would trade one half of the problem for the other.
+    if (auto* c2 = chrome())
+        c2->set_prompt_key_filter([this](const pulp::view::KeyEvent& e) {
+            return mentions_.handle_key_event(e);
+        });
+
     if (top == key_hook_root_) return;
     key_hook_root_ = top;
     auto prior = std::move(top->on_global_key);

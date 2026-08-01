@@ -6767,3 +6767,114 @@ TEST_CASE("a new build stops drawing the rack that was on screen before it",
 
     std::filesystem::remove_all(dir, ec);
 }
+
+TEST_CASE("choosing a row does not wipe the notice that row just raised",
+          "[mention][notice]") {
+    // The notice existed, was correct, and was gone within the same frame.
+    // `choose` rewrites the composer, the field reports a change, and the
+    // change path clears the notice on the grounds that a new keystroke
+    // supersedes the last pick -- but the pick is not a keystroke. Live, the
+    // app logged show_notice("Geodesics Branes is not installed yet …")
+    // immediately followed by show_notice(""), and the screen showed nothing.
+    forge_modular::MentionOverlay overlay;
+    auto root = overlay.build();
+    REQUIRE(root != nullptr);
+    overlay.set_source([](const std::string&) {
+        std::vector<forge_modular::MentionCandidate> out;
+        forge_modular::MentionCandidate c;
+        c.name = "Branes";
+        c.brand = "Geodesics";
+        c.slug = "Geodesics/Branes";
+        c.state = forge_modular::MentionCandidate::Availability::available;
+        out.push_back(c);
+        return out;
+    });
+    overlay.on_refused = [&](const forge_modular::MentionCandidate& c) {
+        overlay.show_notice(c.name + " is not installed yet");
+    };
+    // The real wiring: choosing writes to the field, and the field's change
+    // notification comes straight back in. Without this the test cannot fail,
+    // because nothing re-enters handle_text at all.
+    std::string field;
+    overlay.on_choose = [&](const std::string& slug) {
+        field = "@" + slug + " ";
+        overlay.handle_text(field, field.size());
+    };
+
+    overlay.handle_text("@br", 3);
+    REQUIRE(overlay.is_open());
+    REQUIRE(overlay.handle_key(36));                 // Return picks row 0
+    CHECK(field == "@Geodesics/Branes ");            // the pick landed
+    CHECK(overlay.notice() == "Branes is not installed yet");
+
+    // And a REAL keystroke still supersedes it, or the notice would never go
+    // away -- deleting the guard's condition would pass everything above.
+    overlay.handle_text("@Geodesics/Branes x", 19);
+    CHECK(overlay.notice().empty());
+}
+
+TEST_CASE("the composer field offers arrow keys to the mention list first",
+          "[mention][keys]") {
+    // The bug the user reported twice, and the reason two previous fixes did
+    // not fix it: the hook was on the window root, and AppKit offers every
+    // key-down to performKeyEquivalent: BEFORE keyDown:, a path that asks the
+    // FOCUSED view before the root's global handler. The composer is
+    // multi-line, so it consumed Up and Down to move between lines and the
+    // arrows never travelled any further while somebody was typing -- which is
+    // the only time the list is open. Clicking a row moved focus off the field
+    // and made the arrows start working, which is what made it look
+    // intermittent.
+    //
+    // So this drives the FIELD, not the root: `prompt_input()->on_key_event`
+    // is the virtual AppKit reaches first. A test that called the root hook
+    // passed throughout the whole time the feature was broken.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    auto* input = chrome->prompt_input();
+    REQUIRE(input != nullptr);
+
+    // The filter is installed from the poll, once the tree is attached.
+    shell.on_poll();
+
+    auto& mentions = shell.mentions();
+    mentions.set_source([](const std::string&) {
+        std::vector<forge_modular::MentionCandidate> out;
+        for (const char* n : {"Alpha", "Beta", "Gamma"}) {
+            forge_modular::MentionCandidate c;
+            c.name = n;
+            c.slug = std::string("Test/") + n;
+            c.state = forge_modular::MentionCandidate::Availability::ready;
+            out.push_back(c);
+        }
+        return out;
+    });
+    mentions.handle_text("@a", 2);
+    REQUIRE(mentions.is_open());
+    REQUIRE(mentions.selected_index() == 0);
+
+    pulp::view::KeyEvent down;
+    down.key = pulp::view::KeyCode::down;
+    down.is_down = true;
+    // Consumed BY THE FIELD, which is the whole point: if the field returns
+    // false the key goes on to move the caret and the list never sees it.
+    CHECK(input->on_key_event(down));
+    CHECK(mentions.selected_index() == 1);
+    CHECK(input->on_key_event(down));
+    CHECK(mentions.selected_index() == 2);
+
+    // And the field still works as a field: a key the list does not want is
+    // NOT swallowed, or typing would stop working the moment the list opened.
+    pulp::view::KeyEvent letter;
+    letter.key = static_cast<pulp::view::KeyCode>('x');
+    letter.is_down = true;
+    CHECK_FALSE(mentions.handle_key_event(letter));
+}
