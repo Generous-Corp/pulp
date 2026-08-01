@@ -215,6 +215,35 @@ test("capture snapshots redact the private loopback token", () => {
   });
 });
 
+test("path redaction keeps the CSS alpha separator intact", () => {
+  const snapshot = {
+    strings: [
+      "oklab(0.876866 -0.205044 0.134253 / 0.34)",
+      "oklab(0.53 -0.07 0.045 / 0.26) 0px 1px 0px 0px inset",
+      "linear-gradient(135deg, oklab(0.2 -0.005 0.003 / 0.9), rgb(10, 10, 10))",
+      "rgb(184 248 192 / 62%)",
+    ],
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, "").strings, snapshot.strings);
+});
+
+test("path redaction still removes real local paths", () => {
+  const snapshot = {
+    strings: [
+      "failed at /Users/someone/Code/panel.html",
+      "spawn /opt/homebrew/bin/node ENOENT",
+      "C:\\Users\\someone\\panel.html",
+    ],
+  };
+  const sanitized = sanitizeSnapshot(snapshot, "").strings;
+  for (const value of sanitized) {
+    assert.ok(
+      !/Users|homebrew/u.test(value),
+      `expected the local path to be redacted, got ${value}`);
+    assert.match(value, /<local-path>/u);
+  }
+});
+
 test("capture errors redact tokenized URLs from messages and health", () => {
   const prefix = "http://127.0.0.1:43123/private-token/";
   const error = new Error(

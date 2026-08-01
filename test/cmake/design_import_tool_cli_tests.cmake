@@ -45,6 +45,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_cli.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_session.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
@@ -55,6 +56,12 @@ add_executable(pulp-test-browser-capture-import
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
+# A real Chromium capture of a panel built from oklab colours, gradients, and
+# layered shadows. Kept byte-verbatim (the envelope carries the screenshot's
+# sha256) so the computed-style lowering is proven against what Chrome actually
+# serializes rather than against hand-written JSON that agrees with the parser.
+target_compile_definitions(pulp-test-browser-capture-import PRIVATE
+    PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style")
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
     pulp::view

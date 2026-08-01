@@ -53,6 +53,19 @@ below. The image-compositing rule still applies to the raster backends.
 | `coregraphics` (macOS default of `default_backend`) | **Yes, as of #6223** | Vector-only UIs, or when you specifically want the CG raster path |
 | `default_backend` | macOS → CoreGraphics, else provider | Fine for images now; still prefer `skia` for import fidelity |
 
+**"Skia is the fidelity reference" is about IMAGES, not about everything.**
+The rule above exists because CG could not composite file-backed images — it is
+not a general statement that the GPU path is more correct. Conic gradients were
+the counter-example: Skia's sweep shader clamps angles outside its
+`[start, end]` window instead of wrapping, so passing the CSS rotation as the
+window's start left a flat wedge the size of that rotation, and the default
+`from 0deg` lost a quarter of the circle. CoreGraphics software-rasterises the
+sweep and wraps its angle correctly, so it never had the defect — a CG
+screenshot of a conic was the more faithful one. Fixed by rotating the shader
+instead of shifting its window, so the two agree again. The durable lesson:
+when two backends disagree, find out WHICH is wrong before assuming; a
+per-backend gap is a claim about one primitive, not a ranking.
+
 **History (the trap — fixed #6223 S34):** `ImageView::paint` decodes images
 on-paint via the canvas's `draw_image_from_file` / `measure_image_from_file`
 primitive. `SkiaCanvas` always implemented it; the **CoreGraphics canvas did

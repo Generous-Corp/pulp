@@ -26,6 +26,7 @@ add_executable(pulp-import-design
     browser_html_import.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
+    browser_capture_styles.cpp
     browser_capture_validation.cpp
     claude_html_dependencies.cpp
     html_project_stager.cpp

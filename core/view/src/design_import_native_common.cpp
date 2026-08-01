@@ -2234,8 +2234,17 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      "$",
                                      std::nullopt,
                                      materialize_diagnostics);
-        if (options.apply_token_theme)
-            root->set_theme(ir_tokens_to_theme(ir.tokens));
+        if (options.apply_token_theme) {
+            // A widget key the design states no source for is left unset, so
+            // the widget paints its own built-in colour instead of the
+            // design's. That is a gap in what was captured, not a rendering
+            // bug, and it is invisible in the pixels — the render just quietly
+            // carries a colour from nowhere. Name it.
+            std::vector<std::string> unresolved;
+            root->set_theme(ir_tokens_to_theme(ir.tokens, &unresolved));
+            if (auto gap = unmapped_widget_token_diagnostic(unresolved))
+                materialize_diagnostics.push_back(std::move(*gap));
+        }
         // Imported geometry is already solved at fractional coordinates;
         // Yoga's whole-pixel grid rounding would move concentric siblings
         // relative to each other (see View::set_subpixel_layout). The flag

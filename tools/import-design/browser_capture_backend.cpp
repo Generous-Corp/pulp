@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <regex>
 #include <set>
@@ -126,17 +127,28 @@ std::string sanitize_subprocess_output(std::string value) {
 }
 
 std::optional<std::string> capture_error_code(std::string_view stderr_text) {
-    const auto colon = stderr_text.find(':');
-    if (colon == std::string_view::npos || colon == 0 || colon > 80)
-        return std::nullopt;
-    const auto candidate = stderr_text.substr(0, colon);
-    if (!std::all_of(candidate.begin(), candidate.end(), [](unsigned char c) {
-            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
-                || c == '-';
-        })) {
-        return std::nullopt;
+    // The capture runtime writes its diagnostic as a leading `code: message`
+    // token, but it also reports the resolved browser build before doing any
+    // work, and Node itself can emit runtime warnings. Scan for the first line
+    // that carries a code rather than assuming the code opens the stream.
+    while (!stderr_text.empty()) {
+        const auto newline = stderr_text.find('\n');
+        const auto line = stderr_text.substr(0, newline);
+        const auto colon = line.find(':');
+        if (colon != std::string_view::npos && colon != 0 && colon <= 80) {
+            const auto candidate = line.substr(0, colon);
+            if (std::all_of(
+                    candidate.begin(), candidate.end(), [](unsigned char c) {
+                        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                            || c == '-';
+                    })) {
+                return std::string(candidate);
+            }
+        }
+        if (newline == std::string_view::npos) break;
+        stderr_text.remove_prefix(newline + 1);
     }
-    return std::string(candidate);
+    return std::nullopt;
 }
 
 NodeResolution resolve_node_runtime(
@@ -349,7 +361,16 @@ Diagnostic discovery_diagnostic(
     if (has_failure(BrowserProbeFailure::browser_incompatible)) {
         return {
             "browser-incompatible",
-            "Chrome or Chromium was found, but it is too old or incompatible.",
+            "Chrome or Chromium was found, but it is older than the minimum "
+            "supported version.",
+            "browser-discovery"};
+    }
+    if (has_failure(BrowserProbeFailure::browser_version_unreadable)) {
+        return {
+            "browser-version-unreadable",
+            "Chrome or Chromium was found, but its version could not be read. "
+            "This is not a verdict on the installed version — see Checked "
+            "below for what the probe observed.",
             "browser-discovery"};
     }
     return {
@@ -500,31 +521,58 @@ BrowserProbeResult probe_browser(
     }
 
     platform::ProcessOptions version_options;
-    version_options.timeout_ms = std::min(options.probe_timeout_ms, 5000);
+    // Honour the caller's probe budget. A shorter private cap here only turns a
+    // slow-but-healthy browser into a rejection the caller never asked for.
+    version_options.timeout_ms = options.probe_timeout_ms;
     version_options.max_output_bytes = 64 * 1024;
-    auto version_process = platform::ChildProcess::run(
-        candidate.executable.string(), {"--version"}, version_options);
-    if (version_process.timed_out) {
-        result.failure_kind = BrowserProbeFailure::browser_incompatible;
-        result.failure = "browser version probe timed out";
-        return result;
+
+    // Reading `--version` is the one probe step that has been observed to fail
+    // transiently and then succeed moments later on the very same browser. A
+    // false rejection here is expensive — it discards a browser that works — so
+    // give the read a second attempt before concluding anything, and record
+    // what was actually observed so a recurrence explains itself.
+    std::string version_detail;
+    bool version_read = false;
+    for (int attempt = 0; attempt < 2 && !version_read; ++attempt) {
+        const auto started = std::chrono::steady_clock::now();
+        auto version_process = platform::ChildProcess::run(
+            candidate.executable.string(), {"--version"}, version_options);
+        const auto elapsed_ms = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count();
+        const auto attempt_label =
+            " (attempt " + std::to_string(attempt + 1) + ", "
+            + std::to_string(elapsed_ms) + "ms)";
+        if (version_process.timed_out) {
+            version_detail = "browser version probe timed out after "
+                + std::to_string(options.probe_timeout_ms) + "ms"
+                + attempt_label;
+            continue;
+        }
+        if (version_process.exit_code != 0) {
+            version_detail = "browser version probe exited "
+                + std::to_string(version_process.exit_code) + attempt_label;
+            const auto detail = one_line(
+                sanitize_subprocess_output(version_process.stderr_output));
+            if (!detail.empty()) version_detail += ": " + detail;
+            continue;
+        }
+        const std::string version_output =
+            !version_process.stdout_output.empty()
+                ? version_process.stdout_output
+                : version_process.stderr_output;
+        if (!parse_browser_version(version_output, result.product,
+                                   result.version, result.major_version)) {
+            version_detail = "browser version output was not recognized"
+                + attempt_label + ": "
+                + one_line(sanitize_subprocess_output(version_output));
+            continue;
+        }
+        version_read = true;
     }
-    if (version_process.exit_code != 0) {
-        result.failure_kind = BrowserProbeFailure::browser_incompatible;
-        result.failure = "browser version probe failed";
-        const auto detail = one_line(
-            sanitize_subprocess_output(version_process.stderr_output));
-        if (!detail.empty()) result.failure += ": " + detail;
-        return result;
-    }
-    const std::string version_output =
-        !version_process.stdout_output.empty()
-            ? version_process.stdout_output
-            : version_process.stderr_output;
-    if (!parse_browser_version(version_output, result.product,
-                               result.version, result.major_version)) {
-        result.failure_kind = BrowserProbeFailure::browser_incompatible;
-        result.failure = "browser version output was not recognized";
+    if (!version_read) {
+        result.failure_kind = BrowserProbeFailure::browser_version_unreadable;
+        result.failure = std::move(version_detail);
         return result;
     }
     result.product = sanitize_subprocess_output(std::move(result.product));
@@ -833,6 +881,16 @@ DiscoverAndCaptureResult discover_and_capture(
         result.capture.diagnostic = result.discovery.diagnostic;
         return result;
     }
+    // Several installations can satisfy discovery — a pinned Chrome for
+    // Testing, a system Chrome, an explicit override. Which one won decides
+    // how a capture behaves, so name it before running: the capture envelope
+    // deliberately omits host paths, and a failed capture writes no envelope
+    // at all.
+    std::cerr << "[browser-capture] selected "
+              << browser_origin_name(result.discovery.selected->origin)
+              << " browser " << result.discovery.selected->product << "/"
+              << result.discovery.selected->version << " at "
+              << result.discovery.selected->executable.string() << "\n";
     result.capture = capture_document(*result.discovery.selected, request);
     return result;
 }

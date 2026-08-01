@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Computed Style Fixture</title>
+<style>
+  :root {
+    --panel: #12161a;
+    --accent: #39ff6a;
+    --face: #1b2026;
+  }
+  body { margin: 0; background: #060809; font-family: "SF Mono", Menlo, monospace; }
+  .panel {
+    position: relative;
+    width: 520px;
+    margin: 40px;
+    padding: 28px;
+    display: flex;
+    gap: 34px;
+    border-radius: 18px;
+    background: linear-gradient(150deg,
+      color-mix(in oklab, var(--panel) 94%, white),
+      var(--panel));
+    box-shadow:
+      0 1px 0 color-mix(in oklab, white 22%, transparent) inset,
+      0 22px 44px color-mix(in oklab, black 62%, transparent);
+  }
+  .knob { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .face {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--accent) 26%, transparent);
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--accent) 42%, white),
+      color-mix(in oklab, var(--face) 88%, black) 58%,
+      #0d1013 100%);
+    box-shadow:
+      0 2px 0 color-mix(in oklab, white 24%, transparent) inset,
+      0 -14px 22px color-mix(in oklab, black 48%, transparent) inset,
+      0 0 26px color-mix(in oklab, var(--accent) 30%, transparent);
+    filter: saturate(1.05);
+  }
+  .cap { color: color-mix(in oklab, var(--accent) 70%, white); font-size: 13px; letter-spacing: 1.4px; }
+</style>
+<div class="panel">
+  <div class="knob pulp-knob" data-pulp-param="drive" data-pulp-value="0.62">
+    <div class="face" data-pulp-paint></div>
+    <div class="cap">DRIVE</div>
+  </div>
+  <div class="knob pulp-knob" data-pulp-param="tone" data-pulp-value="0.41">
+    <div class="face" data-pulp-paint></div>
+    <div class="cap">TONE</div>
+  </div>
+</div>

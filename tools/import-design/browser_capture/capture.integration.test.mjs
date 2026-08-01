@@ -174,6 +174,68 @@ test("real browser capture waits through a delayed DOM commit",
     }
   });
 
+// Pixels are read with virtual time running, so the JS freeze is the only
+// thing holding a canvas animation still. A page that repaints on every frame
+// without touching the DOM settles the document sample immediately and then
+// keeps the compositor busy forever, so this fails loudly — as a timeout or as
+// capture-frame-not-deterministic — if the freeze ever stops taking effect.
+test("real browser capture freezes a canvas animation and names its browser",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-freeze-"));
+    const input = path.join(root, "animated.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  body { margin: 0; background: #111; }
+  canvas { display: block; }
+</style>
+<canvas id="surface" width="320" height="240"></canvas>
+<script>
+  const context = document.getElementById('surface').getContext('2d');
+  let frame = 0;
+  const paint = () => {
+    frame += 1;
+    context.fillStyle = 'hsl(' + (frame * 37 % 360) + ' 80% 50%)';
+    context.fillRect(0, 0, 320, 240);
+    requestAnimationFrame(paint);
+  };
+  requestAnimationFrame(paint);
+</script>
+`);
+      const run = await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.match(envelope.provenance.browser.version, /^\d+\./);
+      assert.match(
+        run.stderr,
+        new RegExp(`\\[browser-capture\\] browser=[^/]+/${
+          envelope.provenance.browser.version.replace(/\./g, "\\.")} `));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser interactions capture a same-document secondary screen",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();
