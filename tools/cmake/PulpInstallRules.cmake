@@ -258,7 +258,7 @@ endif()
 # aligned with the targets exported above: iOS deliberately has no pulp-host,
 # so it must not receive orphaned desktop-host headers either.
 set(_pulp_sdk_header_subsystems
-    platform runtime timebase timeline playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
+    platform runtime timebase timeline timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)

@@ -1,8 +1,10 @@
-#include <pulp/timeline/edit_intent.hpp>
+#include <pulp/timeline_editor/edit_intent.hpp>
 
 #include <utility>
 
-namespace pulp::timeline {
+namespace pulp::timeline_editor {
+
+using namespace pulp::timeline;
 
 runtime::Result<Transaction, ModelError>
 lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity) {
@@ -63,4 +65,4 @@ lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity) 
     return runtime::Ok(std::move(result));
 }
 
-} // namespace pulp::timeline
+} // namespace pulp::timeline_editor

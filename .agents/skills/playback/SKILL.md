@@ -639,6 +639,17 @@ The table holds every engine-adjacent module, not just playback, and the selftes
 is generic over it. Adding a module there is how a new `core/` target gets the
 same enforcement; it does not widen anyone else's floor.
 
+**The rows are not independent, and "cannot reach X" is usually the wrong half of
+the argument.** `timeline_editor`'s row is a strict superset of `timeline`'s, so a
+claim of the form "this type must live in `core/timeline` because that module
+cannot link `view`" is true and *proves nothing* — it is equally true one rung up.
+When a floor row is offered as the reason for placing something, check which row
+**excludes** which: that is the only asymmetry between two rungs in a chain, and
+it is what the gate can actually act on. The worked example is the edit vocabulary
+(`EditIntent`), which sits at the editor rung precisely because `timeline`'s row
+excludes `timeline_editor` and can therefore reject a reducer or serializer that
+reaches for a gesture verb.
+
 ### An editor view never links playback
 
 `core/timeline_editor` carries a floor that deliberately excludes `playback`, and

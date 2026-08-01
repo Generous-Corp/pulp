@@ -343,19 +343,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   bulk construction with repeated persistent insertion; wasm's tighter memory
   ceiling makes the transient allocation growth especially costly.
 
-- A new `core/timeline` translation unit belongs in **two** places, not four.
-  `core/timeline/CMakeLists.txt`, `PulpWam.cmake`, and `PulpWclap.cmake` all
-  resolve their timeline sources through `pulp_resolve_timeline_sources()` in
-  `core/timeline/PulpTimelineSources.cmake`, so adding the file to that one
-  function covers the native target and both web lanes at once. The second place
-  is the `pulp-test-timeline-no-exceptions` OBJECT library in
-  `test/cmake/timeline_tests.cmake`, which still enumerates sources by hand.
-  `web-timeline-source-closure` compares only the WAM and WebCLAP lanes — both
-  fed by the shared function — so a missing no-exceptions entry passes that check
-  and surfaces instead as an undefined symbol when the no-exceptions target
-  links. A portable unit added to the shared function but not to the
-  no-exceptions library is the failure mode to watch for; the reverse cannot
-  happen silently.
+- A new `core/timeline` translation unit belongs in exactly **one** place.
+  `core/timeline/CMakeLists.txt`, `PulpWam.cmake`, `PulpWclap.cmake`, and the
+  `pulp-test-timeline-no-exceptions` OBJECT library in
+  `test/cmake/timeline_tests.cmake` all resolve their sources through
+  `pulp_resolve_timeline_sources()` in `core/timeline/PulpTimelineSources.cmake`,
+  so one edit to that function covers the native target, both web lanes, and the
+  no-exceptions proof together. Hand-editing any of the four consumer lists for a
+  timeline unit is not just unnecessary, it is wrong.
 
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,
@@ -370,20 +365,25 @@ per-ABI entry point for it.** Go through the plugin's own state:
   (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
   build. The closure checker scans sources, so adding such a header is
   correct even though it touches `core/timeline`.
-- A new `core/timeline` translation unit belongs in **two** source lists:
-  `core/timeline/PulpTimelineSources.cmake` and the
-  `pulp-test-timeline-no-exceptions` OBJECT library in
-  `test/cmake/timeline_tests.cmake`. The native target
-  (`core/timeline/CMakeLists.txt`), `PulpWam.cmake`, and `PulpWclap.cmake` all
-  call `pulp_resolve_timeline_sources()`, so one edit to the resolver feeds all
-  three and hand-editing the web lists for a timeline unit is not just
-  unnecessary, it is wrong. Timeline is the exception here: engine units from
-  other modules are still hand-listed per lane, so check which shape the module
-  uses before assuming either one. `web-timeline-source-closure` compares only
-  the WAM and WebCLAP lanes — which the resolver satisfies automatically — so a
-  missing no-exceptions entry passes that check and surfaces instead as an
-  undefined symbol when the no-exceptions target links. That target is the only
-  list a timeline TU can actually be missed from.
+
+- **The editor rung is not in the browser lanes at all.** `core/timeline_editor`
+  (`SequencerUiHost`, `EditIntent`, `lower_edit_intent`) is its own target with
+  its own source list; the WAM/WebCLAP lanes compile `core/timeline/src` directly
+  and never link it, so a browser plugin has commands and transactions but no
+  gesture verbs. If a browser editor needs to lower intents, link
+  `pulp::timeline-editor` — do **not** add `edit_intent.cpp` back to
+  `PulpTimelineSources.cmake`. That would put the editor's vocabulary into the
+  document model's source list, which is the exact placement
+  `timeline-engine-dependency-floor` exists to prevent, and the closure checker
+  would not object because it only asks whether every `core/timeline/src` TU is
+  listed, never whether a listed TU belongs there.
+- Timeline is the exception in list shape: engine units from other modules are
+  still hand-listed per lane, so check which shape the module uses before
+  assuming the resolver covers it. `web-timeline-source-closure` only asks
+  whether every TU under `core/timeline/src` reaches the WAM and WebCLAP lanes —
+  which the resolver satisfies automatically — so it can neither catch a
+  hand-listed module's omission nor object to a TU that is listed but does not
+  belong in the document model's list at all.
 
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked

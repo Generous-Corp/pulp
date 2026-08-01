@@ -51,10 +51,13 @@ pulp_add_test_suite(pulp-test-playback-production
         ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 # Links the view layer as well: the mouse/touch parity fixture drives the
-# device-dependent hit metrics through the pointer-neutral intent seam.
+# device-dependent hit metrics through the pointer-neutral intent seam. That
+# link is the test's alone — it stands where a front-end stands, above both
+# rungs, and is exactly what neither pulp::timeline-editor nor pulp::timeline
+# is allowed to name.
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
-    LIBRARIES pulp::timeline pulp::view)
+    LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
