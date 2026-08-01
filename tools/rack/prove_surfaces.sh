@@ -65,6 +65,84 @@ if [ -n "${FORGE_HOST:-}" ] && [ "${FORGE_PROVE_REMOTE:-}" != "1" ]; then
     esac
 fi
 
+# `doctor`: what this machine can and cannot prove, and WHY -- measured here,
+# never remembered.
+#
+# Written after a blocker was carried in a handoff, repeated for a session, and
+# turned out to be wrong: "the M5 CLI proof is blocked on the keychain" named
+# the SIGNING keychain, which is fully set up there. The real obstacle was the
+# LOGIN keychain, which an SSH session cannot unlock, so the model CLI could
+# not read a token it does in fact have. Two different keychains, opposite
+# conclusions, and nothing in the repository could tell them apart. A blocker
+# nobody can re-measure becomes folklore.
+if [ "$ONLY" = "doctor" ]; then
+    say() { printf '  %-9s %s\n' "$1" "$2"; }
+    printf '\nwhat this machine can prove, and why\n\n'
+    printf 'host: %s\n' "$(hostname -s)"
+    [ -n "${SSH_CONNECTION:-}" ] && printf 'session: over SSH\n' \
+                                 || printf 'session: local\n'
+
+    printf '\n1. the CLI (a generation)\n'
+    if ! command -v claude >/dev/null 2>&1; then
+        say "NO" "the model CLI is not installed here"
+    elif claude -p "reply with the single word ok" 2>&1 | grep -qi "^ok"; then
+        say "yes" "the model CLI answers"
+    elif [ -f "$HOME/.claude/.credentials.json" ]; then
+        # The distinction that cost a session. A locked login keychain reports
+        # exactly like being logged out, and the fix is completely different.
+        if security show-keychain-info "$HOME/Library/Keychains/login.keychain-db" \
+             >/dev/null 2>&1; then
+            say "NO" "the model CLI has credentials and still refuses — really logged out"
+        else
+            say "SESSION" "logged in (credentials on disk), but this session cannot"
+            say "" "  read them: the login keychain is locked, which an SSH"
+            say "" "  session cannot change. Run this from a Terminal on this"
+            say "" "  machine and it works."
+        fi
+    else
+        say "NO" "no credentials on disk — run: claude   then /login"
+    fi
+
+    printf '\n2. the app (clicking Build)\n'
+    if [ -d /Applications/"Forge Modular.app" ]; then
+        say "yes" "installed at /Applications/Forge Modular.app"
+        n=$(ls "$HOME/Library/Logs/DiagnosticReports/" 2>/dev/null |
+            grep -c "^Forge Modular")
+        [ "${n:-0}" -gt 0 ] && say "note" "$n crash report(s) on this machine — see
+             ~/Library/Logs/DiagnosticReports"
+    else
+        say "NO" "not installed — run setup_m5.sh"
+    fi
+    if [ -n "${SSH_CONNECTION:-}" ]; then
+        say "SESSION" "driving its window needs Accessibility + Screen Recording,"
+        say "" "  which belong to a terminal app and cannot exist over SSH."
+        say "" "  On this machine: ~/bin/forge-modular-prove"
+    fi
+
+    printf '\n3. REAPER (all three formats)\n'
+    if [ -d /Applications/REAPER.app ]; then
+        say "yes" "installed"
+        [ -f "$HOME/.config/pulp/secrets/reaper-license.txt" ] \
+            && say "yes" "licensed (~/.config/pulp/secrets/reaper-license.txt)" \
+            || say "note" "no license file found; REAPER may run evaluation-limited"
+    else
+        say "NO" "REAPER is not installed here"
+    fi
+
+    printf '\n4. signing and notarization\n'
+    [ -d "$HOME/.config/pulp/secrets" ] \
+        && say "yes" "secrets present: $(ls "$HOME/.config/pulp/secrets" | tr '\n' ' ')" \
+        || say "NO" "no ~/.config/pulp/secrets"
+    if security find-identity -v -p codesigning 2>/dev/null |
+         grep -q "Developer ID Application"; then
+        say "yes" "a Developer ID Application identity is available"
+    else
+        say "NO" "no Developer ID Application identity"
+    fi
+    printf '\nSESSION means the machine can do it and THIS session cannot.\n'
+    exit 0
+fi
+
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
 none() { printf '  SKIP  %s\n' "$*"; skip=$((skip + 1)); }
