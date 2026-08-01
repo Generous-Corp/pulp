@@ -77,9 +77,16 @@ had shipped green while being invisible or unreachable.
        the credential sits in the login keychain, and a non-interactive
        session may not open it.
 
+   The harness reports the generator's own words now rather than a fragment
+   of them; over SSH to the M5 it says:
+
+       the model CLI is not logged in for this session.
+       It said: Not logged in · Please run /login
+
    The credential IS there — `security find-generic-password -s "Claude
-   Code-credentials"` finds it in `login.keychain-db` — and an SSH session
-   simply cannot open it. So this surface needs a window on the M5, or
+   Code-credentials"` finds it in `login.keychain-db` — so "not logged in" is
+   the CLI's reading of a credential it cannot reach, not a missing one. This
+   surface needs a window on the M5, or
 
        security unlock-keychain ~/Library/Keychains/login.keychain-db
 
