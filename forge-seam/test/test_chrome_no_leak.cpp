@@ -5489,6 +5489,36 @@ TEST_CASE("an entry from an older scanner is not passed off as measured",
     // text is built from.
     REQUIRE(lfo->inputs.size() == 1);
     CHECK(lfo->inputs[0].name == "Frequency modulation");
+
+    // An entry that predates the scan field but DOES carry controls is a
+    // third case, and it is the common one: most of the map was written by a
+    // scanner that recorded params and no lights. gap_for calls it stale,
+    // correctly -- there is more to measure. What matters for drawing is that
+    // its controls are known, so it must not be treated as faceless.
+    //
+    // Core's AudioInterface is that entry, and it wore the badge on a panel
+    // with a visible knob until the badge stopped asking gap_for.
+    const std::string with_params = R"({
+  "modules": [
+    {
+      "plugin": "Core",
+      "model": "AudioInterface2",
+      "pluginVersion": "2.6.4",
+      "size": [150.0, 380.0],
+      "params": [
+        {"index": 0, "name": "Level", "x": 75.0, "y": 120.0, "w": 30.0, "h": 30.0}
+      ],
+      "inputs": [],
+      "outputs": []
+    }
+  ]
+})";
+    const auto older = forge_modular::PortMap::parse(with_params);
+    const auto* ai = older.find("Core", "AudioInterface2");
+    REQUIRE(ai != nullptr);
+    CHECK(ai->params.size() == 1);
+    CHECK(older.gap_for("Core", "AudioInterface2", "2.6.4") ==
+          forge_modular::PortMap::Gap::stale);
 }
 
 // The UNMAPPED mark is drawn, and only where it belongs.

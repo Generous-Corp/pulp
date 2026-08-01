@@ -220,13 +220,22 @@ LoadedPatch load_patch(const std::string& path) {
             add(mapped->outputs, "out", false);
             // Placed means "we know where its jacks are", which is now true.
             rm.placed = !rm.ports.empty();
-            // Whether its CONTROLS are known is a separate question, and the
-            // one a stale entry gets wrong: it answers the version check
-            // correctly and still holds no controls at all.
-            rm.controls_measured =
-                PortMap::shared().gap_for(rm.brand, rm.name,
-                                          installed_version(rm.brand)) ==
-                PortMap::Gap::none;
+            // Whether its CONTROLS are known is a separate question, and it
+            // is answered by what the entry HOLDS rather than by which
+            // scanner wrote it.
+            //
+            // Keying the badge off gap_for() marked modules whose controls we
+            // do know. Core's AudioInterface carries a measured param and
+            // draws its knob from vendor artwork, and it wore the badge
+            // anyway, because its entry predates the scan field and so reads
+            // as old. A badge on a panel with visible knobs invites exactly
+            // the question it is meant to answer.
+            //
+            // gap_for still knows the difference -- it is what a "rescan for
+            // lights" prompt would ask -- but the badge means the narrower
+            // thing a person can see: we cannot show you this module's
+            // controls.
+            rm.controls_measured = !mapped->params.empty();
         } else {
             // Our own modules are not scanned and never need to be: their
             // controls come from the manifest their panel was emitted from,
