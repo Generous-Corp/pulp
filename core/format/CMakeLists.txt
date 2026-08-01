@@ -53,6 +53,11 @@ target_link_libraries(pulp-format
         pulp::events
         pulp::graph
         pulp::midi
+        # device_quotas.hpp is a public header that includes
+        # pulp/platform/device_capability.hpp, so the platform include path is a
+        # declared dependency of this target rather than one inherited through
+        # pulp::view.
+        pulp::platform
         pulp::state
         pulp::view
         pulp::runtime

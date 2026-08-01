@@ -55,9 +55,9 @@
 // correct shape for it — the dry path in that topology is the mix bus, not
 // something this node should own.
 
+#include <pulp/host/detail/forge_realization_identity.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
-#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/diode_bridge_compressor.hpp>
 #include <pulp/signal/feedforward_compressor.hpp>
@@ -110,8 +110,7 @@ struct FeedforwardCompressorInstance {
 /// makeup ceiling: `10^(24/20)`. Asserted directly by the DSP suite's
 /// makeup-gain bound test rather than reasoned about here.
 inline float feedforward_compressor_worst_case_gain() {
-    return static_cast<float>(
-        std::pow(10.0, signal::FeedforwardCompressor::kMakeupDbMax / 20.0));
+    return static_cast<float>(std::pow(10.0, signal::FeedforwardCompressor::kMakeupDbMax / 20.0));
 }
 
 /// The transparent/modern compressor as a lowerable custom node.
@@ -122,9 +121,7 @@ inline float feedforward_compressor_worst_case_gain() {
 inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f) {
     using Comp = signal::FeedforwardCompressor;
     const double fixed_lookahead_ms = std::clamp(
-        std::isfinite(static_cast<double>(lookahead_ms))
-            ? static_cast<double>(lookahead_ms)
-            : 0.0,
+        std::isfinite(static_cast<double>(lookahead_ms)) ? static_cast<double>(lookahead_ms) : 0.0,
         0.0, static_cast<double>(kNodeMaxLookaheadMs));
 
     CustomNodeType t;
@@ -150,9 +147,7 @@ inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f
         s->compressor.prepare(sr, kNodeMaxLookaheadMs);
         s->compressor.set_lookahead_ms(fixed_lookahead_ms);
     };
-    t.reset = [](void* p) {
-        static_cast<FeedforwardCompressorInstance*>(p)->compressor.reset();
-    };
+    t.reset = [](void* p) { static_cast<FeedforwardCompressorInstance*>(p)->compressor.reset(); };
 
     // Ranges and defaults are the module's canonical contract, in REAL units.
     // Each row is a design-parameter declaration per the series contract; the
@@ -160,8 +155,8 @@ inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f
     // readability at the call site and are not a second declaration.
     t.baked_params.push_back({kThresholdDb, static_cast<float>(Comp::kThresholdDbMin),
                               static_cast<float>(Comp::kThresholdDbMax), -18.0f});
-    t.baked_params.push_back({kRatio, static_cast<float>(Comp::kRatioMin),
-                              static_cast<float>(Comp::kRatioMax), 4.0f});
+    t.baked_params.push_back(
+        {kRatio, static_cast<float>(Comp::kRatioMin), static_cast<float>(Comp::kRatioMax), 4.0f});
     t.baked_params.push_back({kKneeDb, static_cast<float>(Comp::kKneeDbMin),
                               static_cast<float>(Comp::kKneeDbMax), 6.0f});
     t.baked_params.push_back({kAttackMs, static_cast<float>(Comp::kAttackMsMin),
@@ -224,7 +219,21 @@ inline ForgeNodeDescriptor feedforward_compressor_descriptor() {
     d.label = "Feedforward Compressor";
     d.description = "Transparent true-stereo compressor with linked detection and optional "
                     "program-dependent release.";
-    d.realizations = {{"zero_lookahead", kFeedforwardCompressorTypeId}};
+    d.axes = {{"lookahead_ms",
+               "Lookahead",
+               "Fixed detector lookahead; non-zero values report matching latency.",
+               {{"zero_latency", "Zero latency", 0.0f},
+                {"lookahead_3ms", "3 ms", 3.0f},
+                {"lookahead_10ms", "10 ms", 10.0f}}}};
+    d.realizations = {{"zero_lookahead",
+                       make_feedforward_compressor_node(0.0f).type_id,
+                       {{"lookahead_ms", "zero_latency"}}},
+                      {"lookahead_3ms",
+                       make_feedforward_compressor_node(3.0f).type_id,
+                       {{"lookahead_ms", "lookahead_3ms"}}},
+                      {"lookahead_10ms",
+                       make_feedforward_compressor_node(10.0f).type_id,
+                       {{"lookahead_ms", "lookahead_10ms"}}}};
     d.params = {
         {"threshold_db", kThresholdDb, "Threshold", "dB",
          "Level above which gain reduction begins.", ForgeParamKind::continuous,
@@ -316,18 +325,16 @@ inline float vca_compressor_worst_case_gain() {
 inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
                                                double attack_release_k = Comp::kRatioKDefault) {
     const double fixed_lookahead_ms = std::clamp(
-        std::isfinite(static_cast<double>(lookahead_ms))
-            ? static_cast<double>(lookahead_ms)
-            : 0.0,
+        std::isfinite(static_cast<double>(lookahead_ms)) ? static_cast<double>(lookahead_ms) : 0.0,
         0.0, Comp::kLookaheadMsMax);
-    const double fixed_attack_release_k = std::clamp(
-        std::isfinite(attack_release_k) ? attack_release_k : Comp::kRatioKDefault,
+    const double fixed_attack_release_k =
+        std::clamp(std::isfinite(attack_release_k) ? attack_release_k : Comp::kRatioKDefault,
         Comp::kRatioKMin, Comp::kRatioKMax);
     CustomNodeType t;
     t.type_id = kTypeId;
     if (fixed_lookahead_ms != 0.0 || fixed_attack_release_k != Comp::kRatioKDefault) {
-        t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms)
-                   + ".ark_" + detail::realization_real_token(fixed_attack_release_k);
+        t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms) + ".ark_" +
+                     detail::realization_real_token(fixed_attack_release_k);
     }
     t.version = 1;
     t.num_input_ports = 1;
@@ -343,7 +350,8 @@ inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [fixed_lookahead_ms, fixed_attack_release_k](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_lookahead_ms, fixed_attack_release_k](void* p, double sr,
+                                                             int /*max_block*/) {
         auto* s = static_cast<Instance*>(p);
         s->compressor.prepare(sr);
         // After `prepare()`, which is what sized the ring and would otherwise
@@ -355,8 +363,8 @@ inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
 
     t.baked_params.push_back({kThresholdDb, static_cast<float>(Comp::kThresholdDbMin),
                               static_cast<float>(Comp::kThresholdDbMax), -20.0f});
-    t.baked_params.push_back({kRatio, static_cast<float>(Comp::kRatioMin),
-                              static_cast<float>(Comp::kRatioMax), 4.0f});
+    t.baked_params.push_back(
+        {kRatio, static_cast<float>(Comp::kRatioMin), static_cast<float>(Comp::kRatioMax), 4.0f});
     t.baked_params.push_back({kKneeDb, static_cast<float>(Comp::kKneeDbMin),
                               static_cast<float>(Comp::kKneeDbMax), 10.0f});
     t.baked_params.push_back({kTimeMs, static_cast<float>(Comp::kTimeMsMin),
@@ -401,7 +409,34 @@ inline ForgeNodeDescriptor vca_compressor_descriptor() {
     d.label = "VCA Compressor";
     d.description = "Fast VCA-style compressor with OverEasy knee and optional negative-ratio "
                     "behavior.";
-    d.realizations = {{"default", kTypeId}};
+    d.axes = {{"lookahead_ms",
+               "Lookahead",
+               "Fixed detector lookahead; non-zero values report matching latency.",
+               {{"zero_latency", "Zero latency", 0.0f},
+                {"lookahead_3ms", "3 ms", 3.0f},
+                {"lookahead_10ms", "10 ms", 10.0f}}},
+              {"attack_release_k",
+               "Attack/Release Lock",
+               "Fixed release-to-attack timing ratio.",
+               {{"k2", "2:1", 2.0f}, {"k4", "4:1", 4.0f}, {"k8", "8:1", 8.0f}}}};
+    // Axes describe the construction dimensions; realizations are the supported
+    // finite subset, not an implied Cartesian product. These five are exactly
+    // the VCA registrations exposed to Forge.
+    d.realizations = {{"default",
+                       make_vca_compressor_node(0.0f, 4.0).type_id,
+                       {{"lookahead_ms", "zero_latency"}, {"attack_release_k", "k4"}}},
+                      {"lookahead_3ms_k4",
+                       make_vca_compressor_node(3.0f, 4.0).type_id,
+                       {{"lookahead_ms", "lookahead_3ms"}, {"attack_release_k", "k4"}}},
+                      {"lookahead_10ms_k4",
+                       make_vca_compressor_node(10.0f, 4.0).type_id,
+                       {{"lookahead_ms", "lookahead_10ms"}, {"attack_release_k", "k4"}}},
+                      {"zero_latency_k2",
+                       make_vca_compressor_node(0.0f, 2.0).type_id,
+                       {{"lookahead_ms", "zero_latency"}, {"attack_release_k", "k2"}}},
+                      {"zero_latency_k8",
+                       make_vca_compressor_node(0.0f, 8.0).type_id,
+                       {{"lookahead_ms", "zero_latency"}, {"attack_release_k", "k8"}}}};
     d.params = {
         {"threshold_db", kThresholdDb, "Threshold", "dB",
          "Level above which gain reduction begins.", ForgeParamKind::continuous,
@@ -524,8 +559,8 @@ inline CustomNodeType make_fet_compressor_node() {
             const auto offset = static_cast<std::int32_t>(k);
             s->compressor.set_input_gain_db(params.value_at(kInputGainDb, offset));
             s->compressor.set_output_gain_db(params.value_at(kOutputGainDb, offset));
-            const int step = std::clamp(
-                static_cast<int>(std::lround(params.value_at(kRatio, offset))), 0,
+            const int step =
+                std::clamp(static_cast<int>(std::lround(params.value_at(kRatio, offset))), 0,
                 static_cast<int>(kRatioSteps));
             s->compressor.set_ratio(static_cast<signal::FetRatio>(step));
             s->compressor.set_attack_us(params.value_at(kAttackUs, offset));
@@ -648,8 +683,8 @@ inline CustomNodeType make_diode_bridge_compressor_node(bool feedback = true, bo
 
     t.baked_params.push_back({kThresholdDb, static_cast<float>(Comp::kThresholdDbMin),
                               static_cast<float>(Comp::kThresholdDbMax), -12.0f});
-    t.baked_params.push_back({kRatio, static_cast<float>(Comp::kRatioMin),
-                              static_cast<float>(Comp::kRatioMax), 4.0f});
+    t.baked_params.push_back(
+        {kRatio, static_cast<float>(Comp::kRatioMin), static_cast<float>(Comp::kRatioMax), 4.0f});
     t.baked_params.push_back({kKneeDb, static_cast<float>(Comp::kKneeDbMin),
                               static_cast<float>(Comp::kKneeDbMax), 6.0f});
     t.baked_params.push_back({kAttackMs, static_cast<float>(Comp::kAttackMsMin),

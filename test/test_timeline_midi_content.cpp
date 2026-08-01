@@ -174,15 +174,14 @@ TEST_CASE("Copying a clip issues fresh identities for its lanes and points",
     CHECK(copied_ids.size() == 7);
 }
 
-TEST_CASE("Lane identities appear in both walks a sequence copy relies on",
+TEST_CASE("A sequence copy and its carried-id transfer agree on the whole owned set",
           "[timeline][midi-content]") {
-    // Remapping a subtree runs two independent enumerations of what a clip
-    // owns: id_remap allocates from its own walk, while preflight, the identity
-    // index, and the carried-id transfer below enumerate through
-    // visit_clip_owned_identities. Nothing makes them agree structurally, so a
-    // kind added to one and missed by the other is invisible until a copy is
-    // rejected or an identity silently escapes validation. Replaying one walk's
-    // table through the other's size check is what ties them together.
+    // Remapping a subtree allocates one destination identity per identity the
+    // clip owns, and the carried-id overload below re-derives that same set to
+    // size-check a table it is handed. Both read visit_clip_owned_identities,
+    // so a kind the traversal stops emitting drops out of the copy and out of
+    // the expectation together and the two still agree — which is why the
+    // hand-counted total is asserted rather than just the agreement.
     const auto clip = take(Clip::create({4}, {0}, {100}, content_with_lanes()));
     const auto track = take(Track::create({3}, "track", {clip}));
     const auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
