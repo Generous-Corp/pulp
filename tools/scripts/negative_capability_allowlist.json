@@ -1,0 +1,26 @@
+{
+  "$comment": "Refusals the playback compiler raises against constructs a user can author. An entry records who owns the refusal and why it stands; it is not a claim that the refusal is correct. status=live-defect means the document is authorable today and unplayable, and the refusal is a placeholder for work that has not happened; status=intended means the refusal is the answer. Enforced by tools/scripts/negative_capability_check.py.",
+  "refusals": [
+    {
+      "code": "MidiExpressionLaneUnsupported",
+      "file": "core/playback/src/program_compiler.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "MidiContent::create accepts expression lanes, the schema stores them under content.notes.lanes, and the serializer, id remap and note transaction all carry them; the note program has no representation for them, so a clip that authors one does not compile until a renderer chases and emits lane values."
+    },
+    {
+      "code": "TrimmedMidiLaneUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "A clip authored with expression lanes stops lowering the moment a SequenceRef trims it, because a lane point before the retained window can still be the value sounding inside it and neither dropping nor carrying it is right; the refusal stands until a chase rule decides what the window inherits."
+    },
+    {
+      "code": "NestedSequenceUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "set_clip_sequence_ref composes with set_clip_playback_properties, set_track_mixer, set_track_freeze and the take, automation and device-chain surfaces, but flattening has nowhere to fold clip gain and fades, a child fader, a child device chain, takes, freeze, a non-musical anchor, or a trim that cuts a conformed source or a fade, so each of those authored combinations refuses instead of playing wrong."
+    }
+  ]
+}

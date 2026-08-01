@@ -559,6 +559,8 @@
         "test/cmake/sampler_runtime_tests.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
         "tools/scripts/*web_timeline_source_closure_check.py",
+        "tools/scripts/negative_capability_check.py",
+        "tools/scripts/negative_capability_allowlist.json",
         ".agents/skills/playback/**"
       ]
     },

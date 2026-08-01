@@ -1432,6 +1432,32 @@ serialized JSON, which is also more faithful: the constructor never runs on byte
 someone else wrote. A refusal on that path surfaces as `"stage":"open"`, not
 `"stage":"render"`.
 
+## Widening the authoring surface can make a document unplayable
+
+A model field, a command, or a schema property is not finished when it
+round-trips. The playback compiler refuses several constructs this module lets a
+user author — expression lanes on a clip, and six combinations reachable by
+composing `set_clip_sequence_ref` with `set_clip_playback_properties`,
+`set_track_mixer`, `set_track_freeze`, or the take, automation and device-chain
+surfaces. Those documents save, reload, copy and round-trip; only playback says
+no, and nothing at authoring time warns anyone.
+
+`tools/scripts/negative_capability_check.py` (ctest
+`playback-negative-capability`) is what makes that cost visible. It cross-refers
+every refusal-shaped `CompileErrorCode` raise against this module's public
+headers and `core/timeline/schema/timeline_schema.json`, and requires an owner
+and a written reason for each refusal it can reach from here. The gate is
+registered in `test/cmake/timeline_tests.cmake` beside the engine dependency
+floor.
+
+**When adding to the authoring surface, check the compiler consumes it** —
+`core/playback/src/program_compiler.cpp` and
+`core/playback/src/sequence_content_lowerer.cpp` are where a new field either
+lowers or gets refused. Shipping the model half alone is how a negative
+capability arrives. The check only sees refusals that name a code, so a field
+the compiler silently drops or clamps passes it: that case needs a test, not a
+gate.
+
 ## New public API in `core/timeline/include` needs a contract or docs fail
 
 `tools/build-api-docs.sh` runs `tools/scripts/timeline_api_docs_check.py` over
