@@ -57,7 +57,6 @@ struct WidgetReloadSnapshot {
     // Legacy compat
     std::unordered_map<std::string, float> values;
 };
-
 // Bridges JS scripts to the Pulp widget system.
 // Registers native functions that JS code calls to create, configure,
 // layout, style, and interact with widgets.
@@ -97,12 +96,7 @@ public:
     /// The visitor must not retain a channel set or source after it returns.
     void visit_value_channels(const ValueChannelVisitor& visitor) const;
 
-    /// Immutable readback of the effectful native API grants installed in this
-    /// realm. Returned by value so diagnostics cannot mutate the live bridge.
-    CapabilitySet granted_capabilities() const noexcept {
-        return granted_capabilities_;
-    }
-
+    CapabilitySet granted_capabilities() const noexcept { return granted_capabilities_; }
     // True iff a GpuSurface is attached AND its adapter reports
     // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
     // will route through Pulp's Dawn).
