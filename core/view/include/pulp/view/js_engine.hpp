@@ -171,6 +171,11 @@ public:
     // (see ScriptInspectorBridge) only arm it while an evaluation is in flight.
     virtual void request_interrupt() {}
 
+    // Consume an interrupt that arrived after the backend's final check. Called
+    // on the engine thread after evaluation quiesces so a persistent cancel
+    // flag cannot abort the next otherwise-unrelated evaluation.
+    virtual void clear_pending_interrupt() {}
+
     // ── Forward-compatibility capability flags (HostObject / TypedArray / Promise) ──
     // These are defined now so all backends can be designed with them in mind.
     // Default implementations return false / no-op. Backends enable as ready.

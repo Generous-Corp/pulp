@@ -73,6 +73,9 @@ public:
     // interrupt check. Thread-safe on supporting backends; no-op otherwise.
     void request_interrupt();
 
+    // [engine thread] Consume a late interrupt after evaluation quiesces.
+    void clear_pending_interrupt();
+
     // Check if the engine is valid
     explicit operator bool() const;
 

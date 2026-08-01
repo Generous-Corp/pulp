@@ -139,7 +139,7 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
             req->state = RequestState::running;
             req->engine = engine;
             req->can_interrupt = caps_.can_interrupt;
-            req->interrupt_window_open.store(true, std::memory_order_release);
+            req->interrupt_window_open = true;
             running_ = req;
         } else {
             pending_ = req;
@@ -161,7 +161,14 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
         });
 
         EvalResult result = serialize_eval(engine, code);
-        req->interrupt_window_open.exchange(false, std::memory_order_acq_rel);
+        bool interrupt_was_issued = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            interrupt_was_issued = !req->interrupt_window_open;
+            req->interrupt_window_open = false;
+        }
+        if (interrupt_was_issued)
+            engine->clear_pending_interrupt();
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (req->detach_requested) {
@@ -220,8 +227,9 @@ bool ScriptInspectorBridge::interrupt() {
     if (!running_ || !running_->can_interrupt)
         return false;
     auto request = running_;
-    if (!request->interrupt_window_open.exchange(false, std::memory_order_acq_rel))
+    if (!request->interrupt_window_open)
         return false;
+    request->interrupt_window_open = false;
     request->interrupt_requested = true;
     auto* engine = request->engine;
     engine->request_interrupt();
@@ -243,7 +251,7 @@ bool ScriptInspectorBridge::pump() {
         req->state = RequestState::running;
         req->engine = engine_;
         req->can_interrupt = caps_.can_interrupt;
-        req->interrupt_window_open.store(true, std::memory_order_release);
+        req->interrupt_window_open = true;
         running_ = req;
         engine = engine_;
         state_cv_.notify_all();
@@ -256,7 +264,14 @@ bool ScriptInspectorBridge::pump() {
         result.detached = true;
         result.error = "engine detached before evaluation ran";
     }
-    req->interrupt_window_open.exchange(false, std::memory_order_acq_rel);
+    bool interrupt_was_issued = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        interrupt_was_issued = !req->interrupt_window_open;
+        req->interrupt_window_open = false;
+    }
+    if (interrupt_was_issued && engine)
+        engine->clear_pending_interrupt();
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -297,8 +312,9 @@ bool ScriptInspectorBridge::interrupt_if_active_locked(
     const std::shared_ptr<Request>& request) {
     if (!request->can_interrupt || !request->engine)
         return false;
-    if (!request->interrupt_window_open.exchange(false, std::memory_order_acq_rel))
+    if (!request->interrupt_window_open)
         return false;
+    request->interrupt_window_open = false;
     request->engine->request_interrupt();
     return true;
 }

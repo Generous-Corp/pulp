@@ -2,7 +2,6 @@
 // inspector and the single-threaded scripted-UI JS engine.
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -104,11 +103,11 @@ private:
         bool interrupt_requested = false;
         ScriptEngine* engine = nullptr;
         bool can_interrupt = false;
-        // Exactly one side closes this window: the engine thread after
-        // evaluate() returns, or a cancelling thread before it requests an
-        // interrupt. That prevents a late interrupt from poisoning the next
-        // evaluation after this one already completed.
-        std::atomic<bool> interrupt_window_open{false};
+        // Protected by mutex_. A cancelling thread closes the window and arms
+        // the engine interrupt while holding that mutex; the engine thread
+        // takes the same mutex before closing/draining at quiescence. That
+        // ordering prevents a cancel flag from being armed after the drain.
+        bool interrupt_window_open = false;
         EvalResult result;
     };
 

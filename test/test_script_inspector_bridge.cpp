@@ -72,6 +72,16 @@ TEST_CASE("Same-thread evaluate runs inline without a pump", "[view][script][ins
     REQUIRE(err.error.find("boom") != std::string::npos);
 }
 
+TEST_CASE("A late engine interrupt is cleared before the next evaluation",
+          "[view][script][inspector][interrupt]") {
+    ScriptEngine engine;
+    engine.request_interrupt();
+    engine.clear_pending_interrupt();
+
+    const auto value = engine.evaluate("6 * 7");
+    REQUIRE(value.getWithDefault<std::int64_t>(0) == 42);
+}
+
 TEST_CASE("Owner-thread evaluate is single-flight and explicitly interruptible",
           "[view][script][inspector]") {
     ScriptEngine engine;
