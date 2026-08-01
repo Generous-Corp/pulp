@@ -207,3 +207,54 @@ TEST_CASE("oklab alpha through the style-decl path, differential",
          << "   5% tint " << t[0] << "," << t[1] << "," << t[2]);
     CHECK(t[0] != o[0]);
 }
+
+// Read-and-report measurement: does the NON-browser HTML lane emit styles?
+#include <pulp/view/design_sources.hpp>
+TEST_CASE("legacy HTML lane: how many nodes carry appearance",
+          "[web-compat][ir-lane]") {
+    const char* dir_env = std::getenv("PULP_CSS_PROBE_DIR");
+    if (dir_env == nullptr) { WARN("SKIPPED"); return; }
+    std::ifstream in(std::filesystem::path("/tmp/forge-designs/1785533071370-001-ok/index.html"),
+                     std::ios::binary);
+    std::ostringstream ss; ss << in.rdbuf();
+    const auto ir = pulp::view::parse_claude_html(ss.str());
+    int nodes = 0, styled = 0, bg = 0, grad = 0, shadow = 0, radius = 0;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& n) {
+            ++nodes;
+            bool any = false;
+            if (n.style.background_color && !n.style.background_color->empty()) { ++bg; any = true; }
+            if (n.style.background_gradient) { ++grad; any = true; }
+            if (!n.style.box_shadow.empty()) { ++shadow; any = true; }
+            if (n.style.border_top_left_radius) { ++radius; any = true; }
+            if (any) ++styled;
+            for (const auto& c : n.children) walk(c);
+        };
+    walk(ir.root);
+    WARN("legacy-lane nodes=" << nodes << " styled=" << styled
+         << " bg=" << bg << " gradient=" << grad
+         << " shadow=" << shadow << " radius=" << radius);
+}
+
+TEST_CASE("legacy HTML lane control: does it emit styles at all",
+          "[web-compat][ir-lane]") {
+    // 0 styled nodes on the real design could mean the parser never emits
+    // appearance, or that this design puts all of it in CSS classes. Inline
+    // styles separate the two.
+    const std::string html =
+        "<html><body><div style=\"background:#ff0000;border-radius:8px;"
+        "box-shadow:0 2px 4px #000000\">x</div></body></html>";
+    const auto ir = pulp::view::parse_claude_html(html);
+    int nodes = 0, bg = 0, shadow = 0, radius = 0;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& n) {
+            ++nodes;
+            if (n.style.background_color && !n.style.background_color->empty()) ++bg;
+            if (!n.style.box_shadow.empty()) ++shadow;
+            if (n.style.border_top_left_radius) ++radius;
+            for (const auto& c : n.children) walk(c);
+        };
+    walk(ir.root);
+    WARN("inline-style control: nodes=" << nodes << " bg=" << bg
+         << " shadow=" << shadow << " radius=" << radius);
+}
