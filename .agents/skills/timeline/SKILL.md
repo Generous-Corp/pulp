@@ -1231,7 +1231,7 @@ permission list. Pair the two whenever the criterion is about what the artifact
 *contains*: the upper bound stops the editing stack leaking in, the lower bound
 stops the claim being satisfied by the module quietly disappearing.
 
-**What `StepSequencer_CLAP` actually proves today.** Measured on a macOS
+**What the two sequencer plugins prove.** Measured on a macOS
 configure, it reaches eighteen modules, and `timeline_editor` is not among them —
 `pulp-timeline-editor` is a live target in that same configure and this plugin
 does not link it. `timeline` it reaches only through
@@ -1241,8 +1241,15 @@ recorded as debt rather than claimed by the tier. Its `REQUIRE format state` is
 correspondingly narrow: this plugin's own code contributes no module edge beyond
 the adapter it is packaged as. So the honest reading of a green run here is "a
 step sequencer packaged as a CLAP, carrying no editing stack" — **not** "a piano
-roll inside a plugin". Nothing in the repo demonstrates the latter yet; the tier
-that would express it, `sequencer-editor`, has no claimant.
+roll inside a plugin".
+
+`TimelinePluginProof_CLAP` is the positive counterpart. Its processor owns a
+`Project` and `DocumentSession`, implements `EditIntentHost`, returns a native
+view from `create_view()`, and stores canonical Timeline JSON in plugin-owned
+state. It claims `sequencer-plugin-editor` and requires `format timeline
+timeline_editor`, so configure fails if any of those three disappears. Its view
+is deliberately only a ruler/playhead shell: the target proves the integration
+boundary, not a piano-roll interaction surface.
 
 **Know where the verdict runs.** The assertion lives in the consumer's own
 `CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
