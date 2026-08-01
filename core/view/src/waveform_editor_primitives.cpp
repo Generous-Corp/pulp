@@ -386,6 +386,14 @@ WaveformHitResult hit_test_waveform_handles(const WaveformViewport& viewport,
     return result;
 }
 
+WaveformHitResult hit_test_waveform_handles(const WaveformViewport& viewport,
+                                            const WaveformHandleModel& model,
+                                            float x,
+                                            const HitMetrics& metrics,
+                                            float pixels_per_point) {
+    return hit_test_waveform_handles(viewport, model, x, metrics.tolerance_px(pixels_per_point));
+}
+
 WaveformSnapResult resolve_waveform_snap(int64_t sample,
                                          int64_t total_samples,
                                          const WaveformSnapSettings& settings) {
@@ -619,6 +627,11 @@ WaveformRenderPlan WaveformEditorSurface::render_plan(int max_spans) const {
 
 WaveformHitResult WaveformEditorSurface::hit_test(float x, float tolerance_px) const {
     return hit_test_waveform_handles(viewport_, handles_, x, tolerance_px);
+}
+
+WaveformHitResult WaveformEditorSurface::hit_test(float x, const HitMetrics& metrics,
+                                                  float pixels_per_point) const {
+    return hit_test_waveform_handles(viewport_, handles_, x, metrics, pixels_per_point);
 }
 
 bool WaveformEditorSurface::begin_selection_edit(int64_t anchor_sample) {

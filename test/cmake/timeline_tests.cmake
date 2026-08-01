@@ -35,6 +35,13 @@ pulp_add_test_suite(pulp-test-smf-interchange
 pulp_add_test_suite(pulp-test-timeline-production-mode
     SOURCES test_timeline_production_mode.cpp
     LIBRARIES pulp::timeline)
+# SequencerUiHost is the editor rung's only coupling toward playback, so the
+# link list is part of what this suite proves: it names the editor interface and
+# the document model, and never pulp::playback. A member of the interface that
+# grew into an engine type would fail to build here.
+pulp_add_test_suite(pulp-test-sequencer-ui-host
+    SOURCES test_sequencer_ui_host.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp
@@ -43,6 +50,11 @@ pulp_add_test_suite(pulp-test-playback-production
     LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::native-components
         ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+# Links the view layer as well: the mouse/touch parity fixture drives the
+# device-dependent hit metrics through the pointer-neutral intent seam.
+pulp_add_test_suite(pulp-test-timeline-edit-intents
+    SOURCES test_timeline_edit_intents.cpp
+    LIBRARIES pulp::timeline pulp::view)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -320,13 +332,19 @@ pulp_add_test_suite(pulp-test-timeline-daw-project
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
     LIBRARIES pulp::playback pulp::timeline pulp::timebase)
 
-# Portable conformance runner over the timeline fixture corpus. Deliberately
-# free of Catch2 and of any desktop dependency: the same binary is meant to run
-# here under ctest, on the Android emulator lane via `adb push`, and compiled to
-# WASM, so it links only the portable floor (timeline + interchange) and takes
-# its corpus path on argv rather than through a compile-time host path.
-add_executable(pulp-fixture-runner fixture_runner_main.cpp)
-target_link_libraries(pulp-fixture-runner PRIVATE pulp::timeline pulp::interchange)
+# The portable conformance runner over this corpus is built by
+# core/interchange, which is configured on every platform — including the mobile
+# lanes where this test directory is not added at all. Only the ctest wiring and
+# the corpus itself live here; the corpus stays under test/ because it is the
+# fixture data the rest of this suite already loads.
+if(NOT TARGET pulp-fixture-runner)
+    # Dropping these two registrations silently would remove the corpus gate
+    # while every lane stayed green, which is the exact blindness the gate
+    # exists to prevent. Fail the configure instead.
+    message(FATAL_ERROR
+        "pulp-fixture-runner is missing: core/interchange must be configured "
+        "before test/ for the timeline fixture corpus gate to be registered.")
+endif()
 add_test(NAME timeline-fixture-corpus
     COMMAND pulp-fixture-runner --corpus "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 

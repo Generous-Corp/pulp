@@ -64,7 +64,15 @@ struct UndoGroupId {
 };
 
 /// Lifecycle position of a transaction within an interactive gesture.
-enum class GesturePhase : std::uint8_t { Single, Begin, Update, End };
+///
+/// `End` and `Cancel` are the two closing phases and share the mechanical close
+/// path: both require a matching open gesture, both clear it, and both close the
+/// undo group. They differ in what they assert about the edits already applied —
+/// `End` says they stand, `Cancel` says they do not. A cancel necessarily arrives
+/// AFTER its transactions have been applied, so closing is all the session does:
+/// the revert is the caller's existing one-call `DocumentSession::undo()` over the
+/// now-closed group, not a second reduction path hidden inside commit.
+enum class GesturePhase : std::uint8_t { Single, Begin, Update, End, Cancel };
 
 /// Inserts an identity-bearing clip into a track.
 struct InsertClip {
