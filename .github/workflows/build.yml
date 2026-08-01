@@ -47,6 +47,11 @@ on:
         required: false
         default: ""
         type: string
+      run_windows:
+        description: "Include the hosted Windows leg; disable for a trusted Linux-only Mac Pro dispatch"
+        required: false
+        default: true
+        type: boolean
 
 # Cancel superseded runs when a new commit lands on the same PR.
 # Stops stale build matrix runs (20-30 min each) from eating runner
@@ -76,6 +81,9 @@ jobs:
     outputs:
       provider: ${{ steps.resolve.outputs.provider }}
       matrix_json: ${{ steps.resolve.outputs.matrix_json }}
+      linux_route_reason: ${{ steps.resolve.outputs.linux_route_reason }}
+      linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
+      linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -85,13 +93,13 @@ jobs:
       - id: resolve
         env:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
-          # Linux runner selection (highest precedence in the resolver):
-          #   1. workflow_dispatch input (per-run override), else
-          #   2. PULP_LOCAL_LINUX_RUNS_ON_JSON repo var — OPT-IN routing to the
-          #      x64 Mac Pro Proxmox pool:
+          # Keep the configured selector distinct from the selector authorized
+          # for this event. PULP_LOCAL_LINUX_RUNS_ON_JSON configures the x64
+          # Mac Pro Proxmox pool:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro"].
-          #   3. unset → '' → resolver falls through to github-hosted (default).
+          # A workflow_dispatch input overrides it. Other events deliberately
+          # authorize neither selector and fall through to GitHub-hosted Linux.
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
           # image. The separate MSVC release-path gate tracks windows-latest,
@@ -102,6 +110,9 @@ jobs:
           # Until an organization runner group restricts the Mac Pro pool to
           # trusted workflow refs outside PR-controlled YAML, keep its repo
           # variable dispatch-only. Public pull_request jobs stay hosted.
+          WORKFLOW_DISPATCH_LINUX_SELECTOR: ${{ inputs.linux_runner_selector_json || '' }}
+          WORKFLOW_DISPATCH_RUN_WINDOWS: ${{ inputs.run_windows }}
+          CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -185,6 +196,12 @@ jobs:
               "python3",
               str(
                   WORKSPACE / "tools" / "scripts" / "resolve_runs_on.py"
+              ),
+          ]
+          LINUX_ROUTE_RESOLVER = [
+              "python3",
+              str(
+                  WORKSPACE / "tools" / "scripts" / "resolve_linux_route.py"
               ),
           ]
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
@@ -487,6 +504,38 @@ jobs:
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
           ])
+          linux_route_result = subprocess.run(
+              LINUX_ROUTE_RESOLVER + [
+                  "--event-name", EVENT_NAME,
+                  "--dispatch-selector-json",
+                  os.environ.get("WORKFLOW_DISPATCH_LINUX_SELECTOR", ""),
+                  "--configured-selector-json",
+                  os.environ.get("CONFIGURED_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  "--authorized-selector-json",
+                  os.environ.get("EXPLICIT_LINUX_RUNNER_SELECTOR_JSON", ""),
+                  "--resolved-selector-json", linux_runs_on,
+                  "--requested-provider", REQUESTED,
+              ],
+              check=False,
+              capture_output=True,
+              text=True,
+          )
+          if linux_route_result.returncode != 0:
+              sys.stderr.write(linux_route_result.stderr)
+              sys.exit(linux_route_result.returncode)
+          linux_route = json.loads(linux_route_result.stdout)
+          linux_provider = linux_route["linux_provider"]
+          linux_route_reason = linux_route["linux_route_reason"]
+          print(
+              "resolve-provider: Linux route "
+              f"reason={linux_route_reason}; provider={linux_provider}; "
+              "configured_selector="
+              f"{linux_route['configured_selector_json'] or '(unset)'}; "
+              "event_authorized_selector="
+              f"{linux_route['event_authorized_selector_json'] or '(unset)'}; "
+              f"resolved_selector={linux_runs_on}",
+              file=sys.stderr,
+          )
           # Windows routes through the provider resolver, but it does NOT read
           # PULP_LOCAL_WINDOWS_RUNS_ON_JSON on PRs. That local lane is currently
           # Windows ARM64 on QEMU, useful as a smoke target but not an x64 gate.
@@ -568,13 +617,27 @@ jobs:
           #
           # workflow_dispatch is kept so a Windows-touching change can be verified
           # on demand rather than waiting for the nightly.
-          if EVENT_NAME not in ("pull_request", "merge_group"):
+          dispatch_runs_windows = (
+              EVENT_NAME != "workflow_dispatch"
+              or os.environ.get("WORKFLOW_DISPATCH_RUN_WINDOWS", "").lower()
+              != "false"
+          )
+          if (
+              EVENT_NAME not in ("pull_request", "merge_group")
+              and dispatch_runs_windows
+          ):
               include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
                   "runs_on_json": windows_runs_on,
                   "provider": windows_provider,
               })
+          elif EVENT_NAME == "workflow_dispatch":
+              print(
+                  "resolve-provider: trusted Linux-only workflow_dispatch — "
+                  "Windows leg omitted by operator request",
+                  file=sys.stderr,
+              )
           else:
               print(
                   "resolve-provider: pull_request event — Windows leg omitted "
@@ -586,7 +649,8 @@ jobs:
               "key": "linux",
               "name": "Linux (x64)",
               "runs_on_json": linux_runs_on,
-              "provider": REQUESTED,
+              "provider": linux_provider,
+              "route_reason": linux_route_reason,
           })
 
           matrix = {"include": include}
@@ -595,6 +659,15 @@ jobs:
           with output_path.open("a", encoding="utf-8") as handle:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
+              handle.write(f"linux_route_reason={linux_route_reason}\n")
+              handle.write(
+                  "linux_configured_selector_json="
+                  f"{linux_route['configured_selector_json']}\n"
+              )
+              handle.write(
+                  "linux_event_authorized_selector_json="
+                  f"{linux_route['event_authorized_selector_json']}\n"
+              )
           PY
           )
 
@@ -989,7 +1062,10 @@ jobs:
           if [ "${RUNNER_OS}" = "macOS" ]; then
             bash test/cmake/test_ios_source_syntax.sh "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"
           fi
-          cmake --build "$PULP_BUILD_DIR" --config Release
+          # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro
+          # VM without claiming an entire shared Studio host. Keep this literal:
+          # bare --parallel is unbounded with Makefiles, while no flag is serial.
+          cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
@@ -1229,6 +1305,7 @@ jobs:
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
+      && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -1298,6 +1375,7 @@ jobs:
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
+      && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -1361,6 +1439,7 @@ jobs:
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
       && github.event_name != 'merge_group'
+      && (github.event_name != 'workflow_dispatch' || inputs.run_windows)
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -1557,6 +1636,10 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "Windows runs in the merge queue, not on the PR head — windows alias ✓"
             echo "(advisory; the serial merge_group validation builds PR ∪ main on Windows before this lands)"
+            exit 0
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.run_windows }}" != "true" ]; then
+            echo "Trusted Linux-only dispatch — Windows omitted by operator request; windows alias ✓"
             exit 0
           fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \

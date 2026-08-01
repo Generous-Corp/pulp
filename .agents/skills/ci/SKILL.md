@@ -531,11 +531,16 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
-The real boundary must be enforced outside PR-controlled YAML with an
-organization runner group restricted to selected trusted workflow refs (or an
-equivalent trusted dispatcher). Until that exists, do not add another private
-pool to automatic `pull_request` routing. In particular, the Mac Pro Linux pool
-and example-validation advisory macOS selector remain `workflow_dispatch`-only.
+The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
+that means a dedicated organization runner group containing only its ephemeral
+runners, repository access granted only to `Generous-Corp/pulp`, and workflow
+access restricted to the protected default-branch copy of
+`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
+a PR changing its own workflow cannot target the group before enabling
+automatic PR or merge-group routing. Until that exists, do not add another
+private pool to automatic `pull_request` routing. In particular, the Mac Pro
+Linux pool and example-validation advisory macOS selector remain
+`workflow_dispatch`-only.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
@@ -2482,15 +2487,32 @@ shipyard run --resume-from build
 
 ### Linux self-hosted routing (opt-in) and Windows x64 authority
 
-`build.yml`'s `resolve-provider` feeds the Linux leg selector from (in
-precedence): the `linux_runner_selector_json` workflow_dispatch input →
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` repo var → `''` (github-hosted, the default).
-Set the repo var (e.g. `["self-hosted","Linux","ARM64","pulp-build-linux"]`) to
-route that leg to the self-hosted Linux pool, served by
-`tools/ci/tart-runner-linux.sh` (see the `tart-ci` skill) and toggled in the
-Shipyard macOS GUI. The explicit selector has NO capacity fallback, so only set
-it when the pool reliably serves that lane — else legs route to a label with no
-online runner and queue.
+`build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
+configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
+the current event. A `workflow_dispatch` input has highest precedence; without
+one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
+merge-group, and push events deliberately ignore the configured private selector
+and use the provider fallback (GitHub-hosted by default) until the external
+runner-group boundary above exists.
+
+The Mac Pro selector is
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
+and is served by the Proxmox ephemeral pool described in
+`docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
+`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
+the displayed Linux provider from the selector that actually resolved. A
+dispatch using the configured selector fails loudly if it resolves hosted; a
+successfully assigned self-hosted job still has no live capacity fallback.
+
+Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
+proof during hosted saturation. Its default remains true so ordinary manual
+dispatches preserve the authoritative hosted Windows leg; automatic events do
+not read this input.
+
+The shared build step uses a literal `--parallel 4`: omitting it makes the
+Makefile-based Mac Pro VMs compile serially, while a bare `--parallel` is
+unbounded. Four fills each VM's assigned cores and remains a bounded share on
+the larger self-hosted macOS machines.
 
 Windows is intentionally different. The required `Windows (x64)` functional
 gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC

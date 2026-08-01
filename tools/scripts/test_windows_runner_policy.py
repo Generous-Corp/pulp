@@ -274,7 +274,9 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 )
         raise AssertionError("resolve-provider matrix step not found")
 
-    def _matrix_keys(self, event_name: str) -> list[str]:
+    def _matrix_keys(
+        self, event_name: str, *, run_windows: bool = True
+    ) -> list[str]:
         """Run the real resolver for one event and return its matrix leg keys."""
         env = {
             k: v
@@ -289,6 +291,9 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "GITHUB_WORKSPACE": str(REPO_ROOT),
                 "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "",
                 "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
+                "WORKFLOW_DISPATCH_RUN_WINDOWS": (
+                    "true" if run_windows else "false"
+                ),
                 "WORKFLOW_DISPATCH_MACOS_SELECTOR": "",
                 "LOCAL_MACOS_RUNS_ON_JSON": json.dumps(
                     ["self-hosted", "macOS", "ARM64", "pulp-build"]
@@ -326,9 +331,8 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         keys = self._matrix_keys("pull_request")
         self.assertNotIn("windows", keys)
         # Negative control: the saving must come from Windows alone. macOS runs
-        # on the self-hosted Macs and Linux on the local Linux VMs, so neither
-        # competes for the hosted pool — dropping either would cost PR-head
-        # signal for nothing.
+        # on the self-hosted Macs while automatic PR Linux uses the hosted pool;
+        # dropping either would still cost PR-head signal.
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
@@ -345,9 +349,8 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
         # Same negative control as the pull_request case: the saving has to come
-        # from Windows alone. macOS and Linux run on hardware we own, so neither
-        # competes for the hosted pool and dropping either would cost merge-group
-        # signal for nothing.
+        # from Windows alone. macOS uses hardware we own while merge-group Linux
+        # uses the hosted pool; dropping either would still cost signal.
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
@@ -361,18 +364,37 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         """
         self.assertIn("windows", self._matrix_keys("workflow_dispatch"))
 
+    def test_workflow_dispatch_can_omit_windows_for_trusted_linux_only_run(
+        self,
+    ) -> None:
+        """Mac Pro dispatches must not worsen hosted Windows saturation."""
+        keys = self._matrix_keys("workflow_dispatch", run_windows=False)
+        self.assertNotIn("windows", keys)
+        self.assertIn("macos", keys)
+        self.assertIn("linux", keys)
+
     def test_latest_toolchain_gates_skip_pull_request(self) -> None:
         for name in self.WINDOWS_GATE_JOBS:
             with self.subTest(job=name):
                 condition = " ".join(self.workflow["jobs"][name]["if"].split())
                 self.assertIn("github.event_name != 'pull_request'", condition)
                 self.assertIn("github.event_name != 'push'", condition)
+                self.assertIn(
+                    "github.event_name != 'workflow_dispatch' || inputs.run_windows",
+                    condition,
+                )
 
     def test_windows_alias_short_circuits_on_pull_request(self) -> None:
         """Without this the advisory alias fails closed once the leg is absent."""
         steps = self.workflow["jobs"]["windows"]["steps"]
         body = "\n".join(step.get("run", "") for step in steps)
         self.assertIn("github.event_name }}\" = \"pull_request\"", body)
+
+    def test_windows_alias_short_circuits_on_linux_only_dispatch(self) -> None:
+        steps = self.workflow["jobs"]["windows"]["steps"]
+        body = "\n".join(step.get("run", "") for step in steps)
+        self.assertIn("inputs.run_windows", body)
+        self.assertIn("Windows omitted by operator request", body)
 
     def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
         """The long-polling required alias must leave classifiers runnable.

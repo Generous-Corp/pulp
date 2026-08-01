@@ -46,6 +46,21 @@ x86_64, which the job requires: the lane's earlier ARM64/Tart declaration would
 have changed its architecture rather than relocating it, silently deleting the
 only x64 Linux coverage.
 
+That external boundary is a prerequisite, not a workflow TODO: create a
+dedicated organization runner group containing only the Mac Pro ephemeral
+runners, grant it to `Generous-Corp/pulp` only, and restrict workflow access to
+the protected default-branch copy of `.github/workflows/build.yml`. Then prove
+that a pull request changing its own workflow cannot target the group before
+enabling automatic PR or merge-group routing. Repository variables, event-name
+conditions, and tests in this repository are not substitutes for that control.
+
+`resolve-provider` exposes the configured selector separately from the selector
+authorized for the current event. Its `linux_route_reason` output is one of
+`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`; the Linux
+matrix provider is derived from the selector that actually resolved. An
+operator dispatch with a configured selector fails instead of silently falling
+back to hosted Linux.
+
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
 qm list                          # 9xxx = pulp-linux-golden* (templates)
@@ -660,8 +675,10 @@ So Windows runs where it actually gates:
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
-A PR head keeps macOS (self-hosted) and Linux (self-hosted Linux VMs) for fast
-signal; neither competes for the hosted pool. The advisory `windows` alias job
+A PR head keeps macOS on the self-hosted Macs and Linux on GitHub-hosted Linux
+for fast signal. The Linux leg therefore does consume hosted capacity; the
+security boundary above deliberately prevents automatic PRs from reaching the
+private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed
 looking for a matrix leg that deliberately did not run.
 
@@ -1583,7 +1600,7 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux x86_64 Proxmox VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Dispatch-only Linux x86_64 Proxmox VM pool; automatic PR routing requires the external runner-group boundary above | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
@@ -1739,6 +1756,18 @@ boot a local coverage VM.
 `windows_runner_selector_json`, and `macos_runner_selector_json` inputs.
 These are the same inputs already documented above; they are listed
 here for completeness alongside the repo-variable knobs.
+
+For a trusted Linux-only Mac Pro proof during hosted saturation, disable the
+otherwise-default hosted Windows leg explicitly:
+
+```bash
+gh workflow run build.yml --ref <trusted-branch> \
+  -f linux_runner_selector_json='["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]' \
+  -f run_windows=false
+```
+
+This switch affects only `workflow_dispatch`; automatic events keep their
+documented matrix policy, and ordinary manual dispatches still include Windows.
 
 ### Reverting
 
