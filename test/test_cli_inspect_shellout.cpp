@@ -6,6 +6,7 @@
 #include "test_cli_shellout_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/discovery.hpp>
@@ -766,36 +767,43 @@ TEST_CASE("pulp inspect applies a typed parameter mutation through the productio
     REQUIRE(fixture.publisher.record().has_value());
     const auto& record = *fixture.publisher.record();
 
-    auto result = run_pulp({"inspect", "--port", fixture.port_string(),
+    auto result = run_pulp({"inspect", "set-parameter", "--json",
+                            "--id", "7", "--value", "0.75",
+                            "--port", fixture.port_string(),
                             "--session", record.session_id,
                             "--instance", record.instance_id,
-                            "--publication", record.publication_id, "--command",
-                            "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
+                            "--publication", record.publication_id},
                            10000);
 
     INFO("stdout: " << result.stdout_output);
     INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stdout_output == R"({"ok": true})"
-                                    "\n");
+    const auto envelope = choc::json::parse(result.stdout_output);
+    REQUIRE(envelope["schemaVersion"].getString() ==
+            "pulp.inspect.set-parameter.v1");
+    REQUIRE(envelope["parameterId"].getWithDefault<int>(-1) == 7);
+    REQUIRE(envelope["value"].getWithDefault<double>(-1.0) == 0.75);
+    REQUIRE_FALSE(envelope["normalized"].getWithDefault<bool>(true));
     CHECK(store.get_value(7) == 0.75f);
     REQUIRE(fixture.seen.size() == 1);
     CHECK(fixture.seen.front().method == "State.setParameter");
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
-          R"({"id":7,"value":0.75})");
+          R"({"id":7,"value":0.75,"normalized":false})");
 
-    result = run_pulp({"inspect", "--port", fixture.port_string(),
+    result = run_pulp({"inspect", "set-parameter", "--json",
+                       "--id", "gain", "--value", "0.5",
+                       "--port", fixture.port_string(),
                        "--session", record.session_id,
                        "--instance", record.instance_id,
-                       "--publication", record.publication_id, "--command",
-                       "State.setParameter", "--params", R"({"id":"gain","value":0.5})"},
+                       "--publication", record.publication_id},
                       10000);
     REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 1);
-    CHECK(result.stderr_output.find("Invalid params for State.setParameter") != std::string::npos);
+    REQUIRE(result.exit_code == 2);
+    CHECK(result.stderr_output.find("invalid --id value: gain") !=
+          std::string::npos);
     CHECK(store.get_value(7) == 0.75f);
-    REQUIRE(fixture.seen.size() == 2);
+    REQUIRE(fixture.seen.size() == 1);
 }
 #endif
 
@@ -813,6 +821,22 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
     };
     REQUIRE(fixture.publisher.record().has_value());
     const auto& record = *fixture.publisher.record();
+
+    const auto unwritable = run_pulp(
+        {"inspect", "--json",
+         "--port", fixture.port_string(),
+         "--session", record.session_id,
+         "--instance", record.instance_id,
+         "--publication", record.publication_id,
+         "--command", "State.setParameter",
+         "--params", R"({"id":7,"value":0.5})",
+         "--output", (fixture.temp / "missing" / "result.json").string()},
+        10000);
+    REQUIRE_FALSE(unwritable.timed_out);
+    REQUIRE(unwritable.exit_code == 1);
+    REQUIRE(unwritable.stderr_output.find("output_write_failed") !=
+            std::string::npos);
+    REQUIRE(fixture.seen.empty());
 
     auto written = run_pulp({"inspect",
                              "--port", fixture.port_string(),

@@ -3226,7 +3226,7 @@ TEST_CASE("MCP does not expose filesystem-backed motion fixture loading",
 }
 
 // This code-shape check proves that the grantable pulp_motion_* MCP tools
-// map to the right Motion.* inspector protocol method names. The source
+// map to the right canonical Motion.* inspector protocol constants. The source
 // text assertion mirrors the existing inspector-mapping test — the
 // actual round-trip lands at MotionInspector::handle /
 // MotionScrubber::handle, which run inside the inspected process and
@@ -3235,7 +3235,7 @@ TEST_CASE("MCP does not expose filesystem-backed motion fixture loading",
 TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
           "[mcp][tools][motion][issue-2153]") {
     auto src_path = repo_root_path() / "tools" / "mcp" /
-                    "mcp_inspector_tools.cpp";
+                    "mcp_inspect_tools.cpp";
     REQUIRE(std::filesystem::exists(src_path));
 
     std::ifstream in(src_path);
@@ -3244,15 +3244,15 @@ TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
     const std::string src = buf.str();
 
     const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_motion_start_trace", "Motion.startTrace"},
-        {"pulp_motion_stop_trace", "Motion.stopTrace"},
-        {"pulp_motion_snapshot", "Motion.snapshot"},
-        {"pulp_motion_list_traces", "Motion.listTraces"},
-        {"pulp_motion_scrub_to", "Motion.scrubTo"},
-        {"pulp_motion_play", "Motion.play"},
-        {"pulp_motion_pause", "Motion.pause"},
-        {"pulp_motion_enable_cost", "Motion.enableCost"},
-        {"pulp_motion_disable_cost", "Motion.disableCost"},
+        {"pulp_motion_start_trace", "methods::kMotionStartTrace"},
+        {"pulp_motion_stop_trace", "methods::kMotionStopTrace"},
+        {"pulp_motion_snapshot", "methods::kMotionSnapshot"},
+        {"pulp_motion_list_traces", "methods::kMotionListTraces"},
+        {"pulp_motion_scrub_to", "methods::kMotionScrubTo"},
+        {"pulp_motion_play", "methods::kMotionPlay"},
+        {"pulp_motion_pause", "methods::kMotionPause"},
+        {"pulp_motion_enable_cost", "methods::kMotionEnableCost"},
+        {"pulp_motion_disable_cost", "methods::kMotionDisableCost"},
     };
     for (const auto& [tool, method] : mappings) {
         INFO("motion tool=" << tool << " method=" << method);
@@ -3409,13 +3409,13 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     REQUIRE(explain.find("Unknown tool") == std::string::npos);
 }
 
-// Code-shape check that the pulp_trace_* MCP tools map to the right Trace.*
-// inspector method names. Source-text assertion mirrors the motion mapping
+// Code-shape check that the pulp_trace_* MCP tools map to the right canonical
+// Trace.* inspector method constants. Source-text assertion mirrors the motion mapping
 // test; the round-trip itself lands at TraceInspector::handle, covered by
 // test_trace_inspector.cpp.
 TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools][trace]") {
     auto src_path = repo_root_path() / "tools" / "mcp" /
-                    "mcp_inspector_tools.cpp";
+                    "mcp_inspect_tools.cpp";
     REQUIRE(std::filesystem::exists(src_path));
 
     std::ifstream in(src_path);
@@ -3424,9 +3424,11 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools
     const std::string src = buf.str();
 
     const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_trace_start", "Trace.startSession"}, {"pulp_trace_stop", "Trace.stopSession"},
-        {"pulp_trace_snapshot", "Trace.snapshot"},  {"pulp_trace_query", "Trace.query"},
-        {"pulp_trace_explain", "Trace.explain"},
+        {"pulp_trace_start", "methods::kTraceStartSession"},
+        {"pulp_trace_stop", "methods::kTraceStopSession"},
+        {"pulp_trace_snapshot", "methods::kTraceSnapshot"},
+        {"pulp_trace_query", "methods::kTraceQuery"},
+        {"pulp_trace_explain", "methods::kTraceExplain"},
     };
     for (const auto& [tool, method] : mappings) {
         INFO("trace tool=" << tool << " method=" << method);

@@ -2,8 +2,12 @@
 
 #include "cmd_inspect_support.hpp"
 
-#include <fstream>
+#include <pulp/runtime/detail/durable_file_replacement.hpp>
+
+#include <cstdint>
 #include <iostream>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -256,6 +260,19 @@ int cmd_inspect(const std::vector<std::string>& args) {
         return 2;
     }
 
+    using pulp::runtime::detail::DurableFileCommitOutcome;
+    using pulp::runtime::detail::DurableFileReplacement;
+    std::optional<DurableFileReplacement> output;
+    if (!output_file.empty()) {
+        output = DurableFileReplacement::create(output_file);
+        if (!output) {
+            print_cli_error(json, "output_write_failed",
+                            "could not create a temporary sibling for " +
+                                output_file);
+            return 1;
+        }
+    }
+
     auto client = InspectorClientSession::connect(selection, &failure);
     if (!client) {
         print_failure(failure, json);
@@ -398,10 +415,39 @@ int cmd_inspect(const std::vector<std::string>& args) {
             }
         }
         if (!output_file.empty()) {
-            std::ofstream output(output_file, std::ios::trunc);
-            if (!output || !(output << response_json)) {
-                print_cli_error(json, "output_write_failed",
-                                "could not write " + output_file);
+            const auto bytes = std::span<const std::uint8_t>(
+                reinterpret_cast<const std::uint8_t*>(response_json.data()),
+                response_json.size());
+            auto output_failure = std::string{};
+            if (!output->write_all(bytes)) {
+                output_failure = "could not write a temporary sibling for " +
+                                 output_file;
+            } else {
+                switch (output->commit()) {
+                case DurableFileCommitOutcome::ReplacedDurably:
+                    break;
+                case DurableFileCommitOutcome::NotReplaced:
+                    output_failure =
+                        "could not atomically replace " + output_file;
+                    break;
+                case DurableFileCommitOutcome::ReplacedButDirectorySyncFailed:
+                    output_failure =
+                        "replaced " + output_file +
+                        " but could not durably sync its parent directory";
+                    break;
+                }
+            }
+            if (!output_failure.empty()) {
+                const auto message =
+                    "request completed successfully but " + output_failure;
+                if (json) {
+                    print_json_error("output_write_failed", message,
+                                     R"({"mayHaveApplied":true})");
+                } else {
+                    print_cli_error(
+                        false, "output_write_failed",
+                        message + "; the operation may have applied");
+                }
                 return 1;
             }
             if (json) {
