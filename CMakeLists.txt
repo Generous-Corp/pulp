@@ -439,6 +439,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
+# Inbound link-floor check. Reads the resolved link graph, so it has to be
+# included after the module targets exist and before the consumers that assert
+# a bound over them (examples/, tools/).
+include(PulpLinkFloor)
+
 # ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
 # pulp-cli unconditionally links pulp::inspect (for `pulp inspect`), and
 # pulp::inspect depends on pulp::render which is GPU-only. Without the

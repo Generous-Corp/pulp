@@ -959,6 +959,79 @@ that row to admit `view` makes every consumer of the kernel pay for `core/view`,
 which is the exact coupling the rung split exists to prevent. A view target gets
 its own directory and its own row, sitting above this one.
 
+### The floor has two directions and they need different instruments
+
+`timeline_engine_dependency_floor_check.py` is outbound: for each engine module,
+does it reach up? `tools/cmake/PulpLinkFloor.cmake` is the inbound counterpart:
+given a consumer — a plugin, an app — what does linking it actually cost, and
+did it say so? `pulp_assert_link_floor(<target> TIER <name>)` gates,
+`pulp_report_link_closure(<target>)` measures and writes
+`${CMAKE_BINARY_DIR}/link-floor/<target>.txt`.
+
+Reaching for the Python checker to answer the inbound question does not work,
+and the reasons are properties of CMake rather than of taste:
+
+- **A PRIVATE link to a static library still propagates.** CMake records it as
+  `$<LINK_ONLY:dep>` in `INTERFACE_LINK_LIBRARIES`, because a static archive
+  cannot resolve its own dependencies. Flipping a keyword from `PUBLIC` to
+  `PRIVATE` leaves the consumer's link line byte-identical. A checker reading
+  source text sees the keyword and has to model that rule; one reading the
+  resolved property observes it. Modelling it wrongly under-reports, which is
+  the one failure mode that makes a floor check worthless.
+- **A plugin's link edges are not written down anywhere a parser can read.**
+  `pulp_add_plugin(X FORMATS CLAP)` creates `X_CLAP` inside a function, links
+  `${_PULP_VIEW_TARGET}` — a variable `_pulp_pick_target` chooses — and only
+  when `PULP_HAS_CLAP`. Following that from text means evaluating CMake
+  variables, functions and conditionals. The engine check gets away with text
+  only because it reads `core/<module>/CMakeLists.txt`, where links are literals.
+
+Gotchas once you are reading the resolved graph:
+
+- **Name a module from `SOURCE_DIR`, never from the target name.** `pulp-view`,
+  `pulp-view-core` and `pulp-view-script` are all `core/view`, and there is no
+  naming convention that stays true on its own.
+- **A dependency contributes `INTERFACE_LINK_LIBRARIES`, not `LINK_LIBRARIES`.**
+  Only the root target's own direct links come from `LINK_LIBRARIES`. Reading a
+  dependency's would invent edges: a shared library resolves its PRIVATE links
+  inside its own artifact and charges the consumer nothing.
+- **The walk must close over what it has seen.** `core/host` links
+  `pulp::format` while format reaches back through view, so a walk without a
+  visited set hangs on the real repo rather than in a fixture.
+- **The declared-graph closure is a superset of the link line, and correctly
+  so.** Cross-checking `StepSequencer_CLAP` against
+  `CMakeFiles/<t>.dir/link.txt` shows the two agree on every archive and differ
+  by exactly the header-only libraries: `pulp-signal` is an `INTERFACE` target,
+  so it is a real dependency that costs headers and produces no `.a`. Do not
+  "fix" the walk to match the archive list — the archive list is the narrower
+  instrument.
+
+**Every plugin links the view stack, drawing or not.** VST3, CLAP and AU each
+link `${_PULP_VIEW_TARGET}` unconditionally in `PulpPluginFormats.cmake` and
+`FATAL_ERROR` if it is absent, so the closure runs
+`<plugin> -> pulp-view -> pulp-view-script -> pulp-view-core -> pulp-host ->
+pulp-playback`. Two consequences worth knowing before reading a report as a
+statement about the plugin's own code: a plugin acquires a transport it never
+asked for, and a sequencer plugin's reach to `core/timeline` today arrives
+through that chain rather than through its own engine. A red reading here is
+usually the format packaging's bill, not the plugin's doing.
+
+**Tier versus debt.** A tier is a bound several targets share, declared centrally
+so no single target can widen it alone; `PULP_LINK_FLOOR_DEBT_<target>` records
+what that target's closure drags in beyond the tier. Keep measured-but-unearned
+reach in debt, never in the tier — an entry is a fact to pay down, and deleting
+it once the edge is cut tightens the gate with no other edit. The check rejects a
+debt entry that is no longer linked and one that duplicates its tier, so the list
+cannot outlive its subject.
+
+**Know where the verdict runs.** The assertion lives in the consumer's own
+`CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
+an example plugin that means the Shipyard mac/windows lanes
+(`PULP_BUILD_EXAMPLES=ON`) and ordinary dev builds — not the GitHub-hosted legs
+of `build.yml`, which configure `PULP_BUILD_EXAMPLES=OFF`. It also reports one
+configuration: a link that only exists under `WIN32` is invisible to a macOS
+configure. `tools/scripts/link_floor_selftest.py --mutate` is what runs
+everywhere; it weakens the checker nine ways and requires each to be caught.
+
 ### Derived surfaces are projections of the manifest, not the registry
 
 Every downstream agent surface is a **pure function of the committed

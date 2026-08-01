@@ -677,6 +677,26 @@ direction. An editor learns where the playhead is through
 audio — so a plugin that draws a piano roll over its own engine consumes the
 editor without acquiring a transport.
 
+**The module does not acquire a transport; the plugin binary does.** That row
+governs `core/timeline_editor`'s own includes and links, and it holds. It says
+nothing about what the plugin packaging adds around it, and measuring the other
+direction shows the difference. `tools/cmake/PulpLinkFloor.cmake` walks CMake's
+resolved link graph for a consumer; run over `StepSequencer_CLAP` it reports:
+
+```
+playback: StepSequencer_CLAP -> pulp-view -> pulp-view-script
+            -> pulp-view-core -> pulp-host -> pulp-playback
+```
+
+VST3, CLAP and AU each link `${_PULP_VIEW_TARGET}` unconditionally in
+`PulpPluginFormats.cmake` — drawing or not — and the view stack reaches the
+plugin host and, through it, this module. So every Pulp plugin links `playback`
+today, and the outbound gate is right to stay green about it: nothing in
+`core/playback` or `core/timeline_editor` reached upward to cause it. Cite the
+editor row for what a *module* costs, and a link-floor report for what a
+*binary* costs; they are different claims and only one of them is about the
+artifact a host loads. The inbound side is documented in the `timeline` skill.
+
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
 compiled program. That is correct for a block renderer, which consumes the

@@ -1,0 +1,347 @@
+# PulpLinkFloor.cmake — what does a target actually link, and is it within bound?
+#
+# The engine-side floor check (tools/scripts/timeline_engine_dependency_floor_check.py)
+# is outbound: for each engine module it asks "does this module reach up?". This
+# file asks the inbound question about a *consumer* — a plugin, an app, a test —
+# "what does linking you cost, and did you say so?".
+#
+# The two questions need different instruments and this one cannot be a text
+# scan, for two reasons that are properties of CMake rather than of style:
+#
+#   1. A PRIVATE link to a static library still propagates. CMake records it as
+#      `$<LINK_ONLY:dep>` in INTERFACE_LINK_LIBRARIES, because a static archive
+#      cannot resolve its own dependencies, so the consumer's link line carries
+#      it. A reader of the source text sees the PRIVATE keyword and has to model
+#      that rule to get the right answer; a reader of the resolved property
+#      observes it. Modelling it wrongly under-reports, which is the one failure
+#      mode that makes a floor check worthless.
+#   2. A plugin's link edges are not written down anywhere a parser can read.
+#      `pulp_add_plugin(StepSequencer FORMATS CLAP)` creates StepSequencer_CLAP
+#      inside a function, links `${_PULP_VIEW_TARGET}` — a variable chosen by
+#      `_pulp_pick_target` — and only when PULP_HAS_CLAP. Following that from
+#      text means evaluating CMake variables, functions and conditionals, i.e.
+#      re-implementing CMake. The engine check gets away with text only because
+#      it reads core/<module>/CMakeLists.txt, where every link is a literal.
+#
+# The same trade is already recorded in core/view/CMakeLists.txt, which prefers
+# `get_target_property(... LINK_LIBRARIES)` over grepping the built binary
+# because "the symbol-grep passes on a misconfigured build. The link INTERFACE
+# is the reliable signal, available here at configure time."
+#
+# What this instrument cannot see, stated plainly so a green run is not
+# over-read: it reports the configuration being configured. A link that only
+# exists under WIN32 is invisible to a macOS configure, and a module excluded by
+# an option is genuinely absent rather than forgiven. A floor asserted here is a
+# claim about this build, and it takes a run per configuration to be a claim
+# about all of them.
+
+include_guard(GLOBAL)
+
+if(NOT DEFINED PULP_LINK_FLOOR_ROOT)
+    get_filename_component(PULP_LINK_FLOOR_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+endif()
+
+# ── Tiers ────────────────────────────────────────────────────────────────────
+# A tier is the bound a consumer claims, named centrally so two targets claiming
+# the same tier are held to the same closure and neither can widen it alone. The
+# names follow the module directories under core/, which is also the vocabulary
+# MODULE_FLOORS uses, so a bound and a floor can be read against each other.
+#
+# Tiers are cumulative by construction rather than by inheritance: each lists
+# its whole closure, so reading one row tells you the entire cost. An extra
+# module in a row is a deliberate, reviewable widening of every consumer of that
+# tier at once.
+
+# The rungs a sequencer document and its editor kernel need, and nothing above
+# them. This is the bound behind "a piano roll you can put in a plugin": the
+# editor rung reaches the document model and the timebase and stops, so a plugin
+# drawing a piano roll over its own engine does not acquire a transport.
+set(PULP_LINK_FLOOR_TIER_sequencer-editor
+    platform runtime timebase timeline timeline_editor)
+
+# A loadable plugin binary. Beyond the editor rungs it necessarily carries the
+# format adapter it is packaged as, and the audio/MIDI types that adapter and
+# the engine both speak.
+set(PULP_LINK_FLOOR_TIER_sequencer-plugin
+    platform runtime timebase timeline timeline_editor
+    audio midi format)
+
+# ── Debt ─────────────────────────────────────────────────────────────────────
+# What a target's link closure drags in beyond its tier, recorded per target.
+# An entry is a fact about the artifact, not a permission to build on: it says
+# "this edge exists today", and deleting it once the edge is cut tightens the
+# gate with no other edit. Kept out of the tiers on purpose — a tier is a claim
+# several targets share, and nothing here has earned that reach for all of them.
+#
+# pulp_assert_link_floor() rejects a debt entry that is no longer reached and a
+# debt entry that duplicates its tier, so the list cannot outlive its subject.
+#
+# StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
+# write and cannot cut from its own CMakeLists account for all of it.
+#
+#   pulp-view — every plugin links the view stack whether or not it draws.
+#     VST3, CLAP and AU each link ${_PULP_VIEW_TARGET} unconditionally in
+#     tools/cmake/PulpPluginFormats.cmake and FATAL_ERROR if it is absent. The
+#     stack then reaches the plugin host and, through it, the transport:
+#       StepSequencer_CLAP -> pulp-view -> pulp-view-script -> pulp-view-core
+#         -> pulp-host -> pulp-playback
+#     which is also the only reason this plugin reaches pulp-timeline at all.
+#     view, host, playback, render and canvas all arrive this way, so cutting
+#     the one unconditional link would delete five entries at once.
+#
+#   pulp-format — the adapter the plugin is packaged as. Its own closure brings
+#     the parameter store and the buffer types: state and events directly,
+#     signal and sample_bank_manifest through pulp-audio, plus graph and
+#     native-components.
+#
+# None of this is a permission. It is the bill the format packaging currently
+# presents, written down so the gate polices the artifact that exists instead
+# of passing green on a bound the binary never honoured.
+set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
+    canvas events graph host native-components playback render
+    sample_bank_manifest signal state view)
+
+# ── Walk ─────────────────────────────────────────────────────────────────────
+
+# Return the targets named by a list of link entries.
+#
+# Entries arrive in whatever spelling CMake stored: a plain target, an alias, a
+# framework flag, an absolute path, or a generator expression. Rather than parse
+# the grammar, strip the expression scaffolding and keep every fragment that is
+# actually a target — a non-target fragment such as `LINK_ONLY` or `-framework`
+# simply fails the `if(TARGET)` test and is dropped.
+#
+# `$<COMPILE_ONLY:...>` is the one expression whose meaning cannot be recovered
+# after stripping: it is a usage requirement that is deliberately NOT linked, so
+# keeping its operand would invent an edge. It is skipped whole.
+function(_pulp_link_floor_entry_targets out_var)
+    set(_result "")
+    foreach(_entry IN LISTS ARGN)
+        if(_entry MATCHES "COMPILE_ONLY")
+            continue()
+        endif()
+        set(_candidates "${_entry}")
+        if(_entry MATCHES "\\$<")
+            string(REGEX REPLACE "\\$<[A-Za-z_]+:" ";" _candidates "${_candidates}")
+            string(REPLACE "$<" ";" _candidates "${_candidates}")
+            string(REPLACE ">" ";" _candidates "${_candidates}")
+            # $<IF:...,a,b> and friends separate their operands with commas, so a
+            # target behind one is only visible once commas break too.
+            string(REPLACE "," ";" _candidates "${_candidates}")
+        endif()
+        foreach(_candidate IN LISTS _candidates)
+            string(STRIP "${_candidate}" _candidate)
+            if(_candidate STREQUAL "" OR NOT TARGET "${_candidate}")
+                continue()
+            endif()
+            get_target_property(_aliased "${_candidate}" ALIASED_TARGET)
+            if(_aliased)
+                set(_candidate "${_aliased}")
+            endif()
+            list(APPEND _result "${_candidate}")
+        endforeach()
+    endforeach()
+    if(_result)
+        list(REMOVE_DUPLICATES _result)
+    endif()
+    set(${out_var} "${_result}" PARENT_SCOPE)
+endfunction()
+
+# Return the core/ module a target belongs to, or "" for anything else.
+#
+# Derived from SOURCE_DIR rather than from the target's name, so pulp-view,
+# pulp-view-core and pulp-view-script all resolve to `view` without a naming
+# convention to keep in step, and a target that merely starts with `pulp-` but
+# lives elsewhere is not mistaken for a module.
+function(_pulp_link_floor_module out_var target)
+    set(${out_var} "" PARENT_SCOPE)
+    get_target_property(_dir "${target}" SOURCE_DIR)
+    if(NOT _dir)
+        return()
+    endif()
+    file(RELATIVE_PATH _relative "${PULP_LINK_FLOOR_ROOT}" "${_dir}")
+    if(_relative MATCHES "^core/([A-Za-z0-9_.+-]+)")
+        set(${out_var} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Walk everything `target` links, transitively, and report it.
+#
+#   MODULES_OUT  sorted core/ module names in the closure, excluding the
+#                module the target itself lives in
+#   TARGETS_OUT  every target reached, module or not
+#   PATHS_OUT    one `a>b>c` chain per module, the shortest found, so a report
+#                can name the edge that brought a module in rather than only
+#                the module
+#
+# The root is read through LINK_LIBRARIES — its own direct links, both scopes —
+# and every dependency through INTERFACE_LINK_LIBRARIES, which is precisely what
+# that dependency propagates to whoever links it. Reading a dependency's
+# LINK_LIBRARIES instead would invent edges: a shared library resolves its own
+# PRIVATE links inside its artifact and charges the consumer nothing for them.
+# A static library's PRIVATE links do reach the consumer, and CMake says so by
+# writing them into INTERFACE_LINK_LIBRARIES wrapped in $<LINK_ONLY:>.
+#
+# Breadth-first over a frontier, with every target recorded on first arrival, so
+# paths are shortest and the format->view->view-core->host->format cycle
+# terminates rather than hanging.
+function(pulp_link_closure target)
+    cmake_parse_arguments(PLC "" "MODULES_OUT;TARGETS_OUT;PATHS_OUT" "" ${ARGN})
+    if(NOT TARGET "${target}")
+        message(FATAL_ERROR "pulp_link_closure: no such target: ${target}")
+    endif()
+
+    set(_seen "${target}")
+    set(_chains "${target}")
+    set(_frontier "${target}")
+    while(_frontier)
+        set(_next "")
+        foreach(_current IN LISTS _frontier)
+            list(FIND _seen "${_current}" _position)
+            list(GET _chains ${_position} _chain)
+
+            set(_entries "")
+            if(_current STREQUAL "${target}")
+                get_target_property(_type "${_current}" TYPE)
+                get_target_property(_imported "${_current}" IMPORTED)
+                if(NOT _type STREQUAL "INTERFACE_LIBRARY" AND NOT _imported)
+                    get_target_property(_direct "${_current}" LINK_LIBRARIES)
+                    if(_direct)
+                        list(APPEND _entries ${_direct})
+                    endif()
+                endif()
+            endif()
+            get_target_property(_interface "${_current}" INTERFACE_LINK_LIBRARIES)
+            if(_interface)
+                list(APPEND _entries ${_interface})
+            endif()
+
+            _pulp_link_floor_entry_targets(_dependencies ${_entries})
+            foreach(_dependency IN LISTS _dependencies)
+                if(_dependency IN_LIST _seen)
+                    continue()
+                endif()
+                list(APPEND _seen "${_dependency}")
+                list(APPEND _chains "${_chain}>${_dependency}")
+                list(APPEND _next "${_dependency}")
+            endforeach()
+        endforeach()
+        set(_frontier "${_next}")
+    endwhile()
+
+    _pulp_link_floor_module(_own "${target}")
+    set(_modules "")
+    set(_paths "")
+    foreach(_reached IN LISTS _seen)
+        _pulp_link_floor_module(_module "${_reached}")
+        if(_module STREQUAL "" OR _module STREQUAL "${_own}" OR _module IN_LIST _modules)
+            continue()
+        endif()
+        list(FIND _seen "${_reached}" _position)
+        list(GET _chains ${_position} _chain)
+        list(APPEND _modules "${_module}")
+        list(APPEND _paths "${_module}=${_chain}")
+    endforeach()
+    if(_modules)
+        list(SORT _modules)
+    endif()
+    if(_paths)
+        list(SORT _paths)
+    endif()
+
+    if(PLC_MODULES_OUT)
+        set(${PLC_MODULES_OUT} "${_modules}" PARENT_SCOPE)
+    endif()
+    if(PLC_TARGETS_OUT)
+        set(${PLC_TARGETS_OUT} "${_seen}" PARENT_SCOPE)
+    endif()
+    if(PLC_PATHS_OUT)
+        set(${PLC_PATHS_OUT} "${_paths}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Write a target's measured closure to ${CMAKE_BINARY_DIR}/link-floor/<target>.txt
+# and echo the module list. A report, not a gate — this is how the closure gets
+# read before anyone decides what the bound should be.
+function(pulp_report_link_closure target)
+    pulp_link_closure(${target} MODULES_OUT _modules TARGETS_OUT _targets PATHS_OUT _paths)
+    set(_report "${CMAKE_BINARY_DIR}/link-floor/${target}.txt")
+    set(_body "target: ${target}\n")
+    string(APPEND _body "modules: ${_modules}\n\n")
+    foreach(_path IN LISTS _paths)
+        string(REPLACE "=" ": " _line "${_path}")
+        string(REPLACE ">" " -> " _line "${_line}")
+        string(APPEND _body "${_line}\n")
+    endforeach()
+    string(APPEND _body "\ntargets:\n")
+    foreach(_reached IN LISTS _targets)
+        string(APPEND _body "  ${_reached}\n")
+    endforeach()
+    file(WRITE "${_report}" "${_body}")
+    message(STATUS "link-floor: ${target} reaches [${_modules}] (${_report})")
+endfunction()
+
+# Assert a target's link closure stays within its declared tier.
+#
+# Fails the configure, in the manner of core/view's native-only guard: a link
+# that breaches the bound is a contract violation, and letting it build and be
+# discovered later is how the bound stops meaning anything.
+function(pulp_assert_link_floor target)
+    cmake_parse_arguments(PALF "" "TIER" "" ${ARGN})
+    if(NOT PALF_TIER)
+        message(FATAL_ERROR "pulp_assert_link_floor(${target}): TIER is required")
+    endif()
+    if(NOT DEFINED PULP_LINK_FLOOR_TIER_${PALF_TIER})
+        message(FATAL_ERROR
+            "pulp_assert_link_floor(${target}): unknown tier '${PALF_TIER}'. "
+            "Tiers are declared in tools/cmake/PulpLinkFloor.cmake.")
+    endif()
+    set(_allowed ${PULP_LINK_FLOOR_TIER_${PALF_TIER}})
+    set(_debt ${PULP_LINK_FLOOR_DEBT_${target}})
+
+    pulp_link_closure(${target} MODULES_OUT _modules PATHS_OUT _paths)
+
+    set(_failures "")
+    foreach(_module IN LISTS _modules)
+        if(_module IN_LIST _allowed OR _module IN_LIST _debt)
+            continue()
+        endif()
+        # Split on the first `=` rather than matching the module name as a
+        # pattern: a module directory may legitimately contain `.` or `+`, and
+        # a name read as a regex would silently report the wrong chain.
+        set(_chain "${_module}")
+        foreach(_path IN LISTS _paths)
+            string(FIND "${_path}" "=" _split)
+            string(SUBSTRING "${_path}" 0 ${_split} _named)
+            if(_named STREQUAL "${_module}")
+                math(EXPR _split "${_split} + 1")
+                string(SUBSTRING "${_path}" ${_split} -1 _chain)
+                string(REPLACE ">" " -> " _chain "${_chain}")
+            endif()
+        endforeach()
+        list(APPEND _failures
+            "  pulp/${_module} is outside tier '${PALF_TIER}', reached by ${_chain}")
+    endforeach()
+    foreach(_entry IN LISTS _debt)
+        if(_entry IN_LIST _allowed)
+            list(APPEND _failures
+                "  debt entry '${_entry}' is already inside tier '${PALF_TIER}'; delete it")
+        elseif(NOT _entry IN_LIST _modules)
+            list(APPEND _failures
+                "  debt entry '${_entry}' is no longer linked. Delete it to tighten the bound")
+        endif()
+    endforeach()
+
+    if(_failures)
+        list(JOIN _failures "\n" _detail)
+        message(FATAL_ERROR
+            "pulp_assert_link_floor(${target}): link closure breaches its declared bound.\n"
+            "${_detail}\n"
+            "Closure measured this configure: ${_modules}\n"
+            "Either cut the link, widen tier '${PALF_TIER}' in "
+            "tools/cmake/PulpLinkFloor.cmake for every target that claims it, or "
+            "record the edge in PULP_LINK_FLOOR_DEBT_${target} with the reason it "
+            "exists.")
+    endif()
+    message(STATUS "link-floor: ${target} within tier '${PALF_TIER}'")
+endfunction()
