@@ -3110,6 +3110,22 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     REQUIRE(stale_plain.stderr_output.find(
         "Inspector capability evidence incomplete") != std::string::npos);
     REQUIRE(stale_plain.exit_code != 0);
+
+    const auto raw = dir / "RawStandalone";
+    {
+        std::ofstream executable(raw, std::ios::binary);
+        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
+    {
+        std::ofstream sidecar(dir / "RawStandalone.inspector-capabilities.json");
+        sidecar << R"({"product_name":"RawStandalone","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    auto raw_stale = run_pulp(
+        {"validate", "--target", "standalone", "--json", raw.string()});
+    REQUIRE_FALSE(raw_stale.timed_out);
+    REQUIRE(raw_stale.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(raw_stale.exit_code != 0);
 }
 
 TEST_CASE("pulp validate accepts a manifest-free empty build report",

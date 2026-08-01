@@ -142,13 +142,18 @@ int cmd_validate(const std::vector<std::string>& args) {
             std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
             for (const auto& artifact_string : positional) {
                 const fs::path artifact = artifact_string;
-                if (artifact.extension() != ".app") continue;
+                fs::path executable;
+                if (artifact.extension() == ".app") {
+                    executable = mr::resolve_standalone_executable(artifact, env);
+                } else if (fs::is_regular_file(artifact)) {
+                    executable = artifact;
+                } else {
+                    continue;
+                }
                 auto artifact_report =
                     pulp::cli::inspector_shipping::load_report(
                         inspector_evidence_root(artifact));
                 if (artifact_report.complete) {
-                    const auto executable =
-                        mr::resolve_standalone_executable(artifact, env);
                     if (executable.empty()) {
                         artifact_report.complete = false;
                         artifact_report.error =
