@@ -5684,3 +5684,73 @@ TEST_CASE("a module we made is never marked unmapped", "[portmap][loader]") {
     // A patch that loaded nothing would satisfy every CHECK above.
     REQUIRE(ours > 0);
 }
+
+// Arrows reach the mention list from the PROMPT, with nothing else clicked.
+//
+// Reported from the app: the list opens, and up/down do nothing until you
+// click a row first — after which they work, because the row has focus and
+// handles its own keys. So the global hook either is not installed or is not
+// the one the window calls.
+//
+// This drives the hook the window drives: root->on_global_key.
+TEST_CASE("arrows move the mention list without clicking into it",
+          "[mention][keys]") {
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // The hook has to be on the FIELD. The window host dispatches to its own
+    // root, which for the standalone is an outer chrome the shell never sees,
+    // so a hook on the shell's view is never reached.
+    // WRAP the shell's view, the way the standalone does.
+    //
+    // Without this the shell's own view IS the root, a hook on it is reached,
+    // and the test cannot tell the broken arrangement from the working one —
+    // which is exactly why this shipped. The app puts an outer chrome around
+    // the editor, the host dispatches to THAT, and a hook on the inner view
+    // never fires.
+    auto outer = std::make_unique<pulp::view::View>();
+    auto* inner = view.get();
+    outer->add_child(std::move(view));
+    REQUIRE(inner->parent() == outer.get());
+
+    // The hook goes on the root the WINDOW dispatches to, found by walking up
+    // from the field.
+    shell.on_poll();
+    auto* input = shell.chrome() ? shell.chrome()->prompt_input() : nullptr;
+    REQUIRE(input != nullptr);
+    pulp::view::View* top = input;
+    while (top->parent()) top = top->parent();
+    REQUIRE(top->on_global_key != nullptr);
+
+    shell.mentions().set_source([](const std::string& q) {
+        return forge_modular::search_modules(q, 40);
+    });
+    shell.mentions().handle_text("@", 1);
+    REQUIRE(shell.mentions().is_open());
+    const int first = shell.mentions().selected_index();
+
+    pulp::view::KeyEvent down;
+    down.key = pulp::view::KeyCode::down;
+    down.is_down = true;
+    // Through the FIELD's own key path, which is what a focused field runs.
+    CHECK(top->on_global_key(down));
+    INFO("selected " << first << " -> " << shell.mentions().selected_index());
+    CHECK(shell.mentions().selected_index() != first);
+
+    pulp::view::KeyEvent up;
+    up.key = pulp::view::KeyCode::up;
+    up.is_down = true;
+    CHECK(top->on_global_key(up));
+    CHECK(shell.mentions().selected_index() == first);
+
+    // Tab completes the highlighted row rather than moving focus away.
+    pulp::view::KeyEvent tab;
+    tab.key = pulp::view::KeyCode::tab;
+    tab.is_down = true;
+    CHECK(top->on_global_key(tab));
+    CHECK_FALSE(shell.mentions().is_open());
+}

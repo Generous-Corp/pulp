@@ -410,6 +410,24 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
             input->on_change = [this](const std::string& text) {
                 mentions_.handle_text(text, text.size());
             };
+            // Arrows and Enter, on the FIELD.
+            //
+            // They were on root->on_global_key, which the window host calls on
+            // ITS root -- and the shell's view is not that root: the standalone
+            // wraps the editor, so the hook sat on a child and never fired. In
+            // the app the list opened and up/down did nothing until you clicked
+            // a row, after which they worked, because the row had focus and
+            // handled its own keys. A headless test that called the hook
+            // directly passed the whole time, because calling it is not the
+            // same as it being reached.
+            //
+            // The field is the right place regardless: it has focus for as
+            // long as somebody is typing a mention, which is exactly when the
+            // list is open.
+            // Arrows and Enter go on the view the WINDOW dispatches to, which
+            // is not ours — see ensure_key_hook(). Installed lazily, because
+            // the tree is still being built here and the walk would stop at a
+            // partial root.
         }
     }
     mentions_.on_choose = [this](const std::string& slug) {
@@ -1228,6 +1246,7 @@ void ForgeModularShell::on_poll() {
             if (ready) rack_probed_ = {};
         }
         if (ready) refresh_rack_presence();
+        ensure_key_hook();
         if (rack_pill_ && rack_pill_->visible() != ready) {
             rack_pill_->set_visible(ready);
             rack_pill_->request_repaint();
@@ -1273,9 +1292,15 @@ std::unique_ptr<pulp::view::View> ForgeModularShell::create_view() {
         // to be on the ROOT to run before normal dispatch; on the overlay's
         // own view it never fired at all, and the text field kept the arrows
         // for its caret.
-        root->on_global_key = [this](const pulp::view::KeyEvent& e) {
+        // Chained, never replaced: the chrome installs Escape-closes-modals on
+        // this same hook inside the base create_view(), and assigning over it
+        // took that away silently.
+        auto prior = std::move(root->on_global_key);
+        root->on_global_key = [this, prior = std::move(prior)](
+                                  const pulp::view::KeyEvent& e) {
             if (mentions_.handle_key_event(e)) return true;
-            return handle_prompt_key(e);
+            if (handle_prompt_key(e)) return true;
+            return prior ? prior(e) : false;
         };
     }
     return root;
@@ -1311,6 +1336,31 @@ void ForgeModularShell::on_view_closed(pulp::view::View& view) {
     tab_patch_ = nullptr;
     mentions_.forget_views();
     forge::ForgeShell::on_view_closed(view);
+}
+
+void ForgeModularShell::ensure_key_hook() {
+    // The window host calls `rootView->on_global_key` on ITS root. For the
+    // standalone that root is an outer chrome wrapping the editor, so a hook
+    // on the shell's own view is never reached — which is why the mention
+    // list ignored the arrows until a row had been clicked.
+    //
+    // Done once, from the poll, because the tree is not attached when the
+    // composer is built and the walk would stop short.
+    if (key_hook_installed_) return;
+    auto* c = chrome();
+    if (!c) return;
+    auto* input = c->prompt_input();
+    if (!input || !input->parent()) return;
+    pulp::view::View* top = input;
+    while (top->parent()) top = top->parent();
+    key_hook_installed_ = true;
+    auto prior = std::move(top->on_global_key);
+    top->on_global_key = [this, prior = std::move(prior)](
+                             const pulp::view::KeyEvent& e) {
+        if (mentions_.handle_key_event(e)) return true;
+        if (handle_prompt_key(e)) return true;
+        return prior ? prior(e) : false;
+    };
 }
 
 void ForgeModularShell::refresh_rack_presence() {

@@ -253,6 +253,14 @@ bool MentionOverlay::handle_key_event(const pulp::view::KeyEvent& event) {
         case K::up:     move_selection(-1); return true;
         case K::down:   move_selection(1);  return true;
         case K::escape: close();            return true;
+        // Tab completes the highlighted row, the way a shell completion does.
+        // Asked for directly: "press tab to auto complete the highlited item".
+        case K::tab:
+            if (!candidates_.empty()) {
+                choose(static_cast<std::size_t>(selected_));
+                return true;
+            }
+            return false;
         case K::enter:
             // Enter belongs to the LIST while it is open, or choosing a module
             // would also submit the prompt -- one keystroke doing two things,

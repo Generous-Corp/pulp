@@ -204,6 +204,8 @@ public:
     /// Re-probe for Rack and update the pill. Called from the poll, throttled;
     /// exposed so a test need not wait for a timer.
     void refresh_rack_presence();
+    /// Put the mention keys on the root the window actually dispatches to.
+    void ensure_key_hook();
 
     /// Which of Forge's model roles an artifact actually consumes.
     ///
@@ -350,6 +352,7 @@ private:
     void offer_random();
 
     MentionOverlay mentions_;
+    bool key_hook_installed_ = false;
     BuildMonitor monitor_;
     bool watching_ = false;
     std::string monitor_log_path_;
