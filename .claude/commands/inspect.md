@@ -27,16 +27,23 @@ Use this sequence for agent work:
 4. Reread the state or request `Capture.screenshot` with the same selectors.
 5. Report the exact identity, request, response, and saved evidence path.
 
-Use the typed parameter command with an integer parameter ID and numeric value:
+Read the parameter catalog, then use the typed parameter command with an
+integer parameter ID and numeric value, and reread:
 
 ```bash
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters \
+  > parameters-before.json
 pulp inspect set-parameter --id 7 --value 0.75 --json \
   --session SESSION_ID --instance INSTANCE_ID \
-  --publication PUBLICATION_ID
+  --publication PUBLICATION_ID > mutation.json
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters \
+  > parameters-after.json
 ```
 
-Use the selected target's reported parameter ID and reread
-`State.getParameters` with the same three selectors after the mutation.
+Do not guess the example ID. Use the selected target's reported numeric
+parameter ID and verify the matching value with the same three selectors.
 
 The equivalent MCP flow is `pulp_inspect_list` →
 `pulp_inspect_capabilities` → a typed `pulp_inspect_*` read/mutation →

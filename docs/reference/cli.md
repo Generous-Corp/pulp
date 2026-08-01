@@ -1304,10 +1304,12 @@ the exact identity and evidence. `doctor` combines authenticated capability and
 agent-context probes into one readiness result. The stable JSON envelopes are
 `pulp.inspect.profiles.v1`, `pulp.inspect.sessions.v1`,
 `pulp.inspect.capabilities.v1`, and `pulp.inspect.doctor.v1`.
-The typed `set-parameter` command validates the numeric ID and finite value
-before sending the request and returns a `pulp.inspect.set-parameter.v1`
-envelope. Replace the example ID and value with a parameter reported by
-`State.getParameters`, then reread using the same exact selectors.
+The generic read command `State.getParameters` returns the live parameter
+catalog. The typed `set-parameter` command validates the numeric ID and finite
+value before sending the request and returns a
+`pulp.inspect.set-parameter.v1` envelope. Replace the example ID and value
+with a parameter reported by `State.getParameters`, then run that same read
+command again using the same exact selectors and verify the matching entry.
 
 Options:
 

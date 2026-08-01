@@ -119,13 +119,25 @@ identifiers into subsequent calls, check
 reread or `pulp_inspect_screenshot`. Ordinary launches publish no endpoint.
 
 Use the CLI's typed parameter command with an integer parameter ID and numeric
-value, then reread with the same exact selectors:
+value. First read the live parameter catalog, select an ID and value from that
+response, perform the typed write, then reread with the same exact selectors:
 
 ```bash
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters \
+  > parameters-before.json
 pulp inspect set-parameter --id 7 --value 0.75 --json \
   --session SESSION_ID --instance INSTANCE_ID \
-  --publication PUBLICATION_ID
+  --publication PUBLICATION_ID > mutation.json
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters \
+  > parameters-after.json
 ```
+
+Do not guess the example ID. Replace it with a numeric ID reported in
+`parameters-before.json`, and verify that the matching entry changed in
+`parameters-after.json`. These installed CLI commands are also the documented
+fallback when an MCP client has not loaded the project's `.mcp.json`.
 
 `pulp inspect --output` saves a screenshot response as JSON; it does not decode
 the image. A fresh agent can turn that response into a verified PNG exactly as
