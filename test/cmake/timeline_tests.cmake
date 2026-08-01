@@ -262,6 +262,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_persistence_registry.cpp
         test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
+        test_timeline_tuning.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")

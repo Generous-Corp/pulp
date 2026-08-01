@@ -14,6 +14,7 @@
 #include <pulp/timeline/item_id.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 #include <pulp/timeline/recording.hpp>
+#include <pulp/timeline/tuning.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -67,6 +68,8 @@ struct TrackInput {
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
     TrackMixer mixer;
+    // Absence means the track plays in whatever tuning the project states.
+    std::optional<TuningReference> tuning;
 };
 
 /// Immutable identity-bearing arrangement track.
@@ -198,6 +201,8 @@ class Track {
     const std::optional<TrackFreeze>& freeze() const noexcept;
     /// Returns the authored track mixer.
     const TrackMixer& mixer() const noexcept;
+    /// Returns the tuning this track overrides the project's with, if any.
+    const std::optional<TuningReference>& tuning() const noexcept;
     /// Counts persistent clip-index nodes shared with `other`.
     std::size_t shared_index_nodes_with(const Track& other) const;
     /// Returns whether both snapshots contain the same clip identities.
@@ -247,6 +252,40 @@ enum class ScaleMode : std::uint8_t {
     Chromatic,
 };
 
+/// Added scale degree a chord statement carries above its quality.
+///
+/// One bit per degree, so a chord may state several at once. The values are a
+/// bitmask rather than an enum class because that is what they are; naming them
+/// here keeps the spelling out of every call site that builds one.
+enum ChordExtension : std::uint16_t {
+    kChordExtensionNinth = 1u << 0,
+    kChordExtensionFlatNinth = 1u << 1,
+    kChordExtensionSharpNinth = 1u << 2,
+    kChordExtensionEleventh = 1u << 3,
+    kChordExtensionSharpEleventh = 1u << 4,
+    kChordExtensionThirteenth = 1u << 5,
+    kChordExtensionFlatThirteenth = 1u << 6,
+};
+
+/// Every extension bit the vocabulary defines; anything outside is rejected.
+inline constexpr std::uint16_t kChordExtensionMask =
+    kChordExtensionNinth | kChordExtensionFlatNinth | kChordExtensionSharpNinth |
+    kChordExtensionEleventh | kChordExtensionSharpEleventh | kChordExtensionThirteenth |
+    kChordExtensionFlatThirteenth;
+
+/// Non-binding hint for how a generator should spread a chord's tones.
+///
+/// A hint, not an instruction: nothing in the document is re-voiced because one
+/// changed, and a generator that ignores it is still correct.
+enum class ChordVoicing : std::uint8_t {
+    Close,
+    Open,
+    Drop2,
+    Drop3,
+    Rootless,
+    Shell,
+};
+
 /// Harmonic statement in force from `position` until the next event.
 ///
 /// Roots are pitch classes in [0, 11], where zero is C.
@@ -256,6 +295,14 @@ struct ChordScaleEvent {
     std::uint8_t chord_root = 0;
     ScaleMode scale_mode = ScaleMode::Major;
     std::uint8_t scale_root = 0;
+    // The pitch class that sounds lowest, when it is not the chord root. This
+    // is the general form of an inversion: naming the bass covers both a chord
+    // tone in the bass and a bass note outside the chord, and a separate
+    // inversion number beside it could only ever contradict it.
+    std::optional<std::uint8_t> chord_bass;
+    // Bitmask over ChordExtension. Zero states the plain quality.
+    std::uint16_t chord_extensions = 0;
+    std::optional<ChordVoicing> voicing;
 
     constexpr auto operator<=>(const ChordScaleEvent&) const = default;
 };
@@ -307,6 +354,25 @@ struct SequenceMarker {
     std::optional<std::uint32_t> color;
 };
 
+/// Structural part a region names, independent of what the region is called.
+///
+/// The name is free text a user typed; the role is the typed restatement a
+/// generator can dispatch on without parsing prose. Unspecified is a region
+/// that states a span without claiming a part.
+enum class SectionRole : std::uint8_t {
+    Unspecified,
+    Intro,
+    Verse,
+    PreChorus,
+    Chorus,
+    Bridge,
+    Breakdown,
+    Drop,
+    Solo,
+    Interlude,
+    Outro,
+};
+
 /// Named positive-duration span on a sequence's musical timeline.
 ///
 /// Regions may overlap or contain one another. Position and duration are in
@@ -317,6 +383,7 @@ struct SequenceRegion {
     timebase::TickPosition position;
     timebase::TickDuration duration;
     std::optional<std::uint32_t> color;
+    SectionRole role = SectionRole::Unspecified;
 };
 
 /// Per-mille identity scale for deterministic groove strengths and velocity.
@@ -685,6 +752,10 @@ struct ProjectInput {
     timebase::TempoMap tempo_map{};
     timebase::MeterMap meter_map{};
     std::optional<SessionStart> session_start;
+    // Absence states no tuning at all, which is not the same claim as stating
+    // equal temperament: a document that never chose still follows whatever the
+    // host or instrument defaults to.
+    std::optional<TuningReference> tuning;
 };
 
 /// Kind of an identity-bearing item in a Project.
@@ -836,6 +907,8 @@ class Project {
     const timebase::MeterMap& meter_map() const noexcept;
     /// Returns the optional absolute source-clock origin.
     const std::optional<SessionStart>& session_start() const noexcept;
+    /// Returns the tuning every track plays in unless it states its own.
+    const std::optional<TuningReference>& tuning() const noexcept;
     /// Finds a media asset by identity, or returns `nullptr`.
     const MediaAsset* find_asset(ItemId id) const noexcept;
     /// Finds a sequence by identity, or returns `nullptr`.

@@ -3,6 +3,7 @@
 #include "asset_schema_policy.hpp"
 #include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
+#include "document_enum_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
@@ -589,6 +590,30 @@ bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
     });
 }
 
+// A tuning object always carries all four members, writing the unused hashes as
+// null. The object is only ever reached through an optional member that is
+// omitted entirely when the document states no tuning, so a fixed inner shape
+// costs nothing and keeps the decoder from having to distinguish "no keyboard
+// map" from "member forgotten".
+bool write_tuning(EncodeContext& context, const TuningReference& tuning) {
+    const auto system = detail::tuning_system_name(tuning.system);
+    if (system.empty() || !context.writer.append("{\"keyboard_map_content\":"))
+        return false;
+    if (tuning.keyboard_map_content
+            ? !context.writer.quoted(tuning.keyboard_map_content->to_hex())
+            : !context.writer.append("null"))
+        return false;
+    if (!context.writer.append(",\"reference_pitch_millihertz\":") ||
+        !context.writer.u64(tuning.reference_pitch_millihertz) ||
+        !context.writer.append(",\"scale_content\":"))
+        return false;
+    if (tuning.scale_content ? !context.writer.quoted(tuning.scale_content->to_hex())
+                             : !context.writer.append("null"))
+        return false;
+    return context.writer.append(",\"system\":") && context.writer.quoted(system) &&
+           context.writer.character('}');
+}
+
 bool write_track(EncodeContext& context, const Track& track) {
     return write_envelope(
         context, detail::track_schema_policy.type_name, detail::track_schema_policy.current_version,
@@ -654,7 +679,12 @@ bool write_track(EncodeContext& context, const Track& track) {
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_take_lane(context, track.take_lanes()[index]))
                     return false;
-            return context.writer.append("]}");
+            if (!context.writer.character(']'))
+                return false;
+            if (track.tuning() && (!context.writer.append(",\"tuning\":") ||
+                                   !write_tuning(context, *track.tuning())))
+                return false;
+            return context.writer.character('}');
         });
 }
 
@@ -663,8 +693,20 @@ bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) 
         return false;
     for (std::size_t index = 0; index < lane.events().size(); ++index) {
         const auto& event = lane.events()[index];
+        // Canonical order is alphabetical, so the bass and the extension mask
+        // sort before chord_quality and the voicing hint sorts last. The
+        // optional members are written as null rather than omitted: a v7 event
+        // always carries every member, so the version gate stays a presence
+        // test rather than a per-member guess.
         if ((index != 0 && !context.writer.character(',')) ||
-            !context.writer.append("{\"chord_quality\":") ||
+            !context.writer.append("{\"chord_bass\":"))
+            return false;
+        if (event.chord_bass ? !context.writer.u64(*event.chord_bass)
+                             : !context.writer.append("null"))
+            return false;
+        if (!context.writer.append(",\"chord_extensions\":") ||
+            !context.writer.u64(event.chord_extensions) ||
+            !context.writer.append(",\"chord_quality\":") ||
             !context.writer.quoted(detail::chord_quality_name(event.chord_quality)) ||
             !context.writer.append(",\"chord_root\":") || !context.writer.u64(event.chord_root) ||
             !context.writer.append(",\"position\":") ||
@@ -672,7 +714,19 @@ bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) 
             !context.writer.append(",\"scale_mode\":") ||
             !context.writer.quoted(detail::scale_mode_name(event.scale_mode)) ||
             !context.writer.append(",\"scale_root\":") || !context.writer.u64(event.scale_root) ||
-            !context.writer.character('}'))
+            !context.writer.append(",\"voicing\":"))
+            return false;
+        // The model validated the voicing, so an empty name here would mean a
+        // value outside the enum reached the writer. Fail rather than emit an
+        // empty string the decoder would reject on the way back in.
+        if (event.voicing) {
+            const auto name = detail::chord_voicing_name(*event.voicing);
+            if (name.empty() || !context.writer.quoted(name))
+                return false;
+        } else if (!context.writer.append("null")) {
+            return false;
+        }
+        if (!context.writer.character('}'))
             return false;
     }
     return context.writer.character(']');
@@ -699,12 +753,17 @@ bool write_region(EncodeContext& context, const SequenceRegion& region) {
         if (region.color && (!context.writer.append("\"color\":") ||
                              !context.writer.u64(*region.color) || !context.writer.character(',')))
             return false;
+        const auto role = detail::section_role_name(region.role);
+        if (role.empty())
+            return false;
         return context.writer.append("\"duration\":") &&
                context.writer.i64(region.duration.value, true) &&
                context.writer.append(",\"id\":") && context.writer.u64(region.id.value, true) &&
                context.writer.append(",\"name\":") && context.writer.quoted(region.name) &&
                context.writer.append(",\"position\":") &&
-               context.writer.i64(region.position.value, true) && context.writer.character('}');
+               context.writer.i64(region.position.value, true) &&
+               context.writer.append(",\"role\":") && context.writer.quoted(role) &&
+               context.writer.character('}');
     });
 }
 
@@ -1007,8 +1066,13 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                  !context.writer.i64(project.session_start()->start.value, true) ||
                  !context.writer.character('}')))
                 return false;
-            return context.writer.append(",\"tempo_map\":") &&
-                   write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
+            if (!context.writer.append(",\"tempo_map\":") ||
+                !write_tempo_map(context, project.tempo_map()))
+                return false;
+            if (project.tuning() && (!context.writer.append(",\"tuning\":") ||
+                                     !write_tuning(context, *project.tuning())))
+                return false;
+            return context.writer.character('}');
         });
     if (!wrote) {
         if (context.failure)

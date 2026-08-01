@@ -54,7 +54,7 @@ TEST_CASE("Timeline project summary peeks without constructing the editable docu
     REQUIRE(summary.name == "m\u00edxed");
     REQUIRE(summary.next_item_id == 12);
     REQUIRE(summary.root_sequence_id == ItemId{8});
-    REQUIRE(summary.schema_version == 2);
+    REQUIRE(summary.schema_version == 3);
     REQUIRE(summary.counts.assets == 1);
     REQUIRE(summary.counts.sequences == 2);
     REQUIRE(summary.counts.tracks == 2);
