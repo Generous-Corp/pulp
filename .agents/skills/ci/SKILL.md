@@ -469,6 +469,65 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+## Never wait on a signal you did not uniquely produce
+
+Several agents share each dev Mac, and **the bounded-build rule is what makes
+their build commands collide.** CLAUDE.md requires an explicit job count on every
+build, so every agent emits a byte-identical `cmake --build build -j6`. The
+discipline that prevents an OOM is the same discipline that guarantees the
+command lines are indistinguishable — so this hazard gets *worse* the more
+consistently everyone follows the rule, not better. Do not exempt your own
+pattern on the grounds that it is precise.
+
+```bash
+# WRONG — fires when a STRANGER's build ends, in a different worktree.
+until ! pgrep -f "cmake --build build -j6$"; do sleep 30; done
+ctest --test-dir build          # …now running against a half-built tree
+```
+
+Seen 2026-08-01 on m3: the loop matched
+`sh -c cmake --build build -j6 > /tmp/oklab-build-t5.log` from another lane. The
+damage is not the early exit, it is what the early exit is fed into — **missing
+binaries read as failures, or worse, stale binaries read as passes.** A partial
+build in this repo exited 2 while the previously built test binary reported
+`All tests passed (66 assertions)`.
+
+The same defect has both signs, which is why they look unrelated and are not:
+
+| symptom | cause |
+|---|---|
+| wait returns immediately | the pattern matches **nothing** — a typo, or the process was never named that |
+| wait returns at the wrong time | the pattern matches **someone else's** identical command |
+
+Both are a wait keyed on something that is not uniquely yours.
+
+**Wait on an artifact only your own process can produce**: the completion marker
+of a command you started (`…; echo "EXIT=$?" > mine.done`), or your own log's
+mtime advancing. Same move as reading a build's own exit marker instead of a
+waiter's exit code, and as deleting a test binary before rebuilding it so a run
+cannot be served by an artifact the build did not produce.
+
+`pkill`/`kill` need the same care with a worse failure: **resolve the PID by
+working directory, not by name.**
+
+```bash
+for p in $(pgrep -f "cmake --build build"); do
+    printf '%s -> %s\n' "$p" \
+      "$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2-)"
+done
+```
+
+That listing has shown **six** concurrent builds across worktrees on one host; a
+name match would have killed someone else's.
+
+**While `shipyard ship` is validating, treat the worktree as not yours.** The
+local mac backend builds *in the checkout* rather than a copy, so a source edit
+made while it runs — a mutation control, a quick experiment, a revert — can land
+in the validation build, and committing moves HEAD underneath it. Run mutation
+controls in a throwaway worktree, or wait for the lane to finish. Note that a
+`shipyard` process sitting in the worktree is usually just waiting on GitHub;
+confirm an actual compiler is running before concluding a build is in flight.
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
