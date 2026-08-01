@@ -844,6 +844,16 @@ fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_gene
 is what lets a view tell a stale reading from a live one without holding anything
 a program swap can invalidate.
 
+A value type both rungs genuinely need goes in `core/timebase`, never duplicated
+into each. `timebase` is the whole of what the two floors have in common beyond
+`platform`/`runtime`, so it is the only home that does not require widening a
+row. `LoopRegion` is the worked example: `playback::LoopRegion` is an alias of
+`timebase::LoopRegion` beside the existing `MeterSignature` one, and
+`UiPlayhead::loop` names the same type — a loop set on the transport reaches an
+editor reading with nothing to convert. Do not read this as licence to share the
+*readings* themselves: `TransportPlayhead` and `UiPlayhead` stay separate
+because their fields differ in kind, not merely in spelling.
+
 ### Position leaves the transport in two directions, one SeqLock each
 
 `MasterTransport` publishes `desired_` toward the audio thread and

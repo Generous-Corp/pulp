@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include <pulp/timebase/loop_region.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/item_id.hpp>
 
@@ -51,16 +52,6 @@ enum class UiTransportState : std::uint8_t {
     Scrubbing,
 };
 
-/// The loop the transport is honouring, in document ticks. Disabled loops keep
-/// their bounds so a view can keep drawing the region a user has set up.
-struct UiLoopRegion {
-    bool enabled = false;
-    timebase::TickPosition start{};
-    timebase::TickPosition end{};
-
-    constexpr bool operator==(const UiLoopRegion&) const = default;
-};
-
 /// One complete reading of where playback is.
 ///
 /// Every field is a value. Holding a UiPlayhead across a program swap, a seek,
@@ -69,6 +60,13 @@ struct UiLoopRegion {
 /// without holding anything a swap can invalidate — it changes on every program
 /// adoption, so a view comparing two readings knows whether they describe the
 /// same compiled world.
+///
+/// `continuity_epoch` answers the other question a view has about two readings,
+/// and `program_generation` cannot answer it: whether the position moved
+/// continuously between them. A loop wrap, a seek, and a latched scrub anchor
+/// all break continuity without recompiling anything, so the generation is
+/// unchanged across exactly the discontinuities a drawn playhead must not
+/// smooth over.
 struct UiPlayhead {
     /// Identity of the compiled program this reading came from. Monotonic; a
     /// change means the engine adopted a different program between readings.
@@ -76,9 +74,16 @@ struct UiPlayhead {
     /// Monotonic per publish. Two readings with the same value are the same
     /// reading, which is how a view skips redundant repaints.
     std::uint64_t sequence = 0;
+    /// Identity of the continuous interval this reading's position belongs to.
+    /// A view must not interpolate position across a change in this value: the
+    /// two readings name positions in different intervals, and a line drawn
+    /// between them travels ground the playhead never covered — backwards
+    /// through the whole timeline, on a loop wrap. Hold the newer reading's
+    /// position outright instead, and resume interpolating from there.
+    std::uint64_t continuity_epoch = 0;
     /// Document position. This is the value a ruler and a playhead line draw.
     timebase::TickPosition position{};
-    UiLoopRegion loop{};
+    timebase::LoopRegion loop{};
     UiTransportState state = UiTransportState::Stopped;
     double tempo_bpm = 120.0;
 
