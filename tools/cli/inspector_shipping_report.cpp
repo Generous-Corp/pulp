@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace pulp::cli::inspector_shipping {
@@ -296,6 +297,7 @@ Report load_artifact_report(const fs::path& search_root) {
     fs::recursive_directory_iterator iterator(
         search_root, fs::directory_options::skip_permission_denied, iteration_error);
     fs::recursive_directory_iterator end;
+    std::set<fs::path> resolved_executables;
     while (!iteration_error && iterator != end) {
         const auto path = iterator->path();
         const auto filename = path.filename().string();
@@ -307,22 +309,40 @@ Report load_artifact_report(const fs::path& search_root) {
 
             const auto suffix = std::string(".inspector-capabilities.json");
             const auto target = filename.substr(0, filename.size() - suffix.size());
-            const std::vector<fs::path> candidates = {
+            std::vector<fs::path> candidates = {
                 path.parent_path() / manifest.product_name,
                 path.parent_path() / (manifest.product_name + ".exe"),
                 path.parent_path() / target,
                 path.parent_path() / (target + ".exe"),
             };
-            auto executable = std::find_if(
-                candidates.begin(), candidates.end(),
-                [](const fs::path& candidate) { return fs::is_regular_file(candidate); });
-            if (executable == candidates.end()) {
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(std::unique(candidates.begin(), candidates.end()),
+                             candidates.end());
+            std::vector<fs::path> existing;
+            std::copy_if(candidates.begin(), candidates.end(),
+                         std::back_inserter(existing),
+                         [](const fs::path& candidate) {
+                             return fs::is_regular_file(candidate);
+                         });
+            if (existing.empty()) {
                 report.error =
                     "could not resolve standalone executable for inspector capability "
                     "scan beside: " + path.string();
                 return report;
             }
-            if (!scan_artifact(*executable, manifest, report.error)) return report;
+            if (existing.size() != 1) {
+                report.error =
+                    "inspector capability sidecar resolves to multiple standalone "
+                    "executables: " + path.string();
+                return report;
+            }
+            if (!resolved_executables.insert(existing.front()).second) {
+                report.error =
+                    "multiple inspector capability sidecars resolve to standalone "
+                    "executable: " + existing.front().string();
+                return report;
+            }
+            if (!scan_artifact(existing.front(), manifest, report.error)) return report;
             report.complete = true;
             report.ships_inspector = manifest.ships_inspector;
             report.ships_runtime_eval = manifest.ships_runtime_eval;

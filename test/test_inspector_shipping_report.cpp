@@ -243,6 +243,23 @@ TEST_CASE("one sidecar cannot mask a sibling standalone executable") {
           std::string::npos);
 }
 
+TEST_CASE("target and product aliases cannot bind one sidecar twice") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto products = temporary.path / "products";
+    fs::create_directories(products);
+    write_artifact(products / "Target.exe", "ordinary target executable");
+    write_artifact(products / "Product.exe", "ordinary product executable");
+    write_manifest(products / "Target.inspector-capabilities.json",
+        R"({"target":"Target","product_name":"Product","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(report.complete);
+    CHECK(report.error.find("multiple standalone executables") !=
+          std::string::npos);
+}
+
 TEST_CASE("AUv3 container apps are not standalone inspector artifacts") {
     TemporaryDirectory temporary;
     fs::remove_all(temporary.path / "pulp-inspector-manifests");
