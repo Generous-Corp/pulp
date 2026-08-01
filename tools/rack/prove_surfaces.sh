@@ -25,6 +25,9 @@ pass=0; fail=0; skip=0
 # with no coreutils. One shim, shared, because two copies drift.
 . "$HERE/cap.sh"
 
+# Why a generation stopped, shared with prove_idioms.sh.
+. "$HERE/reason.sh"
+
 # Whether this session can show a window at all -- a locked screen is a
 # logged-in session that cannot.
 . "$HERE/session.sh"
@@ -61,36 +64,6 @@ if [ -n "${FORGE_HOST:-}" ] && [ "${FORGE_PROVE_REMOTE:-}" != "1" ]; then
             ;;
     esac
 fi
-
-# WHY a generation stopped, in the generator's own words.
-#
-# This reported `tail -2 | head -1` -- an arbitrary line -- and on a machine
-# whose model CLI cannot reach its credential that produced:
-#
-#   FAIL  the CLI did not produce a patch:   window on that machine, or
-#         unlock the keychain first:
-#
-# a fragment from the middle of a sentence, naming neither the problem nor the
-# fix. The generators end with a small set of known messages; report the first
-# one that appears, with the line after it, and fall back to the tail only when
-# none is found.
-generator_reason() {
-    local out="$1" line
-    for marker in "gave up after" "model call failed" \
-                  "not logged in for this session" \
-                  "could not fetch the library catalog" \
-                  "could not fetch the module index" \
-                  "contract is not sound" "did not contain both a json" \
-                  "duplicate addModel" "SDK not found" \
-                  "two manifests claim" "already running against this module pack"; do
-        line="$(printf '%s' "$out" | grep -m 1 -A 1 -F "$marker" | tr '\n' ' ')"
-        if [ -n "$line" ]; then
-            printf '%s' "$(printf '%s' "$line" | sed 's/  */ /g; s/^ //; s/ $//')"
-            return
-        fi
-    done
-    printf '%s' "$(printf '%s' "$out" | tail -2 | head -1)"
-}
 
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }

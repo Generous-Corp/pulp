@@ -50,6 +50,9 @@ PROMPTS=(
 # with no coreutils. One shim, shared, because two copies drift.
 . "$HERE/cap.sh"
 
+# Why a generation stopped, shared with prove_surfaces.sh.
+. "$HERE/reason.sh"
+
 # Which generator this proof is about, and whether it is the one being read.
 . "$HERE/toolchain.sh"
 toolchain_report "$HERE" "$TOOLS"
@@ -101,7 +104,7 @@ print(resolve('''$prompt''') or '')
         audio=$(printf '%s' "$log" | grep -c "makes no sound")
         wiring=$(printf '%s' "$log" | grep -c "^  rejected (attempt")
         wrong=$(printf '%s' "$log" | grep -c "not a .* patch yet")
-        printf '    FAILED to build: %s\n' "$(printf '%s' "$log" | tail -2 | head -1)" | tee -a "$OUT"
+        printf '    FAILED to build: %s\n' "$(generator_reason "$log")" | tee -a "$OUT"
         printf '        attempts stopped by: %s silent, %s rejected by the lint, %s wrong idiom\n' \
                "$audio" "$wiring" "$wrong" | tee -a "$OUT"
         silent_total=$((silent_total + audio))

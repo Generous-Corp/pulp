@@ -100,5 +100,43 @@ grep -q 'open -a "\$APP"' "$S" \
     && ok "the app that was found is the app that is launched" \
     || wrong "the launch ignores the located app and opens a fixed path"
 
+# The reason a generation stopped, in the generator's own words.
+#
+# Every harness reported `tail -2 | head -1`, and each produced something
+# useless at least once: a mid-sentence fragment for a login failure, and a
+# traceback's bare caret line for a crash. Both sent somebody to open the log
+# by hand, which is the one thing a verdict is supposed to save.
+. "$HERE/reason.sh"
+
+crash_log='  audio out: Speakers
+Traceback (most recent call last):
+  File "patch.py", line 1437, in generate
+    keep_attempt(patch, report, attempt + 1, "rejected")
+                        ^^^^^^
+UnboundLocalError: cannot access local variable'
+crash_reason="$(generator_reason "$crash_log")"
+case "$crash_reason" in
+    *Traceback*patch.py*) ok "a crash is reported as the traceback, not its caret" ;;
+    *) wrong "a crash reported as '$crash_reason' — the caret line names
+         nothing, and this is what it did" ;;
+esac
+
+login_log='model call failed: the model CLI is not logged in for this session.
+  It said: Not logged in
+  window on that machine, or unlock the keychain first:'
+login_reason="$(generator_reason "$login_log")"
+case "$login_reason" in
+    *"not logged in for this session"*) ok "a login failure names the cause" ;;
+    *) wrong "a login failure reported as '$login_reason'" ;;
+esac
+
+# And nothing recognisable still says something, rather than nothing.
+plain_reason="$(generator_reason 'thinking
+something unremarkable
+the last line')"
+[ -n "$plain_reason" ] \
+    && ok "an unrecognised ending still reports the tail" \
+    || wrong "an unrecognised ending reported nothing at all"
+
 printf '\n%s\n' "$([ "$bad" -eq 0 ] && echo 'all good' || echo FAILED)"
 [ "$bad" -eq 0 ]
