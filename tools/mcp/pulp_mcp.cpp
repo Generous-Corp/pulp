@@ -24,7 +24,9 @@
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 #include "timeline_mcp_tools.h"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -86,7 +88,9 @@ using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_audio_plugin_inspect;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
+#endif
 using pulp_mcp::handle_inspect_pending_requests;
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
@@ -95,8 +99,10 @@ std::string pulp_mcp::server::tools_list_json() {
     std::string out;
     out.reserve(32 * 1024);
     out += R"JSON({"tools":[)JSON";
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
     out += pulp_mcp::kTimelineMcpToolsArray;
     out += ",";
+#endif
     out += R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out += R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -310,7 +316,9 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_plugin_inspect") result = handle_audio_plugin_inspect(args_json);
         else if (name == "pulp_audio_render")         result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")        result = handle_audio_compare(args_json);
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
         else if (auto timeline = handle_timeline_tool(name, args_json)) result = std::move(*timeline);
+#endif
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();

@@ -65,24 +65,27 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
     if (destination.empty())
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
     std::error_code error;
-    const auto status = fs::symlink_status(destination, error);
+    auto anchored_destination = fs::absolute(destination, error);
+    if (error)
+        return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
+    anchored_destination = anchored_destination.lexically_normal();
+    const auto status = fs::symlink_status(anchored_destination, error);
     if ((!error && status.type() != fs::file_type::not_found) ||
         (error && error != std::errc::no_such_file_or_directory))
-        return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict, destination);
+        return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict,
+                                        anchored_destination);
     error.clear();
-    auto parent = destination.parent_path();
-    if (parent.empty())
-        parent = ".";
+    const auto parent = anchored_destination.parent_path();
     const auto parent_status = fs::symlink_status(parent, error);
     if (error || parent_status.type() != fs::file_type::directory)
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, parent);
 
     static std::atomic<std::uint64_t> serial{0};
     for (std::size_t attempt = 0; attempt < 128; ++attempt) {
-        auto staging = staging_sibling(destination, serial.fetch_add(1) + attempt);
+        auto staging = staging_sibling(anchored_destination, serial.fetch_add(1) + attempt);
         if (fs::create_directory(staging, error)) {
             auto impl = std::make_unique<Impl>();
-            impl->destination = destination;
+            impl->destination = anchored_destination;
             impl->staging = std::move(staging);
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
@@ -93,7 +96,7 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
             return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
         error.clear();
     }
-    return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict, destination);
+    return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict, anchored_destination);
 }
 
 const fs::path& AtomicPublisher::staging_directory() const noexcept {

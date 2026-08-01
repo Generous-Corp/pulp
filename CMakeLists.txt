@@ -329,8 +329,8 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
     add_subdirectory(core/project_package)
 else()
     message(STATUS
-        "Pulp: project-package disabled; atomic timeline authoring, pulp-cpp, "
-        "and pulp-mcp targets will not be built")
+        "Pulp: project-package disabled; atomic Timeline authoring targets and "
+        "the corresponding pulp-cpp/pulp-mcp commands will not be built")
 endif()
 add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
@@ -459,11 +459,9 @@ include(PulpUtils)
 include(PulpLinkFloor)
 
 # ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
-# pulp-cli unconditionally links both pulp::inspect and pulp::tool-timeline.
-# The former requires the GPU stack; the latter requires project-package for
-# atomic publication. Keep both guards aligned with those target dependencies.
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PULP_ENABLE_PROJECT_PACKAGE
-   AND PROJECT_IS_TOP_LEVEL)
+# pulp-cli requires the GPU stack through pulp::inspect. Its optional Timeline
+# authoring commands follow PULP_ENABLE_PROJECT_PACKAGE inside tools/cli.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
 
@@ -485,10 +483,10 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
-# pulp-mcp links pulp::tool-timeline unconditionally, so it follows the same
-# project-package guard as that authoring target. Dev tools build only when Pulp
-# is top-level (see PROJECT_IS_TOP_LEVEL).
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_PROJECT_PACKAGE AND PROJECT_IS_TOP_LEVEL)
+# pulp-mcp keeps its package-independent tools in package-stripped builds; its
+# optional Timeline registrations follow PULP_ENABLE_PROJECT_PACKAGE internally.
+# Dev tools build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
+if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
 

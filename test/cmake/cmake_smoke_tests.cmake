@@ -189,24 +189,26 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
-# Installed Creative Timeline Engine consumer. The fixture requests the three
-# public engine components plus the optional DAWproject importer, builds and
-# runs outside the source tree, and audits both target closures for forbidden
-# UI/GPU/host baggage.
-add_test(NAME cmake-timeline-sdk-consumer
-    COMMAND ${CMAKE_COMMAND}
-        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
-        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-        "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
-        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
-        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
-        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
-        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
-set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
-    LABELS "cmake;sdk;timeline;slow"
-    TIMEOUT 180)
+# Installed Creative Timeline Engine consumer. The fixture requests the
+# optional project-package component, so a package-stripped SDK correctly omits
+# this consumer while the compile-out gate proves that requesting the missing
+# component fails.
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    add_test(NAME cmake-timeline-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
+    set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;timeline;slow"
+        TIMEOUT 180)
+endif()
 
 # Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
 # pin the consumer's deployment target when it runs AFTER project() (where the
@@ -361,7 +363,9 @@ if(UNIX)
     set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
 endif()
 if(Python3_Interpreter_FOUND)
-    if(TARGET pulp-mcp)
+    # tools/mcp is added after test/, so TARGET is necessarily false here even
+    # in the normal build. Mirror its platform/top-level admission instead.
+    if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME pulp-mcp-binary-smoke
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py

@@ -49,6 +49,7 @@ std::string handle_audio_scope(const std::string& params_json);
 std::string handle_audio_plugin_inspect(const std::string& params_json);
 std::string handle_audio_render(const std::string& params_json);
 std::string handle_audio_compare(const std::string& params_json);
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 std::string handle_timeline_project_open(const std::string& params_json);
 std::string handle_timeline_command_apply(const std::string& params_json);
 std::string handle_timeline_diff(const std::string& params_json);
@@ -61,6 +62,7 @@ std::string handle_timeline_export(const std::string& params_json);
 std::string handle_timeline_import(const std::string& params_json);
 std::optional<std::string> handle_timeline_tool(std::string_view name,
                                                 const std::string& params_json);
+#endif
 std::string handle_inspect_pending_requests(const std::string& params_json);
 
 }  // namespace pulp_mcp

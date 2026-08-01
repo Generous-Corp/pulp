@@ -9,6 +9,29 @@ endif()
 set(_fixture_root "${PULP_BUILD_DIR}/project-package-compile-out")
 set(_compile_out_build "${_fixture_root}/build")
 file(REMOVE_RECURSE "${_fixture_root}")
+file(MAKE_DIRECTORY "${_compile_out_build}/.cmake/api/v1/query")
+file(WRITE "${_compile_out_build}/.cmake/api/v1/query/codemodel-v2" "")
+
+# This test is registered only by the default-ON build. Prove that its configure
+# retained all three MCP test surfaces; checking TARGET while test/ is parsed is
+# invalid because tools/mcp is added later in the root CMakeLists.
+set(_outer_ctest_file "${PULP_BUILD_DIR}/test/CTestTestfile.cmake")
+if(NOT EXISTS "${_outer_ctest_file}")
+    message(FATAL_ERROR "default-ON build has no test/CTestTestfile.cmake")
+endif()
+file(READ "${_outer_ctest_file}" _outer_ctest)
+foreach(_required_registration IN ITEMS
+        pulp-mcp-binary-smoke
+        pulp-test-mcp-server
+        pulp-test-mcp-timeline-tools)
+    string(FIND "${_outer_ctest}" "${_required_registration}"
+        _registration_offset)
+    if(_registration_offset EQUAL -1)
+        message(FATAL_ERROR
+            "default-ON build dropped MCP registration "
+            "${_required_registration}")
+    endif()
+endforeach()
 
 set(_configure_command
     "${CMAKE_COMMAND}"
@@ -19,7 +42,7 @@ set(_configure_command
     -DPULP_ENABLE_PROJECT_PACKAGE=OFF
     -DPULP_BUILD_TESTS=ON
     -DPULP_BUILD_EXAMPLES=OFF
-    -DPULP_ENABLE_GPU=OFF
+    -DPULP_ENABLE_GPU=ON
     -DPULP_ENABLE_DESIGN_IMPORT=ON
     -DPULP_FETCHCONTENT_UPDATES_DISCONNECTED=ON)
 if(PULP_GENERATOR_PLATFORM)
@@ -64,16 +87,112 @@ if(NOT EXISTS "${_target_directories}")
         "compile-out fixture did not generate ${_target_directories}")
 endif()
 file(READ "${_target_directories}" _targets)
+string(REPLACE "\\" "/" _targets_normalized "${_targets}")
 foreach(_forbidden_target IN ITEMS
         pulp-project-package
         pulp-tool-timeline
-        pulp-cli
-        pulp-mcp)
-    if(_targets MATCHES
-       "(^|[/\\])${_forbidden_target}\\.dir([/\\]|$)")
+        pulp-test-project-package
+        pulp-test-timeline-agent
+        pulp-test-mcp-timeline-tools
+        pulp-test-cli-timeline)
+    string(FIND "${_targets_normalized}" "/${_forbidden_target}.dir"
+        _target_offset)
+    if(NOT _target_offset EQUAL -1)
         message(FATAL_ERROR
             "PULP_ENABLE_PROJECT_PACKAGE=OFF still generated "
             "${_forbidden_target}")
+    endif()
+endforeach()
+foreach(_required_target IN ITEMS
+        pulp-cli
+        pulp-mcp
+        pulp-mcp-core
+        pulp-test-mcp-server)
+    string(FIND "${_targets_normalized}" "/${_required_target}.dir"
+        _target_offset)
+    if(_target_offset EQUAL -1)
+        message(FATAL_ERROR
+            "PULP_ENABLE_PROJECT_PACKAGE=OFF unexpectedly omitted "
+            "${_required_target}")
+    endif()
+endforeach()
+
+set(_inner_ctest_file "${_compile_out_build}/test/CTestTestfile.cmake")
+if(NOT EXISTS "${_inner_ctest_file}")
+    message(FATAL_ERROR "compile-out fixture generated no CTest inventory")
+endif()
+file(READ "${_inner_ctest_file}" _inner_ctest)
+foreach(_required_registration IN ITEMS
+        pulp-mcp-binary-smoke
+        pulp-test-mcp-server)
+    string(FIND "${_inner_ctest}" "${_required_registration}"
+        _registration_offset)
+    if(_registration_offset EQUAL -1)
+        message(FATAL_ERROR
+            "package-stripped build dropped independent MCP registration "
+            "${_required_registration}")
+    endif()
+endforeach()
+foreach(_forbidden_registration IN ITEMS
+        cmake-timeline-sdk-consumer
+        pulp-test-mcp-timeline-tools
+        pulp-test-timeline-agent
+        pulp-test-cli-timeline)
+    string(FIND "${_inner_ctest}" "${_forbidden_registration}"
+        _registration_offset)
+    if(NOT _registration_offset EQUAL -1)
+        message(FATAL_ERROR
+            "package-stripped build retained Timeline registration "
+            "${_forbidden_registration}")
+    endif()
+endforeach()
+
+# The tools remain available, but their package-publishing commands must be
+# compiled out. Query CMake's codemodel instead of generator-specific build
+# files so the proof works with Makefiles, Ninja, Visual Studio, and Xcode.
+file(GLOB _reply_indexes
+    "${_compile_out_build}/.cmake/api/v1/reply/index-*.json")
+list(LENGTH _reply_indexes _reply_index_count)
+if(NOT _reply_index_count EQUAL 1)
+    message(FATAL_ERROR
+        "compile-out fixture expected one CMake file-api index, got "
+        "${_reply_index_count}")
+endif()
+list(GET _reply_indexes 0 _reply_index)
+file(READ "${_reply_index}" _index_json)
+string(JSON _codemodel_file GET "${_index_json}" reply codemodel-v2 jsonFile)
+file(READ "${_compile_out_build}/.cmake/api/v1/reply/${_codemodel_file}"
+    _codemodel_json)
+string(JSON _target_count LENGTH "${_codemodel_json}" configurations 0 targets)
+math(EXPR _target_last "${_target_count} - 1")
+set(_command_sources "")
+foreach(_target_index RANGE 0 ${_target_last})
+    string(JSON _target_name GET "${_codemodel_json}"
+        configurations 0 targets ${_target_index} name)
+    if(_target_name STREQUAL "pulp-cli" OR
+       _target_name STREQUAL "pulp-mcp-core")
+        string(JSON _target_file GET "${_codemodel_json}"
+            configurations 0 targets ${_target_index} jsonFile)
+        file(READ
+            "${_compile_out_build}/.cmake/api/v1/reply/${_target_file}"
+            _target_json)
+        string(JSON _source_count LENGTH "${_target_json}" sources)
+        math(EXPR _source_last "${_source_count} - 1")
+        foreach(_source_index RANGE 0 ${_source_last})
+            string(JSON _source_path GET "${_target_json}"
+                sources ${_source_index} path)
+            string(APPEND _command_sources "\n${_source_path}")
+        endforeach()
+    endif()
+endforeach()
+foreach(_forbidden_source IN ITEMS
+        tools/cli/cmd_seq.cpp
+        tools/mcp/mcp_timeline_tools.cpp)
+    string(FIND "${_command_sources}" "${_forbidden_source}"
+        _source_offset)
+    if(NOT _source_offset EQUAL -1)
+        message(FATAL_ERROR
+            "package-stripped tool retained ${_forbidden_source}")
     endif()
 endforeach()
 
@@ -117,4 +236,5 @@ endif()
 
 message(STATUS
     "project_package_compile_out_verified=true target=false header=false "
-    "install=false export=false component=false dependent_tools=false")
+    "install=false export=false component=false tools=true "
+    "timeline_commands=false default_mcp_tests=true")

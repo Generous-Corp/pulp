@@ -238,7 +238,7 @@ pulp_add_test_suite(pulp-test-timeline-journal
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
-if(TARGET pulp-tool-timeline)
+if(PULP_ENABLE_PROJECT_PACKAGE)
     pulp_add_test_suite(pulp-test-timeline-agent
         SOURCES test_timeline_agent.cpp
         LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)

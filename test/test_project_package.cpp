@@ -481,6 +481,11 @@ TEST_CASE("Atomic project-package publisher refuses unsafe paths and publication
     auto publisher = AtomicPublisher::create(destination);
     REQUIRE(publisher);
     REQUIRE_FALSE(publisher.value().write("../escape", "bad"));
+    for (const auto path : {"media/file:stream", "NUL", "con.txt", "aux ", "COM1.wav",
+                            "folder/trailing.", "folder//value", "folder/value?"}) {
+        INFO("unsafe portable package path: " << path);
+        REQUIRE_FALSE(publisher.value().write(path, "bad"));
+    }
     const auto written = publisher.value().write("nested/value.txt", "value");
     REQUIRE(written);
     REQUIRE(written.value());
@@ -489,4 +494,35 @@ TEST_CASE("Atomic project-package publisher refuses unsafe paths and publication
     REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
     REQUIRE(read_text(destination / "nested" / "value.txt") == "value");
     REQUIRE_FALSE(AtomicPublisher::create(destination));
+}
+
+TEST_CASE("Atomic project-package publisher anchors a relative destination at creation",
+          "[project-package][atomic-publisher]") {
+    TemporaryPackage temporary("atomic-relative");
+    const auto first = temporary.path / "first";
+    const auto second = temporary.path / "second";
+    fs::create_directories(first);
+    fs::create_directories(second);
+
+    struct CurrentPathRestore {
+        fs::path path;
+        ~CurrentPathRestore() {
+            std::error_code ignored;
+            fs::current_path(path, ignored);
+        }
+    } restore{fs::current_path()};
+
+    fs::current_path(first);
+    auto publisher = AtomicPublisher::create("published");
+    REQUIRE(publisher);
+    const auto written = publisher.value().write("value.txt", "anchored");
+    REQUIRE(written);
+    REQUIRE(written.value());
+
+    fs::current_path(second);
+    const auto committed = publisher.value().commit_directory();
+    REQUIRE(committed);
+    REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
+    REQUIRE(read_text(first / "published" / "value.txt") == "anchored");
+    REQUIRE_FALSE(fs::exists(second / "published"));
 }
