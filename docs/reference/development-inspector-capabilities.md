@@ -89,6 +89,45 @@ Build presence, host wiring, profile allowance, and current enablement are
 separate facts. `Session.getCapabilities` reports the available and effective
 sets for an authenticated session; no client should infer one from another.
 
+### End-to-end validation boundary
+
+The checked source workflow starts three independent standalone processes in
+one discovery directory: an ordinary `develop` session, an `observe` session,
+and a deliberately capability-minimal runtime-evaluation session. It selects
+each process by the exact session, instance, and publication IDs that process
+published. This proves ambiguous selection fails closed, observe reads work
+while state mutation is denied, and runtime evaluation is unavailable without
+the separate opt-in. The minimal evaluation process proves a successful typed
+result plus the 64 KiB request bound without weakening the effectful live
+realm used by the ordinary develop process.
+
+The same real-process workflow proves controller acquisition, typed parameter,
+transport, and MIDI mutation ordering; compositor-backed PNG capture; scalar,
+vector, event, and deliberately stale value-channel snapshots; slow-client
+attempt sequencing and explicit source/coalescing loss; generation-changing
+reload reattachment of DOM, logs, value telemetry, and runtime-evaluation realm
+authority; and independent record, credential, and lock teardown.
+Those waits advance from observed process, protocol, or sequence state rather
+than assuming a fixed elapsed delay. Processor-owned scripted sessions can
+explicitly opt into in-place reload on the stable host root, preserving the
+session that owns inspector and GPU-surface attachments instead of replacing it
+through `create_view()`. Non-opt-in or replacement-session generations remain
+pending and fail closed.
+
+A separate packaged-client workflow starts exact `develop` and `observe`
+processes and drives both the installed Rust `pulp inspect` client and the
+installed marketplace `pulp-mcp` client. It covers discovery, capability,
+context, parameter, DOM, capture, transport, MIDI, and typed mutation reads or
+writes without a source-tree client path. An independent source scan rejects
+production protocol literals that are absent from
+`protocol_methods.inc`; its self-test injects an unmapped method and requires
+the check to fail.
+
+These proofs apply to the enabled development build described above. The
+ordinary-launch endpoint-free and disabled-component gates remain separate
+tests. Final shipped-product manifest, per-target declaration, and shipping
+override proof depend on the Phase 7 composition and are not claimed here.
+
 ### Live-realm runtime evaluation boundary
 
 `runtime.eval` is refused when the attached `ScriptedUiSession` has any
