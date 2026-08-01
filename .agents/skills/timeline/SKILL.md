@@ -319,6 +319,23 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
   only when that field is absent, and a v1 envelope that illegally contains
   the field is rejected rather than silently normalized.
+- **A command schema is widened with optional fields at its current version —
+  never by bumping it.** Document schemas walk registered `upgrades` /
+  `downgrades` chains, but `decode_command` gates on exact version equality and
+  has no upgrade hook, and no command schema declares a migration edge. Raising
+  a command's version therefore rejects every envelope already written with
+  `UnsupportedSchemaVersion`. Declare the new field `required = false` in
+  `schema_registry.cpp`, read it with `JsonValue::find` in
+  `serialize_command_decode.cpp`, and make absence decode to what the payload
+  meant before the field existed (`replace_note_content`'s modifier arrays and
+  `set_clip_playback_properties`'s `fade_shape` both do this). Command decode
+  never validates a payload against `schema->fields`, so the registry entry is
+  documentation and generated-artifact input, not the gate — the decoder is.
+  Widening a command payload also means updating `equivalent()` (the
+  idempotency cache answers a repeated transaction id with its first result, so
+  a field it ignores lets a retry apply one payload and report another's
+  outcome) and `retained_size()` (it falls through to `sizeof(T)`, so a field it
+  forgets is under-counted rather than refused).
 - `schema_release.hpp` records exact shipped structural type/version sets,
   including `v0.736.0` (Track v1), `v0.744.0` (Track v2), `v0.748.0`
   (Track v3), and `v0.750.0` (Track v4, before SequenceRef content and sequence

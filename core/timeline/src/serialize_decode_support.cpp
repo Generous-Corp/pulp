@@ -54,6 +54,64 @@ decode_rational_rate(const JsonValue& value, std::string path) {
     return runtime::Ok(rate);
 }
 
+runtime::Result<std::vector<NoteModifier>, PersistenceError>
+decode_note_modifiers(const JsonValue& value, std::size_t note_budget, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::UnexpectedType,
+                                                      std::move(path), value.begin);
+    if (value.array.size() > note_budget)
+        return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::LimitExceeded,
+                                                      std::move(path), value.begin,
+                                                      value.array.size(), note_budget);
+    std::vector<NoteModifier> modifiers;
+    modifiers.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto modifier_path = path + "/" + std::to_string(index);
+        const auto& entry = value.array[index];
+        auto condition = required_decode_member(entry, "condition", modifier_path);
+        auto condition_offset = required_decode_member(entry, "condition_offset", modifier_path);
+        auto condition_period = required_decode_member(entry, "condition_period", modifier_path);
+        auto note_id = required_decode_member(entry, "note_id", modifier_path);
+        auto probability = required_decode_member(entry, "probability", modifier_path);
+        auto ratchet_count = required_decode_member(entry, "ratchet_count", modifier_path);
+        if (!condition || !condition_offset || !condition_period || !note_id || !probability ||
+            !ratchet_count)
+            return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::MissingField,
+                                                          modifier_path);
+        if (condition.value()->kind != JsonValue::Kind::String)
+            return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::UnexpectedType,
+                                                          modifier_path + "/condition");
+        NoteConditionKind decoded_condition{};
+        if (!parse_note_condition(condition.value()->scalar, decoded_condition))
+            return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::InvalidSchema,
+                                                          modifier_path + "/condition");
+        auto decoded_note_id =
+            parse_canonical_u64_string(*note_id.value(), modifier_path + "/note_id");
+        auto decoded_offset =
+            parse_u32_number(*condition_offset.value(), modifier_path + "/condition_offset");
+        auto decoded_period =
+            parse_u32_number(*condition_period.value(), modifier_path + "/condition_period");
+        auto decoded_probability =
+            parse_u32_number(*probability.value(), modifier_path + "/probability");
+        auto decoded_ratchet =
+            parse_u32_number(*ratchet_count.value(), modifier_path + "/ratchet_count");
+        if (!decoded_note_id || !decoded_offset || !decoded_period || !decoded_probability ||
+            !decoded_ratchet || decoded_offset.value() > std::numeric_limits<std::uint16_t>::max() ||
+            decoded_period.value() > std::numeric_limits<std::uint16_t>::max() ||
+            decoded_probability.value() > std::numeric_limits<std::uint16_t>::max() ||
+            decoded_ratchet.value() > std::numeric_limits<std::uint16_t>::max())
+            return decode_fail<std::vector<NoteModifier>>(PersistenceErrorCode::InvalidNumber,
+                                                          modifier_path);
+        modifiers.push_back({ItemId{decoded_note_id.value()},
+                             static_cast<std::uint16_t>(decoded_probability.value()),
+                             static_cast<std::uint16_t>(decoded_period.value()),
+                             static_cast<std::uint16_t>(decoded_offset.value()),
+                             static_cast<std::uint16_t>(decoded_ratchet.value()),
+                             decoded_condition});
+    }
+    return runtime::Ok(std::move(modifiers));
+}
+
 runtime::Result<std::optional<TrackFreeze>, PersistenceError>
 decode_track_freeze(const JsonValue* freeze, std::string path) {
     if (!freeze)
