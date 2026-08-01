@@ -146,6 +146,29 @@ struct ReplaceNoteContent {
     std::vector<NoteModifier> replacement_modifiers;
 };
 
+/// Replaces the values of a named subset of one note clip's notes.
+///
+/// The identity set is invariant: `replacement` names exactly the notes
+/// `expected` names, pairwise by index, so the command inserts nothing, removes
+/// nothing, and touches no identity at all. That is what makes it the shape a
+/// drag emits. It carries only the notes under the gesture, where
+/// ReplaceNoteContent gates on the clip's entire current note set and so costs
+/// the whole array per frame; and swapping expected and replacement is the exact
+/// inverse with no set difference to derive.
+///
+/// `expected` is the optimistic gate, one entry per note, each equal to that
+/// note's current value in every field. Notes the payload does not name keep the
+/// values they had. So do the clip's modifiers, their seed, and its expression
+/// lanes: no note leaves the clip, so no modifier is left keying a note that is
+/// gone, and the payload needs no modifier arrays of its own.
+struct SetNoteEvents {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    std::vector<NoteEvent> expected;
+    std::vector<NoteEvent> replacement;
+};
+
 /// Replaces clip-level gain and fade controls under an exact value gate.
 struct SetClipPlaybackProperties {
     ItemId sequence_id;
@@ -399,7 +422,7 @@ using Command =
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
                  SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
                  InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer,
-                 InsertTrack, RemoveTrack, SetTrackName, MoveTrack>;
+                 InsertTrack, RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

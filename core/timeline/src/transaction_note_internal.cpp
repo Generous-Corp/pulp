@@ -4,7 +4,11 @@
 #include "transaction_reduction_support.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -82,6 +86,130 @@ reduce_set_note_velocity(const Project& project, const SetNoteVelocity& velocity
         SetNoteVelocity{velocity.sequence_id, velocity.track_id, velocity.clip_id, velocity.note_id,
                         velocity.replacement_velocity, velocity.expected_velocity},
         {velocity.note_id, velocity.track_id, velocity.sequence_id,
+         DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_set_note_events(const Project& project, const SetNoteEvents& set,
+                       const Transaction& transaction, CommandId command) {
+    if (const auto code = target_error(project, set.clip_id,
+                                       expected_location(ItemKind::Clip, project, set.sequence_id,
+                                                         set.track_id, set.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, set.clip_id,
+                                                      set.track_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence->find_track(set.track_id);
+    const auto* clip = track->find_clip(set.clip_id);
+    const auto* notes = std::get_if<MidiContent>(&clip->content());
+    if (!notes)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, set.clip_id);
+
+    // The two arrays are one edit read twice: entry i says what note i is now
+    // and what it becomes. A payload naming no note is not an edit; arrays of
+    // unequal length cannot be paired at all; and a pair whose halves name
+    // different notes would give the inverse a note the forward edit never
+    // touched.
+    if (set.expected.empty() || set.expected.size() != set.replacement.size())
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, set.clip_id);
+    for (std::size_t i = 0; i < set.expected.size(); ++i)
+        if (set.expected[i].id != set.replacement[i].id)
+            return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                          command, set.expected[i].id, set.clip_id);
+
+    // Naming one note twice would apply both entries in payload order and leave
+    // the inverse unable to say which of the two values to restore.
+    std::vector<ItemId> named;
+    named.reserve(set.expected.size());
+    for (const auto& note : set.expected)
+        named.push_back(note.id);
+    std::sort(named.begin(), named.end());
+    if (const auto duplicate = std::adjacent_find(named.begin(), named.end());
+        duplicate != named.end())
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, *duplicate, set.clip_id);
+
+    // Notes are stored in (start, id) order, so finding one by identity needs
+    // its own index. Building that index once costs one sort of the clip and
+    // then a binary search per named note, rather than a scan of the clip per
+    // named note — the quadratic term this command exists to avoid on a drag
+    // over a large clip.
+    std::vector<std::pair<ItemId, std::size_t>> by_id;
+    by_id.reserve(notes->notes().size());
+    for (std::size_t i = 0; i < notes->notes().size(); ++i)
+        by_id.emplace_back(notes->notes()[i].id, i);
+    std::sort(by_id.begin(), by_id.end());
+
+    const auto note_location =
+        expected_location(ItemKind::Note, project, set.sequence_id, set.track_id, set.clip_id);
+    std::vector<NoteEvent> next(notes->notes().begin(), notes->notes().end());
+    for (std::size_t i = 0; i < set.expected.size(); ++i) {
+        const auto& gate = set.expected[i];
+        if (const auto code = target_error(project, gate.id, note_location))
+            return reject_reduction<NoteCommandReduction>(*code, transaction, command, gate.id,
+                                                          set.clip_id);
+        const auto found = std::lower_bound(
+            by_id.begin(), by_id.end(), gate.id,
+            [](const std::pair<ItemId, std::size_t>& entry, ItemId id) { return entry.first < id; });
+        if (found == by_id.end() || found->first != gate.id)
+            return reject_reduction<NoteCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                          command, gate.id, set.clip_id);
+        // The gate reads the clip as it was. Identities are unique and each is
+        // named once, so no two iterations write the same slot and an earlier
+        // replacement can never satisfy a later note's gate.
+        if (!equal_note(notes->notes()[found->second], gate))
+            return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                          transaction, command, gate.id,
+                                                          set.clip_id);
+        next[found->second] = set.replacement[i];
+    }
+
+    // Modifiers, the seed their probability draws derive from, and the
+    // controller and expression lanes all carry across whole. Neither is
+    // filtered here, and neither should be: this command's identity set is
+    // invariant, so no modifier can be left keying a note that is gone. The
+    // surviving-note filter in reduce_replace_note_content answers a question
+    // this command cannot ask, and copying it here would only ever find notes
+    // to keep — while the same edit applied to lanes, which key on a
+    // MidiLaneAddress naming no note, deletes a clip's controller streams.
+    auto next_notes = MidiContent::create(
+        std::move(next),
+        std::vector<NoteModifier>(notes->modifiers().begin(), notes->modifiers().end()),
+        notes->modifier_seed(),
+        std::vector<MidiExpressionLane>(notes->lanes().begin(), notes->lanes().end()));
+    if (!next_notes)
+        return runtime::Err(model_failure(transaction, command, next_notes.error()));
+
+    // The inverse is this edit read backwards, so both its arrays need one
+    // agreed order. Ordering by note id makes a payload's inverse independent of
+    // the order its author happened to list the notes in.
+    std::vector<std::size_t> order(set.expected.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::sort(order.begin(), order.end(), [&](std::size_t lhs, std::size_t rhs) {
+        return set.expected[lhs].id < set.expected[rhs].id;
+    });
+    std::vector<NoteEvent> inverse_expected;
+    std::vector<NoteEvent> inverse_replacement;
+    inverse_expected.reserve(order.size());
+    inverse_replacement.reserve(order.size());
+    for (const auto index : order) {
+        inverse_expected.push_back(set.replacement[index]);
+        inverse_replacement.push_back(set.expected[index]);
+    }
+
+    // No identity mutations and no identity allocation: every note the command
+    // names is a note the clip already owned and still owns.
+    auto next_project =
+        replace_note_content(project, *sequence, *track, *clip, std::move(next_notes).value(), {},
+                             std::nullopt, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(NoteCommandReduction{
+        std::move(next_project).value(),
+        SetNoteEvents{set.sequence_id, set.track_id, set.clip_id, std::move(inverse_expected),
+                      std::move(inverse_replacement)},
+        {set.clip_id, set.track_id, set.sequence_id,
          DirtyFlags::Content | DirtyFlags::Notes}});
 }
 
@@ -232,6 +360,8 @@ reduce_note_command(const Project& project, const Command& command, const Transa
     if (const auto* replace = std::get_if<ReplaceNoteContent>(&command))
         return reduce_replace_note_content(project, *replace, transaction, command_id,
                                            allow_tombstone_restore);
+    if (const auto* events = std::get_if<SetNoteEvents>(&command))
+        return reduce_set_note_events(project, *events, transaction, command_id);
     return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
                                                   command_id);
 }
