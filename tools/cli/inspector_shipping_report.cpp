@@ -42,6 +42,8 @@ bool read_manifest(const fs::path& path, Manifest& manifest, std::string& error)
             return false;
         }
         manifest.product_name = std::string(root["product_name"].getString());
+        if (root["target"].isString())
+            manifest.target = std::string(root["target"].getString());
         manifest.ships_inspector = root["shipping_override"].getBool();
         manifest.ships_runtime_eval =
             root["unsafe_runtime_eval_acknowledged"].getBool();
@@ -154,6 +156,83 @@ Report load_report(const fs::path& search_root,
 Report load_artifact_report(const fs::path& search_root) {
     std::vector<Report> reports;
     if (!fs::is_directory(search_root)) return empty_report();
+
+    const auto configured_manifest_dir =
+        search_root / "pulp-inspector-manifests";
+    bool has_configured_manifests = false;
+    if (fs::is_directory(configured_manifest_dir)) {
+        std::error_code configured_error;
+        for (fs::directory_iterator iterator(configured_manifest_dir,
+                                              configured_error), end;
+             !configured_error && iterator != end; iterator.increment(configured_error)) {
+            if (iterator->is_regular_file() &&
+                iterator->path().extension() == ".json") {
+                has_configured_manifests = true;
+                break;
+            }
+        }
+        if (configured_error) {
+            Report failed;
+            failed.error = "could not enumerate configured inspector manifests in " +
+                configured_manifest_dir.string();
+            return failed;
+        }
+    }
+    if (has_configured_manifests) {
+        auto configured = load_report(search_root);
+        if (!configured.complete) return configured;
+        std::error_code find_error;
+        fs::recursive_directory_iterator find_iterator(
+            search_root, fs::directory_options::skip_permission_denied,
+            find_error);
+        fs::recursive_directory_iterator find_end;
+        while (!find_error && find_iterator != find_end) {
+            if (find_iterator->is_regular_file()) {
+                const auto candidate = find_iterator->path();
+                const auto name = candidate.filename().string();
+                bool inside_plugin_format = false;
+                for (const auto& component : candidate) {
+                    const auto directory = component.string();
+                    if (directory == "VST3" || directory == "CLAP" ||
+                        directory == "AU" || directory == "AUv3" ||
+                        directory == "AAX" || directory == "LV2") {
+                        inside_plugin_format = true;
+                        break;
+                    }
+                }
+                if (!inside_plugin_format) {
+                    for (const auto& manifest : configured.manifests) {
+                        const bool is_standalone =
+                            name == manifest.product_name ||
+                            name == manifest.product_name + ".exe" ||
+                            (!manifest.target.empty() &&
+                             (name == manifest.target ||
+                              name == manifest.target + ".exe"));
+                        if (!is_standalone) continue;
+                        const auto target = manifest.target.empty()
+                            ? manifest.path.stem().string()
+                            : manifest.target;
+                        const auto sidecar = candidate.parent_path() /
+                            (target + ".inspector-capabilities.json");
+                        if (!fs::is_regular_file(sidecar)) {
+                            Report missing;
+                            missing.error =
+                                "standalone artifact is missing inspector capability "
+                                "sidecar: " + candidate.string();
+                            return missing;
+                        }
+                    }
+                }
+            }
+            find_iterator.increment(find_error);
+        }
+        if (find_error) {
+            Report failed;
+            failed.error = "could not enumerate standalone artifacts in " +
+                search_root.string();
+            return failed;
+        }
+    }
 
     std::error_code iteration_error;
     fs::recursive_directory_iterator iterator(

@@ -12,6 +12,7 @@ namespace fs = std::filesystem;
 struct Manifest {
     fs::path path;
     std::string json;
+    std::string target;
     std::string product_name;
     std::vector<std::string> capabilities;
     bool ships_inspector = false;

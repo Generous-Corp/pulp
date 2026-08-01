@@ -156,3 +156,20 @@ TEST_CASE("inspector evidence rejects capability aliases and stale build artifac
     REQUIRE(exact.manifests.size() == 1);
     CHECK(exact.manifests.front().product_name == "Alias");
 }
+
+TEST_CASE("inspector evidence rejects standalone artifacts without copied sidecars") {
+    TemporaryDirectory temporary;
+    write_manifest(temporary.path / "pulp-inspector-manifests" / "Missing.json",
+        R"({"target":"Missing","product_name":"Missing Product","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    const auto executable =
+        temporary.path / "products" / "Missing Product.app" / "Contents/MacOS" /
+        "Missing Product";
+    fs::create_directories(executable.parent_path());
+    write_artifact(executable, "ordinary standalone");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(report.complete);
+    CHECK(report.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
+}
