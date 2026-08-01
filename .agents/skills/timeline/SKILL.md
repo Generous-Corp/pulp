@@ -93,7 +93,14 @@ artifact is needed. Never modify canonical project JSON text directly.
   length-mismatched Stretch artifact fails compilation; it never degrades to
   native-rate playback.
 - `MidiContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
-  are positive, pitch is MIDI 0-127, and channel is 0-15.
+  are positive, pitch is MIDI 0-127, and channel is 0-15. Beside the notes it
+  carries `MidiExpressionLane` controller streams, each an owned identity with
+  points in `(position, id)` order and at most one lane per address. The document
+  side is complete — authoring, persistence, id remap, and copy all carry lanes —
+  but **playback refuses to compile a lane-bearing clip** rather than dropping the
+  lanes silently, so a document that authors one cannot be played until the note
+  program can carry controller values. See the playback skill for the two refusal
+  codes and which of them the renderer is allowed to delete.
 - `SequenceRef` makes a musical clip a non-owning placement of another
   sequence. Its source window begins at `source_start`; project construction
   rejects missing targets, cycles, and nesting deeper than eight reference
@@ -615,6 +622,57 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
 
+### Rebuilding a `MidiContent` from its notes alone silently drops everything else
+
+A `MidiContent` carries four things, not one: the note array, a sparse
+`NoteModifier` companion array keyed by note identity (probability, every-Nth /
+first / fill condition, ratchet count), the `modifier_seed` those probability
+draws are derived from, and the clip's controller/expression lanes.
+`MidiContent::create` is overloaded, and the shorter overloads default away
+exactly the state a rebuild means to keep — they **compile wherever the
+four-argument overload does**. So any path that rebuilds a clip's content by
+handing the notes back to `create` erases authored document state with no error
+and no diagnostic. Reach for the four-argument overload on every rebuild path.
+
+Re-attachment is **not uniform across the three companions**, and making it
+uniform is its own bug:
+
+- **Filter the modifier array to the surviving note ids.** Modifiers key on
+  `note_id`, and `create` rejects one that names a note the content does not
+  carry (`MissingItem`), so a blind pass-through converts an ordinary note
+  deletion into a hard model failure. Dropping the orphan is the right answer,
+  not an error: the modifier has no identity left to key to, and the same edit
+  already tombstones that note's identity.
+- **Carry the seed verbatim, even when no modifier survives.** It is authored
+  document state that selects the replay, not a cache — zeroing it changes which
+  notes sound as soon as a modifier is authored again.
+- **Pass the lanes through unfiltered.** A `MidiExpressionLane` keys on a
+  `MidiLaneAddress` — `{group, channel, status, bank, index}`, a channel-voice
+  stream address that references no note at all. Applying the surviving-note-id
+  filter to lanes as well is the reflexive "keep these consistent" edit, and
+  because no lane identity is ever a note identity it deletes the clip's
+  controller streams the moment an edit removes a note. Only a test that
+  authors lanes *and* shrinks the note set catches it.
+
+The rebuild paths that must each handle all three independently are
+`reduce_replace_note_content` (`transaction_note_internal.cpp`), `rebuild_clip`
+(`id_remap.cpp`, which additionally rewrites each `note_id`, lane id, and point
+id through the remap table while leaving the address alone), and
+`finish_pending_leaf` (`core/playback/src/sequence_content_lowerer.cpp`, where a
+nested clip trimmed to its audible window filters modifiers to the retained
+notes and refuses a clip with lanes outright — trimming has no defined answer
+for a point that sits before the retained window yet still sounds inside it).
+
+**Known limit worth knowing before you file it as a bug:** `ReplaceNoteContent`
+transports note arrays only. Preserve-and-prune therefore makes the command's
+inverse exact for every edit that keeps its notes, but *not* for one that
+removes a modifier-bearing note — undo restores the note and its identity while
+its modifier stays dropped. Lanes are unaffected: they never leave the clip.
+Closing the modifier gap means carrying modifiers in the command payload, which
+is a serialized schema surface; `decode_command` gates on exact version equality
+with no upgrade hook, so it has to arrive as optional fields at v1, never a
+version bump.
+
 ### Sequence-owned context and the compile-context subscription contract
 
 A `Sequence` owns a `ChordScaleLane` — an ordered set of `ChordScaleEvent`s
@@ -739,14 +797,45 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 `test_timeline_command_persistence.cpp` (which asserts one decoded command per
 alternative, in variant order).
 
-### Device neutrality is enforced by the module graph, not by discipline
+### The edit vocabulary sits at the editor rung, and "cannot see `view`" is not why
 
-`EditIntent` (`edit_intent.hpp`) lives in `core/timeline` **because** that module's
-dependency floor is `{timeline, timebase, platform, runtime}` — it cannot link
-`view`, so the header physically cannot name a pointer type. That placement is the
-guarantee. Moving intents "up" into an editor module that *can* see `view` would
-turn a structural impossibility back into a convention people have to remember,
-which is how the touch-retrofit bug class returns.
+`EditIntent` (`core/timeline_editor/include/pulp/timeline_editor/edit_intent.hpp`)
+is device-neutral because the module cannot link `view`, so the header cannot name
+a pointer type. True — but **that fact does not choose where the type lives**, and
+reasoning from it is the trap. Check `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py`: the `timeline_editor`
+row is a strict superset of the `timeline` row, and *neither* admits `view`. The
+neutrality guarantee is identical at both addresses.
+
+The argument that does discriminate runs the other way. `core/timeline`'s floor
+excludes `timeline_editor`, so with the verbs at the editor rung the gate rejects a
+reducer, migration, or serializer that reaches for one — an edge it simply does not
+have while the verbs are in the model, where every file may include them and no
+gate can object. `Draw`/`Erase`/`Move`/`Resize` are hit-test verbs: `Move` and
+`Resize` lower to the *same* command and are distinct only because a front-end
+tells a clip body from its edge. A headless importer, a `.pulpgraph` loader, and a
+plugin that wants only commands should not carry that distinction.
+
+Both directions are pinned by `--selftest`, so neither can be relaxed silently.
+
+Consequences worth knowing before you touch this:
+
+- `pulp-timeline-editor` is **not header-only**. It carries `src/edit_intent.cpp`
+  and is built `-fno-exceptions -fno-rtti` to match `pulp-timeline`. Those flags
+  are the target's own exception-free proof — the rung sits outside
+  `pulp-test-timeline-no-exceptions`, which covers only the portable timeline
+  list, so a TU added here that needs exceptions must fail at its own build.
+- The verbs are therefore **absent from the WAM/WebCLAP lanes**, which compile
+  `PulpTimelineSources.cmake`'s portable list directly and do not link the editor
+  rung. A browser build that wants to lower intents adds the rung; it does not add
+  the file back to the timeline manifest.
+- `GesturePhase` belongs in `core/timeline/command.hpp` by the same test that
+  places the verbs: an undo group opens and closes on a bracket whether or not an
+  editor produced it, so it is transaction-level vocabulary, not a tool verb.
+- `EditIntentHost` (`= SequencerUiHostT<EditIntent>`) is declared beside the
+  vocabulary. `SequencerUiHostT`'s parameter exists so the playback seam and the
+  intent vocabulary can evolve apart; the alias is what keeps that parameter bound
+  to something real instead of only ever meeting a test stand-in.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit

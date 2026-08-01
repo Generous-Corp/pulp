@@ -1,12 +1,16 @@
 #include "timeline_command_test_helpers.hpp"
 
-#include <pulp/timeline/edit_intent.hpp>
+#include <pulp/timeline_editor/edit_intent.hpp>
+#include <pulp/timeline_editor/scripted_ui_host.hpp>
 #include <pulp/view/hit_metrics.hpp>
 #include <pulp/view/waveform_editor_primitives.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <type_traits>
+
 using namespace pulp::timeline;
+using namespace pulp::timeline_editor;
 using namespace timeline_test;
 using pulp::view::HitMetrics;
 using pulp::view::PointerType;
@@ -178,4 +182,32 @@ TEST_CASE("Edit intent lowering carries the gesture phase and rejects a grouples
     auto cancelled = lower_edit_intent(intent, identity);
     REQUIRE(cancelled);
     REQUIRE(cancelled.value().gesture_phase == GesturePhase::Cancel);
+}
+
+TEST_CASE("A gesture reaches a host as an intent and the host as a transaction") {
+    // The seam's parameter is bound to a real vocabulary, not only to a
+    // stand-in: a front-end that holds EditIntentHost submits EditIntent and
+    // nothing else compiles into that call.
+    static_assert(std::is_same_v<EditIntentHost::IntentType, EditIntent>);
+
+    ScriptedUiHost<EditIntent> concrete;
+    EditIntentHost& host = concrete;
+
+    const auto viewport = parity_viewport();
+    const auto model = parity_model();
+    const auto hit = hit_test_waveform_handles(viewport, model, 102.0f,
+                                               HitMetrics::for_pointer(PointerType::touch));
+    REQUIRE(hit.kind == WaveformHandleKind::selection_start);
+
+    const EditIntent submitted = intent_from_hit(hit, GesturePhase::Single);
+    REQUIRE(host.submit_intent(submitted).status == IntentStatus::Accepted);
+    REQUIRE(concrete.intents().size() == 1);
+
+    // What the host received lowers to the same transaction the front-end would
+    // have produced, so the value that crossed the seam is the whole edit.
+    auto direct = lower_edit_intent(submitted, fixed_identity());
+    auto via_host = lower_edit_intent(concrete.intents().front(), fixed_identity());
+    REQUIRE(direct);
+    REQUIRE(via_host);
+    REQUIRE(equivalent(direct.value(), via_host.value()));
 }
