@@ -16,6 +16,12 @@ from pathlib import Path
 
 MODULE_FLOORS = {
     "timebase": {"timebase", "platform", "runtime"},
+    # The document model. `timeline_editor` is absent, and that absence is load
+    # bearing rather than incidental: it is what stops a reducer, a migration, or
+    # a serializer from reaching for the editor's gesture verbs. A document model
+    # that can name Draw/Erase/Move/Resize hands them to every consumer of the
+    # model — a headless importer, a .pulpgraph loader, a plugin that wants only
+    # commands — with no gate able to object.
     "timeline": {"timeline", "timebase", "platform", "runtime"},
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
@@ -40,6 +46,12 @@ MODULE_FLOORS = {
     # target above this rung takes its own row rather than widening this one:
     # admitting view here would make every consumer of the editor kernel pay
     # for the view stack.
+    #
+    # This row is a superset of the timeline row, so it is not what keeps edit
+    # intents free of pointer types — that holds equally at either address, and
+    # is therefore no reason to place them here. The asymmetry runs the other
+    # way and lives in the timeline row above: only that row can reject the
+    # document model reaching up for a gesture verb.
     "timeline_editor": {
         "timeline_editor",
         "timeline-editor",
@@ -295,6 +307,35 @@ def run_selftest() -> int:
         )
         if verify(root):
             print("selftest rejected the restored timeline_editor fixture")
+            return 1
+
+        # The rung's other defining rule, and the one that decides where the edit
+        # vocabulary lives: the document model may not reach up for it. Both rows
+        # forbid view, so only this direction distinguishes the two addresses.
+        timeline_source = fixtures["timeline"][0]
+        timeline_source.write_text("#include <pulp/timeline_editor/edit_intent.hpp>\n")
+        if not any(
+            "timeline outside-floor pulp/timeline_editor include" in error
+            for error in verify(root)
+        ):
+            print("selftest missed timeline reaching up for the editor rung")
+            return 1
+        timeline_source.write_text("#include <pulp/timeline/allowed.hpp>\n")
+
+        timeline_cmake.write_text(
+            f"target_link_libraries(pulp-timeline PUBLIC {floor_links} "
+            "pulp::timeline-editor)\n"
+        )
+        if not any(
+            "timeline outside-floor pulp::timeline-editor link" in error
+            for error in verify(root)
+        ):
+            print("selftest missed timeline linking the editor rung")
+            return 1
+        timeline_cmake.write_text(
+            f"target_link_libraries(pulp-timeline PUBLIC {floor_links})\n")
+        if verify(root):
+            print("selftest rejected the restored timeline fixture")
             return 1
 
         shutil.rmtree(root / "core" / "timeline")
