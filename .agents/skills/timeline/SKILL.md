@@ -763,6 +763,29 @@ order and still say exactly the same thing. Write one refusal test per member �
 a single "a populated groove refuses" case passes even when the predicate only
 looks at one field, which is how a weakened refusal gets through review.
 
+### A version-gated field on the clip touches four readers, and the policy struct is what keeps them agreeing
+
+`ClipSchemaVersionPolicy` (`clip_schema_policy.hpp`) is not bookkeeping — it is
+the only thing that stops the readers of a clip envelope from disagreeing about
+which version must carry which field. A field introduced at version N needs a
+`requires_<field>(version)` predicate on that struct, plus a `static_assert` that
+it is false at N-1 and true at N, and then every reader asks the predicate rather
+than testing a literal:
+
+- `schema_json_preflight.cpp` — require the shape when the predicate holds,
+  reject the field's *presence* when it does not. Omitting the second half lets a
+  document claim a field at a version whose readers ignore it.
+- `serialize_project_decode.cpp` — the same two-sided gate, producing the model
+  value.
+- The migration pair, whose guard is the predicate's introduced version, not a
+  literal.
+- `structural_registry_validation.cpp` and the registry entry, whose `required`
+  flags must match each other exactly or the registry self-check fails.
+
+The downgrade refuses on anything but the field's default, for the reason in
+*Downgrade refusals* above: a shape a v(N-1) reader cannot express is not an
+annotation it can drop, it changes what the document sounds like.
+
 ### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
 `Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through
@@ -885,6 +908,22 @@ Both must accept the whole readable range, not just the newest version: a v1
 document is preflighted *before* migration runs, so the older shape has to pass
 too. Field lists in the validator are ordered, and the registry lists fields
 alphabetically, so a new field goes in its sorted position, not at the end.
+
+`schema_json_preflight.cpp` has a second, sharper trap inside it. Each structural
+scan declares its wanted members as a `std::array` of `JsonSpanMember` and then
+indexes the results **positionally**, even though the lookup itself matches by
+name. The arrays are kept alphabetical, so a new field inserted in sorted order
+renumbers every index after it — and the result still compiles, still runs, and
+quietly shape-checks the wrong member. Renumber the whole block by hand whenever
+a field lands anywhere but the end.
+
+Version-gating a field in the preflight also **changes the error a caller sees**.
+The preflight runs before the decoder, so an omitted version-gated field is
+rejected there as `InvalidSchema` (that is `require_shape`'s default
+`missing_code`), and the decoder's own `MissingField` branch for the same field
+becomes unreachable through `deserialize_project`. Keep the decoder check — it
+still guards the decoder driven directly — but assert `InvalidSchema` in a
+document-level test, or the test is describing a layer it is not exercising.
 
 A bump also invalidates any test that pins a **"future version" sentinel** —
 `test_timeline_persistence_limits.cpp` asserts that a known built-in type name at

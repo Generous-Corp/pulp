@@ -59,9 +59,23 @@ decode_command_playback_properties(const JsonValue& value, std::string path) {
     if (!decoded_gain || !decoded_fade_in || !decoded_fade_out ||
         decoded_gain.value() > std::numeric_limits<std::uint32_t>::max())
         return fail<ClipPlaybackProperties>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    // Optional, unlike the document field. Commands are authored input with no
+    // version-gated migration path of their own, so an omitted shape has to keep
+    // meaning what it meant before the field existed.
+    ClipFadeShape fade_shape = ClipFadeShape::Linear;
+    if (const auto* shape = value.find("fade_shape")) {
+        if (shape->kind != JsonValue::Kind::String)
+            return fail<ClipPlaybackProperties>(PersistenceErrorCode::UnexpectedType,
+                                                path + "/fade_shape");
+        if (shape->scalar == "equal_power")
+            fade_shape = ClipFadeShape::EqualPower;
+        else if (shape->scalar != "linear")
+            return fail<ClipPlaybackProperties>(PersistenceErrorCode::InvalidSchema,
+                                                path + "/fade_shape");
+    }
     return runtime::Ok(ClipPlaybackProperties{
         std::bit_cast<float>(static_cast<std::uint32_t>(decoded_gain.value())),
-        decoded_fade_in.value(), decoded_fade_out.value()});
+        decoded_fade_in.value(), decoded_fade_out.value(), fade_shape});
 }
 
 runtime::Result<std::vector<NoteEvent>, PersistenceError>
