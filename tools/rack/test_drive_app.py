@@ -171,6 +171,66 @@ def check_uidriver() -> int:
     return bad
 
 
+def check_success_line_agrees() -> int:
+    """The line patch.py PRINTS must be the line its readers parse.
+
+    One format, three consumers: patch.py writes "built N modules, M cables →
+    path", drive_app.py matches it with a regex, and the app scans the log for
+    it to find the artifact. Only the regex is strict, so a reworded line
+    leaves the app fine and turns every app-driven proof INCONCLUSIVE on
+    success — which is exactly what happened once and took a session to find.
+
+    Checked by building the real line from patch.py's own format string rather
+    than from a copy of it, because a copy is the thing that drifts.
+    """
+    import re
+    bad = 0
+    src = open(os.path.join(HERE, "patch.py")).read()
+
+    # The print that names the artifact, found by STRUCTURE rather than by
+    # its opening word. Anchoring on "built" made a reworded line report
+    # "cannot find the line" instead of "the reader will not parse it" — a
+    # check on the wording, when the wording changing is the whole risk.
+    fmt = re.search(r'print\(f"([^"]*)"\s*\n\s*f"([^"]*\{out\}[^"]*)"\)', src)
+    if not fmt:
+        print("  WRONG  no print naming {out} found in patch.py — the check "
+              "cannot see what it announces")
+        return 1
+
+    # Render it the way patch.py would, with plausible values.
+    line = fmt.group(1) + fmt.group(2)
+    line = re.sub(r"\{len\(patch\.get\('modules', \[\]\)\)\}", "8", line)
+    line = re.sub(r"\{len\(patch\.get\('cables', \[\]\)\)\}", "9", line)
+    line = line.replace("{out}", "/tmp/forge-patch.vcv").replace("\\n", "")
+    if "{" in line:
+        print(f"  WRONG  could not render patch.py's line: {line!r}")
+        return 1
+
+    # drive_app's own regex, taken from drive_app.
+    drv = open(os.path.join(HERE, "drive_app.py")).read()
+    pat = re.search(r'm = re\.search\(r"([^"]+)"', drv)
+    if not pat:
+        print("  WRONG  drive_app.py's success pattern is not where this "
+              "expects it")
+        return 1
+    if re.search(pat.group(1).encode().decode("unicode_escape"), line, re.M):
+        print(f"  ok     drive_app parses the line patch.py prints")
+    else:
+        print(f"  WRONG  drive_app's pattern does NOT match patch.py's line.\n"
+              f"         line:    {line!r}\n"
+              f"         pattern: {pat.group(1)!r}\n"
+              f"         Every app-driven proof reports INCONCLUSIVE on success.")
+        bad += 1
+
+    # And the app's looser rule: it scans for a line naming a .vcv.
+    if ".vcv" in line:
+        print("  ok     the line names a .vcv, which is what the app scans for")
+    else:
+        print("  WRONG  the line has no .vcv in it — the app cannot find the "
+              "artifact it just built")
+        bad += 1
+    return bad
+
 def main() -> int:
     bad = 0
     for case in CASES:
@@ -192,6 +252,7 @@ def main() -> int:
             print("         " + out.strip().replace("\n", "\n         ")[:400])
             bad += 1
     bad += check_uidriver()
+    bad += check_success_line_agrees()
     print(f"\n{len(CASES) - bad}/{len(CASES)} verdicts correct")
     return 1 if bad else 0
 
