@@ -5158,6 +5158,12 @@ TEST_CASE("the @ list actually lists modules", "[rack][mention]") {
         const auto all = forge_modular::search_modules("", 200);
         REQUIRE_FALSE(all.empty());
         CHECK(all.front().insertable());
+    } else {
+        // Legitimate — a machine with no Rack plugins has nothing installed —
+        // but it must SAY so. Silently taking the empty branch is a test
+        // reporting success for the half it did not run.
+        WARN("nothing installed here, so the installed-ranks-first half of "
+             "this test did not run. This is a skip, not a pass.");
     }
 }
 
@@ -6027,18 +6033,27 @@ TEST_CASE("the mention list ranks what you typed first", "[mention][rank]") {
     };
     const int breakout = rank_of("Breakout");
     const int calibrator = rank_of("Calibrator");
-    if (breakout >= 0 && calibrator >= 0) {
-        INFO("Breakout at " << breakout << ", Calibrator at " << calibrator);
-        CHECK(breakout < calibrator);
-    }
+    // REQUIRED, not guarded. Written as `if (both >= 0)`, the comparison
+    // silently stopped happening the moment either dropped out of the
+    // results — a guarded assertion is one that reports success for having
+    // skipped itself, which is the fault this whole test is about.
+    REQUIRE(breakout >= 0);
+    REQUIRE(calibrator >= 0);
+    INFO("Breakout at " << breakout << ", Calibrator at " << calibrator);
+    CHECK(breakout < calibrator);
 
     // A row matched by its slug says which name matched, or it reads as a
     // random result. Audible Instruments' Macro Oscillator is Braids.
+    bool saw_alias_row = false;
     for (const auto& h : hits) {
         if (h.name != "Macro Oscillator") continue;
+        saw_alias_row = true;
         INFO("alias: '" << h.alias << "'");
         CHECK_FALSE(h.alias.empty());
     }
+    // And the row was actually there. Without this the loop asserts nothing
+    // whenever Macro Oscillator falls out of the results, and passes for it.
+    CHECK(saw_alias_row);
 
     // A long name is cut rather than allowed to run under its badge. Ohmer's
     // 'BRK ("Break") expander for RKD' is thirty characters and overlapped
