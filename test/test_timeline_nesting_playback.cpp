@@ -762,3 +762,90 @@ TEST_CASE("A nested child track with a transparent mixer still lowers") {
     const auto events = program->find_track({3})->arrangement_note_events();
     REQUIRE_FALSE(events.empty());
 }
+
+namespace {
+
+// One controller stream a clip can carry beside its notes. The address is a
+// plain channel-voice controller, and the identities stay clear of the note
+// identity the builders below use.
+MidiExpressionLane controller_lane() {
+    return MidiExpressionLane{
+        {20}, MidiLaneAddress{0, 0, 11, 0, 74}, {{{21}, {0}, 0}, {{22}, {240}, 0xffffffff}}};
+}
+
+// A flat track holding one MIDI clip, with or without a controller lane, so the
+// refusal and its control differ in exactly the lane.
+Project flat_note_project(std::vector<MidiExpressionLane> lanes) {
+    auto content = take(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                            std::move(lanes)));
+    auto clip = take(Clip::create({12}, {0}, {960}, std::move(content)));
+    auto root = take(Sequence::create({2}, "root", TickDuration{960}, {track(3, {clip})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "flat notes";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root};
+    return take(Project::create(std::move(input)));
+}
+
+// A lane-bearing child clip the placement trims: the reference admits the first
+// half of the child, so the retained window ends before the child does.
+Project trimmed_nested_lane_project() {
+    auto content = take(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                            {controller_lane()}));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(content)));
+    auto child =
+        take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    auto root = take(
+        Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 480, 480)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "trimmed nested lane";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("A clip carrying expression lanes is refused instead of compiled without them") {
+    // The compiler reads only the notes, so compiling this clip would publish a
+    // program whose controllers silently stopped existing. The refusal names the
+    // clip that carries them, and nothing reaches the store: a published
+    // lane-less program is the loss this guard exists to prevent, so the empty
+    // store is the assertion that matters as much as the code.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(flat_note_project({controller_lane()}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    const auto status = compiler.status();
+    REQUIRE(status.has_error);
+    REQUIRE(status.last_error.code == CompileErrorCode::MidiExpressionLaneUnsupported);
+    REQUIRE(status.last_error.item == ItemId{12});
+    REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("A clip with no expression lanes still compiles") {
+    // The positive control for the refusal above: a guard that rejected every
+    // MIDI clip would pass the refusal test just as well.
+    const auto program = compile(shared(flat_note_project({})));
+    const auto events = program->find_track({3})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+}
+
+TEST_CASE("Trimming a lane-bearing nested clip keeps its own refusal") {
+    // Lowering refuses the trim before the compiler ever sees the clip, and it
+    // says something different: the inherited value at a trim boundary is
+    // undefined, which outlives the missing lane support the code above names.
+    const auto error = compile_error_for(trimmed_nested_lane_project());
+    REQUIRE(error.code == CompileErrorCode::TrimmedMidiLaneUnsupported);
+    REQUIRE(error.item == ItemId{12});
+}
