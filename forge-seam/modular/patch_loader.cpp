@@ -228,7 +228,13 @@ LoadedPatch load_patch(const std::string& path) {
                                           installed_version(rm.brand)) ==
                 PortMap::Gap::none;
         } else {
-            rm.controls_measured = false;
+            // Our own modules are not scanned and never need to be: their
+            // controls come from the manifest their panel was emitted from,
+            // which is always present. Marking them unmapped because the port
+            // map has no entry would put the badge on every module we drew
+            // ourselves, fully, with all its knobs -- the exact opposite of
+            // what it means.
+            rm.controls_measured = (rm.brand == "ForgeModular");
         }
         rm.available = rack_can_create(rm.brand, rm.name);
         out.modules.push_back(std::move(rm));

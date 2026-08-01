@@ -5548,3 +5548,34 @@ TEST_CASE("a module drawn without its controls is marked as unmapped",
     CHECK(min_x > a.width / 4);
     CHECK(min_y > a.height / 2);
 }
+
+// Our own modules are never "unmapped", whatever the port map holds.
+//
+// The port map exists for modules we did not make. Ours are drawn from the
+// manifest their panel was emitted from, so they are always fully known and
+// never scanned -- which means find() returns nothing for them, and treating
+// "no entry" as "not measured" put the badge on every module we drew
+// ourselves, with all its knobs visible underneath it.
+//
+// The fixture that missed it used one brand for both modules. This loads the
+// real patches instead, so the question is asked of the data that ships.
+TEST_CASE("a module we made is never marked unmapped", "[portmap][loader]") {
+    // The patch that travels with the tests, so this runs in a rebuilt
+    // worktree too -- the repo's examples/ directory is not there. The first
+    // version of this looked for it and skipped when it was missing, which
+    // Catch2 reports as a passing test case with no assertions: the shape
+    // that reports success for having checked nothing.
+    const auto patch_path = baseline_dir().parent_path() / "app-generated-patch.vcv";
+    REQUIRE(std::filesystem::exists(patch_path));
+
+    const auto patch = forge_modular::load_patch(patch_path.string());
+    int ours = 0;
+    for (const auto& m : patch.modules) {
+        if (m.brand != "ForgeModular") continue;
+        ++ours;
+        INFO("module " << m.name);
+        CHECK(m.controls_measured);
+    }
+    // A patch that loaded nothing would satisfy every CHECK above.
+    REQUIRE(ours > 0);
+}

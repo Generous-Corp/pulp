@@ -98,9 +98,16 @@ for f in "$SEAM"/modular/*_entry.cpp "$SEAM"/modular/main.cpp \
 done
 echo "  copied the plugin directory"
 
-# 4. The tests.
+# 4. The tests, INCLUDING their directories.
+#
+# This copied `test/*` without -R, so every subdirectory was silently skipped
+# -- and the baselines live in one. The no-leak test writes a baseline when it
+# finds none, so a rebuilt worktree did not fail: it rendered whatever the code
+# currently produced, adopted it as the reference, and reported success. A
+# guard against drift that accepts the drift, in the exact situation the seam
+# exists to recover from.
 mkdir -p "$DEST/test"
-cp "$SEAM"/test/* "$DEST/test/" 2>/dev/null
+cp -R "$SEAM"/test/. "$DEST/test/" 2>/dev/null
 echo "  copied the tests"
 
 # 5. Verify, because every one of these has been silently absent before and
