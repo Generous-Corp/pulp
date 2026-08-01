@@ -47,6 +47,10 @@ PortMap PortMap::parse(const std::string& json) {
             if (plugin.empty() || model.empty()) continue;
             MappedModule one;
             one.plugin_version = m["pluginVersion"].getWithDefault<std::string>("");
+            // Absent means version 1: the scanner that wrote those entries
+            // predates the field, and recorded jacks only.
+            one.scan_version =
+                static_cast<int>(m["scan"].getWithDefault<int64_t>(1));
             if (m.hasObjectMember("size") && m["size"].size() >= 2) {
                 one.width = static_cast<float>(m["size"][0].getWithDefault<double>(0.0));
                 one.height = static_cast<float>(m["size"][1].getWithDefault<double>(0.0));
@@ -89,6 +93,10 @@ PortMap::Gap PortMap::gap_for(const std::string& plugin, const std::string& mode
                               const std::string& installed_version) const {
     const auto* m = find(plugin, model);
     if (!m) return Gap::unmeasured;
+    // An older scanner measured less, so the entry is incomplete however well
+    // the plugin version matches -- and the version matching is exactly what
+    // made these look trustworthy.
+    if (m->scan_version < kScanVersion) return Gap::stale;
     if (installed_version.empty() || m->plugin_version.empty()) return Gap::none;
     return m->plugin_version == installed_version ? Gap::none : Gap::stale;
 }

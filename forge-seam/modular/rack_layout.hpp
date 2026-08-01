@@ -60,6 +60,34 @@ struct RackModule {
     /// and opens over there as a different rack with modules silently
     /// missing. Drawing it anyway is a confident lie about what you will get.
     bool available = true;
+    /// False when nothing has measured this module's CONTROLS -- either it
+    /// has never been scanned, or it was scanned by a scanner that recorded
+    /// jacks only.
+    ///
+    /// Distinct from `placed`, which is about jacks. A module can have every
+    /// jack in the right place and not one knob, and that is not a rare edge:
+    /// most of the map on this machine was written before controls were
+    /// recorded at all, and every one of those entries names the installed
+    /// plugin version, so nothing about it looks stale. Drawn without saying
+    /// so, it is a faceplate with wires going into it and no controls -- which
+    /// reads as "this module has no knobs" rather than "we did not measure
+    /// them".
+    bool controls_measured = true;
+    /// Where the module sits in Rack's grid: x in HP, y in ROWS.
+    ///
+    /// A patch stores this as `pos`, and Rack's grid is 15 points to the HP
+    /// and 380 to the row -- there is no half-row and no 1U: RACK_GRID_HEIGHT
+    /// is a constant and every module in the library is exactly that tall.
+    /// Eurorack's 1U utility rows are a physical-case idea Rack cannot
+    /// represent, so nothing here models them.
+    ///
+    /// Unset means "we were not told", and those modules are laid end to end
+    /// on row 0 in the order they appear -- which is what every patch this
+    /// preview drew before it read `pos` at all.
+    bool has_grid_pos = false;
+    int grid_x = 0;   ///< HP from the left of the rack
+    int grid_y = 0;   ///< which row
+
     /// How the module is named in prose, when that differs from `name`.
     ///
     /// `name` stays the model slug because the panel artwork is filed under
@@ -87,6 +115,9 @@ struct PanelBox {
     /// painting so the preview can say so rather than drawing a panel for
     /// something that will not be in the rack you open.
     bool available = true;
+    /// False when this module's controls have never been measured. The panel
+    /// is real and will load; it is drawn without its knobs, and has to say so.
+    bool controls_measured = true;
 };
 
 /// A laid-out jack, in view coordinates.
@@ -104,6 +135,7 @@ struct RackLayout {
     float scale = 1.0f;
     float origin_x = 0, origin_y = 0;
     float total_width = 0;   ///< unscaled
+    int rows = 1;            ///< how many 3U rows the rack occupies
     std::vector<PanelBox> panels;
 
     const PanelBox* panel(const std::string& id) const;

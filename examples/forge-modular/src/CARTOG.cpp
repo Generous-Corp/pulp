@@ -4,7 +4,11 @@
 
 #include "portmap_merge.hpp"
 
+#include <cxxabi.h>
+
 #include <cstdio>
+#include <cstdlib>
+#include <typeinfo>
 #include <set>
 #include <string>
 #include <vector>
@@ -76,6 +80,104 @@ struct CARTOGWidget : rack::app::ModuleWidget {
 
     /// Walk the rack and write down every module's ports.
     ///
+    /// Walk the widget tree, picking out what nothing enumerates.
+    ///
+    /// Params and ports have accessors; lights and displays do not, so the
+    /// only way to find them is to descend. Positions accumulate on the way
+    /// down because widgets nest -- a display's LEDs are children OF the
+    /// display, and recording their local coordinates would stack every one
+    /// of them in the panel's top-left corner.
+    ///
+    /// Screws and shadows are skipped: they are chrome every panel has, they
+    /// tell a reader nothing, and including them would bury the widgets that
+    /// do.
+    static void collect(rack::widget::Widget* w, rack::math::Vec origin,
+                        std::vector<std::string>& lights,
+                        std::vector<std::string>& displays,
+                        bool lights_only = false) {
+        for (rack::widget::Widget* child : w->children) {
+            if (!child) continue;
+            const rack::math::Vec at = origin.plus(child->box.pos);
+            const float cx = at.x + child->box.size.x * 0.5f;
+            const float cy = at.y + child->box.size.y * 0.5f;
+
+            if (dynamic_cast<rack::app::CircularShadow*>(child) ||
+                dynamic_cast<rack::app::SvgPanel*>(child)) {
+                continue;                                  // chrome, not content
+            }
+            if (dynamic_cast<rack::app::ModuleLightWidget*>(child)) {
+                lights.push_back("{\"x\": " + std::to_string(cx) +
+                                 ", \"y\": " + std::to_string(cy) +
+                                 ", \"w\": " + std::to_string(child->box.size.x) +
+                                 ", \"h\": " + std::to_string(child->box.size.y) + "}");
+                continue;                                  // its children are its own
+            }
+            if (dynamic_cast<rack::app::ParamWidget*>(child) ||
+                dynamic_cast<rack::app::PortWidget*>(child)) {
+                // Already enumerated -- but DESCEND anyway, for LIGHTS ONLY.
+                //
+                // An LED button is a ParamWidget with its light as a CHILD, so
+                // stopping here reported a panel covered in lit buttons as
+                // having no lights at all: Fundamental's Mutes is ten of them,
+                // and SEQ3 lost eleven.
+                //
+                // Lights only, because a knob's insides are the knob's. Rack
+                // wraps a rotating SvgKnob in a TransformWidget, and treating
+                // those as content put a 28x28 "display" under every knob in
+                // the library -- 34 of them across three modules.
+                collect(child, at, lights, displays, /*lights_only=*/true);
+                continue;
+            }
+
+            // Wrappers, not content. A FramebufferWidget is Rack's render
+            // cache and an SvgWidget is the panel image inside it; recording
+            // either says "a display fills this panel", which is true of the
+            // panel and useless. Descend through them to what they hold.
+            if (dynamic_cast<rack::widget::FramebufferWidget*>(child) ||
+                dynamic_cast<rack::widget::SvgWidget*>(child) ||
+                dynamic_cast<rack::widget::TransparentWidget*>(child)) {
+                collect(child, at, lights, displays, lights_only);
+                continue;
+            }
+
+            // Screws, by NAME rather than by type. rack::app::SvgScrew is one
+            // implementation and vendors subclass their own -- Fundamental's
+            // ThemedScrew is not an SvgScrew and slipped straight through a
+            // dynamic_cast. There is no common base to test, and four screws
+            // per panel across a library is a lot of noise burying the one
+            // widget that matters.
+            const std::string tn = type_name(child);
+            if (tn.find("Screw") != std::string::npos) continue;
+
+            // Anything left that occupies real space is SOMETHING -- a screen,
+            // a scope, a text field. Recorded by bounds and type name, because
+            // a rectangle we can say "a display lives here" about beats a
+            // blank we say nothing about. Tiny leftovers are layout glue.
+            if (!lights_only &&
+                child->box.size.x >= 6.0f && child->box.size.y >= 6.0f) {
+                displays.push_back("{\"x\": " + std::to_string(cx) +
+                                   ", \"y\": " + std::to_string(cy) +
+                                   ", \"w\": " + std::to_string(child->box.size.x) +
+                                   ", \"h\": " + std::to_string(child->box.size.y) +
+                                   ", \"type\": \"" + esc(tn) + "\"}");
+            }
+            collect(child, at, lights, displays, lights_only);
+        }
+    }
+
+    /// A widget's C++ class, demangled, for saying WHAT is in a rectangle.
+    static std::string type_name(rack::widget::Widget* w) {
+        const char* raw = typeid(*w).name();
+        int status = 0;
+        char* nice = abi::__cxa_demangle(raw, nullptr, nullptr, &status);
+        std::string out = (status == 0 && nice) ? nice : raw;
+        std::free(nice);
+        // Just the class, not the namespace chain: "LedDisplay" reads, and
+        // "rack::app::LedDisplay" is the same fact with more of it.
+        const auto at = out.rfind("::");
+        return at == std::string::npos ? out : out.substr(at + 2);
+    }
+
     /// Runs on the UI thread from step(), which is the only place the scene
     /// may be touched -- doing this from process() would be both a data race
     /// and a real-time violation.
@@ -97,6 +199,13 @@ struct CARTOGWidget : rack::app::ModuleWidget {
             out += "      \"plugin\": \"" + esc(model->plugin->slug) + "\",\n";
             out += "      \"model\": \"" + esc(model->slug) + "\",\n";
             out += "      \"pluginVersion\": \"" + esc(model->plugin->version) + "\",\n";
+            // Which scanner measured this, so a later one can tell that an
+            // entry it merged forward records less than it would have. A map
+            // is merged, never rewritten, so entries outlive the scanner that
+            // made them: without this, a module measured before controls were
+            // recorded at all reports a matching plugin version and reads as
+            // faithful. Keep in step with PortMap::kScanVersion.
+            out += "      \"scan\": 3,\n";
             // Panel size lets a preview lay modules out at true width without
             // parsing anyone's artwork.
             out += "      \"size\": [" + std::to_string(mw->box.size.x) + ", " +
@@ -124,6 +233,17 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                     std::string name;
                     if (rack::engine::ParamQuantity* q = pw->getParamQuantity())
                         name = q->getLabel();
+                    // WHICH control, not just where. A fader, a switch and a
+                    // knob occupy the same field in a manifest and look
+                    // nothing alike, and guessing from the drawn aspect ratio
+                    // gets switches wrong. Rack's own class hierarchy already
+                    // answers this, so ask it.
+                    const char* kind = "knob";
+                    if (dynamic_cast<rack::app::SliderKnob*>(pw))      kind = "slider";
+                    else if (dynamic_cast<rack::app::Knob*>(pw))       kind = "knob";
+                    else if (dynamic_cast<rack::app::SvgButton*>(pw))  kind = "button";
+                    else if (dynamic_cast<rack::app::Switch*>(pw))     kind = "switch";
+                    else                                              kind = "other";
                     // Centre, not corner: a knob turns about its middle and
                     // box.pos is the widget's top-left.
                     const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
@@ -133,7 +253,8 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                            ", \"x\": " + std::to_string(cx) +
                            ", \"y\": " + std::to_string(cy) +
                            ", \"w\": " + std::to_string(pw->box.size.x) +
-                           ", \"h\": " + std::to_string(pw->box.size.y) + "}";
+                           ", \"h\": " + std::to_string(pw->box.size.y) +
+                           ", \"kind\": \"" + kind + "\"}";
                 }
                 out += first ? "]" : "\n      ]";
                 out += ",\n";
@@ -163,6 +284,32 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                 }
                 out += first ? "]" : "\n      ]";
                 out += inputs ? ",\n" : "\n";
+            }
+            // Lights and everything else on the face.
+            //
+            // ModuleWidget enumerates params and ports and nothing else, so an
+            // LED or a screen is reachable only by walking the widget tree.
+            // Both matter: a sequencer is mostly lights, and a scope is mostly
+            // screen, and a drawing that omits them shows a panel of knobs
+            // where the user sees a display.
+            //
+            // Anything not otherwise classified is recorded as a "display"
+            // with its bounds and its C++ type. We cannot know what a vendor's
+            // custom widget draws, but we can know that SOMETHING occupies
+            // that rectangle -- which is the difference between a faithful
+            // placeholder and a blank.
+            {
+                std::vector<std::string> lights, displays;
+                collect(mw, rack::math::Vec(0, 0), lights, displays);
+                out += ",\n      \"lights\": [";
+                for (std::size_t i = 0; i < lights.size(); ++i)
+                    out += (i ? "," : "") + std::string("\n        ") + lights[i];
+                out += lights.empty() ? "]" : "\n      ]";
+                out += ",\n      \"displays\": [";
+                for (std::size_t i = 0; i < displays.size(); ++i)
+                    out += (i ? "," : "") + std::string("\n        ") + displays[i];
+                out += displays.empty() ? "]" : "\n      ]";
+                out += "\n";
             }
             out += "    }";
         }

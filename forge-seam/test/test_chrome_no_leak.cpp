@@ -16,6 +16,7 @@
 
 #include "forge/module_summary.hpp"
 #include "forge/patch_loader.hpp"
+#include "forge/portmap.hpp"
 #include "forge/rack_preview.hpp"
 #include <ImageIO/ImageIO.h>
 #include <catch2/catch_test_macros.hpp>
@@ -261,6 +262,46 @@ TEST_CASE("Forge Modular's home accessory reaches the chrome", "[seam]") {
 }
 
 namespace {
+
+/// A decoded frame, for comparing two renders pixel by pixel.
+///
+/// count_pixels_near answers "is this colour present", which cannot tell a mark
+/// drawn in the right place from the same mark drawn over everything. Where a
+/// change lands is the thing worth asserting, so this hands back the pixels.
+struct Decoded {
+    int width = 0, height = 0;
+    std::vector<std::uint8_t> pixels;   ///< RGBA, row-major from the top
+};
+
+Decoded decode_rgba(const std::vector<std::uint8_t>& png) {
+    Decoded out;
+    if (png.empty()) return out;
+    auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    auto* src = CGImageSourceCreateWithData(data, nullptr);
+    if (src && CGImageSourceGetCount(src) > 0) {
+        auto* img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        if (img) {
+            const std::size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+            out.width = static_cast<int>(w);
+            out.height = static_cast<int>(h);
+            out.pixels.assign(w * h * 4, 0);
+            auto* cs = CGColorSpaceCreateDeviceRGB();
+            auto* ctx = CGBitmapContextCreate(out.pixels.data(), w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast);
+            if (ctx) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+                CGContextRelease(ctx);
+            } else {
+                out = Decoded{};
+            }
+            CGColorSpaceRelease(cs);
+            CGImageRelease(img);
+        }
+    }
+    if (src) CFRelease(src);
+    CFRelease(data);
+    return out;
+}
 
 /// Count pixels close to a colour. CoreGraphics rather than a new dependency --
 /// the harness already decodes this way.
@@ -5276,4 +5317,234 @@ TEST_CASE("a picked mention is marked, and deletes as one thing",
     input->set_text("@VCO into the filter");
     CHECK_FALSE(shell.handle_prompt_key(bs));
     CHECK(input->text() == "@VCO into the filter");
+}
+
+TEST_CASE("a rack laid out in rows is drawn in rows", "[rack][layout]") {
+    // Every module went end to end on one line regardless of where the patch
+    // put it, so a two-row rack drew as one very long strip and shrank to
+    // nothing. Rack stores `pos` as [HP across, row down] -- and only that:
+    // RACK_GRID_HEIGHT is a constant, every module in the library is exactly
+    // 380 tall, and Eurorack's 1U utility rows are a physical-case idea that
+    // Rack cannot represent at all.
+    auto mod = [](const char* id, int hp, int x, int y) {
+        forge_modular::RackModule m;
+        m.id = id;
+        m.brand = "Test";
+        m.name = id;
+        m.hp = hp;
+        m.grid_x = x;
+        m.grid_y = y;
+        m.has_grid_pos = true;
+        return m;
+    };
+
+    const std::vector<forge_modular::RackModule> two_rows{
+        mod("a", 8, 0, 0), mod("b", 8, 8, 0),
+        mod("c", 8, 0, 1), mod("d", 8, 8, 1)};
+    const auto l = forge_modular::layout_rack(two_rows, 1200, 800);
+    REQUIRE(l.panels.size() == 4);
+    CHECK(l.rows == 2);
+
+    // The second row is BELOW the first, by exactly one panel height.
+    CHECK(l.panel("c")->y == Catch::Approx(l.panel("a")->y + l.panel("a")->height));
+    CHECK(l.panel("a")->y == Catch::Approx(l.panel("b")->y));      // same row
+    CHECK(l.panel("c")->y == Catch::Approx(l.panel("d")->y));
+
+    // And the rack is only as wide as one row, not all four butted together.
+    CHECK(l.total_width == Catch::Approx(16 * forge_modular::kHorizontalPitch));
+
+    // Rack saves ABSOLUTE grid coordinates around an offset of its own, so a
+    // real patch has positions in the thousands. Laid out literally that puts
+    // the rack off the side of the world; normalised, it is the same picture.
+    const std::vector<forge_modular::RackModule> far_away{
+        mod("a", 8, 2000, 100), mod("b", 8, 2008, 100),
+        mod("c", 8, 2000, 101), mod("d", 8, 2008, 101)};
+    const auto f = forge_modular::layout_rack(far_away, 1200, 800);
+    REQUIRE(f.panels.size() == 4);
+    CHECK(f.rows == 2);
+    CHECK(f.panel("a")->x == Catch::Approx(l.panel("a")->x));
+    CHECK(f.panel("d")->y == Catch::Approx(l.panel("d")->y));
+
+    // A patch that never said where anything goes keeps the old behaviour:
+    // end to end on one row, in order. It has no arrangement to lose.
+    std::vector<forge_modular::RackModule> unplaced{
+        mod("a", 8, 0, 0), mod("b", 4, 0, 0)};
+    for (auto& m : unplaced) m.has_grid_pos = false;
+    const auto u = forge_modular::layout_rack(unplaced, 1200, 800);
+    REQUIRE(u.panels.size() == 2);
+    CHECK(u.rows == 1);
+    CHECK(u.panel("b")->x == Catch::Approx(u.panel("a")->x + u.panel("a")->width));
+
+    // Taller racks scale DOWN to fit rather than running off the viewport --
+    // the whole point of noticing there is more than one row.
+    std::vector<forge_modular::RackModule> tall;
+    for (int r = 0; r < 6; ++r) tall.push_back(mod("r", 8, 0, r));
+    const auto t = forge_modular::layout_rack(tall, 1200, 800);
+    CHECK(t.rows == 6);
+    CHECK(t.scale < l.scale);
+    CHECK(t.panels.back().y + t.panels.back().height <= 800.0f);
+}
+
+// ── The port map: what a scan is allowed to claim ────────────────────────────
+//
+// A map is merged, never rewritten, so an entry outlives the scanner that made
+// it. That went wrong in the real map on this machine: fourteen of nineteen
+// modules were carried forward from a scanner that recorded jacks only, so
+// Fundamental's LFO had four inputs, four outputs and none of its knobs -- and
+// reported no gap at all, because the only thing compared was the plugin
+// version, which matched exactly. It drew as a faceplate with no controls and
+// nothing said it was incomplete.
+//
+// The fixture is that map's two vintages side by side.
+TEST_CASE("an entry from an older scanner is not passed off as measured",
+          "[portmap]") {
+    const std::string map = R"({
+  "modules": [
+    {
+      "plugin": "Fundamental",
+      "model": "LFO",
+      "pluginVersion": "2.6.4",
+      "size": [135.0, 380.0],
+      "inputs": [
+        {"index": 0, "name": "Frequency modulation", "x": 20.0, "y": 286.0}
+      ],
+      "outputs": [
+        {"index": 0, "name": "Sine", "x": 20.0, "y": 330.0}
+      ]
+    },
+    {
+      "plugin": "Fundamental",
+      "model": "VCO",
+      "pluginVersion": "2.6.4",
+      "scan": 3,
+      "size": [135.0, 380.0],
+      "params": [
+        {"index": 0, "name": "Frequency", "x": 67.0, "y": 100.0,
+         "w": 45.0, "h": 45.0}
+      ],
+      "inputs": [
+        {"index": 0, "name": "Frequency modulation", "x": 20.0, "y": 286.0}
+      ],
+      "outputs": []
+    }
+  ]
+})";
+
+    const auto pm = forge_modular::PortMap::parse(map);
+    REQUIRE(pm.size() == 2);
+
+    // Both are present and both name the installed version.
+    const auto* lfo = pm.find("Fundamental", "LFO");
+    const auto* vco = pm.find("Fundamental", "VCO");
+    REQUIRE(lfo != nullptr);
+    REQUIRE(vco != nullptr);
+    CHECK(lfo->plugin_version == "2.6.4");
+    CHECK(vco->plugin_version == "2.6.4");
+
+    // The difference is what was RECORDED, and it is visible in the data
+    // before any judgement is made about it.
+    CHECK(lfo->params.empty());
+    CHECK(vco->params.size() == 1);
+    CHECK(lfo->scan_version == 1);          // no field: the oldest scanner
+    CHECK(vco->scan_version == forge_modular::PortMap::kScanVersion);
+
+    // And the judgement. This is the assertion the missing test would have
+    // made: a matching plugin version is not enough to call an entry current.
+    CHECK(pm.gap_for("Fundamental", "LFO", "2.6.4") ==
+          forge_modular::PortMap::Gap::stale);
+    CHECK(pm.gap_for("Fundamental", "VCO", "2.6.4") ==
+          forge_modular::PortMap::Gap::none);
+
+    // The two gaps it already distinguished still work: never scanned, and
+    // scanned against a plugin that has since been updated.
+    CHECK(pm.gap_for("Fundamental", "VCF", "2.6.4") ==
+          forge_modular::PortMap::Gap::unmeasured);
+    CHECK(pm.gap_for("Fundamental", "VCO", "2.7.0") ==
+          forge_modular::PortMap::Gap::stale);
+
+    // A jack keeps the name its author gave it, which is what the explanation
+    // text is built from.
+    REQUIRE(lfo->inputs.size() == 1);
+    CHECK(lfo->inputs[0].name == "Frequency modulation");
+}
+
+// The UNMAPPED mark is drawn, and only where it belongs.
+//
+// Asserting on the layout flag alone would have passed while nothing reached
+// the screen -- the flag existed, was threaded through, and no paint code read
+// it. So this renders and compares pixels: the same two-module rack, once with
+// both modules measured and once with one of them not, must differ, and the
+// difference must sit in the lower part of the unmapped panel where the mark
+// goes.
+TEST_CASE("a module drawn without its controls is marked as unmapped",
+          "[portmap][preview]") {
+    auto rack_of = [](bool second_measured) {
+        std::vector<forge_modular::RackModule> mods;
+        for (int i = 0; i < 2; ++i) {
+            forge_modular::RackModule m;
+            m.id = i == 0 ? "a" : "b";
+            m.brand = "Fundamental";
+            m.name = i == 0 ? "VCO" : "LFO";
+            m.hp = 9;
+            m.placed = true;
+            m.has_artwork = false;
+            m.available = true;
+            m.controls_measured = (i == 0) ? true : second_measured;
+            mods.push_back(std::move(m));
+        }
+        return mods;
+    };
+
+    auto render = [&](bool second_measured, const char* tag) {
+        auto preview = std::make_shared<forge_modular::RackPreview>();
+        preview->set_bounds(pulp::view::Rect{0, 0, 640, 400});
+        preview->set_rack(rack_of(second_measured), {});
+        const auto path = std::filesystem::temp_directory_path() /
+                          (std::string("unmapped-") + tag + ".png");
+        REQUIRE(pulp::view::render_to_file(*preview, 640, 400, path.string(),
+                                           1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        auto bytes = read_all(path);
+        // A blank frame would match another blank frame and prove nothing.
+        REQUIRE(bytes.size() > 2000);
+        return path;
+    };
+
+    const auto clean = render(true, "clean");
+    const auto marked = render(false, "marked");
+
+    const auto a = decode_rgba(read_all(clean));
+    const auto b = decode_rgba(read_all(marked));
+    REQUIRE(a.width == b.width);
+    REQUIRE(a.height == b.height);
+    REQUIRE(a.width > 0);
+
+    // Where do they differ? Nowhere, if the flag never reached the paint.
+    int differing = 0;
+    int min_y = a.height, max_y = -1, min_x = a.width, max_x = -1;
+    for (int y = 0; y < a.height; ++y) {
+        for (int x = 0; x < a.width; ++x) {
+            const std::size_t at = (static_cast<std::size_t>(y) * a.width + x) * 4;
+            if (a.pixels[at] != b.pixels[at] ||
+                a.pixels[at + 1] != b.pixels[at + 1] ||
+                a.pixels[at + 2] != b.pixels[at + 2]) {
+                ++differing;
+                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+            }
+        }
+    }
+    INFO("differing pixels: " << differing
+         << "  x " << min_x << ".." << max_x
+         << "  y " << min_y << ".." << max_y
+         << "  frame " << a.width << "x" << a.height);
+
+    // Enough pixels to be a legible strip and a word, not a stray line.
+    CHECK(differing > 200);
+
+    // The mark belongs to the SECOND panel, in its lower portion. If the flag
+    // were read for the wrong module, or the mark drawn over the whole rack,
+    // this is what catches it.
+    CHECK(min_x > a.width / 4);
+    CHECK(min_y > a.height / 2);
 }

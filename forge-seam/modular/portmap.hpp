@@ -32,6 +32,8 @@ struct MappedWidget {
 /// One module's measured layout.
 struct MappedModule {
     std::string plugin_version;
+    /// Which scanner measured it. See PortMap::kScanVersion.
+    int scan_version = 0;
     float width = 0, height = 0;
     std::vector<MappedWidget> params;
     std::vector<MappedWidget> inputs;
@@ -60,11 +62,30 @@ public:
     /// depending on whatever this machine happens to have scanned.
     static PortMap parse(const std::string& json);
 
+    /// What the current scanner records.
+    ///
+    /// Bumped whenever CARTOG starts measuring something it did not before, so
+    /// an entry from an older scanner is detectable. It has to be, because a
+    /// map is MERGED rather than rewritten: a module measured once is carried
+    /// forward untouched by every later scan, and stays at whatever the
+    /// scanner of the day knew how to record.
+    ///
+    /// That is not hypothetical. Fourteen of nineteen mapped modules were
+    /// carried over from a scanner that recorded jacks and no controls, so
+    /// Fundamental's LFO had four inputs, four outputs and not one of its
+    /// knobs -- while its plugin version matched exactly, which was the only
+    /// thing being compared. They read as fully measured and drew as faceless.
+    ///
+    ///   1  jacks only
+    ///   2  controls, with their kind, size and label
+    ///   3  lights and displays
+    static constexpr int kScanVersion = 3;
+
     /// Why a module cannot be drawn faithfully, if it cannot.
     enum class Gap {
-        none,       ///< measured, and measured against the installed version
+        none,       ///< measured, by the current scanner
         unmeasured, ///< never placed in front of CARTOG
-        stale,      ///< measured, but the plugin has been updated since
+        stale,      ///< measured, but by an older scanner or an older plugin
     };
 
     /// What stands between this module and a faithful drawing.

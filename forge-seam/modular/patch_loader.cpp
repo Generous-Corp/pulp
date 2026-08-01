@@ -27,17 +27,24 @@ namespace {
 ///
 /// Read straight from the installed plugin.json, cached per plugin: it is the
 /// same file Rack reads, so this cannot drift from what Rack will do.
-bool rack_can_create(const std::string& plugin, const std::string& model) {
-    if (plugin.empty() || model.empty()) return true;
-    // Core is compiled into Rack rather than installed, so it is always there.
-    if (plugin == "Core") return true;
+/// What an installed plugin.json says: which models it has, and its version.
+///
+/// Both come from one read. The version is what a port-map entry is checked
+/// against, so reading it from a different place than the model list would let
+/// the two disagree about which plugin is even installed.
+struct InstalledPlugin {
+    std::set<std::string> models;
+    std::string version;
+};
 
-    static std::map<std::string, std::set<std::string>> cache;
+const InstalledPlugin& installed_plugin(const std::string& plugin) {
+    static std::map<std::string, InstalledPlugin> cache;
     static std::mutex lock;
     std::lock_guard<std::mutex> held(lock);
     auto it = cache.find(plugin);
     if (it == cache.end()) {
-        std::set<std::string> models;
+        InstalledPlugin found;
+        std::set<std::string>& models = found.models;
         const char* home = std::getenv("HOME");
         const std::filesystem::path base =
             std::string(home ? home : ".") + "/Library/Application Support/Rack2";
@@ -53,6 +60,9 @@ bool rack_can_create(const std::string& plugin, const std::string& model) {
             ss << f.rdbuf();
             try {
                 const auto doc = choc::json::parse(ss.str());
+                if (doc.hasObjectMember("version"))
+                    found.version =
+                        doc["version"].getWithDefault<std::string>("");
                 if (doc.hasObjectMember("modules")) {
                     const auto ms = doc["modules"];
                     for (uint32_t i = 0; i < ms.size(); ++i)
@@ -63,16 +73,31 @@ bool rack_can_create(const std::string& plugin, const std::string& model) {
             } catch (...) {
                 // A manifest we cannot read is not evidence of absence.
                 models.clear();
+                found.version.clear();
                 break;
             }
         }
-        it = cache.emplace(plugin, std::move(models)).first;
+        it = cache.emplace(plugin, std::move(found)).first;
     }
+    return it->second;
+}
+
+/// The version of the plugin installed here, or empty when it is not.
+std::string installed_version(const std::string& plugin) {
+    if (plugin.empty() || plugin == "Core") return {};
+    return installed_plugin(plugin).version;
+}
+
+bool rack_can_create(const std::string& plugin, const std::string& model) {
+    if (plugin.empty() || model.empty()) return true;
+    // Core is compiled into Rack rather than installed, so it is always there.
+    if (plugin == "Core") return true;
+    const auto& found = installed_plugin(plugin);
     // No manifest found at all means Rack is not installed here, or this is
     // somebody else's machine's patch. Not knowing is not the same as knowing
     // it is missing, so nothing is claimed.
-    if (it->second.empty()) return true;
-    return it->second.count(model) > 0;
+    if (found.models.empty()) return true;
+    return found.models.count(model) > 0;
 }
 
 
@@ -158,6 +183,15 @@ LoadedPatch load_patch(const std::string& path) {
         // CARTOG measured both from inside Rack, so use what it measured.
         // A module nobody has scanned still gets the honest default: the
         // fallback is for the unmeasured, not for everyone.
+        // Where the module sits, if the patch says. Rack writes `pos` as
+        // [HP across, row down]; ignoring it laid a two-row rack out as one
+        // very long strip that then shrank to fit, losing the arrangement the
+        // patch was built to be read in.
+        if (m.hasObjectMember("pos") && m["pos"].size() >= 2) {
+            rm.grid_x = static_cast<int>(m["pos"][0].getWithDefault<int64_t>(0));
+            rm.grid_y = static_cast<int>(m["pos"][1].getWithDefault<int64_t>(0));
+            rm.has_grid_pos = true;
+        }
         rm.hp = 8;
         rm.placed = false;
         if (const auto* mapped = PortMap::shared().find(rm.brand, rm.name)) {
@@ -186,6 +220,15 @@ LoadedPatch load_patch(const std::string& path) {
             add(mapped->outputs, "out", false);
             // Placed means "we know where its jacks are", which is now true.
             rm.placed = !rm.ports.empty();
+            // Whether its CONTROLS are known is a separate question, and the
+            // one a stale entry gets wrong: it answers the version check
+            // correctly and still holds no controls at all.
+            rm.controls_measured =
+                PortMap::shared().gap_for(rm.brand, rm.name,
+                                          installed_version(rm.brand)) ==
+                PortMap::Gap::none;
+        } else {
+            rm.controls_measured = false;
         }
         rm.available = rack_can_create(rm.brand, rm.name);
         out.modules.push_back(std::move(rm));

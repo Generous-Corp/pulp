@@ -27,34 +27,78 @@ const PanelBox* RackLayout::panel(const std::string& id) const {
 RackLayout layout_rack(const std::vector<RackModule>& modules,
                        float viewport_width, float viewport_height) {
     RackLayout out;
-    for (const auto& m : modules)
-        out.total_width += static_cast<float>(m.hp) * kHorizontalPitch;
-    if (modules.empty() || out.total_width <= 0.0f) return out;
+    if (modules.empty()) return out;
 
-    // Fit the whole strip, with breathing room, and never blow a small rack up
+    // Rack's own grid: the patch says where each module sits, in HP across and
+    // rows down. Everything used to be laid end to end on one line regardless,
+    // so a two-row rack drew as one very long strip and shrank to nothing --
+    // and a patch built to be read in rows lost the arrangement that made it
+    // readable.
+    //
+    // Modules without a position keep the old behaviour: appended to row 0 in
+    // order. A patch that never said where anything goes has not got an
+    // arrangement to lose.
+    std::vector<std::pair<int, int>> cell(modules.size());   // (hp_x, row)
+    int appended_x = 0;
+    int min_x = 0, min_y = 0;
+    bool first = true;
+    for (std::size_t i = 0; i < modules.size(); ++i) {
+        const auto& m = modules[i];
+        if (m.has_grid_pos) {
+            cell[i] = {m.grid_x, m.grid_y};
+        } else {
+            cell[i] = {appended_x, 0};
+            appended_x += std::max(1, m.hp);
+        }
+        if (first) { min_x = cell[i].first; min_y = cell[i].second; first = false; }
+        min_x = std::min(min_x, cell[i].first);
+        min_y = std::min(min_y, cell[i].second);
+    }
+
+    // Normalised, because Rack saves absolute grid coordinates around an
+    // offset of its own -- a real patch has positions in the thousands, and
+    // laying those out literally puts the rack off the side of the world.
+    float span_x = 0.0f;
+    int rows = 1;
+    for (std::size_t i = 0; i < modules.size(); ++i) {
+        cell[i].first -= min_x;
+        cell[i].second -= min_y;
+        span_x = std::max(span_x, static_cast<float>(cell[i].first +
+                                                     std::max(1, modules[i].hp)));
+        rows = std::max(rows, cell[i].second + 1);
+    }
+    out.total_width = span_x * kHorizontalPitch;
+    out.rows = rows;
+    if (out.total_width <= 0.0f) return out;
+
+    const float total_height = static_cast<float>(rows) * kPanelHeight;
+
+    // Fit the whole rack, with breathing room, and never blow a small one up
     // past a little over life size -- two modules stretched to fill a wide
     // window stop looking like Eurorack.
     const float fit_w = (viewport_width - 70.0f) / out.total_width;
-    const float fit_h = (viewport_height - 110.0f) / kPanelHeight;
+    const float fit_h = (viewport_height - 110.0f) / total_height;
     out.scale = std::min({fit_w, fit_h, 1.05f});
     if (!(out.scale > 0.0f)) out.scale = 0.01f;   // a degenerate viewport, not a crash
 
     out.origin_x = (viewport_width - out.total_width * out.scale) / 2.0f;
-    out.origin_y = (viewport_height - kPanelHeight * out.scale) / 2.0f - 10.0f;
+    out.origin_y = (viewport_height - total_height * out.scale) / 2.0f - 10.0f;
 
-    float x = out.origin_x;
-    for (const auto& m : modules) {
+    for (std::size_t i = 0; i < modules.size(); ++i) {
+        const auto& m = modules[i];
         PanelBox box;
         box.id = m.id;
-        box.x = x;
-        box.y = out.origin_y;
-        box.width = static_cast<float>(m.hp) * kHorizontalPitch * out.scale;
+        box.x = out.origin_x + static_cast<float>(cell[i].first) *
+                                   kHorizontalPitch * out.scale;
+        box.y = out.origin_y + static_cast<float>(cell[i].second) *
+                                   kPanelHeight * out.scale;
+        box.width = static_cast<float>(std::max(1, m.hp)) * kHorizontalPitch * out.scale;
         box.height = kPanelHeight * out.scale;
         box.placed = m.placed;
         box.has_artwork = m.has_artwork;
         box.available = m.available;
+        box.controls_measured = m.controls_measured;
         out.panels.push_back(box);
-        x += box.width;   // butted, no gutter: that is what a rack does
     }
     return out;
 }

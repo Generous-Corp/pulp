@@ -636,6 +636,31 @@ void RackPreview::paint(Canvas& canvas) {
         canvas.restore();
     }
 
+    // A module drawn without its controls says so, quietly.
+    //
+    // Quietly on purpose: unlike NOT IN RACK this module is real and will load
+    // exactly as drawn -- what is missing is our measurement of its knobs, not
+    // the module. Blacking it out would overstate the problem. But saying
+    // nothing understates it, because a faceplate with jacks and no controls
+    // reads as a module that HAS no controls, and most of the map on this
+    // machine is in exactly that state while naming the right plugin version.
+    for (const auto& panel : L.panels) {
+        if (panel.controls_measured || !panel.available) continue;
+        const float h = std::max(9.0f, 11.0f * L.scale);
+        canvas.save();
+        canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(0, 0, 0, 150));
+        canvas.fill_rect(panel.x, panel.y + panel.height - h,
+                         panel.width, h);
+        canvas.set_font(forge::design::type::mono, std::max(7.0f, 8.0f * L.scale));
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(0xE8, 0xB3, 0x39));
+        canvas.set_text_align(pulp::canvas::TextAlign::center);
+        canvas.fill_text("UNMAPPED", panel.x + panel.width / 2.0f,
+                         panel.y + panel.height - h * 0.25f);
+        canvas.set_text_align(pulp::canvas::TextAlign::left);
+        canvas.restore();
+    }
+
     // What each colour means, bottom right, and only for the roles this patch
     // actually uses. A legend listing four roles for a patch that has two says
     // something untrue about the rack in front of you.
