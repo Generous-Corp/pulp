@@ -612,7 +612,14 @@ int cmd_validate(const std::vector<std::string>& args) {
     }
 
     const bool strict_fail = strict && skipped_missing_tool > 0;
-    bool inspector_evidence_complete = true;
+    const auto inspector_report =
+        fs::is_directory(build_dir / "pulp-inspector-manifests")
+            ? pulp::cli::inspector_shipping::load_report(build_dir)
+            : pulp::cli::inspector_shipping::empty_report();
+    const bool inspector_evidence_complete = inspector_report.complete;
+    if (!inspector_evidence_complete)
+        std::cerr << "Inspector capability evidence incomplete: "
+                  << inspector_report.error << "\n";
 
     // JSON report output
 
@@ -633,14 +640,6 @@ int cmd_validate(const std::vector<std::string>& args) {
         // Aggregate evidence + install/package readiness: a bundle is install-safe
         // only when nothing failed (and, under --strict, nothing was skipped),
         // matching `pulp build --install`'s "validation is the gate" policy.
-        const auto inspector_report =
-            fs::is_directory(build_dir / "pulp-inspector-manifests")
-                ? pulp::cli::inspector_shipping::load_report(build_dir)
-                : pulp::cli::inspector_shipping::empty_report();
-        inspector_evidence_complete = inspector_report.complete;
-        if (!inspector_evidence_complete)
-            std::cerr << "Inspector capability evidence incomplete: "
-                      << inspector_report.error << "\n";
         const bool install_ready = (failed == 0) && !(strict && skipped > 0) &&
             inspector_evidence_complete;
         report << "  \"summary\": {\"total\": " << total

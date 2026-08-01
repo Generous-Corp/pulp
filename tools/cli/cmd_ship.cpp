@@ -974,8 +974,9 @@ static int ship_check(const std::vector<std::string>& args,
                 return unknown_ship_arg(sub, args[i]);
             }
 
-        const auto inspector_report =
-            pulp::cli::inspector_shipping::load_report(build_dir);
+        const auto inspector_report = target == "android"
+            ? pulp::cli::inspector_shipping::empty_report()
+            : pulp::cli::inspector_shipping::load_report(build_dir);
         if (!inspector_report.complete) {
             std::cerr << "pulp ship check: " << inspector_report.error << "\n";
             return 2;
@@ -2211,8 +2212,20 @@ int cmd_ship(const std::vector<std::string>& args) {
         return ship_doctor(args, root);
 
     auto build_dir = root / "build";
+    bool android_check = false;
+    if (sub == "check") {
+        for (std::size_t i = 1; i + 1 < args.size(); ++i) {
+            if (args[i] == "--target" && args[i + 1] == "android") {
+                android_check = true;
+                break;
+            }
+        }
+    }
     // swap-pack signs a UX bundle passed explicitly; it needs no configured build.
-    if (sub != "swap-pack" && !fs::exists(build_dir / "CMakeCache.txt")) {
+    // Android signing checks inspect Gradle artifacts and likewise do not need
+    // a native CMake build.
+    if (sub != "swap-pack" && !android_check &&
+        !fs::exists(build_dir / "CMakeCache.txt")) {
         std::cerr << "Build directory not found. Run `pulp build` first.\n";
         return 1;
     }

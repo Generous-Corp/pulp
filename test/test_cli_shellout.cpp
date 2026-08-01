@@ -3131,4 +3131,38 @@ TEST_CASE("pulp validate accepts a manifest-free empty build report",
         "\"inspector_capability_evidence_complete\": true") != std::string::npos);
     REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
             std::string::npos);
+
+    fs::create_directories(project / "build" / "pulp-inspector-manifests");
+    auto incomplete = run_pulp_in_directory(project, {"validate"});
+    REQUIRE_FALSE(incomplete.timed_out);
+    REQUIRE(incomplete.exit_code != 0);
+    REQUIRE(incomplete.stderr_output.find(
+        "Inspector capability evidence incomplete") != std::string::npos);
+}
+
+TEST_CASE("pulp ship check android ignores standalone inspector manifests",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-ship-check-android-inspector");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "artifacts");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(Android)\n";
+    }
+    {
+        std::ofstream apk(project / "artifacts" / "fixture.apk", std::ios::binary);
+        apk << "unsigned fixture";
+    }
+    auto result = run_pulp_in_directory(
+        project, {"ship", "check", "--target", "android", "--json"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
+    REQUIRE(result.stderr_output.find("inspector capability manifest") ==
+            std::string::npos);
 }
