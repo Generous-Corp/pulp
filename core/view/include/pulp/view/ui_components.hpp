@@ -116,6 +116,27 @@ public:
     /// Close any currently open ComboBox (call before opening a new one).
     static void close_active_popup();
 
+    /// The open dropdown that belongs to `scope`'s own tree, or nullptr.
+    ///
+    /// This is the root-scoped read every host and routing verb must use in
+    /// place of the `active_popup_` shim mirror. The mirror names the
+    /// most-recently-opened popup PROCESS-WIDE, so in the shared
+    /// AUHostingService case (several Pulp editors in one host process) a host
+    /// that consults it routes a pointer landing inside editor A's dropdown
+    /// rect into A's ComboBox even when the event was delivered to editor B —
+    /// B's own scroll/hit handling never runs, and B's captured drag target
+    /// becomes a View owned by a different plugin instance.
+    ///
+    /// Resolves `scope`'s root-owned interaction slot, which by construction
+    /// only ever names a popup inside that same tree. Any view in the tree may
+    /// be passed — a ScrollView asking "is a dropdown open in my editor?" gets
+    /// the same answer as the root.
+    static ComboBox* active_popup_in(View& scope);
+
+    /// Close the open dropdown owned by `scope`'s tree, leaving any other
+    /// editor's popup alone. Root-scoped counterpart to close_active_popup().
+    static void close_active_popup_in(View& scope);
+
     /// Called by the root view on any mouse click — closes popup if click is outside.
     static void notify_global_click(View* target);
 

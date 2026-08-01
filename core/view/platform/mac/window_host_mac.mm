@@ -287,7 +287,11 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
 // and any enclosing ScrollView (whose scroll would otherwise close the popup).
 - (pulp::view::ComboBox*)routeToOpenComboPopup:(pulp::view::Point)pt
                                      configure:(void (^)(pulp::view::MouseEvent&))configure {
-    auto* combo = pulp::view::ComboBox::active_popup_;
+    // Scoped to THIS window's root: a second window (or a hosted plugin editor
+    // sharing the process) must not receive this window's pointer just because
+    // it holds the process-wide `active_popup_` mirror.
+    if (!self.rootView) return nullptr;
+    auto* combo = pulp::view::ComboBox::active_popup_in(*self.rootView);
     if (!combo) return nullptr;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
     if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
@@ -857,8 +861,9 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             // so a stolen-focus case wedges the dropdown open with no
             // keyboard escape route. Close at host level the same way
             // active_overlay_ does below.
-            if (pulp::view::ComboBox::active_popup_) {
-                pulp::view::ComboBox::close_active_popup();
+            if (self.rootView &&
+                pulp::view::ComboBox::active_popup_in(*self.rootView)) {
+                pulp::view::ComboBox::close_active_popup_in(*self.rootView);
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
                 return;
@@ -949,8 +954,9 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
                 // Don't consume — let normal hover handling continue for cursor changes
             }
 
-            if (pulp::view::ComboBox::active_popup_) {
-                auto* combo = pulp::view::ComboBox::active_popup_;
+            if (auto* combo = self.rootView
+                    ? pulp::view::ComboBox::active_popup_in(*self.rootView)
+                    : nullptr) {
                 float cx = 0, cy = 0;
                 auto* v = static_cast<pulp::view::View*>(combo);
                 while (v) { cx += v->bounds().x; cy += v->bounds().y; v = v->parent(); }

@@ -35,8 +35,12 @@ bool is_descendant_of(const View& ancestor, const View* view) {
 }
 
 void close_active_combo_popup_in_subtree(View& root) {
-    auto* active = ComboBox::active_popup_;
-    if (active != nullptr && is_descendant_of(root, active)) ComboBox::close_active_popup();
+    // This tree's popup, not the process-wide mirror: the mirror names whichever
+    // editor opened a dropdown MOST RECENTLY, so with a second editor live in the
+    // same process a recycling list could miss its own open popup entirely.
+    auto* active = ComboBox::active_popup_in(root);
+    if (active != nullptr && is_descendant_of(root, active))
+        ComboBox::close_active_popup_in(root);
 }
 } // namespace
 
