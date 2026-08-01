@@ -3,8 +3,11 @@ if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR)
 endif()
 set(_scanner "${PULP_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake")
 include("${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake")
-_pulp_inspector_json_escape(_escaped_metadata "quoted \"name\"\\path\nline")
-if(NOT _escaped_metadata STREQUAL "quoted \\\"name\\\"\\\\path\\nline")
+string(ASCII 8 _backspace)
+_pulp_inspector_json_escape(
+    _escaped_metadata "quoted \"name\"\\path\nline${_backspace}")
+if(NOT _escaped_metadata STREQUAL
+   "quoted \\\"name\\\"\\\\path\\nline\\u0008")
     message(FATAL_ERROR "inspector manifest metadata JSON escaping regressed")
 endif()
 file(MAKE_DIRECTORY "${FIXTURE_DIR}")
