@@ -166,8 +166,8 @@ std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
 #if defined(_WIN32)
     const auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
     const auto handle = ::CreateFileW(
-        path.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        path.c_str(), access, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
     BY_HANDLE_FILE_INFORMATION info{};
@@ -202,12 +202,13 @@ bool PinnedFile::hash_matches(std::string_view expected_hex,
     std::uint64_t size = 0;
 #if defined(_WIN32)
     const auto handle = reinterpret_cast<HANDLE>(native_);
-    BY_HANDLE_FILE_INFORMATION info{};
-    if (::GetFileInformationByHandle(handle, &info) == 0 ||
-        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        info.nNumberOfLinks != 1)
+    BY_HANDLE_FILE_INFORMATION before{};
+    if (::GetFileInformationByHandle(handle, &before) == 0 ||
+        (before.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+            0 ||
+        before.nNumberOfLinks != 1)
         return false;
-    size = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32u) | info.nFileSizeLow;
+    size = (static_cast<std::uint64_t>(before.nFileSizeHigh) << 32u) | before.nFileSizeLow;
     if (size > maximum_bytes)
         return false;
     LARGE_INTEGER beginning{};
@@ -215,15 +216,17 @@ bool PinnedFile::hash_matches(std::string_view expected_hex,
         return false;
 #else
     const auto descriptor = static_cast<int>(native_);
-    struct stat status{};
-    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 1)
+    struct stat before{};
+    if (::fstat(descriptor, &before) != 0 || !S_ISREG(before.st_mode) || before.st_nlink != 1)
         return false;
-    if (status.st_size < 0 || static_cast<std::uint64_t>(status.st_size) > maximum_bytes)
+    if (before.st_size < 0 || static_cast<std::uint64_t>(before.st_size) > maximum_bytes)
         return false;
-    size = static_cast<std::uint64_t>(status.st_size);
+    size = static_cast<std::uint64_t>(before.st_size);
     if (::lseek(descriptor, 0, SEEK_SET) < 0)
         return false;
 #endif
+
+    invoke_fault_hook(PackageFaultPoint::BlobHashSnapshot);
 
     mbedtls_sha256_context hash;
     mbedtls_sha256_init(&hash);
@@ -251,6 +254,43 @@ bool PinnedFile::hash_matches(std::string_view expected_hex,
 #endif
         mbedtls_sha256_update(&hash, buffer.data(), static_cast<std::size_t>(count));
         offset += static_cast<std::uint64_t>(count);
+    }
+
+#if defined(_WIN32)
+    std::uint8_t trailing = 0;
+    DWORD trailing_count = 0;
+    BY_HANDLE_FILE_INFORMATION after{};
+    const bool stable = ::ReadFile(handle, &trailing, 1, &trailing_count, nullptr) != 0 &&
+                        trailing_count == 0 &&
+                        ::GetFileInformationByHandle(handle, &after) != 0 &&
+                        before.nFileSizeHigh == after.nFileSizeHigh &&
+                        before.nFileSizeLow == after.nFileSizeLow &&
+                        before.ftLastWriteTime.dwHighDateTime == after.ftLastWriteTime.dwHighDateTime &&
+                        before.ftLastWriteTime.dwLowDateTime == after.ftLastWriteTime.dwLowDateTime &&
+                        before.nNumberOfLinks == after.nNumberOfLinks;
+#else
+    std::uint8_t trailing = 0;
+    const auto trailing_count = ::read(descriptor, &trailing, 1);
+    struct stat after{};
+    const bool stat_after = ::fstat(descriptor, &after) == 0;
+#if defined(__APPLE__)
+    const bool timestamps_match =
+        stat_after && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec &&
+        before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec &&
+        before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec &&
+        before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec;
+#else
+    const bool timestamps_match = stat_after && before.st_mtim.tv_sec == after.st_mtim.tv_sec &&
+                                  before.st_mtim.tv_nsec == after.st_mtim.tv_nsec &&
+                                  before.st_ctim.tv_sec == after.st_ctim.tv_sec &&
+                                  before.st_ctim.tv_nsec == after.st_ctim.tv_nsec;
+#endif
+    const bool stable = trailing_count == 0 && stat_after && before.st_size == after.st_size &&
+                        before.st_nlink == after.st_nlink && timestamps_match;
+#endif
+    if (!stable) {
+        mbedtls_sha256_free(&hash);
+        return false;
     }
     std::array<std::uint8_t, 32> digest{};
     mbedtls_sha256_finish(&hash, digest.data());
@@ -490,7 +530,10 @@ bool fence_file(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
     const auto handle =
         ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+                      OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH |
+                          FILE_FLAG_OPEN_REPARSE_POINT,
+                      nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return false;
     const bool fenced = ::FlushFileBuffers(handle) != 0;
@@ -600,7 +643,8 @@ bool regular_file_no_links(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
     const auto handle = ::CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                      nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return false;
     BY_HANDLE_FILE_INFORMATION info{};

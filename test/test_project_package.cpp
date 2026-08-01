@@ -46,6 +46,7 @@ namespace fs = std::filesystem;
 
 fs::path g_swap_after_blob_verification;
 fs::path g_blob_swap_source;
+fs::path g_append_during_hash;
 std::atomic<std::uint64_t> g_blob_verifications{0};
 
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
@@ -60,6 +61,13 @@ void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) 
 void count_blob_verification(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point == pulp::project_package::detail::PackageFaultPoint::BlobReferenceVerified)
         g_blob_verifications.fetch_add(1, std::memory_order_relaxed);
+}
+
+void append_during_blob_hash(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::BlobHashSnapshot)
+        return;
+    std::ofstream output(g_append_during_hash, std::ios::binary | std::ios::app);
+    output << "suffix";
 }
 
 class TemporaryPackage {
@@ -700,6 +708,26 @@ TEST_CASE("Atomic project-package publisher rejects staged symlinks",
     REQUIRE_FALSE(fs::exists(destination));
 }
 
+TEST_CASE("Atomic project-package file publication rejects a staged symlink",
+          "[project-package][atomic-publisher][symlink]") {
+    TemporaryPackage temporary("atomic-file-symlink");
+    fs::create_directories(temporary.path);
+    auto publisher = AtomicPublisher::create(temporary.path / "published");
+    REQUIRE(publisher);
+    const auto external = temporary.path / "external.txt";
+    std::ofstream(external) << "external";
+    const auto staged = publisher->staging_directory() / "redirect";
+    std::error_code error;
+    fs::create_symlink(external, staged, error);
+    if (error)
+        SKIP("symlink creation is unavailable: " << error.message());
+
+    const auto committed = publisher->commit_file(staged);
+    REQUIRE_FALSE(committed);
+    REQUIRE(committed.error().code == PackageErrorCode::InvalidPath);
+    REQUIRE_FALSE(fs::exists(temporary.path / "published"));
+}
+
 TEST_CASE("Atomic project-package publisher rejects symlinked write ancestors",
           "[project-package][atomic-publisher][symlink]") {
     TemporaryPackage temporary("atomic-ancestor-symlink");
@@ -839,6 +867,33 @@ TEST_CASE("Project publication rejects a blob pathname swapped after handle veri
     REQUIRE(published.error().code == PackageErrorCode::InvalidGeneration);
     REQUIRE_FALSE(fs::exists(temporary.path / "project.json"));
 }
+
+#if !defined(_WIN32)
+TEST_CASE("Project package hashing rejects a file appended after its size snapshot",
+          "[project-package][hash-race]") {
+    TemporaryPackage temporary("hash-append-race");
+    fs::create_directories(temporary.path);
+    const std::vector<std::uint8_t> bytes{'p', 'r', 'e', 'f', 'i', 'x'};
+    const auto path = temporary.path / "blob";
+    {
+        std::ofstream output(path, std::ios::binary);
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+    }
+    auto pinned = pulp::project_package::detail::PinnedFile::open(path, false);
+    REQUIRE(pinned);
+
+    g_append_during_hash = path;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        append_during_blob_hash);
+    const bool matches = pinned->hash_matches(hash_bytes(bytes).to_hex(), 1024);
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_append_during_hash.clear();
+
+    REQUIRE_FALSE(matches);
+    REQUIRE(fs::file_size(path) > bytes.size());
+}
+#endif
 
 TEST_CASE("Project reference validation hashes each canonical blob once per pass",
           "[project-package][hash-amplification]") {

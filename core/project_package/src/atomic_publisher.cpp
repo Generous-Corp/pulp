@@ -286,7 +286,8 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     if (!impl_ || impl_->committed || staged_file.parent_path() != impl_->staging ||
         !detail::regular_file_no_links(staged_file))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidPath, staged_file);
-    if (!detail::fence_file(staged_file))
+    auto pinned = detail::PinnedFile::open(staged_file, true);
+    if (!pinned || !pinned->fence() || !pinned->still_named_by(staged_file))
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::StagedFileFenced);
     const auto publication = detail::publish_no_replace(
@@ -298,6 +299,9 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
     impl_->staging_root.close();
+    if (!pinned->still_named_by(impl_->destination))
+        return runtime::Result<AtomicPublishOutcome, PackageError>(
+            runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     std::error_code ignored;
     fs::remove(impl_->staging, ignored);
