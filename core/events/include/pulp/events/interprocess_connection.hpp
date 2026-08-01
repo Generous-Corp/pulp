@@ -130,6 +130,8 @@ private:
     std::shared_ptr<Impl> impl_;
     std::atomic<IpcState> state_{IpcState::Disconnected};
     std::atomic<bool> running_{false};
+    std::atomic<std::uint64_t> connection_generation_{0};
+    std::atomic<std::uint64_t> read_generation_{0};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<std::int64_t> write_timeout_ms_{0};
     std::atomic<std::int64_t> frame_read_timeout_ms_{0};
@@ -141,8 +143,9 @@ private:
 
     void disconnect_impl(bool destroying);
     void release_first_dispatch_gate();
-    void start_read_thread(bool allow_active_disconnect_owner = false);
-    void read_loop();
+    void start_read_thread(bool allow_active_disconnect_owner = false,
+                           std::uint64_t expected_connection_generation = 0);
+    void read_loop(std::uint64_t generation);
 };
 
 /// Interprocess connection server — listens for multiple client connections.
