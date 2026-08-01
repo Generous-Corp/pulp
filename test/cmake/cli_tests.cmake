@@ -186,6 +186,15 @@ if(TARGET pulp::inspect-runtime AND TARGET pulp::inspect-client)
         pulp::inspect-runtime
         pulp::inspect-client
         Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect)
+        target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
+            pulp::inspect)
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=1)
+    else()
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=0)
+    endif()
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()

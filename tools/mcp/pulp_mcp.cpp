@@ -53,46 +53,47 @@ using pulp_mcp::handle_compat;
 // Shell-execution + tool handlers live in mcp_shell.hpp /
 // mcp_tools.{hpp,cpp}.
 using pulp_mcp::exec;
+using pulp_mcp::find_inspector_mcp_tool;
 using pulp_mcp::find_project_root;
-using pulp_mcp::resolve_inspect_cli_binary;
-using pulp_mcp::shell_quote;
+using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_audio_excerpt_find;
+using pulp_mcp::handle_audio_model_activate;
+using pulp_mcp::handle_audio_model_list;
+using pulp_mcp::handle_audio_model_status;
+using pulp_mcp::handle_audio_plugin_inspect;
+using pulp_mcp::handle_audio_probe_json;
+using pulp_mcp::handle_audio_read_bundle;
+using pulp_mcp::handle_audio_render;
+using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_build;
-using pulp_mcp::handle_test;
-using pulp_mcp::handle_status;
-using pulp_mcp::handle_validate;
-using pulp_mcp::handle_minos;
+using pulp_mcp::handle_content;
+using pulp_mcp::handle_content_install;
+using pulp_mcp::handle_content_list;
+using pulp_mcp::handle_content_preview;
+using pulp_mcp::handle_content_remove;
+using pulp_mcp::handle_content_rescan;
+using pulp_mcp::handle_content_reveal;
+using pulp_mcp::handle_content_update;
+using pulp_mcp::handle_content_validate;
+using pulp_mcp::handle_inspect_pending_requests;
 using pulp_mcp::handle_kit;
+using pulp_mcp::handle_kit_apply;
+using pulp_mcp::handle_kit_init;
+using pulp_mcp::handle_kit_inspect;
+using pulp_mcp::handle_kit_pack;
+using pulp_mcp::handle_kit_plan;
+using pulp_mcp::handle_kit_publish_check;
+using pulp_mcp::handle_kit_remove;
 using pulp_mcp::handle_kit_search;
 using pulp_mcp::handle_kit_validate;
-using pulp_mcp::handle_kit_inspect;
-using pulp_mcp::handle_kit_plan;
 using pulp_mcp::handle_kit_verify;
-using pulp_mcp::handle_kit_apply;
-using pulp_mcp::handle_kit_remove;
-using pulp_mcp::handle_kit_pack;
-using pulp_mcp::handle_kit_publish_check;
-using pulp_mcp::handle_kit_init;
-using pulp_mcp::handle_content;
-using pulp_mcp::handle_content_validate;
-using pulp_mcp::handle_content_preview;
-using pulp_mcp::handle_content_install;
-using pulp_mcp::handle_content_update;
-using pulp_mcp::handle_content_list;
-using pulp_mcp::handle_content_rescan;
-using pulp_mcp::handle_content_remove;
-using pulp_mcp::handle_content_reveal;
-using pulp_mcp::handle_audio_model_status;
-using pulp_mcp::handle_audio_model_list;
-using pulp_mcp::handle_audio_model_activate;
-using pulp_mcp::handle_audio_read_bundle;
-using pulp_mcp::handle_audio_excerpt_find;
-using pulp_mcp::handle_audio_probe_json;
-using pulp_mcp::handle_audio_scope;
-using pulp_mcp::handle_audio_plugin_inspect;
-using pulp_mcp::handle_audio_render;
-using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_minos;
+using pulp_mcp::handle_status;
+using pulp_mcp::handle_test;
 using pulp_mcp::handle_timeline_tool;
-using pulp_mcp::handle_inspect_pending_requests;
+using pulp_mcp::handle_validate;
+using pulp_mcp::resolve_inspect_cli_binary;
+using pulp_mcp::shell_quote;
 
 namespace {
 
@@ -323,6 +324,8 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_minos","description":"Measure the minimum OS a built binary needs, read straight from the artifact (macOS deployment target / Linux glibc symbol version / Windows PE subsystem). Point it at any Mach-O / ELF / PE / static archive or a plugin bundle's inner binary. The floor of a binary is the MAX minimum among everything linked into it. The multi-repo consumer sweep (rebuild every downstream project and compare floors) is CLI-only: `pulp minos sweep`, because it clones and builds many repositories.","inputSchema":{"type":"object","required":["binary"],"properties":{"binary":{"type":"string","description":"Path to a built binary: a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo)"}}}},)JSON";
     out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
+    if (!pulp_mcp::decorate_inspector_mcp_tool_descriptions(out))
+        return R"JSON({"tools":[],"error":"invalid inspector MCP registry"})JSON";
     return out;
 }
 
@@ -555,10 +558,10 @@ static std::string handle_request_raw(const std::string& json) {
                  name == "pulp_motion_scrub_to" ||
                  name == "pulp_motion_play" || name == "pulp_motion_pause" ||
                  name == "pulp_motion_enable_cost" || name == "pulp_motion_disable_cost") {
-            std::string inspector_method;
+            const auto* inspector_tool = find_inspector_mcp_tool(name);
+            std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
-                inspector_method = "Motion.startTrace";
                 const auto view_name = extract_string(args_json, "view_name");
                 const auto metrics = extract_raw(args_json, "metrics");
                 const auto fps = extract_raw(args_json, "fps");
@@ -570,29 +573,15 @@ static std::string handle_request_raw(const std::string& json) {
                     inspector_params += ",\"fps\":" + fps;
                 inspector_params += "}";
             } else if (name == "pulp_motion_stop_trace") {
-                inspector_method = "Motion.stopTrace";
                 auto trace_id_raw = extract_raw(args_json, "trace_id");
                 if (trace_id_raw.empty()) trace_id_raw = "0";
                 inspector_params =
                     std::string("{\"trace_id\":") + trace_id_raw + "}";
-            } else if (name == "pulp_motion_snapshot") {
-                inspector_method = "Motion.snapshot";
-            } else if (name == "pulp_motion_list_traces") {
-                inspector_method = "Motion.listTraces";
             } else if (name == "pulp_motion_scrub_to") {
-                inspector_method = "Motion.scrubTo";
                 auto frame_raw = extract_raw(args_json, "frame");
                 if (frame_raw.empty()) frame_raw = "0";
                 inspector_params =
                     std::string("{\"frame\":") + frame_raw + "}";
-            } else if (name == "pulp_motion_play") {
-                inspector_method = "Motion.play";
-            } else if (name == "pulp_motion_pause") {
-                inspector_method = "Motion.pause";
-            } else if (name == "pulp_motion_enable_cost") {
-                inspector_method = "Motion.enableCost";
-            } else if (name == "pulp_motion_disable_cost") {
-                inspector_method = "Motion.disableCost";
             }
 
             auto root = find_project_root();
@@ -666,10 +655,10 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_trace_start" || name == "pulp_trace_stop" ||
                  name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
                  name == "pulp_trace_explain") {
-            std::string inspector_method;
+            const auto* inspector_tool = find_inspector_mcp_tool(name);
+            std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
-                inspector_method = "Trace.startSession";
                 const auto categories = extract_raw(args_json, "categories");
                 const auto ring_mb = extract_raw(args_json, "ring_mb");
                 inspector_params = "{";
@@ -681,12 +670,7 @@ static std::string handle_request_raw(const std::string& json) {
                     inspector_params += "\"ring_mb\":" + ring_mb;
                 }
                 inspector_params += "}";
-            } else if (name == "pulp_trace_stop") {
-                inspector_method = "Trace.stopSession";
-            } else if (name == "pulp_trace_snapshot") {
-                inspector_method = "Trace.snapshot";
             } else if (name == "pulp_trace_query") {
-                inspector_method = "Trace.query";
                 const auto sql = extract_string(args_json, "sql");
                 const auto preset = extract_string(args_json, "preset");
                 const auto format = extract_string(args_json, "format");
@@ -705,7 +689,6 @@ static std::string handle_request_raw(const std::string& json) {
                 }
                 inspector_params += "}";
             } else if (name == "pulp_trace_explain") {
-                inspector_method = "Trace.explain";
                 inspector_params =
                     "{\"question\":" +
                     json_string(extract_string(args_json, "question")) + "}";
@@ -801,8 +784,9 @@ static std::string handle_request_raw(const std::string& json) {
                         "Error: session_id, instance_id, and publication_id "
                         "must be supplied together as exact safe identities");
                 } else {
-                    auto command = run_inspector_command(root, "State.setParameter", params_json,
-                                                         session_id, instance_id, publication_id);
+                    auto command = run_inspector_command(
+                        root, std::string(find_inspector_mcp_tool(name)->method), params_json,
+                        session_id, instance_id, publication_id);
                     result = inspector_tool_payload(std::move(command));
                 }
             }
@@ -813,23 +797,16 @@ static std::string handle_request_raw(const std::string& json) {
                  name == "pulp_inspect_value_channels" ||
                  name == "pulp_inspect_screenshot" || name == "pulp_inspect_evaluate" ||
                  name == "pulp_inspect_performance" || name == "pulp_inspect_audio") {
-            // Map MCP tool name to inspector protocol method
-            std::string inspector_method;
+            const auto* inspector_tool = find_inspector_mcp_tool(name);
+            std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
-            if (name == "pulp_inspect_dom")         inspector_method = "DOM.getDocument";
-            else if (name == "pulp_inspect_params")  inspector_method = "State.getParameters";
-            else if (name == "pulp_inspect_value_channels") inspector_method = "State.getValueChannels";
-            else if (name == "pulp_inspect_screenshot") inspector_method = "Capture.screenshot";
-            else if (name == "pulp_inspect_evaluate") {
-                inspector_method = "Runtime.evaluate";
+            if (name == "pulp_inspect_evaluate") {
                 auto expr = extract_string(args_json, "expression");
                 if (!expr.empty()) {
                     auto params_json = std::string("{\"expression\":") + json_string(expr) + "}";
                     inspector_params = params_json;
                 }
             }
-            else if (name == "pulp_inspect_performance") inspector_method = "Performance.getMetrics";
-            else if (name == "pulp_inspect_audio")   inspector_method = "Audio.getConfig";
 
             auto root = find_project_root();
             if (root.empty()) {

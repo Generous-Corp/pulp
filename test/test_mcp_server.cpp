@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,8 @@
 #include "timeline_mcp_tools.h"
 
 #include <pulp/inspect/agent_request_queue.hpp>
+#include <pulp/inspect/capabilities.hpp>
+#include <pulp/inspect/protocol.hpp>
 
 namespace {
 
@@ -2619,47 +2622,54 @@ TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
     REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
 }
 
-// pulp #1997 — gap 1: the 5 inspector tools each map to a distinct
-// inspector protocol method in pulp_mcp.cpp. Code-shape check: the
-// switch table must mention every method string. If a future refactor
-// drops one of these strings while leaving the dispatch arm intact,
-// the inspector tool would silently send the wrong inspector command.
-//
-// We assert against the source text rather than runtime behavior
-// because the actual inspector connection is over a TCP socket and
-// requires a running plugin — out of scope for unit tests. The source
-// check is cheap, deterministic, and proves the mapping is intact.
-TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
-          "[mcp][tools][issue-1997]") {
-    auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
-    REQUIRE(std::filesystem::exists(src_path));
+TEST_CASE("MCP inspector registry derives methods, capabilities, and descriptions",
+          "[mcp][tools][inspect][registry]") {
+    using namespace pulp::inspect;
+    const auto expected = std::to_array<InspectorMcpToolDescriptor>({
+        {"pulp_inspect_dom", methods::kDOMGetDocument},
+        {"pulp_inspect_params", methods::kStateGetParameters},
+        {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
+        {"pulp_inspect_set_param", methods::kStateSetParameter},
+        {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
+        {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
+        {"pulp_inspect_performance", methods::kPerfGetMetrics},
+        {"pulp_inspect_audio", methods::kAudioGetConfig},
+        {"pulp_motion_start_trace", methods::kMotionStartTrace},
+        {"pulp_motion_stop_trace", methods::kMotionStopTrace},
+        {"pulp_motion_snapshot", methods::kMotionSnapshot},
+        {"pulp_motion_list_traces", methods::kMotionListTraces},
+        {"pulp_motion_scrub_to", methods::kMotionScrubTo},
+        {"pulp_motion_play", methods::kMotionPlay},
+        {"pulp_motion_pause", methods::kMotionPause},
+        {"pulp_motion_enable_cost", methods::kMotionEnableCost},
+        {"pulp_motion_disable_cost", methods::kMotionDisableCost},
+        {"pulp_trace_start", methods::kTraceStartSession},
+        {"pulp_trace_stop", methods::kTraceStopSession},
+        {"pulp_trace_snapshot", methods::kTraceSnapshot},
+        {"pulp_trace_query", methods::kTraceQuery},
+        {"pulp_trace_explain", methods::kTraceExplain},
+    });
 
-    std::ifstream in(src_path);
-    std::stringstream buf;
-    buf << in.rdbuf();
-    const std::string src = buf.str();
+    const auto registry = inspector_mcp_tool_registry();
+    REQUIRE(registry.size() == expected.size());
+    const auto tools = tools_list_json();
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        CAPTURE(i, expected[i].name, expected[i].method);
+        REQUIRE(registry[i].name == expected[i].name);
+        REQUIRE(registry[i].method == expected[i].method);
+        REQUIRE(find_inspector_mcp_tool(expected[i].name) == &registry[i]);
 
-    // Each pair: (MCP tool name, inspector protocol method it must
-    // call). If a refactor removes either side, this test fails loudly.
-    const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_inspect_dom", "DOM.getDocument"},
-        {"pulp_inspect_params", "State.getParameters"},
-        {"pulp_inspect_screenshot", "Capture.screenshot"},
-        {"pulp_inspect_evaluate", "Runtime.evaluate"},
-        {"pulp_inspect_performance", "Performance.getMetrics"},
-        {"pulp_inspect_audio", "Audio.getConfig"},
-    };
-    for (const auto& [tool, method] : mappings) {
-        INFO("inspector tool=" << tool << " method=" << method);
-        REQUIRE(src.find(tool) != std::string::npos);
-        REQUIRE(src.find(method) != std::string::npos);
+        const auto* method = find_inspector_method(registry[i].method);
+        REQUIRE(method != nullptr);
+        REQUIRE(method->kind == InspectorMethodKind::Request);
+        const auto capability = capability_id(method->capability);
+        REQUIRE(inspector_mcp_tool_capability(registry[i]) == capability);
+        require_contains(tools, "\"name\":\"" + std::string(registry[i].name) +
+                                    "\",\"description\":\"Inspector method " +
+                                    std::string(registry[i].method) + " (capability " +
+                                    std::string(capability) + "). ");
     }
-    require_contains(
-        src,
-        "resolve_inspector_selection(\n"
-        "                        root, session_id, instance_id, publication_id)");
-    require_contains(src, "{\"--session\", session_id, \"--instance\", instance_id}");
-    require_contains(src, "{\"--publication\", publication_id}");
+    REQUIRE(find_inspector_mcp_tool("pulp_inspect_missing") == nullptr);
 }
 
 // Per-tool SDK feature detection (min_sdk_version).
