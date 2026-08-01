@@ -33,6 +33,35 @@ pass=0; fail=0; skip=0
 . "$HERE/toolchain.sh"
 toolchain_report "$HERE" "$TOOLS"
 
+# Run somewhere else, if asked. The header has promised FORGE_HOST since this
+# file was written and nothing ever read it: setting it ran the proof on THIS
+# machine and printed PASS, which reads exactly like a proof of the machine you
+# named. The most important claim this repo makes -- that it works on the M5 --
+# had an instrument that could not tell the two apart.
+#
+# Re-exec over SSH rather than proxying each surface: the app and the DAW need
+# a window server on the machine being proved, so the proof has to run there
+# whole or not at all.
+if [ -n "${FORGE_HOST:-}" ] && [ "${FORGE_PROVE_REMOTE:-}" != "1" ]; then
+    case "$FORGE_HOST" in
+        localhost|127.0.0.1|"$(hostname -s)") ;;      # already here
+        *)
+            printf 'proving on %s over SSH\n' "$FORGE_HOST"
+            remote_script="$TOOLS/prove_surfaces.sh"
+            if ! ssh -o ConnectTimeout=10 "$FORGE_HOST" \
+                     "test -f '$remote_script'" 2>/dev/null; then
+                printf '  the toolchain is not installed on %s (%s)\n' \
+                       "$FORGE_HOST" "$remote_script" >&2
+                printf '  run tools/rack/setup_m5.sh first — refusing to fall\n' >&2
+                printf '  back to this machine and call it a proof of that one.\n' >&2
+                exit 2
+            fi
+            exec ssh -o ConnectTimeout=10 "$FORGE_HOST" \
+                 "FORGE_PROVE_REMOTE=1 bash '$remote_script' '$ONLY'"
+            ;;
+    esac
+fi
+
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
 none() { printf '  SKIP  %s\n' "$*"; skip=$((skip + 1)); }
