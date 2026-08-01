@@ -519,6 +519,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 ? processor_.editor_reload_generation()
                 : 0;
             refresh_scripted_source(scripted, generation);
+            refresh_runtime_eval_realm(scripted);
             auto evaluator = scripted
                 ? inspect::make_script_runtime_evaluator(
                       scripted->script_inspector())
@@ -637,6 +638,12 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         // under its generation lease while registering the new callback.
         log_subscription_ = 0;
         log_subscription_generation_ = generation;
+        refresh_runtime_eval_realm(current);
+        if (current)
+            log_subscription_ = current->add_log_callback(console_.callback());
+    }
+
+    void refresh_runtime_eval_realm(view::ScriptedUiSession* current) {
         if (runtime_eval_requested_) {
             if (auto denial = standalone_runtime_eval_realm_denial(current))
                 domains_.set_runtime_eval_denied(std::move(*denial));
@@ -645,8 +652,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         } else {
             domains_.set_runtime_eval_enabled(false);
         }
-        if (current)
-            log_subscription_ = current->add_log_callback(console_.callback());
     }
 
     void refresh_live_state() {
@@ -896,6 +901,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     std::vector<inspect::InspectorCapability> custom;
     if (*parsed_profile == inspect::InspectorProfile::Custom) {
         bool has_session_control = false;
+        bool has_runtime_eval = false;
         bool needs_session_control = false;
         for (const auto& id : custom_capabilities) {
             const auto capability = inspect::capability_from_id(id);
@@ -909,12 +915,19 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
             custom.push_back(*capability);
             has_session_control |=
                 *capability == inspect::InspectorCapability::SessionControl;
+            has_runtime_eval |=
+                *capability == inspect::InspectorCapability::RuntimeEval;
             needs_session_control |=
                 *capability != inspect::InspectorCapability::SessionControl
                 && inspect::capability_requires_controller_lease(*capability);
         }
         if (custom.empty()) {
             runtime::log_error("Standalone: custom inspector profile requires capabilities");
+            return nullptr;
+        }
+        if (runtime_eval_enabled && !has_runtime_eval) {
+            runtime::log_error(
+                "Standalone: custom inspector runtime evaluation requires runtime.eval");
             return nullptr;
         }
         if (needs_session_control && !has_session_control) {

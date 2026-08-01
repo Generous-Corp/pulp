@@ -244,6 +244,13 @@ private:
     std::unique_ptr<ScriptedUiSession> scripted_;
 };
 
+class NonReloadingInspectorProcessor final : public InspectorProcessor {
+public:
+    using InspectorProcessor::InspectorProcessor;
+    bool supports_editor_reload() const override { return false; }
+    std::uint64_t editor_reload_generation() const override { return 0; }
+};
+
 class ReloadingInspectorProcessor final : public InspectorProcessor {
 public:
     ReloadingInspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
@@ -403,6 +410,9 @@ TEST_CASE("Standalone inspector runtime evaluation requires an active controller
     REQUIRE(StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "custom",
         {"runtime.eval"}, true) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"session.describe", "session.control"}, true) == nullptr);
 
     auto develop = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "develop", {}, true);
@@ -483,7 +493,7 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
 
     StandaloneApp app(null_processor_factory);
     CapabilitySet safe;
-    InspectorProcessor processor(app.state(), script, safe);
+    NonReloadingInspectorProcessor processor(app.state(), script, safe);
     ViewBridge bridge(processor, app.state());
     REQUIRE(bridge.open());
     REQUIRE(processor.active_scripted_ui()->granted_capabilities().empty());
