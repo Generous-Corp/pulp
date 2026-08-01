@@ -54,6 +54,18 @@ std::optional<ModelError> validate_note(const NoteEvent& note) noexcept {
     return std::nullopt;
 }
 
+constexpr bool valid_gesture_phase(GesturePhase phase) noexcept {
+    switch (phase) {
+    case GesturePhase::Single:
+    case GesturePhase::Begin:
+    case GesturePhase::Update:
+    case GesturePhase::End:
+    case GesturePhase::Cancel:
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool EditIntent::operator==(const EditIntent& other) const noexcept {
@@ -78,6 +90,8 @@ std::optional<ModelError> validate_note_edit_intent(const NoteEditIntent& intent
         return ModelError{ModelErrorCode::InvalidItemId, intent.track_id, {}};
     if (!intent.clip_id.valid())
         return ModelError{ModelErrorCode::InvalidItemId, intent.clip_id, {}};
+    if (!valid_gesture_phase(intent.phase))
+        return ModelError{ModelErrorCode::InvalidNote, intent.clip_id, {}};
     if (intent.expected) {
         if (auto error = validate_note(*intent.expected))
             return error;

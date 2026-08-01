@@ -309,6 +309,16 @@ TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads")
     REQUIRE_FALSE(rejected_for_host);
     REQUIRE(rejected_for_host.error().code == ModelErrorCode::InvalidNote);
 
+    auto invalid_phase = note_intent(NoteEditIntentKind::Insert);
+    invalid_phase.phase = static_cast<GesturePhase>(255);
+    invalid_phase.replacement = note();
+    error = validate_note_edit_intent(invalid_phase);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::InvalidNote);
+    auto invalid_phase_for_host = ValidatedNoteEditIntent::create(invalid_phase);
+    REQUIRE_FALSE(invalid_phase_for_host);
+    REQUIRE(invalid_phase_for_host.error().code == ModelErrorCode::InvalidNote);
+
     auto mismatched = note_intent(NoteEditIntentKind::Move);
     mismatched.expected = note({20});
     mismatched.replacement = note({21}, kTicksPerQuarter);
