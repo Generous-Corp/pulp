@@ -18,6 +18,7 @@ enum class PackageFaultPoint : std::uint8_t {
     DirectoryTreeFenced,
     DirectoryPublished,
     BlobHashSnapshot,
+    ReferenceSetVerified,
 };
 
 using PackageFaultHook = void (*)(PackageFaultPoint) noexcept;

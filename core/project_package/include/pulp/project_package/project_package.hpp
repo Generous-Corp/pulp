@@ -45,7 +45,9 @@ struct OpenPackageResult {
     bool cache_recreated = false;
 };
 
-/// Exclusive writer for one stable package root.
+/// Cooperative exclusive writer for one stable package root. Other writers
+/// must honor the package lock and must not rename or replace package entries
+/// out of band while a writer is open.
 class PackageWriter {
   public:
     /// Creates or opens the package layout and acquires its non-blocking writer lock.

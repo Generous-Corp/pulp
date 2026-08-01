@@ -1054,6 +1054,15 @@ remains unreachable and cannot expose a durable reference to unfenced content;
 package-wide abandoned-stage recovery and reachability GC belong to the
 follow-on recovery layer.
 
+Writer exclusion is cooperative. All package writers must honor the package
+lock, and callers must not concurrently rename or replace package or private
+staging entries out of band from another process running as the same account.
+An external producer using `staging_directory()` must finish and release the
+stage before commit or cancellation begins.
+The implementation pins and revalidates identities to reject detected
+rebinding, but POSIX does not provide a portable operation that renames an
+already-open directory by identity.
+
 **Link:** `pulp::project-package` · **Include prefix:**
 `<pulp/project_package/...>`
 

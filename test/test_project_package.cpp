@@ -48,6 +48,12 @@ fs::path g_swap_after_blob_verification;
 fs::path g_blob_swap_source;
 fs::path g_append_during_hash;
 fs::path g_switch_current_path;
+fs::path g_remove_after_reference_set;
+fs::path g_rebind_source;
+fs::path g_rebind_displaced;
+fs::path g_rebind_replacement_file;
+pulp::project_package::detail::PackageFaultPoint g_rebind_point =
+    pulp::project_package::detail::PackageFaultPoint::DirectoryPublished;
 std::atomic<std::uint64_t> g_blob_verifications{0};
 
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
@@ -77,6 +83,26 @@ void switch_current_path_after_directory_publish(
         return;
     std::error_code ignored;
     fs::current_path(g_switch_current_path, ignored);
+}
+
+void remove_after_reference_set(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::ReferenceSetVerified)
+        return;
+    std::error_code ignored;
+    fs::remove(g_remove_after_reference_set, ignored);
+}
+
+void rebind_publication_source(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != g_rebind_point)
+        return;
+    std::error_code ignored;
+    fs::rename(g_rebind_source, g_rebind_displaced, ignored);
+    if (g_rebind_replacement_file.empty()) {
+        fs::create_directory(g_rebind_source, ignored);
+        std::ofstream(g_rebind_source / "replacement.txt") << "replacement";
+    } else {
+        std::ofstream(g_rebind_replacement_file) << "replacement";
+    }
 }
 
 class TemporaryPackage {
@@ -362,6 +388,47 @@ TEST_CASE("Project package recovery removes only package-owned staging prefixes"
         REQUIRE_FALSE(fs::exists(path));
     for (const auto& path : preserved)
         REQUIRE(fs::is_regular_file(path));
+}
+
+TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
+          "[project-package][root][race]") {
+    TemporaryPackage temporary("writer-root-rebind");
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    const auto displaced = temporary.path.parent_path() /
+                           (temporary.path.filename().string() + "-displaced");
+    fs::rename(temporary.path, displaced);
+    fs::create_directories(temporary.path / "media");
+    const std::vector<std::uint8_t> bytes{'p', 'i', 'n'};
+
+    const auto staged = writer->stage_blob(BlobStore::Media, hash_bytes(bytes), bytes);
+
+    REQUIRE_FALSE(staged);
+    REQUIRE(staged.error().code == PackageErrorCode::InvalidLayout);
+    REQUIRE(fs::is_empty(temporary.path / "media"));
+    std::error_code ignored;
+    fs::remove_all(displaced, ignored);
+}
+
+TEST_CASE("Generation publication retains verified blob identities until replacement",
+          "[project-package][references][race]") {
+    TemporaryPackage temporary("reference-pin");
+    const std::vector<std::uint8_t> media{'p', 'i', 'n', 'n', 'e', 'd'};
+    const auto hash = hash_bytes(media);
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    REQUIRE(writer->stage_blob(BlobStore::Media, hash, media));
+    g_remove_after_reference_set = temporary.path / "media" / hash.to_hex();
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        remove_after_reference_set);
+
+    const auto published = writer->publish(make_project("pin", "media", hash));
+
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_remove_after_reference_set.clear();
+    REQUIRE_FALSE(published);
+    REQUIRE(published.error().code == PackageErrorCode::InvalidGeneration);
+    REQUIRE_FALSE(fs::exists(temporary.path / "project.json"));
 }
 
 TEST_CASE("Project package readers observe one complete generation during publication",
@@ -775,6 +842,63 @@ TEST_CASE("Atomic project-package directory publication rejects a rebound stagin
     REQUIRE_FALSE(committed);
     REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
     REQUIRE_FALSE(fs::exists(destination));
+    publisher->cancel();
+    REQUIRE(read_text(staging / "replacement.txt") == "replacement");
+}
+
+TEST_CASE("Atomic file publication revalidates its pinned source after callbacks",
+          "[project-package][atomic-publisher][race]") {
+    TemporaryPackage temporary("atomic-file-rebind");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    REQUIRE(publisher->write("source", "original"));
+    const auto source = publisher->staging_directory() / "source";
+    g_rebind_source = source;
+    g_rebind_displaced = publisher->staging_directory() / "displaced";
+    g_rebind_replacement_file = source;
+    g_rebind_point = pulp::project_package::detail::PackageFaultPoint::StagedFileFenced;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        rebind_publication_source);
+
+    const auto committed = publisher->commit_file(source);
+
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_rebind_source.clear();
+    g_rebind_displaced.clear();
+    g_rebind_replacement_file.clear();
+    REQUIRE_FALSE(committed);
+    REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
+    REQUIRE_FALSE(fs::exists(destination));
+}
+
+TEST_CASE("Atomic directory publication revalidates its pinned tree after callbacks",
+          "[project-package][atomic-publisher][race]") {
+    TemporaryPackage temporary("atomic-directory-rebind-callback");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    REQUIRE(publisher->write("original.txt", "original"));
+    const auto staging = publisher->staging_directory();
+    g_rebind_source = staging;
+    g_rebind_displaced = temporary.path / "displaced";
+    g_rebind_replacement_file.clear();
+    g_rebind_point = pulp::project_package::detail::PackageFaultPoint::DirectoryTreeFenced;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        rebind_publication_source);
+
+    const auto committed = publisher->commit_directory();
+
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_rebind_source.clear();
+    g_rebind_displaced.clear();
+    REQUIRE_FALSE(committed);
+    REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
+    REQUIRE_FALSE(fs::exists(destination));
+    publisher->cancel();
+    REQUIRE(read_text(staging / "replacement.txt") == "replacement");
 }
 
 TEST_CASE("Package writer anchors a relative root before publication callbacks",

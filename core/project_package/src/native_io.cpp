@@ -162,11 +162,12 @@ PinnedFile& PinnedFile::operator=(PinnedFile&& other) noexcept {
 }
 
 std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
-                                           bool fence_capable) noexcept {
+                                           bool fence_capable, bool allow_rename) noexcept {
 #if defined(_WIN32)
     const auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    const auto sharing = FILE_SHARE_READ | (allow_rename ? FILE_SHARE_DELETE : 0);
     const auto handle = ::CreateFileW(
-        path.c_str(), access, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        path.c_str(), access, sharing, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
@@ -179,6 +180,7 @@ std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
     }
     return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
 #else
+    (void)allow_rename;
     const auto descriptor = ::open(path.c_str(), (fence_capable ? O_RDWR : O_RDONLY) | O_CLOEXEC
 #ifdef O_NOFOLLOW
                                                      | O_NOFOLLOW
@@ -358,13 +360,15 @@ void PinnedFile::close() noexcept {
 }
 
 std::optional<AnchoredDirectory>
-AnchoredDirectory::open(const std::filesystem::path& path) noexcept {
+AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) noexcept {
 #if defined(_WIN32)
+    const auto sharing =
+        FILE_SHARE_READ | FILE_SHARE_WRITE | (allow_rename ? FILE_SHARE_DELETE : 0);
     const auto handle = ::CreateFileW(
         path.c_str(),
         FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
             FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        sharing, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
@@ -377,6 +381,7 @@ AnchoredDirectory::open(const std::filesystem::path& path) noexcept {
     }
     return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
 #else
+    (void)allow_rename;
     const auto descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC
 #ifdef O_DIRECTORY
                                                      | O_DIRECTORY

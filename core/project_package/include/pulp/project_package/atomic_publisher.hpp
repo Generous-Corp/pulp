@@ -44,7 +44,9 @@ enum class AtomicPublishOutcome : std::uint8_t {
 
 /// Builds a private sibling directory and publishes it at a previously absent
 /// destination. Every staged file and directory entry is fenced before the
-/// destination name becomes visible.
+/// destination name becomes visible. The private stage coordinates trusted
+/// writers; another process running as the same account must not rename or
+/// replace its entries behind the publisher.
 class AtomicPublisher {
   public:
     /// Creates a private staging sibling for a destination that must not exist.
@@ -57,7 +59,9 @@ class AtomicPublisher {
     AtomicPublisher(const AtomicPublisher&) = delete;
     AtomicPublisher& operator=(const AtomicPublisher&) = delete;
 
-    /// Returns the private directory into which external writers may stage one file.
+    /// Returns the private directory into which an external writer may stage one file.
+    /// The external writer must be stopped before `commit_file()`, `commit_directory()`,
+    /// or `cancel()` begins.
     const std::filesystem::path& staging_directory() const noexcept;
     /// Writes and durably fences one lexically safe relative file.
     runtime::Result<bool, PackageError> write(std::string_view relative_utf8,
