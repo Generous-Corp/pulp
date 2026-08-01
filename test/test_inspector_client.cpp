@@ -384,6 +384,7 @@ TEST_CASE("extended inspector transport carries a multi-megabyte capture respons
     record.plugin_id = session.info().plugin_id;
     InspectorServerConfig config{&session, &publisher, record, *token};
     config.max_message_bytes = pulp::inspect::kInspectorExtendedMessageBytes;
+    config.main_thread_rpc = make_inline_test_main_thread_rpc();
     REQUIRE(server.start_authenticated(std::move(config)));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
@@ -392,6 +393,8 @@ TEST_CASE("extended inspector transport carries a multi-megabyte capture respons
     REQUIRE(client.connect(records.front(), reader));
     const auto response = client.request(
         "Capture.screenshot", "{}", std::chrono::seconds(3));
+    INFO("error code: " << response.error_code);
+    INFO("error payload: " << response.error_data_json);
     REQUIRE_FALSE(response.is_error);
     const auto decoded = choc::json::parse(response.params_json);
     REQUIRE(decoded["data"].getString().size() == 2u * 1024u * 1024u);
