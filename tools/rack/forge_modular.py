@@ -206,7 +206,12 @@ _shape_cache: dict = {}
 #                real GPOS kerning, the same stack Pulp's TextShaper uses.
 #   "monoline" — the geometric mono-line alphabet, proportionally spaced.
 TYPE_MODE = os.environ.get("FORGE_MODULAR_TYPE", "shaped")
-SHAPE_TEXT = os.environ.get("FORGE_SHAPE_TEXT", "/tmp/shape_text")
+# Built by tools/rack/build_shape_text.sh, into build/ rather than /tmp:
+# macOS clears /tmp, and when it did this stopped with a bare FileNotFoundError
+# naming a path nothing in the repo explained how to produce.
+SHAPE_TEXT = os.environ.get(
+    "FORGE_SHAPE_TEXT",
+    os.path.join(HERE, "..", "..", "build", "shape_text"))
 PANEL_FONT = os.path.join(HERE, "..", "..", "external", "fonts", "Inter-Regular.ttf")
 LETTER_SPACE = 0.14   # mono-line sidebearing, in cap-height units
 
@@ -241,6 +246,11 @@ def _shaped(text: str, cap_mm: float):
     if key in _shape_cache:
         return _shape_cache[key]
     import subprocess
+    if not os.path.exists(SHAPE_TEXT):
+        raise RuntimeError(
+            f"the panel shaper is not built: {SHAPE_TEXT}\n"
+            f"  build it with: tools/rack/build_shape_text.sh\n"
+            f"  (or set FORGE_SHAPE_TEXT to an existing one)")
     r = subprocess.run([SHAPE_TEXT, text, PANEL_FONT, str(cap_mm), "center"],
                        capture_output=True, text=True)
     if r.returncode != 0:
