@@ -146,6 +146,12 @@ void collect_summary(std::vector<std::pair<std::string, std::string>>& out,
     out.emplace_back("counts.clips", to_text(counts.clips));
     out.emplace_back("counts.notes", to_text(counts.notes));
     out.emplace_back("counts.device_placements", to_text(counts.device_placements));
+    // Scenes and slots are counted during decode like every other entity here.
+    // Their authored orders are already recorded below; without these two the
+    // census could see a launcher shrink only if the surviving scenes also
+    // reordered, since an order key drops out entirely when its list is empty.
+    out.emplace_back("counts.scenes", to_text(counts.scenes));
+    out.emplace_back("counts.slots", to_text(counts.slots));
     out.emplace_back("counts.automation_lanes", to_text(counts.automation_lanes));
     out.emplace_back("counts.automation_points", to_text(counts.automation_points));
     out.emplace_back("counts.take_lanes", to_text(counts.take_lanes));

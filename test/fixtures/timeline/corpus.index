@@ -58,6 +58,7 @@ document v3/midi-content-lanes.json
 document v4/sequence-markers.json
 document v6/sequence-track-order.json
 document v6/track-take-lanes.json
+document v6/sequence-launcher-scenes.json
 
 fragment v4/sequence-before-scenes.json
 
