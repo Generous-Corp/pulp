@@ -1,4 +1,5 @@
 #include "inspector_client_test_support.hpp"
+#include "../inspect/src/inspector_server_test_access.hpp"
 
 #include <stdexcept>
 #include <vector>
@@ -112,6 +113,38 @@ private:
     InspectorDiscoveryReader* reader_;
     InspectorDiscoveryPublisher* competing_;
     std::vector<std::uint8_t> token_;
+};
+
+class ServerDestroyingPublicationBinding final
+    : public InspectorPublicationBinding {
+public:
+    std::unique_ptr<InspectorServer>* server = nullptr;
+    std::thread::id test_thread;
+    std::atomic<bool> released{false};
+    std::atomic<bool> released_off_test_thread{false};
+
+    class Lease final : public InspectorPublicationLease {
+    public:
+        explicit Lease(ServerDestroyingPublicationBinding& owner)
+            : owner_(&owner) {}
+
+        ~Lease() override {
+            owner_->released_off_test_thread.store(
+                std::this_thread::get_id() != owner_->test_thread,
+                std::memory_order_release);
+            if (owner_->server)
+                owner_->server->reset();
+            owner_->released.store(true, std::memory_order_release);
+        }
+
+    private:
+        ServerDestroyingPublicationBinding* owner_;
+    };
+
+    std::unique_ptr<InspectorPublicationLease> bind_publication(
+        const InspectorDiscoveryRecord&) override {
+        return std::make_unique<Lease>(*this);
+    }
 };
 
 } // namespace
@@ -932,6 +965,139 @@ TEST_CASE("publication binding exceptions cannot escape server lifecycle",
     CHECK_NOTHROW(server.stop());
     CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 1);
     CHECK(prerequisite->unbind_calls.load(std::memory_order_acquire) == 2);
+}
+
+TEST_CASE("cleanup-worker publication loss can destroy the server owner",
+          "[inspect][publication][cleanup][owner-lifetime]") {
+#ifdef _WIN32
+    WARN("SKIPPED cleanup-worker ownership loss: lock-file corruption is POSIX-only");
+#else
+    const auto initial_workers =
+        pulp::inspect::detail::active_inspector_cleanup_workers_for_testing();
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-cleanup-destroy", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    auto binding = std::make_shared<ServerDestroyingPublicationBinding>();
+    binding->test_thread = std::this_thread::get_id();
+    StaticPublicationBindings bindings({{
+        InspectorCapability::SessionDescribe,
+        binding,
+    }});
+    auto server = std::make_unique<InspectorServer>();
+    const auto worker_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (pulp::inspect::detail::
+               active_inspector_cleanup_workers_for_testing() ==
+               initial_workers &&
+           std::chrono::steady_clock::now() < worker_start_deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(pulp::inspect::detail::
+                active_inspector_cleanup_workers_for_testing() ==
+            initial_workers + 1);
+    binding->server = &server;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.domain_bindings = &bindings;
+    config.heartbeat_interval = std::chrono::milliseconds(1);
+    REQUIRE(server->start_authenticated(std::move(config)));
+    REQUIRE(publisher.record().has_value());
+    auto ownership_path = publisher.record()->record_path;
+    ownership_path.replace_extension(".lock");
+    {
+        std::ofstream corrupted(ownership_path, std::ios::trunc);
+        REQUIRE(corrupted.good());
+        corrupted << "not-the-live-owner";
+    }
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!binding->released.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(binding->released.load(std::memory_order_acquire));
+    CHECK(binding->released_off_test_thread.load(std::memory_order_acquire));
+    CHECK_FALSE(server);
+    const auto worker_exit_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (pulp::inspect::detail::
+               active_inspector_cleanup_workers_for_testing() !=
+               initial_workers &&
+           std::chrono::steady_clock::now() < worker_exit_deadline) {
+        std::this_thread::yield();
+    }
+    CHECK(pulp::inspect::detail::
+              active_inspector_cleanup_workers_for_testing() ==
+          initial_workers);
+#endif
+}
+
+TEST_CASE("external server destruction joins its cleanup worker",
+          "[inspect][publication][cleanup][external-join]") {
+    const auto initial_workers =
+        pulp::inspect::detail::active_inspector_cleanup_workers_for_testing();
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-cleanup-join", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    auto binding = std::make_shared<ServerDestroyingPublicationBinding>();
+    binding->test_thread = std::this_thread::get_id();
+    StaticPublicationBindings bindings({{
+        InspectorCapability::SessionDescribe,
+        binding,
+    }});
+    auto server = std::make_unique<InspectorServer>();
+    const auto worker_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (pulp::inspect::detail::
+               active_inspector_cleanup_workers_for_testing() ==
+               initial_workers &&
+           std::chrono::steady_clock::now() < worker_start_deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(pulp::inspect::detail::
+                active_inspector_cleanup_workers_for_testing() ==
+            initial_workers + 1);
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.domain_bindings = &bindings;
+    REQUIRE(server->start_authenticated(std::move(config)));
+
+    CHECK_NOTHROW(server.reset());
+    CHECK(binding->released.load(std::memory_order_acquire));
+    CHECK_FALSE(
+        binding->released_off_test_thread.load(std::memory_order_acquire));
+    CHECK(pulp::inspect::detail::
+              active_inspector_cleanup_workers_for_testing() ==
+          initial_workers);
 }
 
 TEST_CASE("publication retirement hides visibility before releasing its binding",
