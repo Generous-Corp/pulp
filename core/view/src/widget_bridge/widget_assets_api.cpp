@@ -123,7 +123,10 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
             auto id = args.get<std::string>(0, "");
             auto* k = dynamic_cast<Knob*>(self.widget(id));
             if (!k) return choc::value::Value();
-            auto color = canvas::Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
+            // No captured colour means Pulp must not invent one: fall back to
+            // the same `knob.thumb` token the synthetic notch resolves, so a
+            // theme reaches the pointer instead of a fixed near-white.
+            auto color = k->resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
             if (auto [c, ok] = parse_skin_hex(args.get<std::string>(4, "")); ok)
                 color = c;
             k->set_captured_indicator(
