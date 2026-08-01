@@ -6111,3 +6111,52 @@ TEST_CASE("choosing from the list writes the module into the prompt",
     // And the half-typed token is gone rather than left in front of it.
     CHECK(input->text().find("@vc ") == std::string::npos);
 }
+
+// The parser reads what CARTOG actually WRITES.
+//
+// Every other port-map test here uses a hand-written fixture, and a fixture
+// agrees with the parser by construction — I wrote both. The real join is
+// CARTOG building JSON by string concatenation inside Rack, and PortMap
+// parsing it with choc::json. A renamed field on either side breaks silently:
+// the parse succeeds, the map comes back empty, and every vendor module draws
+// without jacks, which looks exactly like never having scanned.
+TEST_CASE("the port map parser reads a real scan", "[portmap][join]") {
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path real =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Rack2/forge-portmap.json";
+    if (!std::filesystem::exists(real)) {
+        WARN("no port map on this machine — skipped, not passed. Press SCAN "
+             "in CARTOG to make one.");
+        return;
+    }
+
+    std::ifstream f(real);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const auto text = ss.str();
+    REQUIRE(text.size() > 200);
+
+    const auto pm = forge_modular::PortMap::parse(text);
+    INFO("file is " << text.size() << " bytes; parsed " << pm.size()
+                    << " module(s)");
+    // A file with modules in it must yield modules. Parsing to zero is the
+    // silent failure this exists to catch.
+    REQUIRE(pm.size() > 0);
+
+    // And the fields the drawing depends on have to survive the round trip:
+    // a module with jacks, and a jack with coordinates that are not the
+    // origin. Counting modules alone would pass on entries full of zeroes.
+    bool any_jack = false;
+    for (const auto& name : {"AudioInterface2", "VCO", "LFO", "VCA"}) {
+        for (const auto& plugin : {"Core", "Fundamental"}) {
+            const auto* m = pm.find(plugin, name);
+            if (!m) continue;
+            for (const auto& in : m->inputs)
+                if (in.x != 0.0f || in.y != 0.0f) any_jack = true;
+            for (const auto& out : m->outputs)
+                if (out.x != 0.0f || out.y != 0.0f) any_jack = true;
+        }
+    }
+    CHECK(any_jack);
+}
