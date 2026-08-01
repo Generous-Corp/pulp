@@ -1,13 +1,14 @@
 #pragma once
 
-#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
+#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/program_identity.hpp>
 #include <pulp/playback/track_mixer_program.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/production_mode.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -22,6 +23,7 @@ class ProgramCompilerTask;
 class AudioTrackRendererProgram;
 class DecodedAudioAssetPool;
 class TrackAutomationProgram;
+class CompileContextRegistry;
 
 enum class ProgramErrorCode : std::uint8_t {
     InvalidGeneration,
@@ -116,6 +118,15 @@ class TrackProgram {
     RendererStatePolicy state_policy() const noexcept {
         return state_policy_;
     }
+    /// The control-thread policy before registered arrangement content widens
+    /// it to Stateless. Kept separately so removing a Reset renderer can relax
+    /// the effective policy again on the next compile.
+    RendererStatePolicy requested_state_policy() const noexcept {
+        return requested_state_policy_;
+    }
+    const timeline::ProductionDeclaration& arrangement_production() const noexcept {
+        return arrangement_production_;
+    }
     std::span<const timeline::ItemId> ordered_clip_ids() const noexcept {
         return clip_ids_;
     }
@@ -161,21 +172,22 @@ class TrackProgram {
   private:
     friend class ProgramCompilerTask;
     TrackProgram(timeline::ItemId id, ProgramGeneration generation,
-                 ProviderSelectorProgram provider, RendererStatePolicy state_policy,
-                 std::vector<timeline::ItemId> clip_ids, std::vector<NoteProgramEvent> note_events,
+                 ProviderSelectorProgram provider, RendererStatePolicy requested_state_policy,
+                 RendererStatePolicy state_policy, std::vector<timeline::ItemId> clip_ids,
+                 std::vector<NoteProgramEvent> note_events,
                  std::vector<CompiledNoteModifier> note_modifiers,
                  std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                  std::vector<timeline::ItemId> device_placement_ids,
                  std::shared_ptr<const TrackAutomationProgram> automation_program,
-                 std::uint64_t expanded_clip_count,
-                 std::uint64_t expanded_note_event_count,
-                 std::uint64_t generated_id_start,
-                 std::uint64_t generated_id_count,
+                 std::uint64_t expanded_clip_count, std::uint64_t expanded_note_event_count,
+                 std::uint64_t generated_id_start, std::uint64_t generated_id_count,
+                 timeline::ProductionDeclaration arrangement_production,
                  TrackMixerProgram mixer) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
     ProviderSelectorProgram provider_;
+    RendererStatePolicy requested_state_policy_ = RendererStatePolicy::CarryByItemId;
     RendererStatePolicy state_policy_ = RendererStatePolicy::CarryByItemId;
     std::vector<timeline::ItemId> clip_ids_;
     std::vector<NoteProgramEvent> note_events_;
@@ -187,6 +199,7 @@ class TrackProgram {
     std::uint64_t expanded_note_event_count_ = 0;
     std::uint64_t generated_id_start_ = 0;
     std::uint64_t generated_id_count_ = 0;
+    timeline::ProductionDeclaration arrangement_production_;
     TrackMixerProgram mixer_;
 };
 
@@ -210,6 +223,15 @@ class PlaybackProgram {
     const std::shared_ptr<const timebase::CompiledTempoMap>& tempo_map_owner() const noexcept {
         return tempo_map_;
     }
+    const std::shared_ptr<const CompileContextRegistry>& content_compilers_owner() const noexcept {
+        return content_compilers_;
+    }
+    const std::shared_ptr<const void>& content_compiler_generation() const noexcept {
+        return content_compiler_generation_;
+    }
+    std::uint64_t content_compiler_revision() const noexcept {
+        return content_compiler_revision_;
+    }
     const std::shared_ptr<const DecodedAudioAssetPool>& audio_assets_owner() const noexcept {
         return audio_assets_;
     }
@@ -232,6 +254,9 @@ class PlaybackProgram {
     PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                     timeline::ItemId project_id, timeline::ItemId sequence_id,
                     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
+                    std::shared_ptr<const CompileContextRegistry> content_compilers,
+                    std::shared_ptr<const void> content_compiler_generation,
+                    std::uint64_t content_compiler_revision,
                     std::shared_ptr<const DecodedAudioAssetPool> audio_assets,
                     AudioRendererLimits audio_limits, AutomationPlaybackLimits automation_limits,
                     std::uint64_t generated_id_base,
@@ -243,6 +268,9 @@ class PlaybackProgram {
     timeline::ItemId project_id_;
     timeline::ItemId sequence_id_;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map_;
+    std::shared_ptr<const CompileContextRegistry> content_compilers_;
+    std::shared_ptr<const void> content_compiler_generation_;
+    std::uint64_t content_compiler_revision_ = 0;
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets_;
     AudioRendererLimits audio_limits_;
     AutomationPlaybackLimits automation_limits_;

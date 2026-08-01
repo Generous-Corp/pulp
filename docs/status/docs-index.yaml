@@ -287,12 +287,12 @@ docs:
   - slug: timeline-sdk
     path: guides/timeline-sdk.md
     kind: guide
-    summary: Creative Timeline Engine SDK, persistence, capture, playback, import, CLI, MCP, dependency closure, and project inspection
+    summary: Creative Timeline Engine SDK, registered-content renderers, persistence, capture, playback, import, CLI, MCP, dependency closure, and project inspection
 
   - slug: timeline-cookbook
     path: guides/timeline-cookbook.md
     kind: guide
-    summary: Task-oriented Timeline recipes for projects, transactions, persistence, playback, assets, capture, launch intent, interchange, CLI, MCP, and realtime integration
+    summary: Task-oriented Timeline recipes for projects, transactions, registered-content rendering, persistence, playback, assets, capture, launch intent, interchange, CLI, MCP, and realtime integration
 
   - slug: example-pulp-gain
     path: examples/pulp-gain.md
@@ -485,7 +485,7 @@ docs:
   - slug: capabilities
     path: reference/capabilities.md
     kind: reference
-    summary: All current capabilities organized by area with status
+    summary: All current capabilities organized by area with status, including bounded registered Timeline content rendering
 
   - slug: development-inspector-capabilities
     path: reference/development-inspector-capabilities.md

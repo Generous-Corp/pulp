@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -50,17 +51,26 @@ std::size_t retained_marker(const std::shared_ptr<const void>&, const void*) noe
     return sizeof(int);
 }
 
+runtime::Result<ContentProgramFragment, ContentFragmentError>
+compile_empty_fragment(const RegisteredContentCompileInput& input, const void*) noexcept {
+    return ContentProgramFragment::create({}, input.clip_duration);
+}
+
 SchemaRegistry generator_schema_registry() {
-    SchemaRegistryBuilder builder;
-    for (const auto name : {kFollowsHarmony, kFollowsGroove, kIgnoresHarmony}) {
-        TypeSchema schema;
-        schema.type_name = std::string(name);
-        schema.domain = SchemaDomain::Content;
-        schema.current_version = 1;
-        schema.codec = {{}, decode_marker, encode_marker, retained_marker};
-        REQUIRE(builder.register_type(std::move(schema)));
-    }
-    return take(std::move(builder).build());
+    static const SchemaRegistry registry = [] {
+        SchemaRegistryBuilder builder;
+        for (const auto name : {kFollowsHarmony, kFollowsGroove, kIgnoresHarmony}) {
+            TypeSchema schema;
+            schema.type_name = std::string(name);
+            schema.domain = SchemaDomain::Content;
+            schema.current_version = 1;
+            schema.codec = {{}, decode_marker, encode_marker, retained_marker};
+            if (!builder.register_type(std::move(schema)))
+                std::abort();
+        }
+        return take(std::move(builder).build());
+    }();
+    return registry;
 }
 
 ClipContent generator_content(const SchemaRegistry& registry, std::string_view type_name) {
@@ -188,15 +198,31 @@ std::shared_ptr<const Project> make_project_with_nested_generator(const SchemaRe
 }
 
 CompileContextRegistry context_registry() {
+    const auto schemas = generator_schema_registry();
     CompileContextRegistry registry;
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
     auto reads_groove = CompileContextSubscriptions::none();
     reads_groove.subscribe(CompileContextKind::Groove);
-    REQUIRE_FALSE(registry.declare({std::string(kFollowsHarmony), reads_harmony}));
-    REQUIRE_FALSE(registry.declare({std::string(kFollowsGroove), reads_groove}));
-    REQUIRE_FALSE(
-        registry.declare({std::string(kIgnoresHarmony), CompileContextSubscriptions::none()}));
+    const auto registration = [&](std::string_view type,
+                                  CompileContextSubscriptions subscriptions) {
+        return ContentRendererRegistration{
+            .content_type_name = std::string(type),
+            .subscriptions = subscriptions,
+            .schema_version = 1,
+            .output_kind = ContentProgramOutputKind::Notes,
+            .maximum_fragment_notes = 1,
+            .state_policy = RegisteredRendererStatePolicy::Reset,
+            .production = {.mode = ProductionMode::Synchronous,
+                           .reproducibility = ReproducibilityClass::Deterministic,
+                           .lookahead_ms = 0},
+            .compile = compile_empty_fragment,
+        };
+    };
+    REQUIRE_FALSE(registry.declare(registration(kFollowsHarmony, reads_harmony), schemas));
+    REQUIRE_FALSE(registry.declare(registration(kFollowsGroove, reads_groove), schemas));
+    REQUIRE_FALSE(registry.declare(
+        registration(kIgnoresHarmony, CompileContextSubscriptions::none()), schemas));
     return registry;
 }
 
@@ -286,6 +312,9 @@ ProgramCompileRequest request(std::shared_ptr<const Project> project,
     result.tempo_map = std::move(map);
     result.document_revision = revision;
     result.dirty = std::move(dirty);
+    static const auto compilers =
+        std::make_shared<const CompileContextRegistry>(context_registry());
+    result.content_compilers = compilers;
     return result;
 }
 
@@ -358,14 +387,16 @@ TEST_CASE("a context registry refuses an empty or duplicate content type",
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
 
-    const auto empty = registry.declare({"", reads_harmony});
+    const auto empty = registry.declare({.content_type_name = "", .subscriptions = reads_harmony});
     REQUIRE(empty);
     REQUIRE(empty->code == ContextRegistrationErrorCode::EmptyContentTypeName);
 
-    REQUIRE_FALSE(registry.declare({"vendor.one", reads_harmony}));
+    REQUIRE_FALSE(
+        registry.declare({.content_type_name = "vendor.one", .subscriptions = reads_harmony}));
     // Two renderers disagreeing about what a content kind reads would make the
     // invalidation depend on registration order, so the second is refused.
-    const auto duplicate = registry.declare({"vendor.one", CompileContextSubscriptions::none()});
+    const auto duplicate = registry.declare(
+        {.content_type_name = "vendor.one", .subscriptions = CompileContextSubscriptions::none()});
     REQUIRE(duplicate);
     REQUIRE(duplicate->code == ContextRegistrationErrorCode::DuplicateContentType);
     REQUIRE(registry.size() == 1);
@@ -374,6 +405,139 @@ TEST_CASE("a context registry refuses an empty or duplicate content type",
     // An unregistered type reads nothing: no renderer compiles it, so there is
     // no program that could go stale.
     REQUIRE_FALSE(registry.subscriptions_for("vendor.unknown").any());
+}
+
+TEST_CASE("a trusted content compiler is admitted only for an exact validated schema",
+          "[playback][compile-context][content-compiler]") {
+    const auto schemas = generator_schema_registry();
+    auto reads_harmony = CompileContextSubscriptions::none();
+    reads_harmony.subscribe(CompileContextKind::ChordScale);
+    ContentRendererRegistration trusted{
+        .content_type_name = std::string(kFollowsHarmony),
+        .subscriptions = reads_harmony,
+        .schema_version = 1,
+        .output_kind = ContentProgramOutputKind::Notes,
+        .maximum_fragment_notes = 16,
+        .state_policy = RegisteredRendererStatePolicy::Reset,
+        .production = {.mode = ProductionMode::Synchronous,
+                       .reproducibility = ReproducibilityClass::Deterministic,
+                       .lookahead_ms = 0},
+        .compile = compile_empty_fragment,
+    };
+
+    CompileContextRegistry unvalidated;
+    const auto missing_schema = unvalidated.declare(trusted);
+    REQUIRE(missing_schema);
+    REQUIRE(missing_schema->code == ContextRegistrationErrorCode::SchemaUnavailable);
+
+    CompileContextRegistry registry;
+    REQUIRE_FALSE(registry.declare(trusted, schemas));
+    const auto* found = registry.find({std::string(kFollowsHarmony), 1});
+    REQUIRE(found != nullptr);
+    REQUIRE(found->maximum_fragment_notes == 16);
+    REQUIRE(found->subscriptions.reads(CompileContextKind::ChordScale));
+    REQUIRE(found->state_policy == RegisteredRendererStatePolicy::Reset);
+    REQUIRE(found->production.reproducibility == ReproducibilityClass::Deterministic);
+    REQUIRE(found->compile == compile_empty_fragment);
+    REQUIRE(registry.find({std::string(kFollowsHarmony), 2}) == nullptr);
+
+    SchemaRegistryBuilder foreign_builder;
+    TypeSchema foreign_schema;
+    foreign_schema.type_name = std::string(kFollowsHarmony);
+    foreign_schema.domain = SchemaDomain::Content;
+    foreign_schema.current_version = 1;
+    foreign_schema.codec = {{}, decode_marker, encode_marker, retained_marker};
+    REQUIRE(foreign_builder.register_type(std::move(foreign_schema)));
+    const auto foreign_schemas = take(std::move(foreign_builder).build());
+    const auto foreign_content = take(foreign_schemas.create_registered_no_owned_ids(
+        {std::string(kFollowsHarmony), 1}, std::make_shared<const int>(1), 1024));
+    REQUIRE(registry.find(foreign_content) == nullptr);
+
+    auto wrong_version = trusted;
+    wrong_version.content_type_name = std::string(kFollowsGroove);
+    wrong_version.schema_version = 2;
+    const auto unavailable = registry.declare(std::move(wrong_version), schemas);
+    REQUIRE(unavailable);
+    REQUIRE(unavailable->code == ContextRegistrationErrorCode::InvalidSchemaVersion);
+
+    auto zero_quota = trusted;
+    zero_quota.content_type_name = std::string(kIgnoresHarmony);
+    zero_quota.maximum_fragment_notes = 0;
+    const auto invalid_quota = registry.declare(std::move(zero_quota), schemas);
+    REQUIRE(invalid_quota);
+    REQUIRE(invalid_quota->code == ContextRegistrationErrorCode::InvalidFragmentQuota);
+
+    auto excessive_quota = trusted;
+    excessive_quota.content_type_name = std::string(kIgnoresHarmony);
+    excessive_quota.maximum_fragment_notes =
+        CompileContextRegistry::kMaximumFragmentNotesPerClip + 1;
+    const auto too_large = registry.declare(std::move(excessive_quota), schemas);
+    REQUIRE(too_large);
+    REQUIRE(too_large->code == ContextRegistrationErrorCode::InvalidFragmentQuota);
+
+    auto invalid_output = trusted;
+    invalid_output.content_type_name = std::string(kFollowsGroove);
+    invalid_output.output_kind = static_cast<ContentProgramOutputKind>(255);
+    const auto bad_output = registry.declare(std::move(invalid_output), schemas);
+    REQUIRE(bad_output);
+    REQUIRE(bad_output->code == ContextRegistrationErrorCode::InvalidOutputKind);
+
+    auto invalid_state = trusted;
+    invalid_state.content_type_name = std::string(kFollowsGroove);
+    invalid_state.state_policy = static_cast<RegisteredRendererStatePolicy>(255);
+    const auto bad_state = registry.declare(std::move(invalid_state), schemas);
+    REQUIRE(bad_state);
+    REQUIRE(bad_state->code == ContextRegistrationErrorCode::InvalidStatePolicy);
+
+    auto unsupported_carry = trusted;
+    unsupported_carry.content_type_name = std::string(kFollowsGroove);
+    unsupported_carry.state_policy = RegisteredRendererStatePolicy::CarryByItemId;
+    const auto carry = registry.declare(std::move(unsupported_carry), schemas);
+    REQUIRE(carry);
+    REQUIRE(carry->code == ContextRegistrationErrorCode::InvalidStatePolicy);
+
+    auto invalid_mode = trusted;
+    invalid_mode.content_type_name = std::string(kFollowsGroove);
+    invalid_mode.production.mode = static_cast<ProductionMode>(255);
+    const auto bad_mode = registry.declare(std::move(invalid_mode), schemas);
+    REQUIRE(bad_mode);
+    REQUIRE(bad_mode->code == ContextRegistrationErrorCode::InvalidProductionDeclaration);
+
+    auto invalid_reproducibility = trusted;
+    invalid_reproducibility.content_type_name = std::string(kFollowsGroove);
+    invalid_reproducibility.production.reproducibility = static_cast<ReproducibilityClass>(255);
+    const auto bad_reproducibility = registry.declare(std::move(invalid_reproducibility), schemas);
+    REQUIRE(bad_reproducibility);
+    REQUIRE(bad_reproducibility->code ==
+            ContextRegistrationErrorCode::InvalidProductionDeclaration);
+}
+
+TEST_CASE("registered fragments reject notes outside their owning clip",
+          "[playback][compile-context][content-compiler]") {
+    const auto valid = ContentProgramFragment::create({{{10}, {20}, 900, 64, 1}}, TickDuration{40});
+    REQUIRE(valid);
+    REQUIRE(valid.value().notes().size() == 1);
+    REQUIRE(valid.value().notes()[0] == ContentFragmentNote{{10}, {20}, 900, 64, 1});
+
+    const auto past_end =
+        ContentProgramFragment::create({{{30}, {20}, 900, 64, 1}}, TickDuration{40});
+    REQUIRE_FALSE(past_end);
+    REQUIRE(past_end.error().code == ContentFragmentErrorCode::InvalidNote);
+    REQUIRE(past_end.error().note_index == 0);
+
+    const auto invalid_channel =
+        ContentProgramFragment::create({{{0}, {10}, 900, 64, 16}}, TickDuration{40});
+    REQUIRE_FALSE(invalid_channel);
+    REQUIRE(invalid_channel.error().code == ContentFragmentErrorCode::InvalidNote);
+
+    REQUIRE_FALSE(ContentProgramFragment::create({{{0}, {10}, 900, 128, 0}}, TickDuration{40}));
+    REQUIRE_FALSE(ContentProgramFragment::create({{{-1}, {10}, 900, 64, 0}}, TickDuration{40}));
+    REQUIRE_FALSE(ContentProgramFragment::create({{{0}, {10}, 900, 64, 0}}, TickDuration{0}));
+    REQUIRE_FALSE(ContentProgramFragment::create(
+        {{{0}, {10}, 900, 64, 0}}, TickDuration{std::numeric_limits<std::int64_t>::min()}));
+    const auto exact_end =
+        ContentProgramFragment::create({{{30}, {10}, 900, 64, 0}}, TickDuration{40});
+    REQUIRE(exact_end);
 }
 
 TEST_CASE("the subscriber index names only the tracks that declared the context",
@@ -464,7 +628,8 @@ TEST_CASE("root and registry mismatches invalidate the bundled index",
 
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
-    REQUIRE_FALSE(registry.declare({"vendor.late-reader", reads_harmony}));
+    REQUIRE_FALSE(registry.declare(
+        {.content_type_name = "vendor.late-reader", .subscriptions = reads_harmony}));
     REQUIRE_FALSE(index.valid());
     const auto stale_registry = resolve_dirty_tracks(*project, {2}, child_context_edit, index);
     REQUIRE(stale_registry.all);
@@ -490,7 +655,8 @@ TEST_CASE("registry assignment invalidates prior indices and leaves moved-from r
 
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
-    REQUIRE_FALSE(move_source.declare({"vendor.after-move", reads_harmony}));
+    REQUIRE_FALSE(move_source.declare(
+        {.content_type_name = "vendor.after-move", .subscriptions = reads_harmony}));
     REQUIRE(move_source.size() == 1);
 }
 
@@ -1057,7 +1223,8 @@ TEST_CASE("a registry-generation change forces a full production recompile",
 
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
-    REQUIRE_FALSE(registry->declare({"vendor.late-reader", reads_harmony}));
+    REQUIRE_FALSE(registry->declare(
+        {.content_type_name = "vendor.late-reader", .subscriptions = reads_harmony}));
 
     auto changed = request(after, map, 2, {});
     changed.invalidation = committed_invalidation(registry, before, after, 2, edit.dirty);
@@ -1101,6 +1268,115 @@ TEST_CASE("a commit invalidation owns an immutable registry snapshot",
     REQUIRE(track_program(store, {20}) == independent_before);
 }
 
+TEST_CASE("a manual compile request owns its submit-time registry snapshot",
+          "[playback][compile-context][registry-snapshot]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project(schemas, one_chord(), straight_groove());
+    auto registry = std::make_shared<CompileContextRegistry>(context_registry());
+    const auto generation = registry->generation_identity();
+    const auto revision = registry->revision();
+    const auto map = tempo_map();
+    PlaybackProgramStore store;
+    ManualSliceExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+
+    auto pending = request(project, map, 1, {.all = true});
+    pending.invalidation.reset();
+    pending.content_compilers = registry;
+    REQUIRE(compiler.submit(std::move(pending)));
+    REQUIRE(executor.pending());
+    *registry = CompileContextRegistry{};
+    while (executor.pending())
+        executor.run_one(10'000);
+
+    REQUIRE_FALSE(compiler.status().has_error);
+    std::shared_ptr<const CompileContextRegistry> reusable_registry;
+    std::shared_ptr<const TrackProgram> follower_before;
+    std::shared_ptr<const TrackProgram> independent_before;
+    {
+        auto live = store.read();
+        REQUIRE(live);
+        REQUIRE(live->content_compiler_generation().get() == generation.get());
+        REQUIRE(live->content_compiler_revision() == revision);
+        reusable_registry = live->content_compilers_owner();
+        REQUIRE(reusable_registry);
+        REQUIRE(reusable_registry->size() == 3);
+        REQUIRE(reusable_registry->generation_identity().get() ==
+                live->content_compiler_generation().get());
+        REQUIRE(reusable_registry->revision() == live->content_compiler_revision());
+        for (const auto& track : live->tracks()) {
+            if (track->id() == ItemId{10})
+                follower_before = track;
+            if (track->id() == ItemId{20})
+                independent_before = track;
+        }
+    }
+    REQUIRE(follower_before);
+    REQUIRE(independent_before);
+
+    auto followup = request(project, map, 2, {.tracks = {{20}}});
+    followup.invalidation.reset();
+    followup.content_compilers = reusable_registry;
+    REQUIRE(compiler.submit(std::move(followup)));
+    while (executor.pending())
+        executor.run_one(10'000);
+    REQUIRE_FALSE(compiler.status().has_error);
+    auto refreshed = store.read();
+    REQUIRE(refreshed);
+    const TrackProgram* follower_after = nullptr;
+    const TrackProgram* independent_after = nullptr;
+    for (const auto& track : refreshed->tracks()) {
+        if (track->id() == ItemId{10})
+            follower_after = track.get();
+        if (track->id() == ItemId{20})
+            independent_after = track.get();
+    }
+    REQUIRE(follower_after == follower_before.get());
+    REQUIRE(independent_after != independent_before.get());
+}
+
+TEST_CASE("coalesced manual requests compare same-generation registry revisions",
+          "[playback][compile-context][coalescing][registry-snapshot]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project(schemas, one_chord(), straight_groove());
+    auto first_registry = std::make_shared<CompileContextRegistry>(context_registry());
+    PlaybackProgramStore store;
+    ManualSliceExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+
+    auto initial = request(project, tempo_map(), 1, {.all = true});
+    initial.invalidation.reset();
+    initial.content_compilers = first_registry;
+    REQUIRE(compiler.submit(std::move(initial)));
+    while (executor.pending())
+        executor.run_one(10'000);
+    REQUIRE_FALSE(compiler.status().has_error);
+    std::array<const TrackProgram*, 5> before{
+        track_program(store, {10}), track_program(store, {20}), track_program(store, {30}),
+        track_program(store, {40}), track_program(store, {50})};
+
+    auto sparse = request(project, tempo_map(), 2, {.tracks = {{20}}});
+    sparse.invalidation.reset();
+    sparse.content_compilers = first_registry;
+    REQUIRE(compiler.submit(std::move(sparse)));
+    REQUIRE(executor.pending());
+
+    REQUIRE_FALSE(first_registry->declare({.content_type_name = "vendor.coalesced-late-reader",
+                                           .subscriptions = CompileContextSubscriptions::none()}));
+    auto successor = request(project, tempo_map(), 3, {.tracks = {{20}}});
+    successor.invalidation.reset();
+    successor.content_compilers = first_registry;
+    REQUIRE(compiler.submit(std::move(successor)));
+    REQUIRE(compiler.status().coalesced_requests == 1);
+    while (executor.pending())
+        executor.run_one(10'000);
+
+    REQUIRE_FALSE(compiler.status().has_error);
+    const std::array ids{ItemId{10}, ItemId{20}, ItemId{30}, ItemId{40}, ItemId{50}};
+    for (std::size_t index = 0; index < ids.size(); ++index)
+        REQUIRE(track_program(store, ids[index]) != before[index]);
+}
+
 TEST_CASE("registry replacement refreshes the same document with a fresh generation",
           "[playback][compile-context][invalidation]") {
     const auto schemas = generator_schema_registry();
@@ -1108,6 +1384,7 @@ TEST_CASE("registry replacement refreshes the same document with a fresh generat
     // Start at revision zero. Assignment below also installs a fresh revision
     // zero generation, so pointer-plus-counter comparison would false-pass.
     auto registry = std::make_shared<CompileContextRegistry>();
+    *registry = context_registry();
     PlaybackProgramStore store;
     ManualSliceExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
@@ -1124,9 +1401,7 @@ TEST_CASE("registry replacement refreshes the same document with a fresh generat
     REQUIRE(executor.pending());
 
     CompileContextRegistry replacement;
-    auto reads_harmony = CompileContextSubscriptions::none();
-    reads_harmony.subscribe(CompileContextKind::ChordScale);
-    REQUIRE_FALSE(replacement.declare({"vendor.replacement", reads_harmony}));
+    replacement = context_registry();
     *registry = std::move(replacement);
 
     while (executor.pending())

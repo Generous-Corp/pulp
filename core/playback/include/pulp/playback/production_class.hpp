@@ -3,12 +3,11 @@
 /// @file production_class.hpp
 /// Derives what a compiled program may honestly claim about being replayed.
 ///
-/// The claim is derived from the program rather than stored on it, so it cannot
-/// drift from what the compiler actually lowered. Every content path the
-/// compiler lowers today is produced in band, so every track reports
-/// `Synchronous`; the reproducibility claim comes from the track's selected
-/// provider, which is the one compiled field that already decides where a
-/// track's audio comes from.
+/// The claim is derived from the program's selected provider and its compiled
+/// arrangement declaration, so it cannot drift from what the compiler actually
+/// lowered. When arrangement is active, registered content can weaken
+/// reproducibility or require buffered production and lookahead; inactive
+/// arrangement metadata cannot weaken a freeze, take, or future provider.
 
 #include <pulp/playback/program.hpp>
 #include <pulp/timeline/production_mode.hpp>

@@ -1,6 +1,8 @@
+#include <pulp/playback/chord_pattern_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
 #include <pulp/playback/track_automation_program.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
@@ -22,9 +24,9 @@ using namespace pulp::timebase;
 
 namespace {
 
-template <typename T, typename E>
-T take(runtime::Result<T, E> result) {
-    if (!result) std::abort();
+template <typename T, typename E> T take(runtime::Result<T, E> result) {
+    if (!result)
+        std::abort();
     return std::move(result).value();
 }
 
@@ -40,8 +42,8 @@ std::shared_ptr<const Project> make_project(std::size_t clip_count = 2,
         clips.push_back(make_clip(100 + i, static_cast<std::int64_t>(i * 2)));
     auto first = take(Track::create({10}, "one", std::move(clips)));
     auto second = take(Track::create({20}, "two", {make_clip(90, 0)}));
-    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
-                                          std::vector<Track>{first, second}));
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::vector<Track>{first, second}));
     ProjectInput input;
     input.id = {project_id};
     input.name = "test";
@@ -69,11 +71,10 @@ std::shared_ptr<const Project> make_many_track_project(std::size_t track_count) 
 AutomationLane make_automation_lane(std::uint64_t lane_id, std::uint64_t point_id,
                                     std::uint64_t placement_id, std::uint32_t parameter,
                                     std::int64_t tick, float value) {
-    auto curve = take(AutomationCurve::create(
-        {AutomationPoint{{point_id}, {tick}, value},
-         AutomationPoint{{point_id + 10}, {tick + 480}, value + 0.1f}}));
-    return take(AutomationLane::create({lane_id},
-                                       DeviceParameterTarget{{placement_id}, parameter},
+    auto curve = take(
+        AutomationCurve::create({AutomationPoint{{point_id}, {tick}, value},
+                                 AutomationPoint{{point_id + 10}, {tick + 480}, value + 0.1f}}));
+    return take(AutomationLane::create({lane_id}, DeviceParameterTarget{{placement_id}, parameter},
                                        std::move(curve)));
 }
 
@@ -111,8 +112,8 @@ void drain(DeferredCompileExecutor& executor, PlaybackProgramCompiler& compiler)
 }
 
 ProgramCompileRequest request(std::shared_ptr<const Project> project,
-                              std::shared_ptr<const CompiledTempoMap> map,
-                              std::uint64_t revision, DirtyTrackSet dirty) {
+                              std::shared_ptr<const CompiledTempoMap> map, std::uint64_t revision,
+                              DirtyTrackSet dirty) {
     ProgramCompileRequest result;
     result.project = std::move(project);
     result.sequence_id = {2};
@@ -124,20 +125,21 @@ ProgramCompileRequest request(std::shared_ptr<const Project> project,
 
 class InlineExecutor final : public CompileExecutor {
   public:
-    bool submit(std::unique_ptr<CompileTask> task,
-                std::chrono::steady_clock::time_point) override {
-        if (!task) return false;
+    bool submit(std::unique_ptr<CompileTask> task, std::chrono::steady_clock::time_point) override {
+        if (!task)
+            return false;
         while (task->run_slice({std::chrono::steady_clock::now() + std::chrono::seconds(1),
-                                10'000}) == CompileTaskStatus::Pending) {}
+                                10'000}) == CompileTaskStatus::Pending) {
+        }
         return true;
     }
 };
 
 class HoldingExecutor final : public CompileExecutor {
   public:
-    bool submit(std::unique_ptr<CompileTask> task,
-                std::chrono::steady_clock::time_point) override {
-        if (reject || !task) return false;
+    bool submit(std::unique_ptr<CompileTask> task, std::chrono::steady_clock::time_point) override {
+        if (reject || !task)
+            return false;
         tasks.push_back(std::move(task));
         return true;
     }
@@ -146,7 +148,8 @@ class HoldingExecutor final : public CompileExecutor {
             auto task = std::move(tasks.front());
             tasks.erase(tasks.begin());
             while (task->run_slice({std::chrono::steady_clock::now() + std::chrono::seconds(1),
-                                    10'000}) == CompileTaskStatus::Pending) {}
+                                    10'000}) == CompileTaskStatus::Pending) {
+            }
         }
     }
     void run_one_slice() {
@@ -298,7 +301,7 @@ TEST_CASE("program compiler enforces automation limits before compiling dense la
     PlaybackProgramStore exact_store;
     DeferredCompileExecutor exact_executor;
     PlaybackProgramCompiler exact_compiler(exact_store, exact_executor,
-                                            std::chrono::microseconds(0));
+                                           std::chrono::microseconds(0));
     auto exact = request(project, map, 1, {.all = true});
     exact.automation_limits.max_device_placements_per_track = 2;
     exact.automation_limits.max_lanes_per_track = 2;
@@ -311,16 +314,14 @@ TEST_CASE("program compiler enforces automation limits before compiling dense la
 
     PlaybackProgramStore over_store;
     DeferredCompileExecutor over_executor;
-    PlaybackProgramCompiler over_compiler(over_store, over_executor,
-                                           std::chrono::microseconds(0));
+    PlaybackProgramCompiler over_compiler(over_store, over_executor, std::chrono::microseconds(0));
     auto over = request(project, map, 1, {.all = true});
     over.automation_limits.max_points_per_lane = 1;
     over.automation_limits.max_points_per_track = 4;
     REQUIRE(over_compiler.submit(std::move(over)));
     drain(over_executor, over_compiler);
     REQUIRE_FALSE(over_store.has_value());
-    REQUIRE(over_compiler.status().last_error.code ==
-            CompileErrorCode::AutomationProgramInvalid);
+    REQUIRE(over_compiler.status().last_error.code == CompileErrorCode::AutomationProgramInvalid);
     REQUIRE(over_compiler.status().last_error.item == ItemId{41});
 }
 
@@ -372,8 +373,7 @@ TEST_CASE("program compiler rejects track automation topology over each configur
         REQUIRE(compiler.submit(std::move(compile)));
         drain(executor, compiler);
         REQUIRE_FALSE(store.has_value());
-        REQUIRE(compiler.status().last_error.code ==
-                CompileErrorCode::AutomationProgramInvalid);
+        REQUIRE(compiler.status().last_error.code == CompileErrorCode::AutomationProgramInvalid);
         REQUIRE(compiler.status().last_error.item == limit_case.failed_item);
     }
 }
@@ -621,6 +621,76 @@ TEST_CASE("compiled stateless policy resets carry state on adoption") {
     REQUIRE(shell.state_snapshot().event_cursor == 0);
 }
 
+TEST_CASE("registered fragment replacement adopts without RT allocation and resets state") {
+    SchemaRegistryBuilder schema_builder;
+    REQUIRE(register_chord_pattern_content_schema(schema_builder));
+    const auto schemas = take(std::move(schema_builder).build());
+    auto registry = std::make_shared<CompileContextRegistry>();
+    REQUIRE_FALSE(declare_chord_pattern_renderer(*registry, schemas));
+    auto content = take(create_chord_pattern_content(
+        {.seed = 1, .step = {120}, .gate = {90}, .octave = 4, .velocity = 32000}, schemas));
+    auto clip = take(Clip::create({100}, {0}, {480}, std::move(content)));
+    auto track = take(Track::create({10}, "registered", {std::move(clip)}));
+    SequenceInput sequence;
+    sequence.id = {2};
+    sequence.name = "registered adoption";
+    sequence.tracks = {std::move(track)};
+    sequence.chord_scale_lane =
+        take(ChordScaleLane::create({{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0}}));
+    ProjectInput project_input;
+    project_input.id = {1};
+    project_input.name = "registered adoption";
+    project_input.next_item_id = 500;
+    project_input.root_sequence_id = {2};
+    project_input.sequences = {take(Sequence::create(std::move(sequence)))};
+    auto before = std::make_shared<const Project>(take(Project::create(std::move(project_input))));
+
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    auto initial = request(before, tempo_map(), 1, {.all = true});
+    initial.invalidation = CompileInvalidationInput::baseline(registry, before, 1);
+    REQUIRE(compiler.submit(std::move(initial)));
+    drain(executor, compiler);
+    REQUIRE(store.read()->find_track({10})->state_policy() == RendererStatePolicy::Stateless);
+
+    PlaybackProgramBlockLatch latch;
+    StableRendererShell shell({10});
+    {
+        auto block = latch.begin_block(store);
+        REQUIRE(shell.begin_block(block).adoption == ShellAdoptionResult::Adopted);
+        auto state = shell.state_snapshot();
+        state.event_cursor = 99;
+        REQUIRE(shell.end_block(state));
+    }
+
+    Transaction edit;
+    edit.id = {{1}, 1};
+    const auto minor =
+        take(ChordScaleLane::create({{{0}, ChordQuality::Minor, 2, ScaleMode::Dorian, 2}}));
+    edit.commands.push_back(
+        {{{1}, 1}, SetChordScaleLane{{2}, before->find_sequence({2})->chord_scale_lane(), minor}});
+    const auto reduced = take(reduce_transaction(*before, edit));
+    auto after = std::make_shared<const Project>(reduced.project);
+    const CommitResult committed{after, DocumentRevision{2}, reduced.dirty, {}, before};
+    auto changed = request(after, tempo_map(), 2, {});
+    changed.invalidation = CompileInvalidationInput{registry, committed};
+    REQUIRE(compiler.submit(std::move(changed)));
+    drain(executor, compiler);
+
+    ShellAdoptionResult adoption = ShellAdoptionResult::Missing;
+    std::size_t allocations = 1;
+    {
+        test::ScopedRtProcessProbe probe;
+        auto block = latch.begin_block(store);
+        adoption = shell.begin_block(block).adoption;
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(adoption == ShellAdoptionResult::Adopted);
+    REQUIRE(allocations == 0);
+    REQUIRE(shell.state_snapshot().event_cursor == 0);
+}
+
 TEST_CASE("compiler rejects malformed provider selections") {
     PlaybackProgramStore store;
     DeferredCompileExecutor executor;
@@ -678,8 +748,7 @@ TEST_CASE("many-track linking and validation advance in charged work units") {
     PlaybackProgramStore store;
     HoldingExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-    REQUIRE(compiler.submit(request(make_many_track_project(129), tempo_map(), 1,
-                                    {.all = true})));
+    REQUIRE(compiler.submit(request(make_many_track_project(129), tempo_map(), 1, {.all = true})));
     std::size_t slices = 0;
     while (compiler.status().active_tracks_completed == 0) {
         executor.run_one_slice();
@@ -706,8 +775,7 @@ TEST_CASE("one store binds exactly one compiler publisher core") {
     {
         PlaybackProgramCompiler first(store, first_executor, std::chrono::microseconds(0));
         PlaybackProgramCompiler second(store, second_executor, std::chrono::microseconds(0));
-        const auto rejected = second.submit(
-            request(make_project(), tempo_map(), 1, {.all = true}));
+        const auto rejected = second.submit(request(make_project(), tempo_map(), 1, {.all = true}));
         REQUIRE_FALSE(rejected);
         REQUIRE(rejected.error().code == CompileErrorCode::CompilerAlreadyBound);
     }
@@ -766,7 +834,8 @@ TEST_CASE("concurrent readers pin programs while worker publication reclaims") {
     std::thread reader([&] {
         while (!stop.load(std::memory_order_acquire)) {
             auto pin = store.read();
-            if (pin) (void)pin->generation();
+            if (pin)
+                (void)pin->generation();
         }
     });
     for (std::uint64_t revision = 1; revision <= 30; ++revision)
@@ -797,7 +866,8 @@ TEST_CASE("shell inspectors race safely with audio-thread adoption") {
             const auto view = shell.begin_block(block);
             if (view.program) {
                 auto state = shell.state_snapshot();
-                if (state.valid) (void)shell.end_block(state);
+                if (state.valid)
+                    (void)shell.end_block(state);
             }
         }
     });

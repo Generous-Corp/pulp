@@ -258,6 +258,9 @@ pulp_add_test_suite(pulp-test-timeline-groove
 pulp_add_test_suite(pulp-test-playback-compile-context
     SOURCES test_playback_compile_context.cpp
     LIBRARIES pulp::playback)
+pulp_add_test_suite(pulp-test-playback-chord-pattern-renderer
+    SOURCES test_playback_chord_pattern_renderer.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp

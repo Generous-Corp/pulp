@@ -685,6 +685,49 @@ completion observation, and a replacement compiler starts a new epoch domain.
 If `busy` is false, an error with the watermark still below the ticket is
 terminal failure.
 
+### Trusted registered-content compilers
+
+`CompileContextRegistry` owns the lowering declaration as well as its
+invalidation subscriptions. A `ContentRendererRegistration` binds an exact
+registered-content type, schema version, codec provenance, output kind,
+fragment-note ceiling, state policy, production declaration, and an
+off-realtime `noexcept` compile hook. Always call `declare(registration,
+schemas)` with the immutable `SchemaRegistry` used to create or load the
+content; the declaration records that registry identity and rejects mismatched
+or duplicate provenance rather than accepting an order-dependent renderer.
+The admitted surface is deliberately narrower than the enums suggest: notes
+only, `RegisteredRendererStatePolicy::Reset` only, and at most 4096 fragment
+notes per clip. `CarryByItemId` is refused until carried state has an exact
+identity and lifecycle contract.
+
+The hook receives `RegisteredContentCompileInput` with relative clip duration,
+the validated payload, a `CompileContextView` narrowed to the declared
+subscriptions, and the compiler's bounded note quota. Return an immutable
+`ContentProgramFragment`; do not emit absolute arrangement positions or retain
+the view. Missing exact resolution is
+`CompileErrorCode::UnresolvedRegisteredContent`. A hook failure is
+`RegisteredContentCompileFailed`. Output beyond the effective bound is
+`RegisteredContentFragmentQuotaExceeded`, and its `CompileError` must carry the
+offending clip plus exact `actual` and `limit`. Never degrade any of these to
+silence.
+
+Renderer production declarations participate in the compiled track and program
+claims. Aggregate heterogeneous tracks with `timeline::weakest`; never preserve
+the strongest claim just because it compiled first. The installed consumer
+`examples/timeline-sdk-consumer/registered_chord_renderer.cpp` is the canonical
+proof: schema and renderer registration, exact deterministic baseline and
+semantic hash, exact `CommitResult` invalidation, epoch completion,
+generated-track replacement with ordinary MIDI owner reuse, unresolved and
+quota diagnostics, and weakest production aggregation. Keep it running in the
+installed SDK smoke whenever this contract changes. Registrations are
+process-local; they are not persisted in the Timeline document.
+Nondefault renderer production declarations are also process-local:
+`ProgramWire` refuses to serialize a program that carries one. This prevents a
+remote process from inheriting a reproducibility claim without the hook that
+justified it. A nested reference that trims registered content fails as
+`TrimmedRegisteredContentUnsupported`; the compile input does not yet carry the
+source-window offset needed to preserve stateful pattern phase.
+
 Built-in note compilation applies the owning sequence groove at the original
 owner-sequence onset. Move note-on/off by one shared displacement, intersect the
 pair with the owning clip's half-open window, scale velocity half-up with

@@ -286,6 +286,43 @@ keep passing the same registry plus each committed dirty set through
 can use `WorkerCompileExecutor`; check `supported()` before submitting. The
 store and executor must outlive the compiler and every accepted task.
 
+### Add a registered chord-pattern clip
+
+Use the installed-SDK
+[registered chord renderer example](../../examples/timeline-sdk-consumer/registered_chord_renderer.cpp)
+as the runnable recipe:
+
+```cpp
+timeline::SchemaRegistryBuilder schemas;
+if (!timeline::register_builtin_timeline_schemas(schemas) ||
+    !playback::register_chord_pattern_content_schema(schemas))
+    return report_registration_error();
+auto schema_registry = std::move(schemas).build();
+
+auto compile_contexts =
+    std::make_shared<playback::CompileContextRegistry>();
+if (playback::declare_chord_pattern_renderer(
+        *compile_contexts, schema_registry.value()))
+    return report_registration_error();
+```
+
+Create clip content with `create_chord_pattern_content()` against that same
+immutable schema registry. For the initial compile use
+`CompileInvalidationInput::baseline()`; after an edit, construct invalidation
+from the exact `CommitResult`. Wait until
+`latest_published_epoch >= submission_epoch`, not merely until the document
+revision matches. An unresolved registered clip and a renderer that exceeds its
+bounded note fragment fail compilation with typed diagnostics; neither is
+silently ignored. The example also checks exact deterministic output, unrelated
+MIDI-track owner reuse, quota `actual`/`limit`, and weakest production
+aggregation.
+
+Keep registrations within the current boundary: note output, `Reset` state,
+and at most 4096 fragment notes per clip. A trimmed nested registered clip is
+unsupported because the hook cannot recover its original pattern phase.
+Nondefault production declarations are useful for in-process honesty, but
+`ProgramWire` refuses to serialize them; redeclare the hook in each process.
+
 At the callback boundary:
 
 ```cpp

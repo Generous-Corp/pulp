@@ -27,7 +27,17 @@ provider_production_declaration(ProviderSelectorProgram provider) noexcept {
 }
 
 timeline::ProductionDeclaration track_production_declaration(const TrackProgram& track) noexcept {
-    return provider_production_declaration(track.provider());
+    auto declaration = provider_production_declaration(track.provider());
+    if (track.provider().selected != ProviderKind::Arrangement)
+        return declaration;
+    const auto& content = track.arrangement_production();
+    declaration.reproducibility =
+        timeline::weakest(declaration.reproducibility, content.reproducibility);
+    if (content.mode == timeline::ProductionMode::Buffered) {
+        declaration.mode = timeline::ProductionMode::Buffered;
+        declaration.lookahead_ms = content.lookahead_ms;
+    }
+    return declaration;
 }
 
 timeline::ReproducibilityClass program_reproducibility(const PlaybackProgram& program) noexcept {

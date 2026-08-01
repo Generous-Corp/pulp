@@ -239,6 +239,10 @@ class SequenceContentLowerer::Impl {
             timebase::TickDuration{clipped_end.value - clipped_start.value};
         const auto left_trim = clipped_start.value - child.start().value;
         const auto right_trim = child.end().value - clipped_end.value;
+        if (std::holds_alternative<timeline::RegisteredContent>(child.content()) &&
+            (left_trim != 0 || right_trim != 0))
+            return {.error = SequenceLoweringError{
+                        CompileErrorCode::TrimmedRegisteredContentUnsupported, child.id()}};
         if (std::holds_alternative<timeline::MediaRef>(child.content())) {
             // A conforming clip maps its complete authored source span onto its
             // musical placement. The legacy nested-trim path below advances a
@@ -248,8 +252,8 @@ class SequenceContentLowerer::Impl {
             // nested tempo-ramped clip can silently start at the wrong audio.
             if (child.time_conform() != timeline::TimeConform::None &&
                 (left_trim != 0 || right_trim != 0))
-                return {.error = SequenceLoweringError{
-                            CompileErrorCode::NestedSequenceUnsupported, child.id()}};
+                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
+                                                       child.id()}};
             const auto playback = child.playback_properties();
             const auto retained_start = static_cast<std::uint64_t>(left_trim);
             const auto retained_end =
@@ -268,8 +272,7 @@ class SequenceContentLowerer::Impl {
         }
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
-            if (nested->source_start.value >
-                std::numeric_limits<std::int64_t>::max() - left_trim)
+            if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)
                 return {.error =
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, child.id()}};
             auto nested_clip = timeline::Clip::create(
@@ -330,8 +333,7 @@ class SequenceContentLowerer::Impl {
             std::numeric_limits<std::int64_t>::max() - note.start.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_start = pending.child.start().value + note.start.value;
-        if (note_start >
-            std::numeric_limits<std::int64_t>::max() - note.duration.value)
+        if (note_start > std::numeric_limits<std::int64_t>::max() - note.duration.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_end = note_start + note.duration.value;
         const auto audible_start = std::max(note_start, pending.clipped_start.value);
@@ -376,10 +378,9 @@ class SequenceContentLowerer::Impl {
             // passed through. The seed is carried verbatim: it selects the
             // replay, so changing it would change which notes sound.
             const auto retained = [&](timeline::ItemId note_id) {
-                return std::any_of(pending.clipped_notes.begin(), pending.clipped_notes.end(),
-                                   [&](const timeline::NoteEvent& note) {
-                                       return note.id == note_id;
-                                   });
+                return std::any_of(
+                    pending.clipped_notes.begin(), pending.clipped_notes.end(),
+                    [&](const timeline::NoteEvent& note) { return note.id == note_id; });
             };
             std::vector<timeline::NoteModifier> modifiers;
             for (const auto& modifier : notes->modifiers())
@@ -393,9 +394,8 @@ class SequenceContentLowerer::Impl {
             // missing; silently rebuilding without the lanes would lower a clip
             // whose controllers stopped existing.
             if (!notes->lanes().empty())
-                return {.error =
-                            SequenceLoweringError{CompileErrorCode::TrimmedMidiLaneUnsupported,
-                                                  pending.child.id()}};
+                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedMidiLaneUnsupported,
+                                                       pending.child.id()}};
             auto rebuilt = timeline::MidiContent::create(std::move(pending.clipped_notes),
                                                          std::move(modifiers), seed);
             if (!rebuilt)
@@ -448,10 +448,9 @@ class SequenceContentLowerer::Impl {
         const auto duration = static_cast<std::uint64_t>(pending.target_duration.value);
         playback.fade_in_duration = std::min(playback.fade_in_duration, duration);
         playback.fade_out_duration = std::min(playback.fade_out_duration, duration);
-        auto flattened =
-            timeline::Clip::create(pending.generated_id, pending.target_start,
-                                   pending.target_duration, std::move(content), playback,
-                                   pending.child.time_conform());
+        auto flattened = timeline::Clip::create(pending.generated_id, pending.target_start,
+                                                pending.target_duration, std::move(content),
+                                                playback, pending.child.time_conform());
         if (!flattened)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};

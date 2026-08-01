@@ -99,6 +99,10 @@
 /// document and the asset pool, and three of their members are derived-cache
 /// pointers whose types are still moving; the encoder refuses a program with an
 /// audio track rather than dropping it silently. It does not carry
+/// per-track production declarations. Those remain process-local in this wire
+/// version; a track whose declaration is not the default synchronous,
+/// deterministic, zero-lookahead contract is refused rather than encoded with
+/// a stronger replay claim than it earned. It does not carry
 /// AudioRendererLimits, whose two dozen fields are mostly offline-stretch and
 /// converter-cache budgets governing the compiler's host rather than the
 /// adopting realm. AutomationPlaybackLimits is carried, because those ceilings
@@ -184,6 +188,10 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// A track carries an audio renderer program, which this version does not
     /// represent. Refused rather than dropped. `detail` carries the track id.
     AudioProgramUnsupported,
+    /// A track has a non-default production declaration, which this wire
+    /// version cannot carry. Refused rather than silently strengthening the
+    /// adopting realm's replay claim. `detail` carries the track id.
+    ProductionDeclarationUnsupported,
     /// A mixer control points at an automation program that is not one of the
     /// owning track's lanes. `detail` carries the track id.
     MixerAutomationUnresolved,
