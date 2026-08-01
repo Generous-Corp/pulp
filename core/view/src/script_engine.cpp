@@ -75,6 +75,10 @@ void ScriptEngine::request_interrupt() {
     if (engine_) engine_->request_interrupt();
 }
 
+void ScriptEngine::clear_pending_interrupt() {
+    if (engine_) engine_->clear_pending_interrupt();
+}
+
 ScriptEngine::operator bool() const {
     return engine_ && engine_->is_valid();
 }

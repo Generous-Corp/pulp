@@ -232,6 +232,13 @@ public:
     // because supports_interrupt() already advertises the capability.
     bool supports_interrupt() const override { return true; }
     void request_interrupt() override { context_.cancel(); }
+    void clear_pending_interrupt() override {
+        try {
+            (void)context_.evaluateExpression("void 0");
+        } catch (...) {
+            // A pending cancellation is consumed by this engine-thread probe.
+        }
+    }
 
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
     choc::javascript::Context& choc_context() { return context_; }
