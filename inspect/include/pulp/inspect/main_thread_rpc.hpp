@@ -49,6 +49,16 @@ public:
     /// started. Running operations retain their own state and are not waited
     /// for. Safe to call repeatedly during host teardown.
     void cancel();
+    /// Cancel queued work and wait for every operation already executing on
+    /// another thread to reach its completion callback. When called from the
+    /// executing operation itself, cancellation is applied but waiting is
+    /// skipped so reentrant host teardown cannot deadlock.
+    void cancel_and_wait();
+    bool executing_on_current_thread() const;
+    /// Queue teardown work for the exact point at which the current operation
+    /// has delivered its completion and left RPC execution. Returns false when
+    /// the caller is not inside an operation owned by this RPC.
+    bool after_current_operation(Completion completion);
     bool active() const;
 
 private:

@@ -193,6 +193,276 @@ TEST_CASE("server stop is reentrant from a request callback",
     CHECK(reader.list().empty());
 }
 
+TEST_CASE("server stop drains a started timed-out domain operation",
+          "[inspect][client][teardown][main-thread][drain]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateRead,
+        InspectorCapability::StateWrite,
+    };
+    struct RawSource {
+        bool alive = true;
+        ~RawSource() { alive = false; }
+    };
+    auto source = std::make_unique<RawSource>();
+    auto* raw_source = source.get();
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    int posted_count = 0;
+    bool handler_started = false;
+    bool release_handler = false;
+    std::atomic<bool> source_survived{false};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::milliseconds(100), 2},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+                ++posted_count;
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    InspectorSession session(
+        {"session-stop-drain", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            handler_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_handler; });
+            source_survived.store(raw_source->alive,
+                                  std::memory_order_release);
+            return make_response(request.id, R"({"applied":true})");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.main_thread_rpc = rpc;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    InspectorClient unrelated_client;
+    REQUIRE(client.connect(records.front(), reader));
+    REQUIRE(unrelated_client.connect(records.front(), reader));
+    REQUIRE_FALSE(client.request("Session.acquireController").is_error);
+
+    pulp::inspect::InspectorMessage response;
+    std::thread requester([&] {
+        response = client.request("State.setParameter", "{}");
+    });
+    std::function<void()> main_task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return static_cast<bool>(queued);
+        }));
+        main_task = std::move(queued);
+    }
+    std::thread executor([&] { main_task(); });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return handler_started;
+        }));
+    }
+    requester.join();
+    REQUIRE(response.error_code == "main_thread_timeout");
+
+    std::atomic<bool> unrelated_returned{false};
+    std::thread unrelated_requester([&] {
+        (void)unrelated_client.request("State.getParameters");
+        unrelated_returned.store(true, std::memory_order_release);
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return posted_count == 2;
+        }));
+    }
+
+    std::atomic<bool> stop_returned{false};
+    std::thread stopper([&] {
+        server.stop();
+        stop_returned.store(true, std::memory_order_release);
+    });
+    const auto unrelated_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!unrelated_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < unrelated_deadline) {
+        std::this_thread::yield();
+    }
+    CHECK_FALSE(stop_returned.load(std::memory_order_acquire));
+    CHECK(unrelated_returned.load(std::memory_order_acquire));
+    CHECK(source->alive);
+    {
+        std::lock_guard lock(mutex);
+        release_handler = true;
+    }
+    cv.notify_all();
+    executor.join();
+    stopper.join();
+    unrelated_requester.join();
+
+    CHECK(stop_returned.load(std::memory_order_acquire));
+    CHECK(source_survived.load(std::memory_order_acquire));
+    source.reset();
+}
+
+TEST_CASE("server stop cancels queued domain work without draining it",
+          "[inspect][client][teardown][main-thread][queued]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool posted = false;
+    std::atomic<bool> handled{false};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto) {
+            {
+                std::lock_guard lock(mutex);
+                posted = true;
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    InspectorSession session(
+        {"session-stop-queued", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            handled.store(true, std::memory_order_release);
+            return make_response(request.id, "{}");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.main_thread_rpc = rpc;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    pulp::inspect::InspectorMessage response;
+    std::thread requester([&] {
+        response = client.request("State.getParameters");
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return posted;
+        }));
+    }
+
+    server.stop();
+    requester.join();
+    CHECK_FALSE(handled.load(std::memory_order_acquire));
+    CHECK((response.error_code == "dispatch_cancelled" ||
+           response.error_code == "connection_closed"));
+}
+
+TEST_CASE("server stop is reentrant from a main-thread domain operation",
+          "[inspect][client][teardown][main-thread][reentrant]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    InspectorServer server;
+    std::atomic<bool> reentrant_stop_returned{false};
+    InspectorSession session(
+        {"session-main-reentrant-stop", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            server.stop();
+            reentrant_stop_returned.store(true, std::memory_order_release);
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.main_thread_rpc = rpc;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    std::thread requester([&] {
+        (void)client.request("State.getParameters");
+    });
+    std::function<void()> main_task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return static_cast<bool>(queued);
+        }));
+        main_task = std::move(queued);
+    }
+    std::thread executor([&] { main_task(); });
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!reentrant_stop_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(reentrant_stop_returned.load(std::memory_order_acquire));
+    executor.join();
+    requester.join();
+    CHECK(reader.list().empty());
+}
+
 TEST_CASE("server can be released from a request callback",
           "[inspect][client][teardown][owner-lifetime]") {
     TemporaryDirectory temporary;

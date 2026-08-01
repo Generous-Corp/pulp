@@ -1080,6 +1080,102 @@ TEST_CASE("cancelling main-thread RPC does not wait for running direct work",
     CHECK_FALSE(rpc.active());
 }
 
+TEST_CASE("draining main-thread RPC waits only for work that started",
+          "[inspect][session][main-thread-rpc][teardown][drain]") {
+    SECTION("queued cancellation drains immediately without applying") {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool posted = false;
+        std::atomic<bool> applied{false};
+        InspectorMainThreadRpc rpc(
+            {1s, 1},
+            [&](auto) {
+                {
+                    std::lock_guard lock(mutex);
+                    posted = true;
+                }
+                cv.notify_all();
+                return true;
+            },
+            [] { return false; });
+        pulp::inspect::InspectorMessage response;
+        std::thread caller([&] {
+            response = rpc.call(30, [&] {
+                applied.store(true, std::memory_order_release);
+                return make_response(30, "{}");
+            });
+        });
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] { return posted; }));
+        }
+        rpc.cancel_and_wait();
+        caller.join();
+        CHECK(response.error_code == "dispatch_cancelled");
+        CHECK_FALSE(applied.load(std::memory_order_acquire));
+    }
+
+    SECTION("started timeout drains after actual completion") {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::function<void()> queued;
+        bool started = false;
+        bool release = false;
+        InspectorMainThreadRpc rpc(
+            {5ms, 1},
+            [&](auto task) {
+                {
+                    std::lock_guard lock(mutex);
+                    queued = std::move(task);
+                }
+                cv.notify_all();
+                return true;
+            },
+            [] { return false; });
+        pulp::inspect::InspectorMessage response;
+        std::thread caller([&] {
+            response = rpc.call(31, [&] {
+                std::unique_lock lock(mutex);
+                started = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return release; });
+                return make_response(31, "{}");
+            });
+        });
+        std::function<void()> task;
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] {
+                return static_cast<bool>(queued);
+            }));
+            task = std::move(queued);
+        }
+        std::thread executor([&] { task(); });
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] { return started; }));
+        }
+        caller.join();
+        REQUIRE(response.error_code == "main_thread_timeout");
+
+        std::atomic<bool> drained{false};
+        std::thread drainer([&] {
+            rpc.cancel_and_wait();
+            drained.store(true, std::memory_order_release);
+        });
+        std::this_thread::sleep_for(20ms);
+        CHECK_FALSE(drained.load(std::memory_order_acquire));
+        {
+            std::lock_guard lock(mutex);
+            release = true;
+        }
+        cv.notify_all();
+        executor.join();
+        drainer.join();
+        CHECK(drained.load(std::memory_order_acquire));
+    }
+}
+
 TEST_CASE("reentrant cancellation preserves a started RPC result",
           "[inspect][session][main-thread-rpc][teardown][reentrant]") {
     InspectorMainThreadRpc* rpc_ptr = nullptr;

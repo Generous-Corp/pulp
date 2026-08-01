@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <exception>
 #include <mutex>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -70,8 +71,65 @@ public:
     std::atomic<bool> accepting{true};
     std::recursive_mutex operation_mutex;
     std::mutex pending_mutex;
+    std::condition_variable pending_cv;
     std::vector<std::weak_ptr<PendingCall>> pending;
     std::size_t pending_count = 0;
+    std::map<std::thread::id, std::size_t> operation_threads;
+    std::map<std::thread::id, std::vector<InspectorMainThreadRpc::Completion>>
+        after_operation;
+
+    void begin_operation() {
+        std::lock_guard lock(pending_mutex);
+        ++operation_threads[std::this_thread::get_id()];
+    }
+
+    void end_operation() {
+        std::vector<InspectorMainThreadRpc::Completion> completions;
+        {
+            std::lock_guard lock(pending_mutex);
+            const auto thread = std::this_thread::get_id();
+            if (auto found = operation_threads.find(thread);
+                found != operation_threads.end() && --found->second == 0) {
+                operation_threads.erase(found);
+                if (auto callbacks = after_operation.find(thread);
+                    callbacks != after_operation.end()) {
+                    completions = std::move(callbacks->second);
+                    after_operation.erase(callbacks);
+                }
+            }
+        }
+        pending_cv.notify_all();
+        for (auto& completion : completions)
+            run_completion(std::move(completion));
+    }
+
+    bool executing_here() {
+        std::lock_guard lock(pending_mutex);
+        return operation_threads.contains(std::this_thread::get_id());
+    }
+
+    bool defer_here(InspectorMainThreadRpc::Completion completion) {
+        if (!completion)
+            return false;
+        std::lock_guard lock(pending_mutex);
+        const auto thread = std::this_thread::get_id();
+        if (!operation_threads.contains(thread))
+            return false;
+        after_operation[thread].push_back(std::move(completion));
+        return true;
+    }
+
+    class OperationGuard {
+    public:
+        explicit OperationGuard(std::shared_ptr<Impl> owner)
+            : impl(std::move(owner)) {
+            impl->begin_operation();
+        }
+        ~OperationGuard() { impl->end_operation(); }
+
+    private:
+        std::shared_ptr<Impl> impl;
+    };
 
     bool register_call(const std::shared_ptr<PendingCall>& call) {
         std::lock_guard lock(pending_mutex);
@@ -119,6 +177,7 @@ public:
             std::remove_if(pending.begin(), pending.end(),
                            [](const auto& item) { return item.expired(); }),
             pending.end());
+        pending_cv.notify_all();
     }
 };
 
@@ -175,6 +234,7 @@ InspectorMessage InspectorMainThreadRpc::call(
             run_completion(std::move(completion));
             return cancelled(request_id);
         }
+        Impl::OperationGuard running(impl);
         auto response = run_operation(request_id, operation);
         run_completion(std::move(completion));
         return response;
@@ -219,8 +279,9 @@ InspectorMessage InspectorMainThreadRpc::call(
                 impl->complete_call(pending, cancelled(request_id));
                 return;
             }
-            impl->complete_call(
-                pending, run_operation(request_id, operation));
+            Impl::OperationGuard running(impl);
+            auto response = run_operation(request_id, operation);
+            impl->complete_call(pending, std::move(response));
         });
     if (!posted) {
         impl->complete_call(
@@ -285,6 +346,25 @@ void InspectorMainThreadRpc::cancel() {
         if (cancel_before_start)
             impl->complete_call(call, cancelled(call->request_id));
     }
+}
+
+void InspectorMainThreadRpc::cancel_and_wait() {
+    cancel();
+    const auto impl = impl_;
+    if (!impl || impl->executing_here())
+        return;
+    std::unique_lock lock(impl->pending_mutex);
+    impl->pending_cv.wait(lock, [&] {
+        return impl->pending_count == 0 && impl->operation_threads.empty();
+    });
+}
+
+bool InspectorMainThreadRpc::executing_on_current_thread() const {
+    return impl_ && impl_->executing_here();
+}
+
+bool InspectorMainThreadRpc::after_current_operation(Completion completion) {
+    return impl_ && impl_->defer_here(std::move(completion));
 }
 
 bool InspectorMainThreadRpc::active() const {
