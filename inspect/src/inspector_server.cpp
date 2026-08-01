@@ -107,6 +107,7 @@ public:
     std::recursive_mutex transition_mutex;
     std::atomic<bool> stop_requested{false};
     std::atomic<bool> transition_waiting_for_callbacks{false};
+    std::atomic<bool> deferred_stop_started{false};
     std::size_t max_message_bytes = 1024u * 1024u;
 
     class CallbackGuard {
@@ -485,6 +486,42 @@ void InspectorServer::Impl::stop() {
     // must defer to a transition that is waiting for the current callback.
     const auto keep_alive = shared_from_this();
     stop_requested.store(true, std::memory_order_release);
+    std::shared_ptr<InspectorMainThreadRpc> rpc;
+    InspectorSession* active_session = nullptr;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        rpc = main_thread_rpc;
+        active_session = session;
+    }
+    if (rpc && rpc->executing_on_current_thread()) {
+        // InterprocessConnectionServer::stop() joins its reader callbacks. The
+        // reader that issued this RPC is waiting for the current main-thread
+        // operation, so joining it here would deadlock. Close admission now,
+        // retain Impl, and perform the exact teardown after this operation's
+        // completion lets its causal reader callback unwind.
+        rpc->cancel();
+        if (active_session)
+            active_session->suspend_dispatches();
+        {
+            std::lock_guard lock(clients_mutex);
+            stopping_callbacks = true;
+        }
+        bool expected = false;
+        if (deferred_stop_started.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            const bool deferred = rpc->after_current_operation(
+                [keep_alive] {
+                    keep_alive->stop();
+                    keep_alive->deferred_stop_started.store(
+                        false, std::memory_order_release);
+                });
+            if (!deferred) {
+                deferred_stop_started.store(false,
+                                            std::memory_order_release);
+            }
+        }
+        return;
+    }
     std::unique_lock transition_lock(transition_mutex, std::defer_lock);
     if (!transition_lock.try_lock()) {
         bool called_from_callback = false;
@@ -530,10 +567,26 @@ void InspectorServer::Impl::stop_locked() {
         rpc_to_cancel->cancel();
     if (session)
         session->suspend_dispatches();
+    std::vector<std::shared_ptr<events::InterprocessConnection>>
+        connections_to_interrupt;
     {
         std::lock_guard lock(clients_mutex);
         stopping_callbacks = true;
+        connections_to_interrupt.reserve(clients.size());
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            connections_to_interrupt.push_back(client->connection);
+        }
     }
+    // Wake remote callers before draining their already-started handlers. The
+    // session and all publication wiring remain attached until the drain below
+    // reaches true operation completion.
+    for (const auto& connection : connections_to_interrupt) {
+        if (connection)
+            connection->disconnect();
+    }
+    if (rpc_to_cancel)
+        rpc_to_cancel->cancel_and_wait();
     server.stop();
     port.store(0, std::memory_order_release);
     std::vector<std::shared_ptr<detail::InspectorConnectedClient>>
