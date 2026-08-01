@@ -24,6 +24,11 @@ _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
+_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_TARGET
+    Pulp::standalone-inspector pulp::standalone-inspector)
+_pulp_pick_target(_PULP_STANDALONE_INSPECTOR_RUNTIME_EVAL_TARGET
+    Pulp::standalone-inspector-runtime-eval pulp::standalone-inspector-runtime-eval)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpInspectorShipping.cmake")
 _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
@@ -619,9 +624,9 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI"
+        "ACCEPTS_MIDI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
-        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS"
+        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES"
         ${ARGN}
     )
     if("PRODUCES_MIDI" IN_LIST PLUGIN_UNPARSED_ARGUMENTS)
@@ -665,6 +670,44 @@ function(pulp_add_plugin target)
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS "${PLUGIN_CONTENT_MANUAL_RESCAN_KINDS}" CACHE INTERNAL "")
+    if(PLUGIN_INSPECTOR_CAPABILITIES AND NOT PLUGIN_SHIP_INSPECTOR)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): INSPECTOR_CAPABILITIES requires the deliberate SHIP_INSPECTOR acknowledgement")
+    endif()
+    if(PLUGIN_SHIP_INSPECTOR AND NOT PLUGIN_INSPECTOR_CAPABILITIES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): SHIP_INSPECTOR requires an explicit INSPECTOR_CAPABILITIES list")
+    endif()
+    if(PLUGIN_SHIP_INSPECTOR AND NOT "Standalone" IN_LIST PLUGIN_FORMATS)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): shipping inspector endpoints are supported only for Standalone targets")
+    endif()
+    if("runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES AND
+       NOT PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): runtime.eval requires the separate unsafe SHIP_INSPECTOR_RUNTIME_EVAL acknowledgement")
+    endif()
+    if(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL AND
+       NOT "runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): SHIP_INSPECTOR_RUNTIME_EVAL does not imply runtime.eval; declare that capability explicitly")
+    endif()
+    set(_inspector_controller_capabilities
+        trace.control trace.session.control state.write test.input
+        authoring.tweaks runtime.eval)
+    foreach(_inspector_capability IN LISTS PLUGIN_INSPECTOR_CAPABILITIES)
+        if(_inspector_capability IN_LIST _inspector_controller_capabilities AND
+           NOT "session.control" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): inspector mutation capability '${_inspector_capability}' requires session.control")
+        endif()
+    endforeach()
+    unset(_inspector_capability)
+    unset(_inspector_controller_capabilities)
+    set(PULP_${target}_SHIP_INSPECTOR "${PLUGIN_SHIP_INSPECTOR}" CACHE INTERNAL "")
+    set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}" CACHE INTERNAL "")
+    set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "")
+    _pulp_configure_inspector_shipping(${target} "${PLUGIN_BUNDLE_ID}")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
         message(WARNING

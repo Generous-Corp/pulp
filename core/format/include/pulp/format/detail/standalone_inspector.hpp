@@ -26,6 +26,11 @@ class InspectorOverlay;
 
 namespace pulp::format::detail {
 
+/// Installed by the generated product-owned shipping marker before main().
+/// When present, this exact declaration is the maximum runtime grant set.
+void set_standalone_inspector_shipping_capabilities(
+    std::vector<std::string> capabilities);
+
 /// Return the exact fail-closed diagnostic when the attached live scripted-UI
 /// realm exposes any effectful native bridge capability.
 std::optional<std::string>

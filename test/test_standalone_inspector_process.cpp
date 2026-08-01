@@ -151,6 +151,17 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
 
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
+    const auto capabilities = client.request(
+        std::string(pulp::inspect::methods::kSessionGetCapabilities));
+    REQUIRE_FALSE(capabilities.is_error);
+    const auto effective_position = capabilities.params_json.find("\"effective\":");
+    REQUIRE(effective_position != std::string::npos);
+    const auto effective = capabilities.params_json.substr(effective_position);
+    CHECK(effective.find("\"session.describe\"") != std::string::npos);
+    CHECK(effective.find("\"ui.read\"") != std::string::npos);
+    CHECK(effective.find("\"test.input\"") == std::string::npos);
+    CHECK(effective.find("\"state.write\"") == std::string::npos);
+    CHECK(effective.find("\"runtime.eval\"") == std::string::npos);
     std::vector<std::uint8_t> captured_png;
     const auto capture_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(4);

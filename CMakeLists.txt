@@ -384,27 +384,24 @@ if(ANDROID)
     pulp_wire_android_sources()
 endif()
 
-add_library(pulp-standalone STATIC
+set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
-    core/format/src/settings_panel.cpp
-)
+    core/format/src/settings_panel.cpp)
+add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-target_include_directories(pulp-standalone
-    PUBLIC
+function(_pulp_configure_standalone_target target)
+    target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-        $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(pulp-standalone
-    PUBLIC
-        pulp::format
-        pulp::view
-        $<BUILD_INTERFACE:yogacore>
-        $<INSTALL_INTERFACE:Pulp::yogacore>
-        $<BUILD_INTERFACE:SDL3::SDL3-static>
-        $<INSTALL_INTERFACE:Pulp::sdl3-static>
-)
+        $<INSTALL_INTERFACE:include>)
+    target_link_libraries(${target} PUBLIC
+        pulp::format pulp::view
+        $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
+        $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
+endfunction()
+_pulp_configure_standalone_target(pulp-standalone)
+target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 
 # The inspector protocol/session/client foundation is CPU-only and installable
 # when the optional SDK component is requested. inspect/CMakeLists.txt adds the
@@ -413,24 +410,57 @@ if(PULP_ENABLE_INSPECTOR)
     add_subdirectory(inspect)
 endif()
 
-# The visual Cmd+I overlay belongs only to the standalone authoring target.
-# Keeping this dependency off pulp-format is what prevents ordinary plugin
-# targets from inheriting inspector archives through the format SDK.
+# Inspector-capable standalone archives are optional SDK components. The
+# ordinary `pulp::standalone` target above is deliberately inspector-free;
+# pulp_add_plugin selects one of these only after an exact shipping declaration.
 if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
-    target_sources(pulp-standalone PRIVATE
+    set(_pulp_standalone_inspector_sources
+        ${_pulp_standalone_sources}
         core/format/src/standalone_inspector.cpp
         core/format/src/standalone_inspector_capture.cpp
         core/format/src/standalone_inspector_policy.cpp
         core/format/src/standalone_runtime_eval_dispatch.cpp)
-    target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
-    target_link_libraries(pulp-standalone PRIVATE pulp::inspect-runtime-eval)
-    target_compile_definitions(pulp-standalone PRIVATE
-        PULP_ENABLE_INSPECTOR=1
-        PULP_HAS_INSPECT=1)
-else()
-    target_compile_definitions(pulp-standalone PRIVATE
-        PULP_ENABLE_INSPECTOR=0)
+    add_library(pulp-standalone-inspector STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector ALIAS pulp-standalone-inspector)
+    _pulp_configure_standalone_target(pulp-standalone-inspector)
+    target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)
+    target_compile_definitions(pulp-standalone-inspector PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=0)
+
+    add_library(pulp-standalone-inspector-runtime-eval STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector-runtime-eval ALIAS
+        pulp-standalone-inspector-runtime-eval)
+    _pulp_configure_standalone_target(pulp-standalone-inspector-runtime-eval)
+    target_link_libraries(pulp-standalone-inspector-runtime-eval PRIVATE
+        pulp::inspect pulp::inspect-runtime-eval)
+    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=1)
+
+    get_target_property(_ordinary_standalone_links pulp-standalone LINK_LIBRARIES)
+    get_target_property(_inspector_standalone_links pulp-standalone-inspector LINK_LIBRARIES)
+    get_target_property(_eval_standalone_links
+        pulp-standalone-inspector-runtime-eval LINK_LIBRARIES)
+    if("pulp::inspect" IN_LIST _ordinary_standalone_links OR
+       "pulp::inspect-runtime-eval" IN_LIST _ordinary_standalone_links)
+        message(FATAL_ERROR "ordinary pulp::standalone inherited an inspector component")
+    endif()
+    if("pulp::inspect-runtime-eval" IN_LIST _inspector_standalone_links)
+        message(FATAL_ERROR "generic inspector standalone inherited runtime.eval")
+    endif()
+    if(NOT "pulp::inspect" IN_LIST _inspector_standalone_links OR
+       NOT "pulp::inspect-runtime-eval" IN_LIST _eval_standalone_links)
+        message(FATAL_ERROR "declared standalone inspector component graph is incomplete")
+    endif()
+    unset(_ordinary_standalone_links)
+    unset(_inspector_standalone_links)
+    unset(_eval_standalone_links)
+    unset(_pulp_standalone_inspector_sources)
 endif()
+unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 # tools/timeline publishes through core/project_package, so the target does not

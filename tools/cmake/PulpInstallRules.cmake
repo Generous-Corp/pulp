@@ -118,6 +118,12 @@ endif()
 if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
 endif()
+if(TARGET pulp-standalone-inspector)
+    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector)
+endif()
+if(TARGET pulp-standalone-inspector-runtime-eval)
+    list(APPEND PULP_SDK_TARGETS pulp-standalone-inspector-runtime-eval)
+endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
@@ -435,6 +441,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"

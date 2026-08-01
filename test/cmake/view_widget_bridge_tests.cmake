@@ -270,6 +270,15 @@ add_executable(pulp-test-inspector-stripped-artifact
     fixtures/inspector_stripped_artifact.cpp)
 target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::format)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_CAPABILITIES "")
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_MANIFEST_DIRECTORY
+    "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+_pulp_configure_inspector_shipping(
+    pulp-test-inspector-stripped-artifact "com.pulp.test.inspector-stripped")
+_pulp_attach_inspector_shipping(
+    pulp-test-inspector-stripped-artifact pulp-test-inspector-stripped-artifact)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
 unset(_pulp_inspector_symbol_tool)

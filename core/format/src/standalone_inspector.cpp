@@ -17,7 +17,9 @@
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/main_thread_rpc.hpp>
+#if PULP_STANDALONE_RUNTIME_EVAL_COMPONENT
 #include <pulp/inspect/runtime_eval_component.hpp>
+#endif
 #include <pulp/inspect/session.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/test_input.hpp>
@@ -51,6 +53,11 @@
 
 namespace pulp::format::detail {
 namespace {
+
+std::vector<std::string>& shipping_capabilities_storage() {
+    static std::vector<std::string> capabilities;
+    return capabilities;
+}
 
 #if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
 std::mutex rpc_post_hook_mutex;
@@ -120,6 +127,10 @@ std::int64_t mtime_unix_ms(const std::filesystem::path& path) {
 
 } // namespace
 
+void set_standalone_inspector_shipping_capabilities(
+    std::vector<std::string> capabilities) {
+    shipping_capabilities_storage() = std::move(capabilities);
+}
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
                                                public inspect::InspectorCaptureSource,
                                                public inspect::InspectorTestInputSource {
@@ -612,10 +623,15 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
 
     void refresh_runtime_eval_realm(view::ScriptedUiSession* current) {
         if (runtime_eval_requested_) {
+#if !PULP_STANDALONE_RUNTIME_EVAL_COMPONENT
+            domains_.set_runtime_eval_denied(
+                "runtime.eval was not linked into this product target");
+#else
             if (auto denial = standalone_runtime_eval_realm_denial(current))
                 domains_.set_runtime_eval_denied(std::move(*denial));
             else
                 domains_.set_runtime_eval_enabled(true);
+#endif
         } else {
             domains_.set_runtime_eval_enabled(false);
         }
@@ -838,9 +854,25 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         return nullptr;
     if (!local_only && *parsed_profile == inspect::InspectorProfile::Off)
         return nullptr;
+    auto effective_profile = local_only
+        ? inspect::InspectorProfile::Off
+        : *parsed_profile;
+    const auto& shipping_capabilities = shipping_capabilities_storage();
+    if (!shipping_capabilities.empty() &&
+        effective_profile != inspect::InspectorProfile::Off) {
+        if (runtime_eval_enabled &&
+            std::find(shipping_capabilities.begin(), shipping_capabilities.end(),
+                      "runtime.eval") == shipping_capabilities.end()) {
+            runtime::log_error(
+                "Standalone: runtime.eval exceeds this product's shipping capability manifest");
+            return nullptr;
+        }
+        effective_profile = inspect::InspectorProfile::Custom;
+        custom_capabilities = shipping_capabilities;
+    }
     if (runtime_eval_enabled &&
-        (local_only || (*parsed_profile != inspect::InspectorProfile::Develop &&
-                        *parsed_profile != inspect::InspectorProfile::Custom))) {
+        effective_profile != inspect::InspectorProfile::Develop &&
+        effective_profile != inspect::InspectorProfile::Custom) {
         runtime::log_error(
             "Standalone: runtime evaluation requires the develop or custom inspector profile");
         return nullptr;
@@ -881,7 +913,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         return nullptr;
     }
     std::vector<inspect::InspectorCapability> custom;
-    if (*parsed_profile == inspect::InspectorProfile::Custom) {
+    if (effective_profile == inspect::InspectorProfile::Custom) {
         bool has_session_control = false;
         bool has_runtime_eval = false;
         bool needs_session_control = false;
@@ -931,7 +963,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         return nullptr;
     }
     auto impl =
-        std::make_shared<Impl>(app, processor, bridge, root, window, overlay.get(), *parsed_profile,
+        std::make_shared<Impl>(app, processor, bridge, root, window, overlay.get(), effective_profile,
                                std::move(custom), runtime_eval_enabled,
                                std::move(*session_id), std::move(*instance_id));
     return std::unique_ptr<StandaloneInspectorRuntime>(

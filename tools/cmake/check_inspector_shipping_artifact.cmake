@@ -1,0 +1,48 @@
+if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}")
+    message(FATAL_ERROR "inspector shipping scan requires ARTIFACT and MANIFEST")
+endif()
+file(READ "${ARTIFACT}" _binary HEX)
+file(READ "${MANIFEST}" _manifest)
+string(HEX "PULP_INSPECT_SHIPPING_MANIFEST_V1" _shipping_hex)
+string(FIND "${_binary}" "${_shipping_hex}" _shipping_pos)
+string(FIND "${_manifest}" "\"shipping_override\": true" _declared_pos)
+if(_declared_pos GREATER_EQUAL 0 AND _shipping_pos LESS 0)
+    message(FATAL_ERROR "manifest declares an inspector endpoint but binary marker is absent")
+elseif(_declared_pos LESS 0 AND _shipping_pos GREATER_EQUAL 0)
+    message(FATAL_ERROR "binary contains an inspector endpoint marker but manifest does not declare it")
+endif()
+
+foreach(_cap IN ITEMS
+    session.describe session.control state.read ui.read diagnostics.read logs.read
+    capture.image trace.control trace.session.control state.write test.input
+    authoring.tweaks telemetry.stream runtime.eval)
+    string(FIND "${_manifest}" "\"${_cap}\"" _cap_declared)
+    string(MAKE_C_IDENTIFIER "${_cap}" _cap_identifier)
+    string(TOUPPER "${_cap_identifier}" _cap_identifier)
+    string(HEX "PULP_INSPECT_CAPABILITY_${_cap_identifier}_V1" _cap_hex)
+    string(FIND "${_binary}" "${_cap_hex}" _cap_binary)
+    if(_cap_declared GREATER_EQUAL 0 AND _cap_binary LESS 0)
+        message(FATAL_ERROR "declared capability marker is absent: ${_cap}")
+    elseif(_cap_declared LESS 0 AND _cap_binary GREATER_EQUAL 0)
+        message(FATAL_ERROR "binary contains undeclared capability marker: ${_cap}")
+    endif()
+endforeach()
+
+foreach(_token IN ITEMS
+    "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
+    "InspectorServer" "DiscoveryPublisher" "publish_discovery_record")
+    string(HEX "${_token}" _token_hex)
+    string(FIND "${_binary}" "${_token_hex}" _token_pos)
+    if(_declared_pos LESS 0 AND _token_pos GREATER_EQUAL 0)
+        message(FATAL_ERROR "ordinary artifact contains forbidden inspector token: ${_token}")
+    endif()
+endforeach()
+
+string(FIND "${_manifest}" "\"unsafe_runtime_eval_acknowledged\": true" _eval_declared)
+string(HEX "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1" _eval_hex)
+string(FIND "${_binary}" "${_eval_hex}" _eval_binary)
+if(_eval_declared GREATER_EQUAL 0 AND _eval_binary LESS 0)
+    message(FATAL_ERROR "runtime.eval acknowledgement is present but high-risk component marker is absent")
+elseif(_eval_declared LESS 0 AND _eval_binary GREATER_EQUAL 0)
+    message(FATAL_ERROR "high-risk runtime.eval component is present without its separate acknowledgement")
+endif()
