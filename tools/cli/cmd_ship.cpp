@@ -8,10 +8,12 @@
 #include "inspector_shipping_report.hpp"
 #include "xcode_developer_path.hpp"
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string_view>
@@ -104,6 +106,7 @@ static int print_ship_help() {
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
     std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
+    std::cout << "             --ship-inspector [--ship-inspector-runtime-eval]  (package acknowledgements)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
     std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
     std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [--output <dir>]\n";
@@ -416,8 +419,27 @@ static int ship_sign(const std::vector<std::string>& args,
 }
 
     // ── package ─────────────────────────────────────────────────────────────
-static int ship_package(const std::vector<std::string>& args,
-                       const fs::path& root, const fs::path& build_dir) {
+struct InspectorPackageEvidence {
+    pulp::cli::inspector_shipping::Report report;
+    fs::path path;
+};
+
+class ScopedOutputCapture {
+public:
+    ScopedOutputCapture(std::ostream& stream, std::streambuf* replacement)
+        : stream_(stream), original_(stream.rdbuf(replacement)) {}
+    ~ScopedOutputCapture() { stream_.rdbuf(original_); }
+    ScopedOutputCapture(const ScopedOutputCapture&) = delete;
+    ScopedOutputCapture& operator=(const ScopedOutputCapture&) = delete;
+
+private:
+    std::ostream& stream_;
+    std::streambuf* original_;
+};
+
+static int ship_package_impl(const std::vector<std::string>& args,
+                             const fs::path& root, const fs::path& build_dir,
+                             InspectorPackageEvidence& evidence) {
     const std::string sub = "package";
         auto artifacts = root / "artifacts";
         fs::create_directories(artifacts);
@@ -429,7 +451,6 @@ static int ship_package(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
-        bool json_output = false;
         bool ship_inspector = false;
         bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
@@ -483,7 +504,6 @@ static int ship_package(const std::vector<std::string>& args,
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
-            else if (args[i] == "--json") json_output = true;
             else if (args[i] == "--ship-inspector") ship_inspector = true;
             else if (args[i] == "--ship-inspector-runtime-eval")
                 ship_inspector_runtime_eval = true;
@@ -497,8 +517,18 @@ static int ship_package(const std::vector<std::string>& args,
             return rc;
         }
 
-        const auto inspector_report =
-            pulp::cli::inspector_shipping::load_report(build_dir);
+        auto inspector_manifest_root = build_dir;
+        if (!binary_path.empty())
+            inspector_manifest_root = fs::path(binary_path).parent_path();
+        const auto inspector_report = pulp::cli::inspector_shipping::load_report(
+            inspector_manifest_root,
+            product_filter.empty()
+                ? std::optional<std::string_view>{}
+                : std::optional<std::string_view>{product_filter});
+        if (!inspector_report.complete) {
+            std::cerr << "pulp ship package: " << inspector_report.error << "\n";
+            return 2;
+        }
         if (inspector_report.ships_inspector != ship_inspector) {
             std::cerr << "pulp ship package: inspector manifest/acknowledgement mismatch; "
                          "an intentional endpoint requires --ship-inspector and an ordinary "
@@ -523,10 +553,8 @@ static int ship_package(const std::vector<std::string>& args,
             std::cerr << "pulp ship package: could not write inspector capability evidence\n";
             return 1;
         }
-        if (json_output)
-            std::cout << "\n{\"inspector_capabilities\": "
-                      << inspector_report.json << ", \"evidence\": "
-                      << std::quoted(capability_evidence.string()) << "}\n";
+        evidence.report = inspector_report;
+        evidence.path = capability_evidence;
 
         if (apk_only && aab_only) {
             std::cerr << "Error: --apk-only and --aab-only are mutually exclusive.\n";
@@ -861,6 +889,32 @@ static int ship_package(const std::vector<std::string>& args,
         return 1;
 #endif  // __APPLE__
 #endif  // _WIN32 else
+}
+
+static int ship_package(const std::vector<std::string>& args,
+                        const fs::path& root, const fs::path& build_dir) {
+    const bool json_output =
+        std::find(args.begin(), args.end(), "--json") != args.end();
+    std::vector<std::string> package_args;
+    package_args.reserve(args.size());
+    std::copy_if(args.begin(), args.end(), std::back_inserter(package_args),
+                 [](const std::string& arg) { return arg != "--json"; });
+
+    InspectorPackageEvidence evidence;
+    std::ostringstream human_output;
+    int result = 0;
+    if (json_output) {
+        ScopedOutputCapture capture(std::cout, human_output.rdbuf());
+        result = ship_package_impl(package_args, root, build_dir, evidence);
+    } else {
+        result = ship_package_impl(package_args, root, build_dir, evidence);
+    }
+    if (json_output && result == 0) {
+        std::cout << "{\"inspector_capabilities\": " << evidence.report.json
+                  << ", \"evidence\": " << std::quoted(evidence.path.string())
+                  << "}\n";
+    }
+    return result;
 }
 
     // ── check ───────────────────────────────────────────────────────────────
@@ -1212,6 +1266,7 @@ static int ship_release(const std::vector<std::string>& args,
         std::string api_key, api_key_id, api_issuer, installer_identity;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
+        bool ship_inspector = false, ship_inspector_runtime_eval = false;
 
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--target") {
@@ -1238,6 +1293,10 @@ static int ship_release(const std::vector<std::string>& args,
                 want_pkg = true;
             } else if (args[i] == "--dmg") {
                 want_dmg = true;
+            } else if (args[i] == "--ship-inspector") {
+                ship_inspector = true;
+            } else if (args[i] == "--ship-inspector-runtime-eval") {
+                ship_inspector_runtime_eval = true;
             } else if (args[i] == "--skip-sign") {
                 skip_sign = true;
             } else if (args[i] == "--skip-package") {
@@ -1324,6 +1383,9 @@ static int ship_release(const std::vector<std::string>& args,
             }
             if (want_pkg) pkg_args.push_back("--pkg");
             if (want_dmg) pkg_args.push_back("--dmg");
+            if (ship_inspector) pkg_args.push_back("--ship-inspector");
+            if (ship_inspector_runtime_eval)
+                pkg_args.push_back("--ship-inspector-runtime-eval");
             // Plumb the Developer ID Installer identity so `package` signs the
             // flat package it builds — an unsigned .pkg cannot be notarized.
             if (!installer_identity.empty()) {

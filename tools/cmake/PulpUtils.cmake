@@ -707,7 +707,8 @@ function(pulp_add_plugin target)
     set(PULP_${target}_SHIP_INSPECTOR "${PLUGIN_SHIP_INSPECTOR}" CACHE INTERNAL "")
     set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}" CACHE INTERNAL "")
     set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "")
-    _pulp_configure_inspector_shipping(${target} "${PLUGIN_BUNDLE_ID}")
+    _pulp_configure_inspector_shipping(
+        ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
         message(WARNING

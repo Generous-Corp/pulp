@@ -374,7 +374,8 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect
         "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
     _pulp_configure_inspector_shipping(
         pulp-standalone-inspector-process-fixture
-        "com.pulp.test.inspector-developer-edition")
+        "com.pulp.test.inspector-developer-edition"
+        "Inspector Developer Edition")
     target_compile_definitions(pulp-standalone-inspector-process-fixture PRIVATE
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_link_libraries(pulp-standalone-inspector-process-fixture PRIVATE

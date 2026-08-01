@@ -17,7 +17,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     telemetry.stream
     runtime.eval)
 
-function(_pulp_configure_inspector_shipping target bundle_id)
+function(_pulp_configure_inspector_shipping target bundle_id product_name)
     set(_caps "${PULP_${target}_INSPECTOR_CAPABILITIES}")
     foreach(_cap IN LISTS _caps)
         if(NOT _cap IN_LIST _PULP_INSPECTOR_SHIPPING_CAPABILITIES)
@@ -62,7 +62,7 @@ function(_pulp_configure_inspector_shipping target bundle_id)
     file(MAKE_DIRECTORY "${_manifest_dir}")
     set(_manifest "${_manifest_dir}/${target}.json")
     file(GENERATE OUTPUT "${_manifest}" CONTENT
-        "{\n  \"schema_version\": 1,\n  \"target\": \"${target}\",\n  \"bundle_id\": \"${bundle_id}\",\n  \"shipping_override\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"activation\": \"product-owned; runtime default off\",\n  \"capabilities\": [${_json_caps}]\n}\n")
+        "{\n  \"schema_version\": 1,\n  \"target\": \"${target}\",\n  \"product_name\": \"${product_name}\",\n  \"bundle_id\": \"${bundle_id}\",\n  \"shipping_override\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"activation\": \"product-owned; runtime default off\",\n  \"capabilities\": [${_json_caps}]\n}\n")
     set(PULP_${target}_INSPECTOR_MANIFEST "${_manifest}" CACHE INTERNAL "")
 
     if(PULP_${target}_SHIP_INSPECTOR)

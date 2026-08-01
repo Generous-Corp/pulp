@@ -1,6 +1,7 @@
 if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}")
     message(FATAL_ERROR "inspector shipping scan requires ARTIFACT and MANIFEST")
 endif()
+include("${CMAKE_CURRENT_LIST_DIR}/PulpInspectorShipping.cmake")
 file(READ "${ARTIFACT}" _binary HEX)
 file(READ "${MANIFEST}" _manifest)
 string(HEX "PULP_INSPECT_SHIPPING_MANIFEST_V1" _shipping_hex)
@@ -12,10 +13,7 @@ elseif(_declared_pos LESS 0 AND _shipping_pos GREATER_EQUAL 0)
     message(FATAL_ERROR "binary contains an inspector endpoint marker but manifest does not declare it")
 endif()
 
-foreach(_cap IN ITEMS
-    session.describe session.control state.read ui.read diagnostics.read logs.read
-    capture.image trace.control trace.session.control state.write test.input
-    authoring.tweaks telemetry.stream runtime.eval)
+foreach(_cap IN LISTS _PULP_INSPECTOR_SHIPPING_CAPABILITIES)
     string(FIND "${_manifest}" "\"${_cap}\"" _cap_declared)
     string(MAKE_C_IDENTIFIER "${_cap}" _cap_identifier)
     string(TOUPPER "${_cap_identifier}" _cap_identifier)
