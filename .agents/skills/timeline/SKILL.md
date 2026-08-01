@@ -986,6 +986,14 @@ Consequences worth knowing before you touch this:
   vocabulary. `SequencerUiHostT`'s parameter exists so the playback seam and the
   intent vocabulary can evolve apart; the alias is what keeps that parameter bound
   to something real instead of only ever meeting a test stand-in.
+- Piano-roll gestures use the sibling `NoteEditIntent` and
+  `NoteEditIntentHost`. Insert carries only `replacement`, erase carries only
+  `expected`, and move/resize/velocity carry both with one identity;
+  `ValidatedNoteEditIntent::create` rejects malformed or ambiguous shapes, and
+  `NoteEditIntentHost` accepts only that wrapper so invalid raw values cannot
+  cross the host seam. There is intentionally no note lowerer until the granular
+  note commands land — do not route these through the O(clip)
+  `ReplaceNoteContent` command as an interim implementation.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit
