@@ -41,10 +41,18 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 # grew into an engine type would fail to build here.
 pulp_add_test_suite(pulp-test-sequencer-ui-host
     SOURCES test_sequencer_ui_host.cpp test_timeline_snap_grid.cpp
+            test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
+# Names both rungs at once, which neither rung may do for itself. The link list
+# is the point: standing above the transport and the editor is what makes "both
+# describe a loop with one type" a statement the build checks, rather than a
+# claim two headers make separately and can drift apart on.
+pulp_add_test_suite(pulp-test-timebase-loop-region
+    LIBRARIES pulp::playback pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp
+        test_playback_generated_event_source.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::native-components
@@ -372,6 +380,20 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-engine-dependency-floor-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_engine_dependency_floor_check.py"
         --selftest)
+
+    # A construct a user can author and the compiler then refuses leaves the
+    # document unplayable with nothing saying so at authoring time, which is
+    # worse than the construct not existing. Every such refusal must carry a
+    # written reason and an owner. The selftest proves the check names a
+    # refusal dropped from the allowlist, names a newly added one, and still
+    # passes a refusal that reads nothing a document can carry.
+    add_test(NAME playback-negative-capability COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/negative_capability_check.py"
+        --repo-root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME playback-negative-capability-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/negative_capability_check.py"
+        --selftest)
+
     add_test(NAME web-timeline-source-closure
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/web_timeline_source_closure_check.py

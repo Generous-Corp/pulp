@@ -28,7 +28,12 @@ namespace pulp::timeline_editor {
 /// What the caller scripts. Held by value inside the host's current program.
 struct ScriptedProgram {
     timebase::TickPosition position{};
-    UiLoopRegion loop{};
+    /// Scripted rather than counted by the host, because only whoever moves the
+    /// position knows when it stopped moving continuously. A real host copies
+    /// this from its transport; a caller scripting a loop wrap advances it by
+    /// hand, which is how a view's interpolation can be driven over the break.
+    std::uint64_t continuity_epoch = 0;
+    timebase::LoopRegion loop{};
     UiTransportState state = UiTransportState::Stopped;
     double tempo_bpm = 120.0;
 };
@@ -91,6 +96,7 @@ class ScriptedUiHost final : public SequencerUiHostT<Intent> {
         UiPlayhead reading;
         reading.program_generation = generation_;
         reading.sequence = sequence_;
+        reading.continuity_epoch = current.continuity_epoch;
         reading.position = current.position;
         reading.loop = current.loop;
         reading.state = current.state;

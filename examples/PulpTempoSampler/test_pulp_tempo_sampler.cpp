@@ -1354,9 +1354,11 @@ TEST_CASE("target-bpm override survives the per-block host tempo", "[tempo-sampl
     REQUIRE(f.proc->effective_bpm() == 200.0);
 }
 
-// Item B: the framework SettingsPanel reports a natural height taller than the
-// fixed sampler editor, so the standalone host can grow the window on the
-// Settings tab (instead of squishing the device dropdowns into 372px).
+#if defined(__APPLE__)
+// The framework SettingsPanel reports a natural height taller than the fixed
+// sampler editor, so the standalone host can grow the window on the Settings
+// tab instead of squishing the device dropdowns into 372px. SettingsPanel is
+// linked only into the Apple test target; Linux keeps this example headless.
 TEST_CASE("settings panel natural height exceeds the editor height", "[tempo-sampler]") {
     PulpTempoSamplerProcessor p;
     const auto vs = p.view_size();
@@ -1365,6 +1367,7 @@ TEST_CASE("settings panel natural height exceeds the editor height", "[tempo-sam
     // Room for header + inner tab bar + every Audio-tab row at full size.
     REQUIRE(format::SettingsPanel::preferred_height() == 620);
 }
+#endif
 
 TEST_CASE("plugin state round-trips the loaded sample (close/reopen)", "[tempo-sampler]") {
     auto loop = percussive_loop(48000, 4);

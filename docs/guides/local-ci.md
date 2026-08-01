@@ -7,20 +7,24 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
-## Pull requests from forks never reach the local Macs
+## Fork routing in YAML is defense in depth, not access control
 
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the Mac Studios (or the M5 on
-overflow). For a pull request whose head branch lives in **another repository**,
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
+request whose head branch lives in **another repository**,
 both self-hosted selectors are ignored and the leg falls through to the
 GitHub-hosted `macos-15` label.
 
-This is a security boundary, not a preference. The local Macs hold the Developer
-ID signing keychain and the notary key (`~/.config/pulp/secrets/`), and
+This checked-in routing is useful defense in depth, but it is not a security
+boundary: pull-request workflow YAML is contributor-controlled and can remove
+its own guard. The local Macs hold the Developer ID signing keychain and the
+notary key (`~/.config/pulp/secrets/`), and
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable** — variables, unlike
 secrets, *do* resolve for fork runs. Without the guard, one "Approve and run"
-click on a fork pull request would execute contributor code on the credentialed
-machines.
+click on a fork pull request could otherwise execute contributor code on the
+credentialed machines. The real boundary must be an organization runner group
+restricted to selected trusted workflow refs (or an equivalent trusted
+dispatcher). Until then, do not add private pools to automatic PR routing.
 
 The leg is rerouted rather than skipped, so a fork contributor still gets a real
 macOS result on a clean throwaway runner. Note that the required `macos` check
@@ -28,15 +32,19 @@ is posted by the local lane, so a fork PR still cannot merge on its own — the
 maintainer adopts the commits onto an in-repo `contrib/*` branch and ships that.
 
 Same-repo pull requests, pushes, and `workflow_dispatch` runs are unaffected.
-Covered by `tools/scripts/test_fork_pr_runner_routing.py` (ctest:
-`fork-pr-runner-routing`), which runs the resolver the workflow actually embeds.
-## The Linux x64 lane runs on macpro (Proxmox)
+Covered as defense in depth by `tools/scripts/test_fork_pr_runner_routing.py`
+(ctest: `fork-pr-runner-routing`), which runs the resolver the workflow actually
+embeds; that test does not prove the runners are inaccessible.
+## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
 
-`build.yml`'s `Linux (x64)` leg routes via `PULP_LOCAL_LINUX_RUNS_ON_JSON` to
-ephemeral Proxmox VMs on **macpro** — a Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t,
-31 GB) repurposed as a Linux CI host. Native x86_64, which the job requires: the
-lane's earlier ARM64/Tart declaration would have changed its architecture rather
-than relocating it, silently deleting the only x64 Linux coverage.
+Operator-dispatched `build.yml` runs may route the `Linux (x64)` leg via
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` to ephemeral Proxmox VMs on **macpro** — a
+Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI
+host. Automatic PR runs remain on GitHub-hosted Linux until an organization
+runner group provides the private-pool access boundary. The pool is native
+x86_64, which the job requires: the lane's earlier ARM64/Tart declaration would
+have changed its architecture rather than relocating it, silently deleting the
+only x64 Linux coverage.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
@@ -79,10 +87,11 @@ first.
   costs time. Every clone is admitted through it, so nothing can oversubscribe the
   host.
 
-**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the leg returns to
-GitHub-hosted. `runs-on` has no automatic fallback, so if macpro is down or its pool
-is stopped, jobs routed here queue indefinitely rather than erroring — unset the
-variable rather than waiting.
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON`; operator-dispatched runs
+then use GitHub-hosted Linux. Automatic PR runs already use GitHub-hosted Linux.
+`runs-on` has no live fallback after a dispatched job is assigned, so if macpro
+is down or its pool is stopped, unset the variable and redispatch rather than
+waiting.
 
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
@@ -174,8 +183,8 @@ The required `macos` gate runs the shipyard `mac` target
 (`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
 `ctest ... --repeat until-pass:2 --label-exclude "validation|slow|performance|bench|quality-lab"`
 — it excludes the long `slow` tests, the example plugins' `validation`
-format-validators (these gate on the path-filtered `example-validation` lane
-instead), and the relative-timing / CPU-budget / benchmark tests
+format-validators (reported by the path-filtered, currently advisory
+`example-validation` lane), and the relative-timing / CPU-budget / benchmark tests
 (`performance|bench|quality-lab`), and retries a single flake once so timing-flakes
 don't redden the gate. The perf/ratio tests are excluded (2026-07-21, mirrors
 build.yml) because they tolerate steady load but flake under the load *variance*
@@ -818,49 +827,52 @@ python3 tools/scripts/runner_topology_check.py --mode=hint
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
 > only. `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is kept **UNSET**, so the
 > Namespace overflow described here never fires — it's a documented break-glass
-> option, not the active path. The required gate is the **bare-metal Mac
-> Studios** on m3 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`); the overflow tier is the
-> **local JIT VM pool** on m1 + m5 (`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`).
+> option, not the active path. The required gate is the clean-per-job **JIT VM
+> pool** on M3 + M5 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`), selected by the
+> `pulp-gate-fast` label. M1 keeps the generic `pulp-build-vm` label as a
+> rollback/non-required lane but cannot randomly win the serial required gate.
 > Do **not** repurpose the Namespace var to point at self-hosted runners (see
 > CLAUDE.md "Runner priority").
 
 **Read the live variable, not this page's defaults.** A routing var describes
 reality; `build.yml`'s `||` fallback is only what happens when the var is unset.
 The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
-`["macos-15"]`, while the live variable sends it to the local VM pool. Confirm
-before reasoning about a route:
+`["macos-15"]`, while the live variable is the `local-only` sentinel and
+disables overflow. Confirm before reasoning about a route:
 
 ```bash
 gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
 ```
 
-### Live routing state (verified 2026-07-16)
+### Live routing state
 
-| Variable | Value | Lane |
-|---|---|---|
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — required gate |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
-| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
-| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
-| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
-| `PULP_ADVISORY_MACOS_RUNS_ON_JSON` | (unset; hosted `macos-15`) | example and format validation; required-pool labels rejected |
-| `PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON` | (unset; proof skipped) | distinct self-hosted GPU advisory lane; required-pool labels rejected |
-| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
-| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
-| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
+Do not maintain another selector table here. The reviewed source is
+`tools/scripts/runner_topology.json`; the live source is the GitHub repo
+variables. Reconcile the two with:
+
+```bash
+PATH="$HOME/.config/tartci/ghapp-shim:$PATH" \
+  python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+As of 2026-07-31, the required macOS contract selects the fast M3/M5 JIT class,
+overflow is contracted to the `local-only` sentinel, and Namespace variables
+remain unset. Exact labels and hosts belong only in the JSON contract.
 
 When the local self-hosted Mac runner is saturated, `build.yml`'s
-`resolve-provider` job *could* route new macOS legs to a Namespace cloud runner
-instead of queueing on local — but only if the Namespace var is set, which it is
-not. Snap-back is automatic — once local clears, fresh dispatches return to
-local. Source of truth:
-`planning/2026-05-13-namespace-overflow-implementation.md` (Plan B,
-reviewed by `/codex` 2026-05-13).
+`resolve-provider` job can route new PR or workflow-dispatch macOS legs to the
+configured generic overflow target. Live policy sets that target to the
+`local-only` sentinel, so overflow is disabled. Namespace remains an explicit,
+paid break-glass option and is never selected automatically.
 
 **Precedence** (highest first, resolved per dispatch):
 
 1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
-2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
+2. **Overflow** — for PR and workflow-dispatch events, an idle registered local
+   runner keeps the local route. Otherwise `BUSY >=
+   PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) selects
+   `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`. The `local-only` sentinel disables
+   this branch; an unset variable restores the hosted `macos-15` fallback.
 3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON`. For the current label set, read the lane in `tools/scripts/runner_topology.json` — that file is checked against the live fleet, so it cannot drift the way a value quoted here can.
 
 **Tuning knobs** (repo variables):
@@ -868,16 +880,17 @@ reviewed by `/codex` 2026-05-13).
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
-| `PULP_LOCAL_MAC_RUNNER_LABEL` | `sanitizer` | Label the busy probe filters runners by. Must match `PULP_LOCAL_MACOS_RUNS_ON_JSON`'s target label. |
-| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | (unset) | Namespace selector JSON, e.g. `"namespace-profile-generouscorp-macos"`. When empty, overflow is disabled — everything stays local. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe filters runners by. It must match the required gate class so rollback-only M1 capacity cannot suppress overflow. |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["macos-15"]` when unset | Generic overflow selector JSON, or the bare sentinel `local-only` to keep work local. |
 
-**Disabling overflow** (revert to local-only):
+**Disabling overflow** (the live state):
 
 ```bash
-gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo Generous-Corp/pulp
+gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON \
+  --body local-only --repo Generous-Corp/pulp
 ```
 
-The next PR's `resolve-provider` falls through to local since condition #2 fails.
+The next PR's `resolve-provider` keeps the macOS leg on the local selector.
 
 **Inspecting routing decisions:** `resolve-provider`'s stderr prints a one-line summary, e.g. `resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"`. Find it via the GitHub Actions UI under the `resolve-provider` job's log, or:
 
@@ -898,7 +911,7 @@ pulp overflow status
 
 # Turn overflow on (defaults to free GH-hosted "macos-15"):
 pulp overflow enable
-pulp overflow enable --to '"namespace-profile-generouscorp-macos"'   # paid Namespace
+pulp overflow enable --to '"macos-15"'
 
 # Turn overflow off — every macOS leg goes to the local target.
 # In-flight cloud jobs continue to completion; only new dispatches change.
@@ -909,8 +922,9 @@ pulp overflow threshold
 pulp overflow threshold 1
 ```
 
-`pulp overflow disable` does not cancel in-flight cloud runs — it's a
-config-change only. To force a currently-routed-to-cloud PR back to local,
+`pulp overflow disable` writes the `local-only` sentinel; deleting the variable
+would restore the hosted default. It does not cancel in-flight cloud runs. To
+force a currently-routed-to-cloud PR back to local,
 use `pulp macos retarget --pr N --to local` (see "Per-PR macOS retargeting"
 below).
 
@@ -1567,9 +1581,9 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON --body '["namespace-profile-generouscorp"]'` |
 | `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON --body '["namespace-profile-generouscorp-windows"]'` |
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Local macOS ARM64 primary pool (bare-metal Studios; see the live table under "macOS overflow routing") | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]'` |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Local macOS ARM64 JIT VM overflow pool. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; `local-only` disables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux","pulp-host-macstudio"]'` |
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Fast local macOS ARM64 JIT VM pool; see the live table under "macOS overflow routing" | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]'` |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Overflow is disabled live with `local-only`. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; another reviewed selector re-enables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body 'local-only'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux x86_64 Proxmox VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
 
 The Linux and Windows label sets include a `pulp-host-*` label that pins the
@@ -1635,6 +1649,12 @@ auto-closes the tracker when the platform recovers. Do not add a duplicate
 nightly Intel workflow unless this one is deliberately retired.
 
 ### `sanitizers.yml` — per-sanitizer target selection
+
+The automatic matrix runs on every relevant pull request and once nightly.
+It deliberately does not rerun after every push to `main`: that duplicated
+four hosted jobs after each merge and competed with the next merge group's
+required checks. The nightly schedule is the independent post-merge backstop;
+`workflow_dispatch` remains available for an immediate operator run.
 
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.

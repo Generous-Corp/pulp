@@ -23,7 +23,8 @@
 
 add_library(pulp-timeline-editor
     src/edit_intent.cpp
-    src/snap_grid.cpp)
+    src/snap_grid.cpp
+    src/viewport_projection.cpp)
 add_library(pulp::timeline-editor ALIAS pulp-timeline-editor)
 
 target_compile_features(pulp-timeline-editor PUBLIC cxx_std_20)
