@@ -327,7 +327,9 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "expected_modifiers", kind: "Array", jsType: "array", required: false }),
       Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "replacement_modifiers", kind: "Array", jsType: "array", required: false }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),

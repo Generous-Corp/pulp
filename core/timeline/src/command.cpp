@@ -391,7 +391,14 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                                   right.expected.begin(), equal_note) &&
                        left.replacement.size() == right.replacement.size() &&
                        std::equal(left.replacement.begin(), left.replacement.end(),
-                                  right.replacement.begin(), equal_note);
+                                  right.replacement.begin(), equal_note) &&
+                       // The idempotency cache returns the first result for a
+                       // repeated transaction id, so two payloads that differ
+                       // only in their modifiers are not the same command:
+                       // calling them equivalent would answer a retry with the
+                       // modifiers of the transaction it did not send.
+                       left.expected_modifiers == right.expected_modifiers &&
+                       left.replacement_modifiers == right.replacement_modifiers;
             } else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -535,7 +542,12 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
                 const auto note_count =
                     saturated_add(value.expected.size(), value.replacement.size());
-                return saturated_add(sizeof(T), saturated_multiply(note_count, sizeof(NoteEvent)));
+                const auto modifier_count = saturated_add(value.expected_modifiers.size(),
+                                                          value.replacement_modifiers.size());
+                return saturated_add(
+                    saturated_add(sizeof(T),
+                                  saturated_multiply(note_count, sizeof(NoteEvent))),
+                    saturated_multiply(modifier_count, sizeof(NoteModifier)));
             }
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(

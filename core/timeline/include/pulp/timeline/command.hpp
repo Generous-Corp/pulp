@@ -127,12 +127,22 @@ struct SetNoteVelocity {
 /// the journal never records a callback invocation. The expected value makes
 /// replay conflict-aware, while swapping expected/replacement is the exact
 /// inverse used by undo.
+///
+/// The modifier arrays are optional. An authoring caller leaves both empty and
+/// the reducer carries the clip's existing modifiers across, dropping only the
+/// ones whose note the replacement removes. A reducer-built inverse fills them
+/// in, because the modifiers of a removed note are exactly what the note array
+/// alone cannot say: `replacement_modifiers` is the complete set to install and
+/// `expected_modifiers` is the set the clip must currently carry, gating the
+/// modifiers the same way the note arrays gate the notes.
 struct ReplaceNoteContent {
     ItemId sequence_id;
     ItemId track_id;
     ItemId clip_id;
     std::vector<NoteEvent> expected;
     std::vector<NoteEvent> replacement;
+    std::vector<NoteModifier> expected_modifiers;
+    std::vector<NoteModifier> replacement_modifiers;
 };
 
 /// Replaces clip-level gain and fade controls under an exact value gate.

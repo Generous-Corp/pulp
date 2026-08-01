@@ -227,7 +227,9 @@ export interface PulpTimelineCommandRemoveTrack {
 export interface PulpTimelineCommandReplaceNoteContent {
   clip_id: number | string;
   expected: readonly unknown[];
+  expected_modifiers?: readonly unknown[];
   replacement: readonly unknown[];
+  replacement_modifiers?: readonly unknown[];
   sequence_id: number | string;
   track_id: number | string;
 }

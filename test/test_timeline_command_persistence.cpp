@@ -321,6 +321,89 @@ TEST_CASE("Typed scene commands preserve exact nested field diagnostics") {
     REQUIRE(invalid_slot_anchor.error().path == "/0/data/before_slot_id");
 }
 
+namespace {
+
+// A clip whose content carries both notes and modifiers, so the envelopes below
+// are built from bytes the encoder actually produced rather than from JSON
+// written to match the decoder.
+Project modifier_payload_project() {
+    NoteModifier chance;
+    chance.note_id = {10};
+    chance.probability = 0x4000;
+    NoteModifier ratcheted;
+    ratcheted.note_id = {11};
+    ratcheted.ratchet_count = 3;
+    auto content = take(MidiContent::create(
+        {{{10}, {0}, {25}, 32768, 60, 0}, {{11}, {25}, {25}, 32768, 64, 0}}, {chance, ratcheted},
+        0xABCDEF));
+    auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
+    auto track = take(Track::create({6}, "authored", {value}));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    return take(Project::create(ProjectInput{{1}, "modifier payloads", 12, {5}, {}, {sequence}}));
+}
+
+} // namespace
+
+TEST_CASE("A note-content envelope without the modifier fields still decodes") {
+    const auto registry = builtins();
+    const auto snapshot = take(serialize_project(modifier_payload_project(), registry)).json;
+    const auto parsed = take(parse_json(snapshot));
+    const auto& sequence = member(member(parsed->root(), "data"), "sequences").array[0];
+    const auto& track = member(member(sequence, "data"), "tracks").array[0];
+    const auto& clip = member(member(track, "data"), "clips").array[0];
+    const auto& content = member(member(clip, "data"), "content");
+    const auto notes = std::string(parsed->raw(member(member(content, "data"), "notes")));
+    const auto modifiers = std::string(parsed->raw(member(member(content, "data"), "modifiers")));
+
+    // The shape every envelope written before the modifier fields existed has.
+    // Command decode gates on exact version equality with no migration edge, so
+    // this has to keep decoding at version 1 or every persisted journal breaks.
+    const auto legacy = "[" +
+                        envelope("pulp.timeline.command.replace_note_content",
+                                 R"({"clip_id":"7","expected":)" + notes + R"(,"replacement":)" +
+                                     notes + R"(,"sequence_id":"5","track_id":"6"})") +
+                        "]";
+    const auto decoded = take(deserialize_commands(legacy, registry));
+    REQUIRE(decoded.size() == 1);
+    const auto& replace = std::get<ReplaceNoteContent>(decoded[0]);
+    REQUIRE(replace.expected.size() == 2);
+    REQUIRE(replace.replacement.size() == 2);
+    CHECK(replace.expected[0].id == ItemId{10});
+    CHECK(replace.expected_modifiers.empty());
+    CHECK(replace.replacement_modifiers.empty());
+
+    // The same envelope with the fields present, so the empty vectors above are
+    // an absent field rather than a decoder that never reads one.
+    const auto current =
+        "[" +
+        envelope("pulp.timeline.command.replace_note_content",
+                 R"({"clip_id":"7","expected":)" + notes + R"(,"expected_modifiers":)" + modifiers +
+                     R"(,"replacement":)" + notes + R"(,"replacement_modifiers":)" + modifiers +
+                     R"(,"sequence_id":"5","track_id":"6"})") +
+        "]";
+    const auto with_modifiers = take(deserialize_commands(current, registry));
+    REQUIRE(with_modifiers.size() == 1);
+    const auto& carried = std::get<ReplaceNoteContent>(with_modifiers[0]);
+    REQUIRE(carried.expected_modifiers.size() == 2);
+    REQUIRE(carried.replacement_modifiers.size() == 2);
+    CHECK(carried.replacement_modifiers[0].note_id == ItemId{10});
+    CHECK(carried.replacement_modifiers[0].probability == 0x4000);
+    CHECK(carried.replacement_modifiers[1].note_id == ItemId{11});
+    CHECK(carried.replacement_modifiers[1].ratchet_count == 3);
+
+    // A modifier array cannot outgrow the notes it annotates.
+    const auto overlong =
+        "[" +
+        envelope("pulp.timeline.command.replace_note_content",
+                 R"({"clip_id":"7","expected":[],"expected_modifiers":)" + modifiers +
+                     R"(,"replacement":)" + notes +
+                     R"(,"sequence_id":"5","track_id":"6"})") +
+        "]";
+    auto rejected = deserialize_commands(overlong, registry);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == PersistenceErrorCode::LimitExceeded);
+}
+
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {
     const auto registry = builtins();
     auto commands = take(deserialize_commands(

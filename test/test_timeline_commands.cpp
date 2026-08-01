@@ -215,6 +215,120 @@ TEST_CASE("ReplaceNoteContent drops only the modifier whose note it removes") {
     check_lanes_intact(after);
 }
 
+namespace {
+
+// The note set before and after an edit that deletes note seven, the note the
+// fixture gives a modifier of its own.
+const std::vector<NoteEvent> kBothNotes{modifier_note(6, 0, 60),
+                                        modifier_note(7, kTicksPerQuarter / 2, 64)};
+const std::vector<NoteEvent> kFirstNoteOnly{modifier_note(6, 0, 60)};
+
+} // namespace
+
+// Restoring a deleted note means restoring a tombstoned identity, which the
+// public reducer refuses, so this drives a real DocumentSession's undo.
+TEST_CASE("Undoing a note removal restores the removed note's modifier") {
+    auto session = std::move(DocumentSession::create(make_authored_clip_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+
+    auto edit = session_transaction(
+        writer, session->revision(),
+        {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+    REQUIRE(midi_content(*session->snapshot()).notes().size() == 1);
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) == nullptr);
+
+    // The dropped modifier is unreachable from the edited clip, so the recorded
+    // inverse has to carry it: an inverse that only re-listed the notes would
+    // restore a note that has silently forgotten how it plays.
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(writer));
+
+    const auto& back = midi_content(*session->snapshot());
+    REQUIRE(back.notes().size() == 2);
+    CHECK(back.modifier_seed() == 0xABCDEF);
+    REQUIRE(back.modifiers().size() == 2);
+    REQUIRE(back.modifier_for({6}) != nullptr);
+    CHECK(back.modifier_for({6})->probability == 1024);
+    REQUIRE(back.modifier_for({7}) != nullptr);
+    CHECK(back.modifier_for({7})->probability == 4096);
+    CHECK(back.modifier_for({7})->condition == NoteConditionKind::Always);
+    CHECK(back.modifier_for({7})->ratchet_count == 1);
+    check_lanes_intact(back);
+
+    // Redo drops it again and a second undo brings it back, so the payload the
+    // inverse carries is recomputed rather than consumed once.
+    REQUIRE(session->redo(writer));
+    CHECK(midi_content(*session->snapshot()).modifier_for({7}) == nullptr);
+    REQUIRE(session->undo(writer));
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) != nullptr);
+    CHECK(midi_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+}
+
+TEST_CASE("A shrinking note edit drops the orphaned modifier and keeps every lane") {
+    const auto original = make_authored_clip_project();
+    auto edit = transaction({1}, 1, 1, {},
+                            {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+
+    // A modifier keys on a note id and a lane keys on a channel-voice address,
+    // so the same edit has to treat them differently: the orphaned modifier
+    // goes and both lanes stay whole. The inverse inherits that split — it
+    // restates the modifiers because they were filtered, and says nothing about
+    // lanes because nothing filtered them.
+    const auto& after = midi_content(changed->project);
+    CHECK(after.modifier_for({7}) == nullptr);
+    check_lanes_intact(after);
+
+    REQUIRE(changed->inverses.size() == 1);
+    const auto& inverse_command = std::get<ReplaceNoteContent>(changed->inverses[0]);
+    REQUIRE(inverse_command.replacement_modifiers.size() == 2);
+    CHECK(inverse_command.replacement_modifiers[0] == chance(6, 1024));
+    CHECK(inverse_command.replacement_modifiers[1] == chance(7, 4096));
+    REQUIRE(inverse_command.expected_modifiers.size() == 1);
+    CHECK(inverse_command.expected_modifiers[0] == chance(6, 1024));
+}
+
+TEST_CASE("Two note-content transactions differing only in modifiers are not equivalent") {
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
+
+    ReplaceNoteContent quiet{{3}, {4}, {5}, expected, replacement, {}, {chance(6, 1024)}};
+    ReplaceNoteContent loud = quiet;
+    loud.replacement_modifiers = {chance(6, 4096)};
+
+    // The idempotency cache answers a repeated transaction id with the first
+    // result it saw, so calling these equivalent would apply one payload's
+    // modifiers and report the other's outcome.
+    auto first = transaction({1}, 1, 1, {}, {quiet});
+    auto retry = transaction({1}, 1, 1, {}, {loud});
+    CHECK_FALSE(equivalent(first, retry));
+
+    auto gated = transaction({1}, 1, 1, {}, {quiet});
+    gated.commands[0].command = ReplaceNoteContent{{3},  {4}, {5}, expected, replacement,
+                                                   {chance(6, 1024)}, {chance(6, 1024)}};
+    CHECK_FALSE(equivalent(first, gated));
+    CHECK(equivalent(first, transaction({1}, 1, 1, {}, {quiet})));
+}
+
+TEST_CASE("Note-content retained size counts the modifiers the payload carries") {
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
+
+    const Command bare{ReplaceNoteContent{{3}, {4}, {5}, expected, replacement}};
+    const Command carrying{ReplaceNoteContent{
+        {3}, {4}, {5}, expected, replacement, {chance(6, 1024)}, {chance(6, 1024), chance(7, 4096)}}};
+
+    // The journal budgets a command by this number and the fallthrough answers
+    // `sizeof(T)` for a payload it does not know, so a field it forgets is
+    // under-counted rather than refused.
+    CHECK(retained_size(carrying) == retained_size(bare) + 3 * sizeof(NoteModifier));
+}
+
 TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
     const ClipPlaybackProperties playback{0.375f, 120, 240};
     const ClipPlaybackProperties replacement{0.75f, 60, 90};
