@@ -881,6 +881,15 @@ all:
   branch order would otherwise resolve silently.
 - `retained_size()` has a `sizeof(T)` fallback and so fails **open** — see the
   section above.
+- each **family reducer** carries a `static_assert(!is_X_command_type<T>, …)` in
+  the `else` of its `std::visit`, so a command claimed by the family with no arm
+  in the reducer is a **compile error**. This closes the rung below the second
+  guard: `transaction.cpp` proves which *family* claims an alternative, but the
+  arms inside that family were a second statement of the same list in a
+  different file, tied to it by nothing. Add a command to `is_note_command_type`,
+  forget the arm, and it used to compile, route, fall off the end and be
+  rejected at runtime as `ModelInvariant` — a command the document should have
+  applied.
 
 The reason the second guard exists: `pulp-timeline` builds `-fno-exceptions`, so
 an alternative that reaches the end of the dispatch chain is not a
@@ -897,6 +906,23 @@ alternative is claimed twice and another not at all — the two errors cancel.
 Verified: with `MoveTrack` claimed by both the scene and track families and
 `SetTrackName` claimed by none, the claim total is still 39 and a count check
 passes while the identity check fails. Compare identities, not counts.
+
+**Two lists that must agree is the shape worth recognising here.** Every guard
+above exists because one fact is written down twice — the claim list and the
+arms, the variant and the type-name array, the variant and the envelope batch —
+and nothing forces the copies to match. When you find a runtime rejection
+guarding a pair of lists, the fix is to state the list once and let the compiler
+check it, not to add a test that notices the drift later: a lint over two lists
+can be skipped or can rot, while a `static_assert` in the same translation unit
+cannot. A sweep comparing every family's claim list against its handled arms
+reports zero discrepancies today, so the reducer guard above is regression
+insurance rather than a fix for a live defect.
+
+The distinction that decides whether this generalises: a branch guarding a
+**relationship between two lists** is enumerable, so it can be made a compile
+error. A branch guarding a **value invariant** — an overflow test, a range check
+— is not enumerable and stays review discipline. Do not go looking for a tool
+for the second kind.
 
 Also extend the two coverage guards that pin the vocabulary, and note that
 neither is ordered the way you would guess:
