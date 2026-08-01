@@ -1023,6 +1023,44 @@ it once the edge is cut tightens the gate with no other edit. The check rejects 
 debt entry that is no longer linked and one that duplicates its tier, so the list
 cannot outlive its subject.
 
+**A tier is an upper bound and proves only absence.** `TIER` says nothing outside
+it is reached; it cannot say anything inside it *is*. "Reaches nothing extra" is
+satisfied most easily by reaching nothing at all, so a tier naming a module the
+target never links stays green while reading, to anyone scanning the row, as a
+proven link. Do not answer "does the piano roll ship inside the plugin?" from a
+tier — that question needs the other bound, and a tier that has been widened to
+look like an answer is worse than no answer, because it is a false one.
+
+**`REQUIRE <modules...>` is the lower bound.** Optional, listed at the call site
+next to `TIER`, and every module named must appear in the measured closure or the
+configure fails naming the ones that do not:
+
+```cmake
+pulp_assert_link_floor(MyPlugin_CLAP
+    TIER    sequencer-plugin
+    REQUIRE format state)
+```
+
+`REQUIRE` grants no reach of its own — a required module must also be declared in
+the tier or the debt list, or no closure could satisfy both bounds at once, and
+the check reports that contradiction rather than letting `REQUIRE` become a third
+permission list. Pair the two whenever the criterion is about what the artifact
+*contains*: the upper bound stops the editing stack leaking in, the lower bound
+stops the claim being satisfied by the module quietly disappearing.
+
+**What `StepSequencer_CLAP` actually proves today.** Measured on a macOS
+configure, it reaches eighteen modules, and `timeline_editor` is not among them —
+`pulp-timeline-editor` is a live target in that same configure and this plugin
+does not link it. `timeline` it reaches only through
+`pulp-view -> … -> pulp-host -> pulp-playback -> pulp-timeline`, with no
+`pulp/timeline` include anywhere in the example's own sources, so `timeline` is
+recorded as debt rather than claimed by the tier. Its `REQUIRE format state` is
+correspondingly narrow: this plugin's own code contributes no module edge beyond
+the adapter it is packaged as. So the honest reading of a green run here is "a
+step sequencer packaged as a CLAP, carrying no editing stack" — **not** "a piano
+roll inside a plugin". Nothing in the repo demonstrates the latter yet; the tier
+that would express it, `sequencer-editor`, has no claimant.
+
 **Know where the verdict runs.** The assertion lives in the consumer's own
 `CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
 an example plugin that means the Shipyard mac/windows lanes
@@ -1030,7 +1068,8 @@ an example plugin that means the Shipyard mac/windows lanes
 of `build.yml`, which configure `PULP_BUILD_EXAMPLES=OFF`. It also reports one
 configuration: a link that only exists under `WIN32` is invisible to a macOS
 configure. `tools/scripts/link_floor_selftest.py --mutate` is what runs
-everywhere; it weakens the checker nine ways and requires each to be caught.
+everywhere; it weakens the checker eleven ways — including one that stops
+checking `REQUIRE` at all — and requires each to be caught.
 
 ### Derived surfaces are projections of the manifest, not the registry
 

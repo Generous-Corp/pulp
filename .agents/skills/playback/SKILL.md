@@ -713,6 +713,14 @@ editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
 
+Read that report as an upper bound and nothing more. `TIER` proves only that
+nothing outside it is reached, so a tier can name `playback` — or the editor
+rung — while the binary links neither, and still pass. If what you need to show
+is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
+`REQUIRE` list, which fails naming any module that is absent from the measured
+closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
+by it; it does not link `timeline_editor` at all.
+
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
 compiled program. That is correct for a block renderer, which consumes the

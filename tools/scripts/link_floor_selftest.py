@@ -5,9 +5,11 @@ breached one.
 The checker reads CMake's resolved link graph, so its selftest has to be a real
 configure rather than a string comparison: each case writes a small project with
 a known graph, runs the checker over it, and asserts the verdict and the reason
-given. A green repo says nothing on its own — `--mutate` then weakens the
-checker itself in eight ways and requires the battery to go red for each, so a
-pass cannot be the walk quietly failing to arrive.
+given. Both bounds are covered: TIER rejects a module that is reached and not
+declared, REQUIRE rejects one that is declared and not reached. A green repo
+says nothing on its own — `--mutate` then weakens the checker itself in eleven
+ways and requires the battery to go red for each, so a pass cannot be the walk
+quietly failing to arrive.
 
     link_floor_selftest.py            # run the battery
     link_floor_selftest.py --mutate   # also prove the battery is not vacuous
@@ -166,6 +168,44 @@ CASES: list[tuple[str, str, bool, str]] = [
         PASS,
     ),
     (
+        # The lower bound. A tier alone cannot express this: "reaches nothing
+        # extra" is satisfied most easily by reaching nothing at all, so a tier
+        # naming a module the target does not link stays green while asserting a
+        # link that does not exist.
+        "require_is_satisfied_by_a_reached_module",
+        case(tier("alpha", "beta", "gamma")
+             + "pulp_assert_link_floor(probe TIER fixture REQUIRE alpha gamma)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # `zeta` is in the tier and is not linked, which is exactly the state the
+        # upper bound cannot see. Without REQUIRE this case passes.
+        "require_names_an_unlinked_module",
+        case(tier("alpha", "beta", "gamma", "zeta")
+             + "pulp_assert_link_floor(probe TIER fixture REQUIRE zeta)\n"),
+        False,
+        "pulp/zeta is required by this target but is not linked at all",
+    ),
+    (
+        # REQUIRE grants no reach: a module named there but declared in neither
+        # list could never satisfy both bounds, so the contradiction is reported
+        # rather than quietly widening the tier.
+        "require_outside_tier_and_debt_is_rejected",
+        case(tier("alpha", "beta", "gamma")
+             + "pulp_assert_link_floor(probe TIER fixture REQUIRE zeta)\n"),
+        False,
+        "required module 'zeta' is in neither tier 'fixture' nor",
+    ),
+    (
+        "require_may_name_a_debt_entry",
+        case(tier("beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "pulp_assert_link_floor(probe TIER fixture REQUIRE alpha)\n"),
+        True,
+        PASS,
+    ),
+    (
         "unknown_tier_is_rejected",
         case("pulp_assert_link_floor(probe TIER nonexistent)\n"),
         False,
@@ -237,6 +277,16 @@ MUTATIONS: list[tuple[str, str, str]] = [
     (
         "reads a module name off the target name instead of its directory",
         'if(_relative MATCHES "^core/([A-Za-z0-9_.+-]+)")',
+        "if(FALSE)",
+    ),
+    (
+        "never checks that a required module is actually reached",
+        "if(NOT _required IN_LIST _modules)",
+        "if(FALSE)",
+    ),
+    (
+        "lets REQUIRE name a module no tier or debt list declares",
+        "if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)",
         "if(FALSE)",
     ),
 ]

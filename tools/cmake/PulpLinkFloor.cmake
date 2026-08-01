@@ -56,15 +56,24 @@ endif()
 # them. This is the bound behind "a piano roll you can put in a plugin": the
 # editor rung reaches the document model and the timebase and stops, so a plugin
 # drawing a piano roll over its own engine does not acquire a transport.
+#
+# No target claims this tier yet. It is the bound a consumer that actually
+# carries the editor would claim, and such a consumer should pair it with
+# REQUIRE timeline timeline_editor — a tier alone cannot say the editor arrived.
 set(PULP_LINK_FLOOR_TIER_sequencer-editor
     platform runtime timebase timeline timeline_editor)
 
-# A loadable plugin binary. Beyond the editor rungs it necessarily carries the
-# format adapter it is packaged as, and the audio/MIDI types that adapter and
-# the engine both speak.
+# A loadable plugin binary: the format adapter it is packaged as, and the
+# audio/MIDI types that adapter and the engine both speak.
+#
+# The timeline rungs are deliberately NOT here. A tier is an upper bound, so
+# naming a module a claimant does not link is not a harmless over-estimate — it
+# reads as a proven link and is not one. StepSequencer_CLAP reaches `timeline`
+# only through the view stack (recorded as debt, where a fact about today
+# belongs) and does not reach `timeline_editor` at all. A plugin that genuinely
+# carries the editor states so with REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
-    platform runtime timebase timeline timeline_editor
-    audio midi format)
+    platform runtime timebase audio midi format)
 
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.
@@ -84,10 +93,12 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 #     tools/cmake/PulpPluginFormats.cmake and FATAL_ERROR if it is absent. The
 #     stack then reaches the plugin host and, through it, the transport:
 #       StepSequencer_CLAP -> pulp-view -> pulp-view-script -> pulp-view-core
-#         -> pulp-host -> pulp-playback
-#     which is also the only reason this plugin reaches pulp-timeline at all.
-#     view, host, playback, render and canvas all arrive this way, so cutting
-#     the one unconditional link would delete five entries at once.
+#         -> pulp-host -> pulp-playback -> pulp-timeline
+#     which is the only reason this plugin reaches pulp-timeline at all: the
+#     sequencer's own code carries no pulp/timeline include and no timeline
+#     link. view, host, playback, timeline, render and canvas all arrive this
+#     way, so cutting the one unconditional link would delete six entries at
+#     once.
 #
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
@@ -99,7 +110,7 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
     canvas events graph host native-components playback render
-    sample_bank_manifest signal state view)
+    sample_bank_manifest signal state timeline view)
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 
@@ -281,13 +292,31 @@ function(pulp_report_link_closure target)
     message(STATUS "link-floor: ${target} reaches [${_modules}] (${_report})")
 endfunction()
 
-# Assert a target's link closure stays within its declared tier.
+# Assert a target's link closure matches what it declares.
+#
+# TIER is an upper bound: nothing outside tier ∪ debt may be reached. On its own
+# that is the only claim a tier can support, and it is worth being exact about
+# how little it proves — a tier naming a module the target does not link is
+# still green, because "reaches nothing extra" is satisfied most easily by
+# reaching nothing at all. So an acceptance criterion of the form "the editor
+# ships inside the plugin" cannot be read off a tier, however generous the tier
+# looks.
+#
+# REQUIRE is the other half: an optional lower bound listing modules the closure
+# MUST contain. It is what turns "did not drag the editing stack in" into a pair
+# with "and did carry the piano roll", and it fails naming the modules that are
+# absent, so the claim cannot quietly become true by deletion.
+#
+# The two lists stay orthogonal on purpose. REQUIRE grants nothing: a required
+# module must also be declared in the tier or the debt list, or no closure could
+# satisfy both bounds at once, and that contradiction is reported as such rather
+# than letting REQUIRE become a third permission list nobody reviews.
 #
 # Fails the configure, in the manner of core/view's native-only guard: a link
 # that breaches the bound is a contract violation, and letting it build and be
 # discovered later is how the bound stops meaning anything.
 function(pulp_assert_link_floor target)
-    cmake_parse_arguments(PALF "" "TIER" "" ${ARGN})
+    cmake_parse_arguments(PALF "" "TIER" "REQUIRE" ${ARGN})
     if(NOT PALF_TIER)
         message(FATAL_ERROR "pulp_assert_link_floor(${target}): TIER is required")
     endif()
@@ -302,10 +331,12 @@ function(pulp_assert_link_floor target)
     pulp_link_closure(${target} MODULES_OUT _modules PATHS_OUT _paths)
 
     set(_failures "")
+    set(_over FALSE)
     foreach(_module IN LISTS _modules)
         if(_module IN_LIST _allowed OR _module IN_LIST _debt)
             continue()
         endif()
+        set(_over TRUE)
         # Split on the first `=` rather than matching the module name as a
         # pattern: a module directory may legitimately contain `.` or `+`, and
         # a name read as a regex would silently report the wrong chain.
@@ -324,24 +355,72 @@ function(pulp_assert_link_floor target)
     endforeach()
     foreach(_entry IN LISTS _debt)
         if(_entry IN_LIST _allowed)
+            set(_over TRUE)
             list(APPEND _failures
                 "  debt entry '${_entry}' is already inside tier '${PALF_TIER}'; delete it")
         elseif(NOT _entry IN_LIST _modules)
+            set(_over TRUE)
             list(APPEND _failures
                 "  debt entry '${_entry}' is no longer linked. Delete it to tighten the bound")
         endif()
     endforeach()
 
+    # The lower bound. Absence is the failure mode an upper bound cannot see, so
+    # it is checked against the same measured closure rather than against the
+    # declaration: a REQUIRE entry is satisfied by the module being reached, by
+    # whatever edge, and by nothing else.
+    set(_missing FALSE)
+    set(_undeclared FALSE)
+    foreach(_required IN LISTS PALF_REQUIRE)
+        if(NOT _required IN_LIST _modules)
+            set(_missing TRUE)
+            list(APPEND _failures
+                "  pulp/${_required} is required by this target but is not linked at all")
+        endif()
+        if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)
+            set(_undeclared TRUE)
+            # One string, not two arguments: list(APPEND) would make a second
+            # element and the JOIN below would break the sentence across lines.
+            string(CONCAT _line
+                "  required module '${_required}' is in neither tier "
+                "'${PALF_TIER}' nor PULP_LINK_FLOOR_DEBT_${target}, "
+                "so no closure could satisfy both bounds")
+            list(APPEND _failures "${_line}")
+        endif()
+    endforeach()
+
     if(_failures)
         list(JOIN _failures "\n" _detail)
+        set(_remedy "")
+        if(_over)
+            string(APPEND _remedy
+                "Either cut the link, widen tier '${PALF_TIER}' in "
+                "tools/cmake/PulpLinkFloor.cmake for every target that claims it, or "
+                "record the edge in PULP_LINK_FLOOR_DEBT_${target} with the reason it "
+                "exists. ")
+        endif()
+        if(_missing)
+            string(APPEND _remedy
+                "A REQUIRE entry claims the artifact carries that module. Restore the "
+                "link if it was lost, or drop the entry if the claim is stale -- but do "
+                "not leave it standing, because a bound that no longer matches the "
+                "binary is the failure REQUIRE exists to catch. ")
+        endif()
+        if(_undeclared)
+            string(APPEND _remedy
+                "REQUIRE grants no reach of its own: declare the module in the tier or "
+                "in the debt list as well, or drop it from REQUIRE. ")
+        endif()
         message(FATAL_ERROR
-            "pulp_assert_link_floor(${target}): link closure breaches its declared bound.\n"
+            "pulp_assert_link_floor(${target}): declared bound and measured closure disagree.\n"
             "${_detail}\n"
             "Closure measured this configure: ${_modules}\n"
-            "Either cut the link, widen tier '${PALF_TIER}' in "
-            "tools/cmake/PulpLinkFloor.cmake for every target that claims it, or "
-            "record the edge in PULP_LINK_FLOOR_DEBT_${target} with the reason it "
-            "exists.")
+            "${_remedy}")
     endif()
-    message(STATUS "link-floor: ${target} within tier '${PALF_TIER}'")
+    if(PALF_REQUIRE)
+        message(STATUS
+            "link-floor: ${target} within tier '${PALF_TIER}' and carries [${PALF_REQUIRE}]")
+    else()
+        message(STATUS "link-floor: ${target} within tier '${PALF_TIER}'")
+    endif()
 endfunction()
