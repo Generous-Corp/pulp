@@ -110,9 +110,14 @@ handler.set_runtime_eval_enabled(true);           // opt in to evaluate (dev/loo
 ```
 
 **Teardown ordering:** the bridge lives as long as the `ScriptedUiSession`, but
-its methods are called from the inspector's background reader thread. Before
-destroying the session, stop the `InspectorServer` reader thread and call
-`handler.set_script_inspector(nullptr)` so no background call outlives the bridge.
+its methods are called from inspector worker threads. Ordinary owner-thread
+teardown destroys `InspectorServer` synchronously, then calls
+`handler.set_script_inspector(nullptr)` before destroying the session. If a
+publication or domain callback may destroy the server wrapper, capture
+`server.shutdown_fence()` first. Retain the bridge and other attached sources,
+then wait on that fence from a non-callback thread before clearing them or
+unloading the module. Waiting on the cleanup worker itself returns `false`
+instead of deadlocking.
 
 `ScriptInspectorBridge` re-attaches to the engine across hot reloads, so the
 debug console survives a reload. Without this wiring, `Runtime.evaluate` /

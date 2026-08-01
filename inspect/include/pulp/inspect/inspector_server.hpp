@@ -15,9 +15,31 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::inspect {
+
+/// Waitable proof that an InspectorServer's cleanup worker has exited. Capture
+/// this before allowing publication/domain callbacks to destroy the server.
+/// Waiting from the cleanup worker itself returns false instead of deadlocking.
+class InspectorServerShutdownFence {
+public:
+    struct State;
+
+    InspectorServerShutdownFence() = default;
+
+    bool ready() const noexcept;
+    bool wait() const;
+    bool wait_for(std::chrono::milliseconds timeout) const;
+
+private:
+    friend class InspectorServer;
+    explicit InspectorServerShutdownFence(std::shared_ptr<State> state)
+        : state_(std::move(state)) {}
+
+    std::shared_ptr<State> state_;
+};
 
 struct InspectorServerConfig {
     InspectorSession* session = nullptr;
@@ -59,6 +81,12 @@ public:
 
     /// Stop listening and disconnect all clients.
     void stop();
+
+    /// Obtain a lifetime fence before permitting callbacks to destroy this
+    /// wrapper. After callback-triggered destruction, wait on a non-callback
+    /// thread before tearing down attached sources or unloading module code.
+    /// Ordinary external destruction already waits synchronously.
+    InspectorServerShutdownFence shutdown_fence() const;
 
     /// Broadcast an event to all connected clients.
     void broadcast(const InspectorMessage& event);
