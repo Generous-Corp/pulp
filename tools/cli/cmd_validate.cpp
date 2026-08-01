@@ -613,9 +613,7 @@ int cmd_validate(const std::vector<std::string>& args) {
 
     const bool strict_fail = strict && skipped_missing_tool > 0;
     const auto inspector_report =
-        fs::is_directory(build_dir / "pulp-inspector-manifests")
-            ? pulp::cli::inspector_shipping::load_report(build_dir)
-            : pulp::cli::inspector_shipping::empty_report();
+        pulp::cli::inspector_shipping::load_artifact_report(build_dir);
     const bool inspector_evidence_complete = inspector_report.complete;
     if (!inspector_evidence_complete)
         std::cerr << "Inspector capability evidence incomplete: "

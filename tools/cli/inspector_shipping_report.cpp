@@ -11,6 +11,14 @@
 namespace pulp::cli::inspector_shipping {
 namespace {
 
+bool known_capability(std::string_view candidate) {
+#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable, publication_bound) \
+    if (candidate == id) return true;
+#include <pulp/inspect/capability_definitions.inc>
+#undef PULP_INSPECT_CAPABILITY
+    return false;
+}
+
 bool read_manifest(const fs::path& path, Manifest& manifest, std::string& error) {
     std::ifstream input(path);
     if (!input) {
@@ -44,7 +52,13 @@ bool read_manifest(const fs::path& path, Manifest& manifest, std::string& error)
                 error = "invalid inspector capability manifest: " + path.string();
                 return false;
             }
-            manifest.capabilities.emplace_back(capability.getString());
+            const std::string_view capability_id = capability.getString();
+            if (!known_capability(capability_id)) {
+                error = "unknown inspector capability '" +
+                    std::string(capability_id) + "' in manifest: " + path.string();
+                return false;
+            }
+            manifest.capabilities.emplace_back(capability_id);
         }
     } catch (const std::exception&) {
         error = "invalid inspector capability manifest: " + path.string();
@@ -135,6 +149,59 @@ Report load_report(const std::vector<fs::path>& search_roots,
 Report load_report(const fs::path& search_root,
                    std::optional<std::string_view> product) {
     return load_report(std::vector<fs::path>{search_root}, product);
+}
+
+Report load_artifact_report(const fs::path& search_root) {
+    std::vector<Report> reports;
+    if (!fs::is_directory(search_root)) return empty_report();
+
+    std::error_code iteration_error;
+    fs::recursive_directory_iterator iterator(
+        search_root, fs::directory_options::skip_permission_denied, iteration_error);
+    fs::recursive_directory_iterator end;
+    while (!iteration_error && iterator != end) {
+        const auto path = iterator->path();
+        const auto filename = path.filename().string();
+        if (iterator->is_regular_file() &&
+            filename.ends_with(".inspector-capabilities.json")) {
+            Manifest manifest;
+            Report report;
+            if (!read_manifest(path, manifest, report.error)) return report;
+
+            const auto suffix = std::string(".inspector-capabilities.json");
+            const auto target = filename.substr(0, filename.size() - suffix.size());
+            const std::vector<fs::path> candidates = {
+                path.parent_path() / manifest.product_name,
+                path.parent_path() / (manifest.product_name + ".exe"),
+                path.parent_path() / target,
+                path.parent_path() / (target + ".exe"),
+            };
+            auto executable = std::find_if(
+                candidates.begin(), candidates.end(),
+                [](const fs::path& candidate) { return fs::is_regular_file(candidate); });
+            if (executable == candidates.end()) {
+                report.error =
+                    "could not resolve standalone executable for inspector capability "
+                    "scan beside: " + path.string();
+                return report;
+            }
+            if (!scan_artifact(*executable, manifest, report.error)) return report;
+            report.complete = true;
+            report.ships_inspector = manifest.ships_inspector;
+            report.ships_runtime_eval = manifest.ships_runtime_eval;
+            report.json = "[\n" + manifest.json + "\n]";
+            report.manifests.push_back(std::move(manifest));
+            reports.push_back(std::move(report));
+        }
+        iterator.increment(iteration_error);
+    }
+    if (iteration_error) {
+        Report report;
+        report.error = "could not enumerate inspector artifact evidence in " +
+            search_root.string();
+        return report;
+    }
+    return combine_reports(std::move(reports));
 }
 
 Report combine_reports(std::vector<Report> reports) {

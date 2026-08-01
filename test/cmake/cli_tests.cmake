@@ -6,6 +6,7 @@ add_executable(pulp-test-inspector-shipping-report
     ${CMAKE_SOURCE_DIR}/tools/cli/inspector_shipping_report.cpp)
 target_include_directories(pulp-test-inspector-shipping-report PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include
     ${choc_SOURCE_DIR})
 target_link_libraries(pulp-test-inspector-shipping-report PRIVATE
     Catch2::Catch2WithMain)

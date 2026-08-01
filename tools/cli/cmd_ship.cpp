@@ -7,6 +7,7 @@
 #include "ship_tracing_guard.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
+#include "shell_redirect.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
@@ -946,6 +947,7 @@ static int ship_package(const std::vector<std::string>& args,
     int result = 0;
     if (json_output) {
         ScopedOutputCapture capture(std::cout, human_output.rdbuf());
+        ScopedStdoutRedirect process_output(true);
         result = ship_package_impl(package_args, root, build_dir, evidence);
     } else {
         result = ship_package_impl(package_args, root, build_dir, evidence);

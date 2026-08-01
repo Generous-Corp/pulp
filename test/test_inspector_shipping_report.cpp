@@ -127,3 +127,32 @@ TEST_CASE("artifact scan accepts exact declared capability markers") {
     CHECK(pulp::cli::inspector_shipping::scan_artifact(
         artifact, report.manifests.front(), error));
 }
+
+TEST_CASE("inspector evidence rejects capability aliases and stale build artifacts") {
+    TemporaryDirectory temporary;
+    const auto artifacts = temporary.path / "products" / "Alias.app" / "Contents/MacOS";
+    fs::create_directories(artifacts);
+    const auto sidecar = artifacts / "Alias.inspector-capabilities.json";
+    write_manifest(sidecar,
+        R"({"product_name":"Alias","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["state-write"]})");
+    write_artifact(artifacts / "Alias",
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_STATE_WRITE_V1");
+    auto alias =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(alias.complete);
+    CHECK(alias.error.find("unknown inspector capability") != std::string::npos);
+
+    write_manifest(sidecar,
+        R"({"product_name":"Alias","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    auto stale =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(stale.complete);
+    CHECK(stale.error.find("does not match manifest") != std::string::npos);
+
+    write_artifact(artifacts / "Alias", "ordinary standalone");
+    auto exact =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE(exact.complete);
+    REQUIRE(exact.manifests.size() == 1);
+    CHECK(exact.manifests.front().product_name == "Alias");
+}

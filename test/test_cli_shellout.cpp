@@ -3132,7 +3132,18 @@ TEST_CASE("pulp validate accepts a manifest-free empty build report",
     REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
             std::string::npos);
 
-    fs::create_directories(project / "build" / "pulp-inspector-manifests");
+    const auto artifact_dir =
+        project / "build" / "products" / "Stale.app" / "Contents/MacOS";
+    fs::create_directories(artifact_dir);
+    {
+        std::ofstream sidecar(
+            artifact_dir / "Stale.inspector-capabilities.json");
+        sidecar << R"({"product_name":"Stale","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    {
+        std::ofstream executable(artifact_dir / "Stale", std::ios::binary);
+        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
     auto incomplete = run_pulp_in_directory(project, {"validate"});
     REQUIRE_FALSE(incomplete.timed_out);
     REQUIRE(incomplete.exit_code != 0);

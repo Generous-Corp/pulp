@@ -146,6 +146,7 @@ add_executable(pulp-cli
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-cli PRIVATE cmd_seq.cpp)
 endif()
+target_include_directories(pulp-cli PRIVATE ${CMAKE_SOURCE_DIR}/inspect/include)
 # The C++ CLI was historically the user-facing `pulp` binary. The Rust
 # binary now takes the `pulp` slot and this target emits `pulp-cpp`.
 # Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
