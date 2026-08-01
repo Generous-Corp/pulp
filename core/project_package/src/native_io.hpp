@@ -4,10 +4,20 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::project_package::detail {
+
+template <typename Size> std::optional<Size> checked_size_limit(std::uint64_t value) noexcept {
+    static_assert(std::is_unsigned_v<Size>);
+    if (value > static_cast<std::uint64_t>(std::numeric_limits<Size>::max()))
+        return std::nullopt;
+    return static_cast<Size>(value);
+}
 
 enum class PackageFaultPoint : std::uint8_t;
 enum class NativeReadOutcome : std::uint8_t { Ok, InvalidFile, LimitExceeded, IoError };

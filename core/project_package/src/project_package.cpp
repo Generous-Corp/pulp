@@ -362,8 +362,13 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
     if (!validate_project_references(impl_->root, project, impl_->limits.max_blob_bytes))
 #endif
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidGeneration, impl_->root);
-    auto serialized = timeline::serialize_project(
-        project, impl_->registry, timeline::SerializeOptions{impl_->limits.max_project_bytes});
+    const auto output_limit =
+        detail::checked_size_limit<std::size_t>(impl_->limits.max_project_bytes);
+    if (!output_limit)
+        return failure<AtomicPublishOutcome>(PackageErrorCode::LimitExceeded,
+                                             impl_->root / kProjectFile);
+    auto serialized = timeline::serialize_project(project, impl_->registry,
+                                                  timeline::SerializeOptions{*output_limit});
     if (!serialized)
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidGeneration,
                                              impl_->root / kProjectFile);

@@ -6,6 +6,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 
+#include "native_io.hpp"
 #include "project_package_test_access.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -575,4 +576,13 @@ TEST_CASE("Package writer fences a verified pre-existing blob before admitting i
 
     REQUIRE_FALSE(restaged);
     REQUIRE(restaged.error().code == PackageErrorCode::DurabilityUncertain);
+}
+
+TEST_CASE("Project package size limits narrow only when the target size can represent them",
+          "[project-package][limits]") {
+    constexpr auto largest_32_bit = std::numeric_limits<std::uint32_t>::max();
+    REQUIRE(pulp::project_package::detail::checked_size_limit<std::uint32_t>(largest_32_bit) ==
+            largest_32_bit);
+    REQUIRE_FALSE(pulp::project_package::detail::checked_size_limit<std::uint32_t>(
+        static_cast<std::uint64_t>(largest_32_bit) + 1));
 }
