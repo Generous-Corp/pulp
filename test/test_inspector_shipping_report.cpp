@@ -289,3 +289,19 @@ TEST_CASE("unrelated app bundles do not require standalone evidence") {
     CHECK(report.complete);
     CHECK(report.manifests.empty());
 }
+
+TEST_CASE("plugin-like directory names cannot hide inspector artifacts") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto executable = temporary.path / "AU" / "Developer.app" /
+        "Contents" / "MacOS" / "Developer";
+    fs::create_directories(executable.parent_path());
+    write_artifact(executable,
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(report.complete);
+    CHECK(report.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
+}

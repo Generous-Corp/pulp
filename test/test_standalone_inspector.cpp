@@ -41,6 +41,126 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 using namespace pulp::test::standalone_inspector;
 
+namespace {
+
+struct ScopedEnv {
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* previous = std::getenv(name_.c_str())) {
+            previous_ = previous;
+            had_previous_ = true;
+        }
+    }
+    ~ScopedEnv() {
+        if (had_previous_)
+            set(previous_);
+        else
+            unset();
+    }
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), 1);
+#endif
+    }
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+private:
+    std::string name_;
+    std::string previous_;
+    bool had_previous_ = false;
+};
+
+struct ScopedShippingCapabilitiesReset {
+    ~ScopedShippingCapabilitiesReset() {
+        set_standalone_inspector_shipping_capabilities({});
+    }
+};
+
+class TestProcessor : public Processor {
+public:
+    PluginDescriptor descriptor() const override { return {}; }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+};
+
+std::unique_ptr<Processor> null_processor_factory() { return {}; }
+
+class StubWindowHost final : public WindowHost {
+public:
+    int repaint_calls = 0;
+    std::vector<std::uint8_t> capture_bytes;
+    bool capture_supported = true;
+    bool blocking_event_loop = true;
+    bool exit_drain_supported = true;
+    bool deferred_close_supported = true;
+    std::function<void()> close_callback;
+    std::function<void()> capture_callback;
+    std::function<bool()> event_loop_step;
+    std::function<void()> deferred_close;
+    int deferred_close_calls = 0;
+    int run_until_calls = 0;
+    int readiness_checks = 0;
+    bool run_until_ready = false;
+
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return false; }
+    void repaint() override { ++repaint_calls; }
+    std::vector<std::uint8_t> capture_png() override {
+        if (capture_callback)
+            capture_callback();
+        return capture_bytes;
+    }
+    bool supports_compositor_capture() const override { return capture_supported; }
+    bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
+    bool event_loop_supports_exit_drain() const override {
+        return exit_drain_supported;
+    }
+    bool supports_deferred_close() const override {
+        return deferred_close_supported;
+    }
+    void request_close_deferred() override {
+        ++deferred_close_calls;
+        deferred_close = [this] { request_close(); };
+    }
+    void run_deferred_close() {
+        auto close = std::move(deferred_close);
+        if (close)
+            close();
+    }
+    void request_close() override {
+        if (close_callback)
+            close_callback();
+    }
+    void set_close_callback(std::function<void()> callback) override {
+        close_callback = std::move(callback);
+    }
+    void run_event_loop() override {}
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
+        ++run_until_calls;
+        run_event_loop();
+        for (int attempt = 0; attempt < 64; ++attempt) {
+            ++readiness_checks;
+            if (!ready_to_return || ready_to_return()) {
+                run_until_ready = true;
+                return;
+            }
+            if (!event_loop_step || !event_loop_step())
+                return;
+        }
+    }
+};
 
 #if PULP_TEST_STANDALONE_INSPECTOR
 TEST_CASE("Standalone inspector off mode creates no runtime, hook, endpoint, or artifact",
@@ -326,6 +446,24 @@ TEST_CASE("Standalone inspector does not advertise capture for a native-overlay 
         app, processor, bridge, root, window, "custom",
         {"session.describe", "capture.image"});
     REQUIRE(runtime == nullptr);
+}
+
+TEST_CASE("shipping-bounded profiles omit unavailable capture",
+          "[standalone][inspect][capabilities][shipping]") {
+    ScopedShippingCapabilitiesReset reset;
+    set_standalone_inspector_shipping_capabilities(
+        {"session.describe", "capture.image"});
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+    window.capture_supported = false;
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "observe", {});
+    REQUIRE(runtime != nullptr);
+    runtime->stop();
 }
 
 TEST_CASE("Standalone inspector rejects a non-blocking window event loop",

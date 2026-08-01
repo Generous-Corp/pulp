@@ -857,6 +857,8 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     auto effective_profile = local_only
         ? inspect::InspectorProfile::Off
         : *parsed_profile;
+    const bool strict_custom_profile =
+        effective_profile == inspect::InspectorProfile::Custom;
     const auto& shipping_capabilities = shipping_capabilities_storage();
     if (!shipping_capabilities.empty() &&
         effective_profile != inspect::InspectorProfile::Off) {
@@ -880,8 +882,15 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         std::vector<std::string> bounded_capabilities;
         for (const auto& capability : requested_capabilities) {
             if (std::find(shipping_capabilities.begin(), shipping_capabilities.end(),
-                          capability) != shipping_capabilities.end())
-                bounded_capabilities.push_back(capability);
+                          capability) == shipping_capabilities.end())
+                continue;
+            const auto parsed_capability = inspect::capability_from_id(capability);
+            if (!strict_custom_profile && parsed_capability &&
+                !standalone_capability_available(
+                    *parsed_capability, window.supports_compositor_capture(),
+                    runtime_eval_enabled))
+                continue;
+            bounded_capabilities.push_back(capability);
         }
         effective_profile = inspect::InspectorProfile::Custom;
         custom_capabilities = std::move(bounded_capabilities);

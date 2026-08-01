@@ -123,9 +123,10 @@ bool has_matching_inspector_sidecar(const fs::path& executable) {
 
 bool inside_plugin_format(const fs::path& path) {
     for (const auto& component : path) {
-        const auto directory = component.string();
-        if (directory == "VST3" || directory == "CLAP" || directory == "AU" ||
-            directory == "AUv3" || directory == "AAX" || directory == "LV2")
+        const auto extension = component.extension().string();
+        if (extension == ".vst3" || extension == ".clap" ||
+            extension == ".component" || extension == ".appex" ||
+            extension == ".aaxplugin" || extension == ".lv2")
             return true;
     }
     return false;
