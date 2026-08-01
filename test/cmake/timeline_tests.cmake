@@ -521,3 +521,7 @@ add_test(NAME timeline-api-docs-check-selftest
 
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.
 include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
+
+# Durable project packages sit immediately above the timeline model and keep
+# their crash-recovery fixtures with the owning timeline test manifest.
+include("${CMAKE_CURRENT_LIST_DIR}/project_package_tests.cmake")
