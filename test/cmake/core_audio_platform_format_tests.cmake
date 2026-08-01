@@ -135,6 +135,12 @@ pulp_add_test_suite(pulp-test-host-parameter-edit LIBRARIES pulp::format pulp::s
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)
 
+# The device quota table: monotonicity across both axes, clamping of values cast
+# in from outside the enumerators, and that the row is keyed by capability rung
+# rather than by the lane that observed it. Header-only over pulp::format —
+# linked for the include path only.
+pulp_add_test_suite(pulp-test-device-quotas LIBRARIES pulp::format)
+
 # Standalone host render-path RT-safety guard. Drives the extracted
 # StandaloneApp::render_audio_block() seam for one steady-state block under
 # ScopedRtProcessProbe. Links the RT interposition trap TU + sets

@@ -3054,8 +3054,8 @@
             {
               "id": "kDepth",
               "min": "static_cast<float>(Engine::kDepthMinMs)",
-              "max": "static_cast<float>(Engine::kDepthMaxMs)",
-              "default": "1.5f"
+              "max": "depth_max",
+              "default": "depth_default"
             },
             {
               "id": "kCenter",

@@ -147,6 +147,63 @@ Two things that WILL bite:
   subscribe) that first publish is lost, and the consumer waits for a change that
   already happened.
 
+## Capability tiers are shared with mobile — do not mint a browser-local enum
+
+When a browser lane needs to say "this page can only do the degraded thing",
+the tier vocabulary already exists and is **not** browser-specific:
+`core/platform/include/pulp/platform/device_capability.hpp` declares one
+`DeviceCapabilityTier` (`Constrained` / `Standard` / `Full`) that the browser
+lane's Tier A/B/C and the mobile lane's M-A/M-B/M-C both name. Use it. A
+second, browser-local `TierA | TierB | TierC` looks harmless in isolation and
+then permanently forks the ladder, because mobile and playback quotas will be
+reading the shared one.
+
+The seam is `DeviceCapabilityInputs::realtime_render_available`. The header
+deliberately never names `crossOriginIsolated`, `SharedArrayBuffer`, or worklet
+module support: **the browser probe collapses those three observations into
+that one boolean** and hands over neutral inputs, because a type consumed by
+iOS and Android must not carry web-platform spellings. Keep the probe's
+vocabulary in the probe.
+
+Two consequences worth knowing before you tune anything:
+
+- **No realtime render path caps the page at `Constrained`**, whatever its
+  memory and core count — the rungs above it are defined by rendering locally.
+  That is the controller-mode shape, and it is why a Tier-A page should refuse
+  to construct the worklet path with a typed diagnostic rather than build it
+  and catch a throw.
+- **A lane with no thermal API tops out at `Standard`.** Browsers expose no
+  thermal signal, so a browser page cannot currently reach `Full`. This is a
+  deliberate policy in `project_device_capability_tier` — the top rung's quotas
+  assume the platform will report heat so the consumer can step down — not an
+  oversight. Revisit it when the browser lane actually needs the top rung, and
+  change it in the shared header rather than routing around it.
+
+### The tier is in `platform`; the quota table is not
+
+`pulp::format::device_quotas(tier, thermal)`
+(`core/format/include/pulp/format/device_quotas.hpp`) is the matching table
+(voices, nodes, simultaneous editors, preview quality). It deliberately does
+**not** sit next to the tier enum, and reaching for
+`pulp::platform::DeviceQuotas` will not compile.
+
+`core/platform` is named in every row of the engine's declared dependency
+floors (`tools/scripts/timeline_engine_dependency_floor_check.py`), so anything
+placed there is reachable by every module and no floor row can object to it.
+That is right for a shared vocabulary and wrong for a budget over render-graph
+nodes and editing surfaces. `core/format` appears in no floor row, so an engine
+module that reaches for the quota header is rejected by the gate.
+
+Consumption runs one way: every enforcement point the table names already takes
+its ceilings as injected configuration (`playback::AudioRendererLimits`,
+`timeline::SessionLimits`, `graph::GraphRuntimeLimits`,
+`format::PrepareResourceLimits`), so the table's consumer is the shell that
+*constructs* those — which a browser lane already is. No engine module needs to
+see it.
+
+It is a declaration today: nothing enforces it yet, so reading it is safe and
+*relying* on someone else having enforced it is not.
+
 ## The worklet has no second thread
 
 A WAM module runs entirely inside the audio worklet: **there is no `std::thread`

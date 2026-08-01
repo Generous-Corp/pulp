@@ -182,6 +182,13 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"before_track_id":"34","sequence_id":"5","track":)" +
                      std::string(parsed->raw(track)) + "}"),
         envelope("pulp.timeline.command.remove_track", R"({"sequence_id":"5","track_id":"6"})"),
+        envelope(
+            "pulp.timeline.command.set_track_name",
+            R"({"expected":"authored","replacement":"lead vocal","sequence_id":"5","track_id":"6"})"),
+        envelope(
+            "pulp.timeline.command.move_track",
+            R"({"expected_before_track_id":"34","replacement_before_track_id":"35",)"
+            R"("sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -235,6 +242,12 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::get<InsertTrack>(commands[35]).before_track_id == ItemId{34});
     REQUIRE(std::get<InsertTrack>(commands[35]).track.id() == ItemId{6});
     REQUIRE(std::holds_alternative<RemoveTrack>(commands[36]));
+    REQUIRE(std::holds_alternative<SetTrackName>(commands[37]));
+    REQUIRE(std::get<SetTrackName>(commands[37]).expected == "authored");
+    REQUIRE(std::get<SetTrackName>(commands[37]).replacement == "lead vocal");
+    REQUIRE(std::holds_alternative<MoveTrack>(commands[38]));
+    REQUIRE(std::get<MoveTrack>(commands[38]).expected_before_track_id == ItemId{34});
+    REQUIRE(std::get<MoveTrack>(commands[38]).replacement_before_track_id == ItemId{35});
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
@@ -335,4 +348,26 @@ TEST_CASE("Decoded command batch reduces through the authoritative document sess
 
     REQUIRE(session->submit(writer, std::move(transaction)));
     REQUIRE_FALSE(session->snapshot()->find_sequence({5})->find_track({6})->record_armed());
+}
+
+TEST_CASE("Typed move-track JSON reads an absent endpoint as the last position") {
+    const auto registry = builtins();
+    const auto batch = "[" +
+                       envelope("pulp.timeline.command.move_track",
+                                R"({"sequence_id":"5","track_id":"6"})") +
+                       "]";
+    const auto commands = take(deserialize_commands(batch, registry));
+    REQUIRE(commands.size() == 1);
+    const auto& move = std::get<MoveTrack>(commands[0]);
+    REQUIRE_FALSE(move.expected_before_track_id.has_value());
+    REQUIRE_FALSE(move.replacement_before_track_id.has_value());
+
+    // A non-string endpoint is a decode failure, not a silent empty position.
+    const auto malformed = "[" +
+                           envelope("pulp.timeline.command.move_track",
+                                    R"({"expected_before_track_id":34,"sequence_id":"5",)"
+                                    R"("track_id":"6"})") +
+                           "]";
+    auto rejected = deserialize_commands(malformed, registry);
+    REQUIRE_FALSE(rejected);
 }
