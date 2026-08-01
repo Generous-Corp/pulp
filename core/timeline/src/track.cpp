@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include "automation_document_internal.hpp"
+#include "track_input_access.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -486,6 +487,33 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
              .freeze = std::move(input.freeze),
              .mixer = input.mixer}))));
 }
+
+namespace detail {
+
+TrackInput track_input_of(const Track& track) {
+    const auto clips = track.clips();
+    std::vector<Clip> clip_values;
+    clip_values.reserve(clips.size());
+    for (const auto& clip : clips)
+        clip_values.push_back(clip);
+    const auto devices = track.device_chain();
+    const auto automation = track.automation_lanes();
+    const auto takes = track.take_lanes();
+    return TrackInput{
+        .id = track.id(),
+        .name = track.name(),
+        .clips = std::move(clip_values),
+        .device_chain = {devices.begin(), devices.end()},
+        .automation_lanes = {automation.begin(), automation.end()},
+        .take_lanes = {takes.begin(), takes.end()},
+        .record_armed = track.record_armed(),
+        .active_take_lane_id = track.active_take_lane_id(),
+        .freeze = track.freeze(),
+        .mixer = track.mixer(),
+    };
+}
+
+} // namespace detail
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
     const Clip probe = replacement;

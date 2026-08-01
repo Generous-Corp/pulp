@@ -3,6 +3,7 @@
 #include "automation_document_internal.hpp"
 #include "owned_identity_traversal.hpp"
 #include "project_state_access.hpp"
+#include "track_input_access.hpp"
 
 #include <algorithm>
 
@@ -330,18 +331,20 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
             return fail<Track>(fixed.error().code, fixed.error().item, fixed.error().related_item);
         freeze->media.asset_id = fixed.value();
     }
-    return Track::create(
-        TrackInput{.id = *table.find(track.id()),
-                   .name = track.name(),
-                   .clips = std::move(clips),
-                   .device_chain = std::move(device_chain),
-                   .automation_lanes = std::move(automation_lanes),
-                   .take_lanes = std::move(take_lanes),
-                   .record_armed = track.record_armed(),
-                   .active_take_lane_id = track.active_take_lane_id().valid()
-                                              ? *table.find(track.active_take_lane_id())
-                                              : ItemId{},
-                   .freeze = std::move(freeze)});
+    // A remap rewrites identities and carries authored value state across
+    // unchanged, so it names only the identity-bearing fields over a copy of
+    // the source input. Enumerating the whole struct instead would silently
+    // reset any authored field the list forgot to a default.
+    auto input = detail::track_input_of(track);
+    input.id = *table.find(track.id());
+    input.clips = std::move(clips);
+    input.device_chain = std::move(device_chain);
+    input.automation_lanes = std::move(automation_lanes);
+    input.take_lanes = std::move(take_lanes);
+    input.active_take_lane_id =
+        track.active_take_lane_id().valid() ? *table.find(track.active_take_lane_id()) : ItemId{};
+    input.freeze = std::move(freeze);
+    return Track::create(std::move(input));
 }
 
 runtime::Result<Sequence, ModelError>

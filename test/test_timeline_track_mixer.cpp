@@ -275,3 +275,44 @@ TEST_CASE("A mixer lane insert command needs no device placement",
     REQUIRE(reduced);
     REQUIRE(track_of(reduced->project).automation_lanes().size() == 1);
 }
+
+TEST_CASE("Remapping a track carries its authored mixer and arm intent",
+          "[timeline][mixer][remap]") {
+    // Copy, paste, and import all rebuild a track around fresh identities.
+    // Authored value state is not identity, so it must survive the rewrite
+    // unchanged rather than fall back to unity gain and centre pan.
+    const TrackMixer authored{0.25f, -0.75f};
+    const auto original = take_result(Track::create(TrackInput{.id = {4},
+                                                               .name = "authored track",
+                                                               .clips = {make_note_clip({5}, {6},
+                                                                                        0)},
+                                                               .record_armed = true,
+                                                               .mixer = authored}));
+    REQUIRE(original.mixer().gain_linear == 0.25f);
+    REQUIRE(original.mixer().pan == -0.75f);
+
+    ItemIdAllocator allocator(100);
+    const auto remapped = take_result(remap_ids(original, allocator));
+    REQUIRE(remapped.track.id() != original.id());
+    REQUIRE(remapped.track.mixer().gain_linear == 0.25f);
+    REQUIRE(remapped.track.mixer().pan == -0.75f);
+    REQUIRE(remapped.track.record_armed());
+    REQUIRE(remapped.track.name() == "authored track");
+
+    const auto sequence =
+        take_result(Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {original}));
+    const auto project = take_result(Project::create(ProjectInput{.id = {1},
+                                                                  .name = "project",
+                                                                  .next_item_id = 100,
+                                                                  .root_sequence_id = {3},
+                                                                  .sequences = {sequence}}));
+    const auto remapped_project = take_result(remap_ids(project, 200));
+    const auto* rebuilt =
+        remapped_project.project.sequences()[0].find_track(*remapped_project.ids.find({4}));
+    REQUIRE(rebuilt != nullptr);
+    REQUIRE(rebuilt->mixer().gain_linear == 0.25f);
+    REQUIRE(rebuilt->mixer().pan == -0.75f);
+    REQUIRE(rebuilt->record_armed());
+    REQUIRE(rebuilt->name() == "authored track");
+}

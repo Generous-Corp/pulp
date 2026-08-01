@@ -659,6 +659,29 @@ is a serialized schema surface; `decode_command` gates on exact version equality
 with no upgrade hook, so it has to arrive as optional fields at v1, never a
 version bump.
 
+### An identity rewrite must copy the source input, not re-enumerate it
+
+`remap_ids` is the copy / paste / import path: it rewrites every owned
+`ItemId` and carries authored value state across untouched. `rebuild_track`
+used to express that as a designated-initializer `TrackInput{...}` naming every
+field. A designated initializer **does not warn on an omitted member** — unlike
+positional aggregate init, which `-Wmissing-field-initializers` catches — so the
+omitted field takes its default and the rebuild compiles clean. That is how a
+track's authored `mixer` came to be reset to unity gain and centre pan on every
+copy, paste, and import, with no error and no diagnostic.
+
+The shape that fails closed is copy-and-mutate over the source's own input:
+`detail::track_input_of(track)` (`track_input_access.hpp`, implemented beside
+`Track::Data` in `track.cpp`) returns the complete authored `TrackInput`, and
+the rewrite then assigns **only** the identity-bearing fields over it. A newly
+authored value field is carried by construction; the one place that must stay
+exhaustive sits next to the storage it reads. Enumerate identity, inherit value.
+
+The same reasoning applies to any rebuild of a model struct from a source
+value. `SequenceInput` and `ProjectInput` in `id_remap.cpp` are still
+enumerated in full — audit them against `model.hpp` whenever either struct
+grows, because nothing in the compiler will.
+
 ### Sequence-owned context and the compile-context subscription contract
 
 A `Sequence` owns a `ChordScaleLane` — an ordered set of `ChordScaleEvent`s
@@ -1182,6 +1205,11 @@ Things that are easy to get wrong here:
   one-lane-per-control rule still applies: duplicate detection compares a
   normalized key whose leading discriminator keeps a mixer target from colliding
   with a device target that shares its zeroed placement ID.
+- **The mixer *value* is authored state a rebuild must carry.** It is not
+  identity, so every path that reconstructs a `TrackInput` has to bring it
+  across — see "An identity rewrite must copy the source input, not
+  re-enumerate it" for why the remap dropped it silently and what shape stops
+  the next field from going the same way.
 - **Widening `AutomationTarget` reaches four consumers.** `serialize_encode.cpp`,
   `automation_document_internal.cpp`, `transaction_automation_internal.cpp`, and
   `core/interchange/src/census.cpp`. Dispatch through `AutomationTargetCases`
