@@ -212,10 +212,11 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                    [this](const inspect::InspectorRequestContext& context,
                           const inspect::InspectorMessage& request) {
                        refresh_live_state();
-                       if (request.method.rfind("Telemetry.", 0) == 0)
-                           return telemetry_.handle(context, request);
                        if (request.method.rfind("Runtime.", 0) == 0)
                            return handle_runtime_request(request);
+                       refresh_scripted_sources();
+                       if (request.method.rfind("Telemetry.", 0) == 0)
+                           return telemetry_.handle(context, request);
                        return domains_.handle(request);
                    }) {
         session_.set_audit_log(audit_log_);
@@ -496,6 +497,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         bridge_.visit_scripted_ui([this, &request, &response, &visited](
                                       view::ScriptedUiSession* scripted) {
             visited = true;
+            const auto generation = processor_.supports_editor_reload()
+                ? processor_.editor_reload_generation()
+                : 0;
+            refresh_scripted_source(scripted, generation);
             auto evaluator = scripted
                 ? inspect::make_script_runtime_evaluator(
                       scripted->script_inspector())
@@ -597,57 +602,59 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             return;
         }
 
-        const auto callback_epoch =
-            log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
-        bridge_.visit_scripted_ui([this, callback_epoch, generation](
-                                      view::ScriptedUiSession* current) {
-            if (runtime_eval_requested_) {
-                if (auto denial = standalone_runtime_eval_realm_denial(current))
-                    domains_.set_runtime_eval_denied(std::move(*denial));
-                else
-                    domains_.set_runtime_eval_enabled(true);
-            } else {
-                domains_.set_runtime_eval_enabled(false);
-            }
-            if (!current) {
-                log_subscription_ = 0;
-                log_subscription_session_identity_.reset();
-                return;
-            }
-
-            // A generation may reload the same session in place. Retire its old
-            // token before replacing it. A different or temporarily unavailable
-            // session is covered by the epoch guard, so any retained observer is
-            // inert even when its session outlives this runtime.
-            if (log_subscription_ != 0 && log_subscription_session_identity_
-                && *log_subscription_session_identity_ == current->identity()) {
-                current->remove_log_callback(log_subscription_);
-            }
-
-            auto callback = console_->callback();
-            std::weak_ptr<inspect::ConsoleCapture> capture = console_;
-            auto epoch = log_callback_epoch_;
-            log_subscription_ = current->add_log_callback(
-                [capture = std::move(capture), epoch = std::move(epoch),
-                 callback_epoch, callback = std::move(callback)](
-                    std::string_view level, std::string_view message) {
-                    // A retained but no-longer-active session may outlive the
-                    // inspector runtime. Never let its observer dereference the
-                    // destroyed composition root.
-                    if (epoch->load(std::memory_order_acquire) == callback_epoch
-                        && capture.lock()) {
-                        callback(level, message);
-                    }
-                });
-            log_subscription_session_identity_ = current->identity();
-            log_subscription_generation_ = generation;
+        bridge_.visit_scripted_ui([this, generation](view::ScriptedUiSession* current) {
+            refresh_scripted_source(current, generation);
         });
     }
 
+    void refresh_scripted_source(view::ScriptedUiSession* current,
+                                 std::uint64_t generation) {
+        if (log_subscription_generation_
+            && *log_subscription_generation_ == generation) {
+            return;
+        }
+        const auto callback_epoch =
+            log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (runtime_eval_requested_) {
+            if (auto denial = standalone_runtime_eval_realm_denial(current))
+                domains_.set_runtime_eval_denied(std::move(*denial));
+            else
+                domains_.set_runtime_eval_enabled(true);
+        } else {
+            domains_.set_runtime_eval_enabled(false);
+        }
+        if (!current) {
+            log_subscription_ = 0;
+            log_subscription_session_identity_.reset();
+            return;
+        }
+
+        // A generation may reload the same session in place. Retire its old
+        // token before replacing it. A different or temporarily unavailable
+        // session is covered by the epoch guard, so any retained observer is
+        // inert even when its session outlives this runtime.
+        if (log_subscription_ != 0 && log_subscription_session_identity_
+            && *log_subscription_session_identity_ == current->identity()) {
+            current->remove_log_callback(log_subscription_);
+        }
+
+        auto callback = console_->callback();
+        std::weak_ptr<inspect::ConsoleCapture> capture = console_;
+        auto epoch = log_callback_epoch_;
+        log_subscription_ = current->add_log_callback(
+            [capture = std::move(capture), epoch = std::move(epoch),
+             callback_epoch, callback = std::move(callback)](
+                std::string_view level, std::string_view message) {
+                if (epoch->load(std::memory_order_acquire) == callback_epoch
+                    && capture.lock()) {
+                    callback(level, message);
+                }
+            });
+        log_subscription_session_identity_ = current->identity();
+        log_subscription_generation_ = generation;
+    }
+
     void refresh_live_state() {
-        // Requests can arrive between host pumps. Rebind the evaluator before
-        // any domain dispatch so a retired scripted session is never called.
-        refresh_scripted_sources();
         const auto& config = app_.config();
         audio_.set_config(inspect::AudioConfig{config.sample_rate, config.buffer_size,
                                                config.input_channels, config.output_channels,
@@ -869,7 +876,11 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         return nullptr;
     }
     if (runtime_eval_enabled) {
-        if (auto denial = standalone_runtime_eval_realm_denial(bridge.scripted_ui())) {
+        std::optional<std::string> denial;
+        bridge.visit_scripted_ui([&denial](const view::ScriptedUiSession* current) {
+            denial = standalone_runtime_eval_realm_denial(current);
+        });
+        if (denial) {
             runtime::log_error("Standalone: {}", *denial);
             return nullptr;
         }

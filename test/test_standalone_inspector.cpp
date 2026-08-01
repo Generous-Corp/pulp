@@ -218,6 +218,10 @@ public:
     const ScriptedUiSession* active_scripted_ui() const override {
         return scripted_.get();
     }
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override {
+        return scripted_ui_generation_;
+    }
     pulp::view::ValueChannelSet* value_channels() override {
         return &channels_;
     }
@@ -235,6 +239,7 @@ public:
         if (scripted_)
             ++retired_scripted_sessions;
         scripted_ = std::move(replacement);
+        ++scripted_ui_generation_;
         return true;
     }
     void publish_gain_reduction(float rms, float peak) {
@@ -253,6 +258,7 @@ private:
     std::filesystem::path script_;
     CapabilitySet capabilities_ = CapabilitySet::all();
     View* root_ = nullptr;
+    std::uint64_t scripted_ui_generation_ = 0;
     pulp::view::ValueChannelSet channels_;
     pulp::view::MeterSource* gain_reduction_ = nullptr;
     std::unique_ptr<ScriptedUiSession> scripted_;
