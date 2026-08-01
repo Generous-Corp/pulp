@@ -60,6 +60,29 @@ MODULE_FLOORS = {
         "platform",
         "runtime",
     },
+    # The arranger rung, above the editor kernel. It is the first thing that
+    # consumes the kernel rather than declaring it, and it is where the view
+    # and canvas stack becomes admissible — which is the whole reason it is a
+    # row of its own instead of a widening of timeline_editor's.
+    #
+    # Two absences carry the ladder. `playback` keeps a view's only coupling
+    # toward audio the SequencerUiHost interface, so an arranger drawn over
+    # somebody else's engine acquires no transport. `project_package` keeps
+    # storage a sibling rung rather than a base: an editor is proven against
+    # serialize round-trip, and re-hosting it on a package protocol later is
+    # adapter work above this row, not a change to it.
+    "timeline_view": {
+        "timeline_view",
+        "timeline-view",
+        "timeline_editor",
+        "timeline-editor",
+        "timeline",
+        "timebase",
+        "view",
+        "canvas",
+        "platform",
+        "runtime",
+    },
 }
 
 # Modules a row's *link closure* drags in beyond its floor. These are recorded
