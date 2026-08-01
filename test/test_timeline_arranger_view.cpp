@@ -20,9 +20,12 @@ using pulp::view::PointerType;
 
 namespace {
 
-/// One pixel per tick over a 400px-wide lane column starting at x=120, so a
-/// pixel delta and a tick delta are the same number and every expected value
-/// in these tests is readable without arithmetic.
+/// One pixel per tick, with the lane column starting at x=120, so a pixel
+/// delta and a tick delta are the same number and every expected value in
+/// these tests is readable without arithmetic. The fixture clip is one quarter
+/// (kTicksPerQuarter ticks) long, so it occupies x=[120, 120+kTicksPerQuarter)
+/// and the view is given bounds wide enough to hold all of it -- otherwise
+/// paint clips it at the right edge and empty-lane clicks land inside it.
 ArrangerLayout unit_layout() {
     ArrangerLayout layout;
     layout.origin_tick = {0};
@@ -36,7 +39,7 @@ ArrangerLayout unit_layout() {
 /// on track {4} of sequence {3}.
 ArrangerView& configure(ArrangerView& view, const Project& project,
                         EditIntentHost& host) {
-    view.set_bounds({0, 0, 800, 200});
+    view.set_bounds({0, 0, 120.0f + kTicksPerQuarter + 800.0f, 200});
     view.set_project(&project, {3});
     view.set_layout(unit_layout());
     view.set_host(&host);
@@ -72,11 +75,19 @@ struct Applier {
     }
 };
 
+/// The builtin schema registry, which every serialize path needs and which
+/// cannot fail for the builtin set.
+SchemaRegistry builtin_registry() {
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    return std::move(registry).value();
+}
+
 /// The clip's authored start after a round trip through canonical JSON. This
 /// is the acceptance vehicle: an edit that only exists in memory is not an
 /// edit the document kept.
 std::int64_t start_after_round_trip(const Project& project) {
-    const auto registry = builtin_schema_registry();
+    const auto registry = builtin_registry();
     auto encoded = serialize_project(project, registry);
     REQUIRE(encoded);
     auto decoded = deserialize_project(encoded.value().json, registry);
@@ -171,22 +182,22 @@ TEST_CASE("Arranger create gesture authors a clip that survives a round trip",
         return make_note_clip({20}, {21}, start.value);
     });
 
-    // Empty lane space well past the fixture clip's quarter-note extent.
-    view.simulate_click({unit_layout().lane_left_px + 600.0f, 20.0f});
+    // Empty lane space past the fixture clip's quarter-note extent.
+    view.simulate_click({unit_layout().lane_left_px + kTicksPerQuarter + 200.0f, 20.0f});
     REQUIRE(host.intents().size() == 1);
     REQUIRE(host.intents().front().kind == EditIntentKind::Draw);
 
     Applier applier{project};
     REQUIRE(applier.apply(host.intents().front()));
 
-    const auto registry = builtin_schema_registry();
+    const auto registry = builtin_registry();
     auto encoded = serialize_project(applier.project, registry);
     REQUIRE(encoded);
     auto decoded = deserialize_project(encoded.value().json, registry);
     REQUIRE(decoded);
     const auto* created = decoded.value().find_sequence({3})->find_track({4})->find_clip({20});
     REQUIRE(created != nullptr);
-    REQUIRE(created->start().value == 600);
+    REQUIRE(created->start().value == kTicksPerQuarter + 200);
 }
 
 TEST_CASE("Arranger refuses to author a nested-sequence clip from a lane click",
@@ -207,7 +218,7 @@ TEST_CASE("Arranger refuses to author a nested-sequence clip from a lane click",
         return std::move(nested).value();
     });
 
-    view.simulate_click({unit_layout().lane_left_px + 600.0f, 20.0f});
+    view.simulate_click({unit_layout().lane_left_px + kTicksPerQuarter + 200.0f, 20.0f});
     REQUIRE(host.intents().empty());
     REQUIRE(view.refusals().size() == 1);
     REQUIRE(view.refusals().front() == ArrangerRefusal::NestedSequenceContent);
