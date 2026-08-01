@@ -493,6 +493,10 @@ public:
     void stop_generation(std::uint64_t expected_generation);
     void stop_locked();
     void broadcast(const InspectorMessage& event);
+    InspectorTargetedEventResult send_to_client(
+        std::string_view client_id,
+        const InspectorMessage& event,
+        std::string_view loss_owner);
     int client_count();
     void on_message_received(const std::string& data,
                              events::InterprocessConnection* sender);
@@ -524,6 +528,13 @@ InspectorServerShutdownFence InspectorServer::shutdown_fence() const {
 
 void InspectorServer::broadcast(const InspectorMessage& event) {
     impl_->broadcast(event);
+}
+
+InspectorTargetedEventResult InspectorServer::send_to_client(
+    std::string_view client_id,
+    const InspectorMessage& event,
+    std::string_view loss_owner) {
+    return impl_->send_to_client(client_id, event, loss_owner);
 }
 
 int InspectorServer::client_count() const {
@@ -839,18 +850,23 @@ void InspectorServer::Impl::stop_locked() {
     // before taking that mutex. The generation check makes a delayed loss
     // notification inert after a subsequent start.
     publication.clear_after_endpoint_stop();
+    InspectorSession* disconnected_session = nullptr;
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
-        if (session) {
-            for (const auto& client_id : authenticated_clients)
-                session->disconnect(client_id);
-        }
+        disconnected_session = session;
         if (session)
             session->set_main_thread_rpc({});
         session = nullptr;
         main_thread_rpc.reset();
         pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();
+    }
+    // Domain cleanup is arbitrary host code. Run it only after lifecycle state
+    // has been detached and the lifecycle mutex released, so callbacks may
+    // safely query/re-enter the server without self-deadlocking.
+    if (disconnected_session) {
+        for (const auto& client_id : authenticated_clients)
+            disconnected_session->disconnect(client_id);
     }
 }
 
@@ -893,6 +909,72 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
     }
     for (const auto& client : overflowed)
         client->disconnect();
+}
+
+InspectorTargetedEventResult InspectorServer::Impl::send_to_client(
+    std::string_view client_id,
+    const InspectorMessage& event,
+    std::string_view loss_owner) {
+    const auto* descriptor = find_inspector_method(event.method);
+    if (client_id.empty() || event.id != 0 || !descriptor ||
+        descriptor->kind != InspectorMethodKind::Event) {
+        return InspectorTargetedEventResult::EventUnavailable;
+    }
+
+    std::uint64_t generation = 0;
+    std::size_t message_limit = 0;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (!session ||
+            !session->policy().is_available(descriptor->capability) ||
+            !session->policy().is_granted(descriptor->capability)) {
+            return InspectorTargetedEventResult::EventUnavailable;
+        }
+        generation = session_generation.load(std::memory_order_acquire);
+        message_limit = max_message_bytes;
+    }
+
+    auto json = encode_message(event);
+    if (json.size() > message_limit)
+        return InspectorTargetedEventResult::MessageTooLarge;
+
+    auto result = InspectorTargetedEventResult::ClientNotFound;
+    std::shared_ptr<events::InterprocessConnection> overflowed;
+    {
+        std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) != generation)
+            return InspectorTargetedEventResult::EventUnavailable;
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (!client->authenticated ||
+                client->generation != generation ||
+                client->client_id != client_id) {
+                continue;
+            }
+            bool evicted_lossy = false;
+            switch (client->outbound->enqueue_targeted(
+                std::move(json), inspector_event_is_lossy(event.method),
+                loss_owner.empty() ? event.method : std::string(loss_owner),
+                &evicted_lossy)) {
+                case detail::EventQueuePushResult::Queued:
+                    result = evicted_lossy
+                        ? InspectorTargetedEventResult::QueuedAfterLossyEviction
+                        : InspectorTargetedEventResult::Queued;
+                    break;
+                case detail::EventQueuePushResult::DroppedLossy:
+                    result = InspectorTargetedEventResult::DroppedLossy;
+                    break;
+                case detail::EventQueuePushResult::ReliableOverflow:
+                    result = InspectorTargetedEventResult::ReliableOverflow;
+                    overflowed = client->connection;
+                    break;
+            }
+            break;
+        }
+    }
+    if (overflowed)
+        overflowed->disconnect();
+    return result;
 }
 
 int InspectorServer::Impl::client_count() {

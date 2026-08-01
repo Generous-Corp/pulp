@@ -129,6 +129,17 @@ struct InspectorSessionInfo {
     std::string protocol_version = "1";
 };
 
+/// Authenticated transport identity attached to a domain request.
+///
+/// Domain handlers that own per-client state (for example, telemetry
+/// subscriptions) must key it from this context instead of trusting a client
+/// identifier supplied in request JSON.
+struct InspectorRequestContext {
+    /// Borrowed for the duration of the handler call; copy it when retaining
+    /// per-client state beyond the request.
+    std::string_view client_id;
+};
+
 /// Capability-enforcing dispatch facade. Transport supplies an authenticated
 /// per-connection client identity; the session owns policy and the controller
 /// lease, then serializes authorized domain requests before delegating to the
@@ -137,12 +148,24 @@ class InspectorSession {
 public:
     using RequestHandler =
         std::function<InspectorMessage(const InspectorMessage& request)>;
+    using ContextRequestHandler = std::function<InspectorMessage(
+        const InspectorRequestContext& context,
+        const InspectorMessage& request)>;
     using ControllerScopeEndHandler =
         std::function<void(const InspectorControllerScopeEnd& event)>;
+    using ClientDisconnectHandler =
+        std::function<void(std::string_view client_id)>;
 
     InspectorSession(InspectorSessionInfo info,
                      InspectorPolicyConfig policy,
                      RequestHandler handler,
+                     std::chrono::milliseconds lease_ttl =
+                         std::chrono::seconds(15),
+                     InspectorControllerLease::Clock clock =
+                         [] { return std::chrono::steady_clock::now(); });
+    InspectorSession(InspectorSessionInfo info,
+                     InspectorPolicyConfig policy,
+                     ContextRequestHandler handler,
                      std::chrono::milliseconds lease_ttl =
                          std::chrono::seconds(15),
                      InspectorControllerLease::Clock clock =
@@ -158,6 +181,10 @@ public:
     /// callback runs outside session locks and must transfer work to the host's
     /// owning thread when the caller is not already on it.
     void set_controller_scope_end_handler(ControllerScopeEndHandler handler);
+    /// Install generation-scoped cleanup for per-client domain state. The
+    /// callback runs outside session locks and may be called from a transport
+    /// callback thread; it must hand off to its owner when necessary.
+    void set_client_disconnect_handler(ClientDisconnectHandler handler);
     void set_audit_log(std::shared_ptr<InspectorAuditLog> audit_log);
     void disconnect(std::string_view client_id);
     /// Cancel queued domain handlers and reject new ones during server teardown.

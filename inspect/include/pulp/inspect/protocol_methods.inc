@@ -52,6 +52,11 @@ PULP_INSPECT_METHOD(kStateSetParameter, "State.setParameter", StateWrite, Reques
 PULP_INSPECT_METHOD(kStateGetValueChannels, "State.getValueChannels", UiRead, Request)
 PULP_INSPECT_METHOD(kStateParameterChanged, "State.parameterChanged", StateRead, Event)
 
+PULP_INSPECT_METHOD(kTelemetryGetSnapshot, "Telemetry.getSnapshot", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetrySubscribe, "Telemetry.subscribe", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetryUnsubscribe, "Telemetry.unsubscribe", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetrySample, "Telemetry.sample", TelemetryStream, Event)
+
 PULP_INSPECT_METHOD(kTestInjectMidi, "Test.injectMidi", TestInput, Request)
 PULP_INSPECT_METHOD(kTestSetTransport, "Test.setTransport", TestInput, Request)
 

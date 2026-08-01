@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <exception>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace pulp::inspect {
@@ -71,6 +73,20 @@ void deliver_scope_ends(
             // Cleanup notification must not unwind a transport thread or the
             // idle-expiry worker. Host callbacks own their error reporting.
         }
+    }
+}
+
+void deliver_client_disconnect(
+    const InspectorSession::ClientDisconnectHandler& handler,
+    std::string_view client_id) noexcept {
+    if (!handler)
+        return;
+    try {
+        handler(client_id);
+    } catch (...) {
+        // A transport-loss callback must never escape the reader/cleanup
+        // thread. Domain cleanup is best-effort once the authenticated client
+        // is gone; throwing cannot restore that connection.
     }
 }
 
@@ -306,7 +322,7 @@ void InspectorControllerLease::finish_scope(TestInputReleaseReason reason) {
 class InspectorSession::State {
 public:
     State(InspectorSessionInfo session_info,
-          RequestHandler request_handler,
+          ContextRequestHandler request_handler,
           std::chrono::milliseconds lease_ttl,
           InspectorControllerLease::Clock clock)
         : info(std::move(session_info)),
@@ -395,10 +411,14 @@ public:
     }
 
     InspectorSessionInfo info;
-    RequestHandler handler;
+    ContextRequestHandler handler;
     InspectorControllerLease lease;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
     ControllerScopeEndHandler controller_scope_end_handler;
+    ClientDisconnectHandler client_disconnect_handler;
+    std::unordered_map<std::string, std::uint64_t> client_epochs;
+    std::unordered_map<std::string, std::size_t> admitted_client_dispatches;
+    std::unordered_set<std::string> pending_client_disconnects;
     std::shared_ptr<InspectorAuditLog> audit_log;
     std::mutex mutex;
     std::condition_variable expiry_cv;
@@ -415,6 +435,20 @@ public:
 InspectorSession::InspectorSession(InspectorSessionInfo info,
                                    InspectorPolicyConfig policy,
                                    RequestHandler handler,
+                                   std::chrono::milliseconds lease_ttl,
+                                   InspectorControllerLease::Clock clock)
+    : InspectorSession(
+          std::move(info), std::move(policy),
+          [handler = std::move(handler)](
+              const InspectorRequestContext&,
+              const InspectorMessage& request) {
+              return handler(request);
+          },
+          lease_ttl, std::move(clock)) {}
+
+InspectorSession::InspectorSession(InspectorSessionInfo info,
+                                   InspectorPolicyConfig policy,
+                                   ContextRequestHandler handler,
                                    std::chrono::milliseconds lease_ttl,
                                    InspectorControllerLease::Clock clock)
     : info_(std::move(info)),
@@ -461,6 +495,7 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
     std::optional<InspectorMessage> immediate_response;
     InspectorCapability capability = InspectorCapability::Unavailable;
     bool controller_operation = false;
+    std::uint64_t client_epoch = 0;
     {
         std::lock_guard lock(state->mutex);
         if (auto invalid = validate_request_shape(request))
@@ -486,6 +521,8 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
             } else {
                 controller_operation = requires_controller;
                 main_thread_rpc = state->main_thread_rpc;
+                client_epoch = state->client_epochs[std::string(client_id)];
+                ++state->admitted_client_dispatches[std::string(client_id)];
             }
         }
     }
@@ -501,22 +538,37 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
 
     const auto owned_client_id = std::string(client_id);
     const auto owned_info = info_;
-    const auto finish_controller_operation = [state, owned_client_id, owned_info,
-                                              controller_operation] {
-        if (!controller_operation)
-            return;
+    const auto finish_operation = [state, owned_client_id, owned_info,
+                                   controller_operation] {
         ControllerScopeEndHandler handler;
+        ClientDisconnectHandler disconnect_handler;
         std::vector<InspectorControllerLease::EndedScope> ended;
+        bool deliver_disconnect = false;
         {
             std::lock_guard lock(state->mutex);
-            state->lease.end_operation(owned_client_id);
-            ended = state->lease.take_ended_scopes();
-            handler = state->controller_scope_end_handler;
+            if (controller_operation) {
+                state->lease.end_operation(owned_client_id);
+                ended = state->lease.take_ended_scopes();
+                handler = state->controller_scope_end_handler;
+            }
+            auto admitted = state->admitted_client_dispatches.find(owned_client_id);
+            if (admitted != state->admitted_client_dispatches.end() &&
+                --admitted->second == 0) {
+                state->admitted_client_dispatches.erase(admitted);
+                state->client_epochs.erase(owned_client_id);
+                deliver_disconnect =
+                    state->pending_client_disconnects.erase(owned_client_id) != 0;
+                if (deliver_disconnect) {
+                    disconnect_handler = state->client_disconnect_handler;
+                }
+            }
         }
         deliver_scope_ends(owned_info, std::move(ended), handler);
+        if (deliver_disconnect)
+            deliver_client_disconnect(disconnect_handler, owned_client_id);
     };
     if (!state->handler) {
-        finish_controller_operation();
+        finish_operation();
         auto response = make_error(request.id, "No inspector dispatch handler is attached",
                                    "dispatch_unavailable");
         if (controller_operation) {
@@ -527,7 +579,7 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
     }
     const auto owned_request = request;
     auto operation = [state, owned_request, owned_client_id, owned_info, audit_log, capability,
-                      controller_operation] {
+                      controller_operation, client_epoch] {
         InspectorMessage response;
         if (!state->begin_dispatch()) {
             response =
@@ -540,15 +592,28 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                     state->end_dispatch();
                 }
             } guard{state};
-            try {
-                response = state->handler(owned_request);
-            } catch (const std::exception& error) {
-                response = make_error(owned_request.id,
-                                      std::string("Inspector dispatch failed: ") + error.what(),
-                                      "dispatch_failed");
-            } catch (...) {
-                response =
-                    make_error(owned_request.id, "Inspector dispatch failed", "dispatch_failed");
+            {
+                std::lock_guard lock(state->mutex);
+                const auto current_epoch = state->client_epochs[owned_client_id];
+                if (current_epoch != client_epoch) {
+                    response = make_error(
+                        owned_request.id,
+                        "Inspector dispatch was cancelled after client disconnect",
+                        "client_disconnected");
+                }
+            }
+            if (!response.is_error) {
+                try {
+                    response = state->handler(
+                        InspectorRequestContext{owned_client_id}, owned_request);
+                } catch (const std::exception& error) {
+                    response = make_error(owned_request.id,
+                                          std::string("Inspector dispatch failed: ") + error.what(),
+                                          "dispatch_failed");
+                } catch (...) {
+                    response = make_error(owned_request.id, "Inspector dispatch failed",
+                                          "dispatch_failed");
+                }
             }
         }
         if (controller_operation) {
@@ -572,10 +637,10 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                 return make_error(request.id, "Inspector dispatch failed", "dispatch_failed");
             }
         }();
-        finish_controller_operation();
+        finish_operation();
         return response;
     }
-    return main_thread_rpc->call(request.id, std::move(operation), finish_controller_operation);
+    return main_thread_rpc->call(request.id, std::move(operation), finish_operation);
 }
 
 void InspectorSession::suspend_dispatches() {
@@ -624,6 +689,12 @@ void InspectorSession::set_controller_scope_end_handler(
     state_->controller_scope_end_handler = std::move(handler);
 }
 
+void InspectorSession::set_client_disconnect_handler(
+    ClientDisconnectHandler handler) {
+    std::lock_guard lock(state_->mutex);
+    state_->client_disconnect_handler = std::move(handler);
+}
+
 void InspectorSession::set_audit_log(
     std::shared_ptr<InspectorAuditLog> audit_log) {
     std::lock_guard lock(state_->mutex);
@@ -632,14 +703,27 @@ void InspectorSession::set_audit_log(
 
 void InspectorSession::disconnect(std::string_view client_id) {
     ControllerScopeEndHandler handler;
+    ClientDisconnectHandler disconnect_handler;
     std::vector<InspectorControllerLease::EndedScope> ended;
+    const auto owned_client_id = std::string(client_id);
+    bool deliver_disconnect = false;
     {
         std::lock_guard lock(state_->mutex);
-        state_->lease.disconnect(client_id);
+        state_->lease.disconnect(owned_client_id);
         ended = state_->lease.take_ended_scopes();
         handler = state_->controller_scope_end_handler;
+        if (state_->admitted_client_dispatches.contains(owned_client_id)) {
+            ++state_->client_epochs[owned_client_id];
+            state_->pending_client_disconnects.insert(owned_client_id);
+        } else {
+            state_->pending_client_disconnects.erase(owned_client_id);
+            disconnect_handler = state_->client_disconnect_handler;
+            deliver_disconnect = true;
+        }
     }
     deliver_scope_ends(info_, std::move(ended), handler);
+    if (deliver_disconnect)
+        deliver_client_disconnect(disconnect_handler, owned_client_id);
 }
 
 InspectorMessage InspectorSession::handle_session_method(

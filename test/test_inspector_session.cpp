@@ -7,6 +7,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include "bounded_event_queue.hpp"
+#include "inspector_connected_client.hpp"
 
 #include <chrono>
 #include <atomic>
@@ -67,6 +68,7 @@ TEST_CASE("only telemetry stream events use lossy delivery",
           "[inspect][session][events][backpressure]") {
     CHECK(pulp::inspect::inspector_event_is_lossy("Audio.levels"));
     CHECK(pulp::inspect::inspector_event_is_lossy("Motion.sample"));
+    CHECK(pulp::inspect::inspector_event_is_lossy("Telemetry.sample"));
     CHECK_FALSE(
         pulp::inspect::inspector_event_is_lossy("State.parameterChanged"));
     CHECK_FALSE(
@@ -81,7 +83,10 @@ TEST_CASE("bounded event queue evicts only lossy entries",
     BoundedEventQueue<int> queue(2);
     REQUIRE(queue.push(1, false) == EventQueuePushResult::Queued);
     REQUIRE(queue.push(2, true) == EventQueuePushResult::Queued);
-    CHECK(queue.push(3, false) == EventQueuePushResult::Queued);
+    bool evicted_lossy = false;
+    CHECK(queue.push(3, false, &evicted_lossy) ==
+          EventQueuePushResult::Queued);
+    CHECK(evicted_lossy);
     REQUIRE(queue.take_front() == 1);
     REQUIRE(queue.take_front() == 3);
 
@@ -91,6 +96,199 @@ TEST_CASE("bounded event queue evicts only lossy entries",
     CHECK(queue.push(7, false) == EventQueuePushResult::ReliableOverflow);
     REQUIRE(queue.take_front() == 4);
     REQUIRE(queue.take_front() == 5);
+}
+
+TEST_CASE("loss-accounted queue never charges one stream for another",
+          "[inspect][session][events][backpressure][targeted]") {
+    BoundedEventQueue<int> queue(2);
+    bool evicted_same_owner = false;
+    REQUIRE(queue.push_isolated(1, true, "subscription-a") ==
+            EventQueuePushResult::Queued);
+    REQUIRE(queue.push_isolated(2, true, "subscription-b") ==
+            EventQueuePushResult::Queued);
+    CHECK(queue.push_isolated(3, true, "subscription-c",
+                              &evicted_same_owner) ==
+          EventQueuePushResult::DroppedLossy);
+    CHECK_FALSE(evicted_same_owner);
+    CHECK(queue.push_isolated(4, true, "subscription-a",
+                              &evicted_same_owner) ==
+          EventQueuePushResult::Queued);
+    CHECK(evicted_same_owner);
+    REQUIRE(queue.take_front() == 2);
+    REQUIRE(queue.take_front() == 4);
+
+    REQUIRE(queue.push_isolated(5, false, "reliable") ==
+            EventQueuePushResult::Queued);
+    REQUIRE(queue.push_isolated(6, false, "reliable") ==
+            EventQueuePushResult::Queued);
+    CHECK(queue.push_isolated(7, false, "reliable") ==
+          EventQueuePushResult::ReliableOverflow);
+}
+
+TEST_CASE("outbound worker fairly drains broadcast and targeted queues",
+          "[inspect][session][events][backpressure][targeted][fairness]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool sender_entered = false;
+    bool release_sender = false;
+    std::vector<std::string> sent;
+    auto outbound = pulp::inspect::detail::InspectorOutboundClient::create_for_testing(
+        [&](std::string_view message) {
+            std::unique_lock lock(mutex);
+            if (!sender_entered) {
+                sender_entered = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return release_sender; });
+            }
+            sent.emplace_back(message);
+            cv.notify_all();
+            return true;
+        },
+        2);
+
+    REQUIRE(outbound->enqueue("gate", false) == EventQueuePushResult::Queued);
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return sender_entered; }));
+    }
+    REQUIRE(outbound->enqueue("broadcast-1", true) ==
+            EventQueuePushResult::Queued);
+    REQUIRE(outbound->enqueue("broadcast-2", true) ==
+            EventQueuePushResult::Queued);
+    REQUIRE(outbound->enqueue_targeted("target-a-1", true, "owner-a") ==
+            EventQueuePushResult::Queued);
+    REQUIRE(outbound->enqueue_targeted("target-b", true, "owner-b") ==
+            EventQueuePushResult::Queued);
+    bool evicted_same_owner = false;
+    CHECK(outbound->enqueue_targeted("target-c", true, "owner-c",
+                                     &evicted_same_owner) ==
+          EventQueuePushResult::DroppedLossy);
+    CHECK_FALSE(evicted_same_owner);
+    CHECK(outbound->enqueue_targeted("target-a-2", true, "owner-a",
+                                     &evicted_same_owner) ==
+          EventQueuePushResult::Queued);
+    CHECK(evicted_same_owner);
+    CHECK(outbound->enqueue_targeted("target-reliable", false, "owner-r") ==
+          EventQueuePushResult::ReliableOverflow);
+    {
+        std::lock_guard lock(mutex);
+        release_sender = true;
+    }
+    cv.notify_all();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return sent.size() == 5; }));
+    }
+    outbound->shutdown();
+
+    REQUIRE(sent.size() == 5);
+    CHECK(sent[0] == "gate");
+    CHECK(sent[1] == "target-b");
+    CHECK(sent[2] == "broadcast-1");
+    CHECK(sent[3] == "target-a-2");
+    CHECK(sent[4] == "broadcast-2");
+}
+
+TEST_CASE("session authenticates client identity into contextual dispatch",
+          "[inspect][session][client-context]") {
+    auto config = policy(InspectorProfile::Observe);
+    std::string dispatched_client;
+    InspectorSession session(
+        {"session-context", "instance", "plugin", "1"}, config,
+        [&](const pulp::inspect::InspectorRequestContext& context,
+            const pulp::inspect::InspectorMessage& request) {
+            dispatched_client = context.client_id;
+            return make_response(request.id, R"({"ok":true})");
+        });
+
+    const auto response = session.handle(
+        "authenticated-client-7",
+        make_request(1, "State.getParameters"));
+    REQUIRE_FALSE(response.is_error);
+    CHECK(dispatched_client == "authenticated-client-7");
+}
+
+TEST_CASE("session reports authenticated disconnect identity outside its lock",
+          "[inspect][session][client-context][lifecycle]") {
+    InspectorSession session(
+        {"session-disconnect", "instance", "plugin", "1"},
+        policy(InspectorProfile::Observe),
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    std::string disconnected_client;
+    session.set_client_disconnect_handler([&](std::string_view client_id) {
+        disconnected_client = client_id;
+        CHECK(session.dispatches_accepting());
+    });
+
+    session.disconnect("authenticated-client-9");
+    CHECK(disconnected_client == "authenticated-client-9");
+}
+
+TEST_CASE("queued client work cannot recreate state after disconnect cleanup",
+          "[inspect][session][client-context][lifecycle][race]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    InspectorMainThreadRpc rpc(
+        {1s, 4},
+        [&](auto task) {
+            std::lock_guard lock(mutex);
+            queued = std::move(task);
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    std::atomic<int> subscriptions{0};
+    std::atomic<int> cleanups{0};
+    InspectorSession session(
+        {"session-disconnect-race", "instance", "plugin", "1"},
+        policy(InspectorProfile::Observe),
+        [&](const pulp::inspect::InspectorRequestContext&,
+            const pulp::inspect::InspectorMessage& request) {
+            ++subscriptions;
+            return make_response(request.id, "{}");
+        });
+    session.set_main_thread_rpc(std::shared_ptr<InspectorMainThreadRpc>(
+        &rpc, [](InspectorMainThreadRpc*) {}));
+    session.set_client_disconnect_handler([&](std::string_view) {
+        subscriptions.store(0);
+        ++cleanups;
+    });
+
+    pulp::inspect::InspectorMessage response;
+    std::thread caller([&] {
+        response = session.handle(
+            "client-race", make_request(1, "State.getParameters"));
+    });
+    std::function<void()> task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return static_cast<bool>(queued); }));
+        task = std::move(queued);
+    }
+    session.disconnect("client-race");
+    CHECK(cleanups.load() == 0);
+    task();
+    caller.join();
+    CHECK(response.is_error);
+    CHECK(response.error_code == "client_disconnected");
+    CHECK(subscriptions.load() == 0);
+    CHECK(cleanups.load() == 1);
+}
+
+TEST_CASE("disconnect cleanup exceptions are contained",
+          "[inspect][session][client-context][lifecycle][exception]") {
+    InspectorSession session(
+        {"session-disconnect-throws", "instance", "plugin", "1"},
+        policy(InspectorProfile::Observe),
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    std::atomic<int> calls{0};
+    session.set_client_disconnect_handler([&](std::string_view) {
+        ++calls;
+        throw std::runtime_error("cleanup failure");
+    });
+    CHECK_NOTHROW(session.disconnect("client-throws"));
+    CHECK(calls.load() == 1);
 }
 
 TEST_CASE("InspectorAccessPolicy resolves named profiles against host availability",
@@ -1078,6 +1276,62 @@ TEST_CASE("cancelling main-thread RPC does not wait for running direct work",
     CHECK(cancel_returned.load(std::memory_order_acquire));
     CHECK_FALSE(response.is_error);
     CHECK_FALSE(rpc.active());
+}
+
+TEST_CASE("after-operation callbacks run outside RPC serialization",
+          "[inspect][session][main-thread-rpc][teardown][ordering]") {
+    for (const bool direct_path : {false, true}) {
+        DYNAMIC_SECTION((direct_path ? "direct path" : "posted path")) {
+            std::mutex mutex;
+            std::condition_variable cv;
+            bool second_started = false;
+            bool second_finished = false;
+            bool completion_observed_finish = false;
+            bool registered = false;
+            std::thread second;
+            InspectorMainThreadRpc* rpc_ptr = nullptr;
+            InspectorMainThreadRpc rpc(
+                {1s, 2},
+                [](auto task) {
+                    task();
+                    return true;
+                },
+                [direct_path] { return direct_path; });
+            rpc_ptr = &rpc;
+
+            const auto first = rpc.call(40, [&] {
+                registered = rpc.after_current_operation([&] {
+                    second = std::thread([&] {
+                        {
+                            std::lock_guard lock(mutex);
+                            second_started = true;
+                        }
+                        cv.notify_all();
+                        (void)rpc_ptr->call(
+                            41, [] { return make_response(41, "{}"); });
+                        {
+                            std::lock_guard lock(mutex);
+                            second_finished = true;
+                        }
+                        cv.notify_all();
+                    });
+                    std::unique_lock lock(mutex);
+                    if (!cv.wait_for(lock, 1s, [&] { return second_started; }))
+                        return;
+                    completion_observed_finish =
+                        cv.wait_for(lock, 1s, [&] { return second_finished; });
+                });
+                return make_response(40, "{}");
+            });
+            if (second.joinable())
+                second.join();
+
+            CHECK(registered);
+            CHECK_FALSE(first.is_error);
+            CHECK(completion_observed_finish);
+            CHECK(second_finished);
+        }
+    }
 }
 
 TEST_CASE("draining main-thread RPC waits only for work that started",
