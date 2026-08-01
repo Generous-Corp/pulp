@@ -425,6 +425,9 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
     std::mutex clients_mutex;
     std::atomic<int> observed_events{0};
     std::atomic<bool> return_valid_server_proof{false};
+    std::atomic<bool> return_spoofed_error{false};
+    std::atomic<bool> disconnect_after_proof{false};
+    std::atomic<bool> ignore_proof{false};
     std::atomic<bool> send_oversized_event{false};
     std::vector<std::shared_ptr<pulp::events::InterprocessConnection>>
         fake_clients;
@@ -445,6 +448,9 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
             raw->set_on_text_message(
                 [raw, challenge = *challenge, &token,
                  &return_valid_server_proof,
+                 &return_spoofed_error,
+                 &disconnect_after_proof,
+                 &ignore_proof,
                  &send_oversized_event](std::string_view message) {
                     pulp::inspect::InspectorMessage request;
                     if (!pulp::inspect::decode_message(
@@ -458,6 +464,18 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
                             std::string(params["proof"].getString());
                     } catch (...) {
                     }
+                    if (return_spoofed_error.load(std::memory_order_relaxed)) {
+                        raw->send_message(pulp::inspect::encode_message(
+                            pulp::inspect::make_error(request.id, "\x1b[31mspoofed",
+                                                      "spoofed_code")));
+                        return;
+                    }
+                    if (disconnect_after_proof.load(std::memory_order_relaxed)) {
+                        raw->disconnect();
+                        return;
+                    }
+                    if (ignore_proof.load(std::memory_order_relaxed))
+                        return;
                     std::string server_proof = client_proof;
                     if (return_valid_server_proof.load(
                             std::memory_order_relaxed)) {
@@ -535,6 +553,26 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
     CHECK_FALSE(client.connect(records.front(), reader));
     CHECK_FALSE(client.is_connected());
     CHECK(observed_events.load(std::memory_order_relaxed) == 0);
+
+    return_spoofed_error.store(true, std::memory_order_relaxed);
+    pulp::inspect::InspectorClientConnectFailure failure;
+    CHECK_FALSE(client.connect(records.front(), reader, std::chrono::seconds(1), &failure));
+    CHECK(failure.code == "authentication_failed");
+    CHECK(failure.message == "Inspector authentication was rejected");
+    return_spoofed_error.store(false, std::memory_order_relaxed);
+
+    disconnect_after_proof.store(true, std::memory_order_relaxed);
+    CHECK_FALSE(client.connect(records.front(), reader, std::chrono::seconds(1), &failure));
+    CHECK(failure.code == "connection_closed");
+    CHECK(failure.message == "Inspector connection closed during authentication");
+    disconnect_after_proof.store(false, std::memory_order_relaxed);
+
+    ignore_proof.store(true, std::memory_order_relaxed);
+    CHECK_FALSE(client.connect(records.front(), reader, std::chrono::milliseconds(20), &failure));
+    CHECK(failure.code == "authentication_timeout");
+    CHECK(failure.message ==
+          "Inspector authentication response was not received before the deadline");
+    ignore_proof.store(false, std::memory_order_relaxed);
 
     send_oversized_event.store(true, std::memory_order_relaxed);
     CHECK_FALSE(client.connect(records.front(), reader));

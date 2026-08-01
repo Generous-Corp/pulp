@@ -162,12 +162,17 @@ InspectorClientSession::connect(const InspectorClientSelection& selection,
 
     auto session = std::unique_ptr<InspectorClientSession>(
         new InspectorClientSession(std::move(discovery), std::move(*selected)));
-    if (!session->client_.connect(session->record_, session->discovery_, timeout)) {
+    InspectorClientConnectFailure connect_failure;
+    if (!session->client_.connect(session->record_, session->discovery_, timeout,
+                                  &connect_failure)) {
         auto data = choc::value::createObject("");
         data.addMember("sessionId", choc::value::createString(session->record_.session_id));
         data.addMember("instanceId", choc::value::createString(session->record_.instance_id));
         data.addMember("publicationId", choc::value::createString(session->record_.publication_id));
-        set_failure(failure, "authentication_failed", "authentication or connection failed",
+        set_failure(failure,
+                    connect_failure.code.empty() ? "connection_failed" : connect_failure.code,
+                    connect_failure.message.empty() ? "Inspector connection failed"
+                                                    : connect_failure.message,
                     choc::json::toString(data, false));
         return nullptr;
     }
@@ -232,7 +237,7 @@ InspectorMessage InspectorClientSession::request_controlled(std::string method,
     const bool is_lease_operation = method == methods::kSessionAcquireController ||
                                     method == methods::kSessionRenewController ||
                                     method == methods::kSessionReleaseController;
-    if (is_lease_operation || !capability_requires_controller_lease(descriptor->capability)) {
+    if (!is_lease_operation && !capability_requires_controller_lease(descriptor->capability)) {
         return client_.request(std::move(method), std::move(params_json), timeout);
     }
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -245,9 +250,11 @@ InspectorMessage InspectorClientSession::request_controlled(std::string method,
     };
     std::unique_lock control_lock(control_mutex_, std::defer_lock);
     if (timeout <= std::chrono::milliseconds(0) || !control_lock.try_lock_until(deadline)) {
-        return make_error(0, "Inspector request deadline expired before controller acquisition",
+        return make_error(0, "Inspector request deadline expired before controller operation",
                           "request_timeout", R"({"mayHaveApplied":false})");
     }
+    if (is_lease_operation)
+        return client_.request(std::move(method), std::move(params_json), remaining());
     const auto lease =
         client_.request(std::string(methods::kSessionAcquireController), "{}", remaining());
     if (lease.is_error)

@@ -260,3 +260,55 @@ TEST_CASE("shared controlled requests serialize complete controller transactions
     CHECK(second.error_data_json == R"({"mayHaveApplied":false})");
     CHECK(server.requests() == controlled_sequence());
 }
+
+TEST_CASE("explicit lease operations cannot interleave an automatic controller transaction",
+          "[inspect][client][session][control][concurrency][lease]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool acquisition_started = false;
+    bool allow_acquisition = false;
+    ScriptedAuthenticatedServer server([&](const InspectorMessage& request) {
+        if (request.method == pulp::inspect::methods::kSessionAcquireController) {
+            std::unique_lock lock(mutex);
+            acquisition_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return allow_acquisition; });
+        }
+        return make_response(request.id, R"({"ok":true})");
+    });
+    auto client = server.connect();
+
+    InspectorMessage mutation;
+    std::thread mutation_thread([&] {
+        mutation =
+            client->request_controlled(std::string(pulp::inspect::methods::kStateSetParameter),
+                                       R"({"id":7,"value":0.25})", std::chrono::seconds(1));
+    });
+    {
+        std::unique_lock lock(mutex);
+        if (!cv.wait_for(lock, std::chrono::seconds(1), [&] { return acquisition_started; })) {
+            allow_acquisition = true;
+            lock.unlock();
+            cv.notify_all();
+            mutation_thread.join();
+            FAIL("automatic transaction did not begin controller acquisition");
+        }
+    }
+
+    const auto release =
+        client->request_controlled(std::string(pulp::inspect::methods::kSessionReleaseController),
+                                   "{}", std::chrono::milliseconds(20));
+
+    {
+        std::lock_guard lock(mutex);
+        allow_acquisition = true;
+    }
+    cv.notify_all();
+    mutation_thread.join();
+
+    CHECK_FALSE(mutation.is_error);
+    REQUIRE(release.is_error);
+    CHECK(release.error_code == "request_timeout");
+    CHECK(release.error_data_json == R"({"mayHaveApplied":false})");
+    CHECK(server.requests() == controlled_sequence());
+}

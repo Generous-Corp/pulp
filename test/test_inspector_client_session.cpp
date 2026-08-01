@@ -191,3 +191,62 @@ TEST_CASE("shared client session fails closed on invalid or absent selectors",
                                           temporary.path) == nullptr);
     CHECK(failure.code == "session_selection_failed");
 }
+
+TEST_CASE("shared client session preserves transport connection failures",
+          "[inspect][client][session][connect][error]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    pulp::events::InterprocessConnectionServer unavailable;
+    REQUIRE(unavailable.start("127.0.0.1:0", pulp::events::IpcTransport::Socket));
+    const auto unavailable_port = unavailable.bound_port();
+    REQUIRE(unavailable_port != 0);
+    unavailable.stop();
+    InspectorDiscoveryRecord record;
+    record.session_id = "unreachable-session";
+    record.instance_id = "unreachable-instance";
+    record.plugin_id = "unreachable-plugin";
+    record.endpoint = "127.0.0.1:" + std::to_string(unavailable_port);
+    REQUIRE(publisher.publish(record, *token));
+
+    const auto published = publisher.record();
+    REQUIRE(published.has_value());
+    InspectorClientFailure failure;
+    CHECK(InspectorClientSession::connect({.session_id = published->session_id,
+                                           .instance_id = published->instance_id,
+                                           .publication_id = published->publication_id},
+                                          &failure, std::chrono::milliseconds(100),
+                                          temporary.path) == nullptr);
+    CHECK(failure.code == "transport_connection_failed");
+    CHECK(failure.message.find("transport") != std::string::npos);
+    CHECK(failure.data_json.find(published->publication_id) != std::string::npos);
+}
+
+TEST_CASE("shared client session distinguishes a pre-challenge disconnect",
+          "[inspect][client][session][connect][error]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    pulp::events::InterprocessConnectionServer server;
+    server.on_client_connected = [](auto connection) { connection->disconnect(); };
+    REQUIRE(server.start("127.0.0.1:0", pulp::events::IpcTransport::Socket));
+    InspectorDiscoveryRecord record;
+    record.session_id = "disconnect-session";
+    record.instance_id = "disconnect-instance";
+    record.plugin_id = "disconnect-plugin";
+    record.endpoint = "127.0.0.1:" + std::to_string(server.bound_port());
+    REQUIRE(publisher.publish(record, *token));
+
+    const auto published = publisher.record();
+    REQUIRE(published.has_value());
+    InspectorClientFailure failure;
+    CHECK(InspectorClientSession::connect(
+              {.session_id = published->session_id,
+               .instance_id = published->instance_id,
+               .publication_id = published->publication_id},
+              &failure, std::chrono::seconds(1), temporary.path) == nullptr);
+    CHECK(failure.code == "connection_closed");
+    CHECK(failure.message.find("challenge") != std::string::npos);
+}

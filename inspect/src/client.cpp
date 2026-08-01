@@ -258,7 +258,10 @@ public:
     }
 
     InspectorMessage wait_for_response(std::int64_t id,
-                                       std::chrono::milliseconds timeout) {
+                                       std::chrono::milliseconds timeout,
+                                       bool* locally_generated_error = nullptr) {
+        if (locally_generated_error != nullptr)
+            *locally_generated_error = false;
         std::unique_lock lock(mutex);
         if (!cv.wait_for(lock, timeout, [&] {
                 return responses.contains(id) || disconnected;
@@ -271,6 +274,8 @@ public:
             // late responses are no longer correlated and callers must
             // reconnect instead of retrying on the same authority.
             connection.disconnect();
+            if (locally_generated_error != nullptr)
+                *locally_generated_error = true;
             return connection_error(id,
                                     "Inspector request timed out; it may have applied",
                                     "request_timeout",
@@ -279,6 +284,8 @@ public:
         const auto found = responses.find(id);
         if (found == responses.end()) {
             in_flight.erase(id);
+            if (locally_generated_error != nullptr)
+                *locally_generated_error = true;
             return connection_error(id,
                                     "Inspector connection closed; request may have applied",
                                     "connection_closed",
@@ -300,12 +307,28 @@ InspectorClient::~InspectorClient() = default;
 bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
                               const InspectorDiscoveryReader& discovery,
                               std::chrono::milliseconds timeout) {
-    if (impl_->request_from_stale_callback())
+    return connect(record, discovery, timeout, nullptr);
+}
+
+bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
+                              const InspectorDiscoveryReader& discovery,
+                              std::chrono::milliseconds timeout,
+                              InspectorClientConnectFailure* failure) {
+    if (failure)
+        *failure = {};
+    const auto fail = [&](std::string code, std::string message) {
+        if (failure)
+            *failure = {std::move(code), std::move(message)};
         return false;
+    };
+    if (impl_->request_from_stale_callback())
+        return fail("stale_event_callback",
+                    "Inspector event callback belongs to a prior connection");
     disconnect();
     const auto token = discovery.read_credential(record);
     if (!token)
-        return false;
+        return fail("credential_unavailable",
+                    "Inspector credential is unavailable or insecure");
     std::uint64_t generation = 0;
     {
         std::lock_guard lock(impl_->mutex);
@@ -346,7 +369,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
                                    events::IpcTransport::Socket,
                                    bounded_timeout)) {
         impl_->disconnect_current(false);
-        return false;
+        return fail("transport_connection_failed",
+                    "Inspector transport connection failed or timed out");
     }
 
     InspectorAuthChallenge challenge;
@@ -354,16 +378,22 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         const auto challenge_timeout = remaining();
         if (challenge_timeout <= std::chrono::milliseconds(0)) {
             impl_->disconnect_current(false);
-            return false;
+            return fail("authentication_challenge_timeout",
+                        "Inspector authentication deadline expired before the challenge");
         }
         std::unique_lock lock(impl_->mutex);
-        if (!impl_->cv.wait_for(lock, challenge_timeout, [&] {
-                return impl_->challenge.has_value() || impl_->disconnected;
-            }) ||
-            !impl_->challenge) {
+        const bool challenge_ready = impl_->cv.wait_for(lock, challenge_timeout, [&] {
+            return impl_->challenge.has_value() || impl_->disconnected;
+        });
+        const bool disconnected = impl_->disconnected;
+        if (!challenge_ready || !impl_->challenge) {
             lock.unlock();
             impl_->disconnect_current(false);
-            return false;
+            if (disconnected)
+                return fail("connection_closed",
+                            "Inspector connection closed before authentication challenge");
+            return fail("authentication_challenge_timeout",
+                        "Inspector authentication challenge was not received before the deadline");
         }
         challenge = *impl_->challenge;
     }
@@ -372,13 +402,15 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         challenge.publication_id != record.publication_id ||
         challenge.protocol_version != record.protocol_version) {
         impl_->disconnect_current(false);
-        return false;
+        return fail("authentication_challenge_mismatch",
+                    "Inspector authentication challenge does not match the selected publication");
     }
     const auto proof =
         make_inspector_auth_proof(token->bytes(), challenge);
     if (!proof) {
         impl_->disconnect_current(false);
-        return false;
+        return fail("authentication_proof_failed",
+                    "Inspector authentication proof could not be created");
     }
     auto params = choc::value::createObject("");
     params.addMember("proof", choc::value::createString(*proof));
@@ -397,7 +429,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
             impl_->in_flight.erase(authentication.id);
         }
         impl_->disconnect_current(false);
-        return false;
+        return fail("authentication_timeout",
+                    "Inspector authentication deadline expired before proof submission");
     }
     impl_->connection.set_write_timeout(authentication_timeout);
     if (!impl_->connection.send_message(encode_message(authentication))) {
@@ -406,13 +439,24 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
             impl_->in_flight.erase(authentication.id);
         }
         impl_->disconnect_current(false);
-        return false;
+        return fail("authentication_send_failed",
+                    "Inspector authentication proof could not be sent");
     }
-    const auto response =
-        impl_->wait_for_response(1, remaining());
+    bool locally_generated_authentication_error = false;
+    const auto response = impl_->wait_for_response(
+        1, remaining(), &locally_generated_authentication_error);
     if (response.is_error) {
         impl_->disconnect_current(false);
-        return false;
+        if (locally_generated_authentication_error) {
+            if (response.error_code == "request_timeout")
+                return fail("authentication_timeout",
+                            "Inspector authentication response was not received before the deadline");
+            return fail("connection_closed",
+                        "Inspector connection closed during authentication");
+        }
+        // The peer has not proved possession of the credential yet. Do not
+        // expose its untrusted code or message as a stable local diagnostic.
+        return fail("authentication_failed", "Inspector authentication was rejected");
     }
     std::string server_proof;
     try {
@@ -424,20 +468,23 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     if (!verify_inspector_server_auth_proof(
             token->bytes(), challenge, *proof, server_proof)) {
         impl_->disconnect_current(false);
-        return false;
+        return fail("server_authentication_failed",
+                    "Inspector server authentication proof is invalid");
     }
     {
         std::lock_guard lock(impl_->mutex);
         if (impl_->disconnected ||
             impl_->connection_generation != generation) {
-            return false;
+            return fail("connection_closed",
+                        "Inspector connection closed during authentication");
         }
         impl_->mutually_authenticated = true;
     }
     {
         std::lock_guard lock(impl_->event_state->mutex);
         if (impl_->event_state->connection_generation != generation)
-            return false;
+            return fail("connection_replaced",
+                        "Inspector connection was replaced during authentication");
         for (auto& event : impl_->event_state->pre_auth_events) {
             const bool lossy = event.lossy;
             (void)impl_->event_state->events.push(
