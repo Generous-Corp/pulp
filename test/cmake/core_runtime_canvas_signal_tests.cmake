@@ -1,6 +1,8 @@
 # Core runtime, canvas, scheduler, and signal-graph test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake)
+
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
