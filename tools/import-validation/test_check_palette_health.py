@@ -212,6 +212,71 @@ class TextContrast(unittest.TestCase):
         self.assertTrue(any("surface-overlay" in p for p in found), found)
 
 
+class PackResolution(unittest.TestCase):
+    """A derived pack's override block must reach the resolver.
+
+    The bug this pins: the override a derived pack ships is scoped
+    `:root, [data-theme="dark"], [data-theme="light"]`. A theme filter that
+    rejects any selector MENTIONING the other theme drops that whole block, so
+    the resolver reports the base pack's healthy palette for a pack whose
+    palette has been flattened — a false clean, and the worst possible failure
+    mode for a checker.
+    """
+
+    def write_pack(self, tmp: Path) -> Path:
+        pack = tmp / "derived"
+        (pack / "tokens").mkdir(parents=True)
+        (pack / "tokens" / "a-base.css").write_text(
+            ":root, [data-theme=\"dark\"] {\n"
+            "  --accent: #16DAC2;\n"
+            "  --accent-soft: rgba(22,218,194,0.15);\n"
+            "  --accent-line: rgba(22,218,194,0.45);\n"
+            "}\n"
+            "[data-theme=\"light\"] { --accent: #10B6A3; }\n")
+        (pack / "tokens" / "zz-pack-overrides.css").write_text(
+            ":root, [data-theme=\"dark\"], [data-theme=\"light\"] {\n"
+            "  --accent: #39FF6A !important;\n"
+            "  --accent-soft: #39FF6A !important;\n"
+            "  --accent-line: #39FF6A !important;\n"
+            "}\n")
+        return pack
+
+    def test_the_override_block_wins_in_both_themes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pack = self.write_pack(Path(raw))
+            for theme in ("dark", "light"):
+                tokens = cph.tokens_from_pack(pack, theme)
+                self.assertEqual(tokens["accent"], "#39FF6A", theme)
+                self.assertEqual(tokens["accent-soft"], "#39FF6A", theme)
+                found = cph.check_accent_ramp(tokens)[0]
+                self.assertTrue(
+                    any("--accent-soft is identical" in p for p in found),
+                    f"{theme}: the override block was not resolved — {found}")
+
+    def test_a_theme_exclusive_block_does_not_leak(self) -> None:
+        # The other direction: a block scoped to light only must not colour the
+        # dark resolution, or the resolver reports a palette nobody renders.
+        with tempfile.TemporaryDirectory() as raw:
+            pack = Path(raw) / "p"
+            pack.mkdir()
+            (pack / "t.css").write_text(
+                ":root { --accent: #16DAC2; }\n"
+                "[data-theme=\"light\"] { --accent: #10B6A3; }\n")
+            self.assertEqual(cph.tokens_from_pack(pack, "dark")["accent"],
+                             "#16DAC2")
+            self.assertEqual(cph.tokens_from_pack(pack, "light")["accent"],
+                             "#10B6A3")
+
+    def test_var_indirection_is_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pack = Path(raw) / "p"
+            pack.mkdir()
+            (pack / "t.css").write_text(
+                ":root { --ink-signal: #16DAC2; --accent: var(--ink-signal); }\n")
+            self.assertEqual(cph.tokens_from_pack(pack, "dark")["accent"],
+                             "#16DAC2")
+
+
 class CommandLine(unittest.TestCase):
     def run_cli(self, payload: dict, suffix: str = ".json",
                 flag: str = "--tokens") -> subprocess.CompletedProcess:
@@ -263,9 +328,21 @@ class ShippedPack(unittest.TestCase):
     A checker whose own repo fails it is a checker nobody can turn on.
     """
 
+    PACK = (Path(__file__).resolve().parents[2] / "assets" / "design-system"
+            / "ink-signal" / "tokens" / "css")
+
+    def test_ink_signal_passes_every_assertion_in_both_themes(self) -> None:
+        # The whole checker, not just the text bars. Asserting one family here
+        # leaves the others free to regress in the pack this repo ships: a
+        # negative control that re-collapsed the accent ramp left this suite
+        # green until the pack itself was put under the full check.
+        for theme in ("dark", "light"):
+            tokens = cph.tokens_from_pack(self.PACK, theme)
+            self.assertIn("accent", tokens, theme)
+            self.assertEqual(problems_of(tokens), [], f"{theme} theme")
+
     def test_ink_signal_dark_and_light_clear_the_bars(self) -> None:
-        css = (Path(__file__).resolve().parents[2] / "assets" / "design-system"
-               / "ink-signal" / "tokens" / "css" / "semantic.css").read_text()
+        css = (self.PACK / "semantic.css").read_text()
         surfaces_dark = ["#161A21", "#1E2530", "#28303C", "#0E1116", "#0C0F14",
                          "#2F3743", "#2A323D", "#323B47", "#2C333E"]
         surfaces_light = ["#EDEFF2", "#FAFBFC", "#FFFFFF", "#E0E4E9", "#E6E9EE",

@@ -210,6 +210,54 @@ def tokens_from_json(path: Path) -> dict[str, str]:
             if isinstance(v, str)}
 
 
+CSS_BLOCK = re.compile(r"([^{}]*)\{([^{}]*)\}", re.S)
+CSS_DECL = re.compile(r"(--[a-z0-9-]+)\s*:\s*([^;}]+)")
+
+
+def tokens_from_pack(pack: Path, theme: str = "dark") -> dict[str, str]:
+    """Resolve one theme's custom properties out of a pack directory.
+
+    Judging a pack BEFORE it ships is the cheaper place to catch a collapse
+    than judging the panel it produced. Files are read in sorted order and
+    declarations applied in that order, which is what a stylesheet flattened
+    into one document does; `!important` is stripped because at this layer it
+    only ever means "this declaration wins", which reading in order already
+    expresses.
+    """
+    sheets = sorted(pack.rglob("*.css"))
+    if not sheets:
+        fail(EX_INPUT, f"no stylesheets under {pack}")
+    other = "light" if theme == "dark" else "dark"
+    values: dict[str, str] = {}
+    for sheet in sheets:
+        text = re.sub(r"/\*.*?\*/", "", sheet.read_text(errors="replace"), flags=re.S)
+        for selector, body in CSS_BLOCK.findall(text):
+            # A selector LIST is judged part by part. A derived pack's override
+            # block is `:root, [data-theme="dark"], [data-theme="light"]`, so a
+            # filter that rejects any selector merely MENTIONING the other
+            # theme drops the overrides and reads a collapsed pack as healthy —
+            # which is what it did before this was part-wise.
+            parts = [p.strip() for p in selector.split(",")]
+            scoped = [p for p in parts if ":root" in p or "data-theme=" in p]
+            if not scoped:
+                continue
+            # `:root` is the base both themes start from, exactly as the
+            # cascade treats it; the requested theme's block is layered on top
+            # by document order below.
+            if all(f'data-theme="{other}"' in p for p in scoped):
+                continue
+            for name, raw in CSS_DECL.findall(body):
+                values[name] = raw.replace("!important", "").strip()
+    # One var() indirection per pass; four passes covers the chains the packs
+    # actually use (--accent -> --ink-signal -> a literal).
+    for _ in range(4):
+        for name, value in list(values.items()):
+            alias = re.fullmatch(r"var\((--[a-z0-9-]+)\)", value.strip())
+            if alias and alias.group(1) in values:
+                values[name] = values[alias.group(1)]
+    return {name[2:]: value for name, value in values.items()}
+
+
 def tokens_from_artifact(path: Path) -> dict[str, str]:
     """Read the script that ships, not the document beside it.
 
@@ -362,18 +410,30 @@ def main() -> int:
                         help="DesignIR document, or a browser-tokens document")
     source.add_argument("--artifact", type=Path,
                         help="emitted UI script; its setColorToken calls are read")
+    source.add_argument("--pack", type=Path,
+                        help="design-pack directory; its stylesheets are resolved")
+    ap.add_argument("--theme", default="dark", choices=("dark", "light"),
+                    help="which theme block to resolve, with --pack")
     ap.add_argument("--json", action="store_true",
                     help="emit the findings as JSON on stdout")
     args = ap.parse_args()
 
-    path = args.tokens or args.artifact
-    if not path.is_file():
-        fail(EX_INPUT, f"input does not exist: {path}")
-    if path.stat().st_size == 0:
-        fail(EX_INPUT, f"input is empty: {path}")
+    path = args.tokens or args.artifact or args.pack
+    if args.pack is not None:
+        if not path.is_dir():
+            fail(EX_INPUT, f"pack directory does not exist: {path}")
+    else:
+        if not path.is_file():
+            fail(EX_INPUT, f"input does not exist: {path}")
+        if path.stat().st_size == 0:
+            fail(EX_INPUT, f"input is empty: {path}")
 
-    tokens = (tokens_from_json(args.tokens) if args.tokens
-              else tokens_from_artifact(args.artifact))
+    if args.tokens:
+        tokens = tokens_from_json(args.tokens)
+    elif args.artifact:
+        tokens = tokens_from_artifact(args.artifact)
+    else:
+        tokens = tokens_from_pack(args.pack, args.theme)
 
     # A near-empty token set would sail through every assertion below and print
     # a pass. Say it is unjudgeable instead.
