@@ -759,6 +759,12 @@ runtime::Result<Track, ModelError> Track::with_mixer(TrackMixer mixer) const {
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+Track Track::with_name(std::string name) const {
+    auto next_data = *data_;
+    next_data.name = std::move(name);
+    return Track(std::make_shared<const Data>(std::move(next_data)));
+}
+
 ItemId Track::id() const noexcept {
     return data_->id;
 }

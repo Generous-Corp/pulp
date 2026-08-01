@@ -1,9 +1,11 @@
 #include "transaction_marker_internal.hpp"
 
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <array>
 #include <utility>
+#include <variant>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -149,10 +151,7 @@ reduce_remove_region(const Project& project, const RemoveRegion& remove,
 } // namespace
 
 bool is_marker_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertMarker>(command) ||
-           std::holds_alternative<RemoveMarker>(command) ||
-           std::holds_alternative<InsertRegion>(command) ||
-           std::holds_alternative<RemoveRegion>(command);
+    return std::visit([]<typename T>(const T&) { return is_marker_command_type<T>; }, command);
 }
 
 runtime::Result<MarkerCommandReduction, TransactionError>

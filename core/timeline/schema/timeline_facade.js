@@ -217,6 +217,17 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.move_track": Object.freeze({
+    schemaType: "pulp.timeline.command.move_track",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected_before_track_id", kind: "U64String", jsType: "string", required: false }),
+      Object.freeze({ name: "replacement_before_track_id", kind: "U64String", jsType: "string", required: false }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.remove_asset": Object.freeze({
     schemaType: "pulp.timeline.command.remove_asset",
     domain: "Command",
@@ -463,6 +474,17 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.set_track_name": Object.freeze({
+    schemaType: "pulp.timeline.command.set_track_name",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.content.empty": Object.freeze({
     schemaType: "pulp.timeline.content.empty",
     domain: "Content",
@@ -675,6 +697,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.insert_take_lane",
   "pulp.timeline.command.insert_track",
   "pulp.timeline.command.move_clip",
+  "pulp.timeline.command.move_track",
   "pulp.timeline.command.remove_asset",
   "pulp.timeline.command.remove_automation_lane",
   "pulp.timeline.command.remove_clip",
@@ -699,6 +722,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.set_tempo_map",
   "pulp.timeline.command.set_track_freeze",
   "pulp.timeline.command.set_track_mixer",
+  "pulp.timeline.command.set_track_name",
   "pulp.timeline.content.empty",
   "pulp.timeline.content.media",
   "pulp.timeline.content.notes",

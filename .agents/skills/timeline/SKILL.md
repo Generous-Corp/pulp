@@ -793,6 +793,43 @@ version that predates it is as much a rejection as one missing from a version
 that requires it — so reusing another field's predicate silently accepts
 malformed documents on one of the two paths.
 
+### Build a `Sequence::Data` successor by copying and naming, never positionally
+
+Every `Sequence` edit but `create()` produces its successor with
+`auto next = *data_;`, assignment to the fields it changes, and
+`make_shared<const Data>(std::move(next))`. This is not style. `Data` carries
+fourteen fields, two of which — `track_order` and `outgoing_sequence_refs` —
+are both `std::vector<ItemId>`, so a positional brace-initializer that
+transposes them compiles silently and corrupts authored order. The positional
+form also made every new field a mechanical edit at every construction site,
+which is how a field gets dropped from one of them.
+
+Mutate the copy in place (`next.tracks.push_back(...)`) rather than building a
+new vector and assigning it, so a copy-and-mutate site costs the same single
+deep copy the positional form did.
+
+### A track reorder needs its own primitive; erase + insert is wrong three ways
+
+`Sequence::move_track` rewrites `track_order` and nothing else. Reaching for
+`erase_track` + `insert_track` instead is wrong for a reorder because it:
+
+- rebuilds `tracks`, `track_id_index`, and `outgoing_sequence_refs` — a whole
+  subtree rewrite for an edit that permutes one `vector<ItemId>`;
+- mints a fresh compile-structure token, so `Project::replace_sequence` bumps
+  `sequence_compile_structure_token()` and invalidates a compiled program that
+  never observed display order;
+- **fails outright** for a legal edit: `erase_track` refuses to strand a
+  launcher slot that sources one of the track's clips, so drag-reordering a
+  track that carries a launcher clip would be rejected for a non-reason.
+
+The same shape applies to any future authored-order edit. Authored position is
+encoded as "the item this one stands before", with an empty value meaning last —
+one encoding serves `InsertTrack::before_track_id`, `RemoveTrack`'s inverse, and
+`MoveTrack`'s optimistic gate, and swapping expected/replacement is the exact
+inverse. A destination that names the moved item itself must be refused: the
+item is lifted out before the destination is located, so the request would
+otherwise land silently at the end.
+
 ### `Command` `retained_size()` must account for heap the alternative owns
 
 `retained_size()` has a chain of `if constexpr` arms and a `sizeof(T)` fallback.
@@ -801,24 +838,60 @@ reports only its inline size, so the journal's memory accounting silently
 under-counts and the bound it enforces stops meaning what it says. This does not
 fail to compile and no test notices unless one is written for it.
 
-### Adding a `Command` alternative fails closed in one place and aborts in another
+### Adding a `Command` alternative is checked in three places, all fail-closed
 
-`Command` has **no** exhaustive-visitor guard of the `ClipContentCases` kind.
-Two consumers behave differently:
+`Command` has no exhaustive-visitor guard of the `ClipContentCases` kind, so the
+guards are assembled rather than inherent. Three of them fire, and it is worth
+knowing which, because they fail in different ways and one used to not fire at
+all:
 
 - `command.cpp`'s `equivalent()` is an `if constexpr` chain ending in a generic
   `else` that reads `.track_id`/`.clip_id`. A new alternative without those
-  fields is a **compile error** — it fails closed, which is what you want.
-- `detail::reduce_transaction()` in `transaction.cpp` is an `if/else if` chain
-  ending in `std::get<SetClipPlaybackProperties>`. Under `-fno-exceptions` that
-  is `std::terminate`, not a caught error. Add the reduce branch **before** the
-  final `else`; a compile-clean build proves nothing here.
+  fields is a **compile error**. Note this fires *first* and can mask the others:
+  an alternative that happens to carry those fields sails past it.
+- `transaction.cpp` carries a `static_assert` that every alternative is claimed
+  by **exactly one** reduce dispatch branch, reading the lists in
+  `transaction_dispatch_internal.hpp`. Each family predicate (`is_track_command`
+  and friends) is derived from its list by `std::visit` rather than repeating it,
+  so the predicate and the claim cannot drift. Exactly-one, not at-least-one:
+  requiring one claim also catches an alternative two families both handle, which
+  branch order would otherwise resolve silently.
+- `retained_size()` has a `sizeof(T)` fallback and so fails **open** — see the
+  section above.
 
-Also extend the two coverage guards that pin the vocabulary: the type-name array
-in `test_timeline_schema_registry.cpp` (`static_assert`ed against
-`variant_size_v<Command>`) and the encoded-envelope batch in
-`test_timeline_command_persistence.cpp` (which asserts one decoded command per
-alternative, in variant order).
+The reason the second guard exists: `pulp-timeline` builds `-fno-exceptions`, so
+an alternative that reaches the end of the dispatch chain is not a
+`bad_variant_access` and not a `ConflictCode` — it is a process `abort()` inside
+a DAW. The chain's tail is now a rejection (`ConflictCode::ModelInvariant`)
+rather than a bare `std::get`, so the abort is gone even if the assertion is
+ever removed; verified by unwiring an alternative from its family, which aborts
+with **SIGABRT (exit 134)** against the old bare `std::get` and returns a clean
+`ModelInvariant` rejection against the current tail.
+
+**A count-based check is not enough here, and this is the trap.** Asserting
+`variant_size_v<Command>` against the sum of the family sizes passes when one
+alternative is claimed twice and another not at all — the two errors cancel.
+Verified: with `MoveTrack` claimed by both the scene and track families and
+`SetTrackName` claimed by none, the claim total is still 39 and a count check
+passes while the identity check fails. Compare identities, not counts.
+
+Also extend the two coverage guards that pin the vocabulary, and note that
+neither is ordered the way you would guess:
+
+- the type-name array in `test_timeline_schema_registry.cpp`, sized by a
+  `static_assert` against `variant_size_v<Command>` and compared elementwise
+  against the registry, which sorts by type name — so the array is **alphabetical
+  by schema type name**, not variant order. Insert in the right alphabetical
+  slot; appending fails the elementwise compare.
+- the encoded-envelope batch in `test_timeline_command_persistence.cpp`. Its real
+  invariant is **one decoded command per alternative** — `commands.size() ==
+  variant_size_v<Command>` plus one `holds_alternative` assertion per index,
+  naming each alternative exactly once. It is *not* in variant order: the batch
+  carries `InsertTake`, `RemoveTake`, `SetRecordArm` at indices 14-16 where the
+  variant declares `SetRecordArm`, `InsertTake`, `RemoveTake`. That divergence is
+  long-standing and harmless — do not "fix" it, and do not renumber the batch to
+  match the variant. Appending a new envelope and asserting it at the final index
+  is correct.
 
 ### The edit vocabulary sits at the editor rung, and "cannot see `view`" is not why
 

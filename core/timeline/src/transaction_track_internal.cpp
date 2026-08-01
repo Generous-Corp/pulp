@@ -4,10 +4,14 @@
 #include "owned_identity_traversal.hpp"
 #include "sequence_graph_validation.hpp"
 #include "sequence_scene_internal.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
+#include <algorithm>
+#include <iterator>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace pulp::timeline::detail {
@@ -114,11 +118,58 @@ remove_track(const Project& project, const RemoveTrack& remove, const Transactio
                   std::nullopt, transaction, command);
 }
 
+// A track's authored position, named by the track it stands before. The last
+// track stands before nothing, which is the same empty value InsertTrack uses
+// to mean "append", so one encoding serves placement, the optimistic gate, and
+// the inverse.
+std::optional<ItemId> authored_position(const Sequence& sequence, ItemId track_id) {
+    const auto order = sequence.track_order();
+    const auto placed = std::find(order.begin(), order.end(), track_id);
+    if (placed == order.end() || std::next(placed) == order.end())
+        return std::nullopt;
+    return *std::next(placed);
+}
+
+runtime::Result<TrackCommandReduction, TransactionError>
+move_track(const Project& project, const MoveTrack& move, const Transaction& transaction,
+           CommandId command) {
+    if (const auto code =
+            target_error(project, move.track_id,
+                         expected(ItemKind::Track, project, move.sequence_id, move.track_id)))
+        return reject_reduction<TrackCommandReduction>(*code, transaction, command, move.track_id,
+                                                       move.sequence_id);
+    if (move.replacement_before_track_id)
+        if (const auto code =
+                target_error(project, *move.replacement_before_track_id,
+                             expected(ItemKind::Track, project, move.sequence_id,
+                                      *move.replacement_before_track_id)))
+            return reject_reduction<TrackCommandReduction>(
+                *code, transaction, command, *move.replacement_before_track_id, move.sequence_id);
+    const auto* sequence = project.find_sequence(move.sequence_id);
+    if (!sequence)
+        return reject_reduction<TrackCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                       command, move.track_id);
+    if (authored_position(*sequence, move.track_id) != move.expected_before_track_id)
+        return reject_reduction<TrackCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                       transaction, command, move.track_id);
+
+    // move_track permutes authored order alone, so no identity changes state and
+    // the compiled program keeps its token. Composing this from erase and insert
+    // would do neither, and would refuse outright for a track whose clip a
+    // launcher slot sources.
+    auto next = sequence->move_track(move.track_id, move.replacement_before_track_id);
+    if (!next)
+        return runtime::Err(model_failure(transaction, command, next.error()));
+    return finish(project, next.value(),
+                  MoveTrack{move.sequence_id, move.track_id, move.replacement_before_track_id,
+                            move.expected_before_track_id},
+                  move.track_id, DirtyFlags::Structure, {}, std::nullopt, transaction, command);
+}
+
 } // namespace
 
 bool is_track_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertTrack>(command) ||
-           std::holds_alternative<RemoveTrack>(command);
+    return std::visit([]<typename T>(const T&) { return is_track_command_type<T>; }, command);
 }
 
 runtime::Result<TrackCommandReduction, TransactionError>
@@ -129,6 +180,8 @@ reduce_track_command(const Project& project, const Command& command,
         return insert_track(project, *value, transaction, command_id, allow_tombstone_restore);
     if (const auto* value = std::get_if<RemoveTrack>(&command))
         return remove_track(project, *value, transaction, command_id);
+    if (const auto* value = std::get_if<MoveTrack>(&command))
+        return move_track(project, *value, transaction, command_id);
     return reject_reduction<TrackCommandReduction>(ConflictCode::ModelInvariant, transaction,
                                                    command_id);
 }
