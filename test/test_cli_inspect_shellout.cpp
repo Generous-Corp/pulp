@@ -17,9 +17,13 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -49,6 +53,78 @@ using pulp::inspect::make_response;
 
 namespace {
 
+class FixtureMainThreadDispatcher {
+public:
+    FixtureMainThreadDispatcher() {
+        worker_ = std::thread([this] { run(); });
+        std::unique_lock lock(mutex_);
+        ready_cv_.wait(lock, [this] { return ready_; });
+    }
+
+    ~FixtureMainThreadDispatcher() {
+        {
+            std::lock_guard lock(mutex_);
+            stopping_ = true;
+        }
+        work_cv_.notify_all();
+        worker_.join();
+    }
+
+    std::shared_ptr<pulp::inspect::InspectorMainThreadRpc> make_rpc() {
+        return std::make_shared<pulp::inspect::InspectorMainThreadRpc>(
+            pulp::inspect::InspectorMainThreadRpc::Config{},
+            [this](std::function<void()> task) {
+                if (!task)
+                    return false;
+                {
+                    std::lock_guard lock(mutex_);
+                    if (stopping_)
+                        return false;
+                    tasks_.push_back(std::move(task));
+                }
+                work_cv_.notify_one();
+                return true;
+            },
+            [this] {
+                std::lock_guard lock(mutex_);
+                return ready_ && std::this_thread::get_id() == worker_id_;
+            });
+    }
+
+private:
+    void run() {
+        {
+            std::lock_guard lock(mutex_);
+            worker_id_ = std::this_thread::get_id();
+            ready_ = true;
+        }
+        ready_cv_.notify_all();
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock lock(mutex_);
+                work_cv_.wait(lock, [this] {
+                    return stopping_ || !tasks_.empty();
+                });
+                if (stopping_ && tasks_.empty())
+                    return;
+                task = std::move(tasks_.front());
+                tasks_.pop_front();
+            }
+            task();
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable ready_cv_;
+    std::condition_variable work_cv_;
+    std::deque<std::function<void()>> tasks_;
+    std::thread worker_;
+    std::thread::id worker_id_;
+    bool ready_ = false;
+    bool stopping_ = false;
+};
+
 InspectorPolicyConfig fixture_policy() {
     InspectorPolicyConfig policy;
     policy.profile = InspectorProfile::Develop;
@@ -73,6 +149,9 @@ struct InspectServerFixture {
     InspectorPolicyConfig policy = fixture_policy();
     std::function<InspectorMessage(const InspectorMessage&)> handler;
     std::vector<InspectorMessage> seen;
+    FixtureMainThreadDispatcher main_thread;
+    std::shared_ptr<pulp::inspect::InspectorMainThreadRpc> rpc =
+        main_thread.make_rpc();
     InspectorSession session{
         InspectorSessionInfo{
             "cli-shellout-session", "cli-shellout-instance",
@@ -95,8 +174,13 @@ struct InspectServerFixture {
         record.session_id = session.info().session_id;
         record.instance_id = session.info().instance_id;
         record.plugin_id = session.info().plugin_id;
-        REQUIRE(server.start_authenticated(
-            InspectorServerConfig{&session, &publisher, record, *token}));
+        InspectorServerConfig config;
+        config.session = &session;
+        config.discovery = &publisher;
+        config.record = record;
+        config.token = *token;
+        config.main_thread_rpc = rpc;
+        REQUIRE(server.start_authenticated(std::move(config)));
         port = static_cast<std::uint16_t>(server.port());
     }
 
@@ -141,6 +225,8 @@ TEST_CASE("pulp inspect one-shot prints a server response",
                             "--params", R"({"depth":2})"},
                            10000);
 
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" +
@@ -168,6 +254,8 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
 
     auto result = run_pulp({"inspect", "--command", "DOM.getDocument"}, 10000);
 
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.stderr_output.find("Found inspector session " +
@@ -206,15 +294,20 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
             return make_response(request.id, R"({"instance":"second"})");
         }};
     InspectorServer second_server;
+    auto second_rpc = first.main_thread.make_rpc();
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryRecord record;
     record.session_id = second_session.info().session_id;
     record.instance_id = second_session.info().instance_id;
     record.plugin_id = second_session.info().plugin_id;
-    REQUIRE(second_server.start_authenticated(
-        InspectorServerConfig{
-            &second_session, &second_publisher, record, *token}));
+    InspectorServerConfig second_config;
+    second_config.session = &second_session;
+    second_config.discovery = &second_publisher;
+    second_config.record = record;
+    second_config.token = *token;
+    second_config.main_thread_rpc = second_rpc;
+    REQUIRE(second_server.start_authenticated(std::move(second_config)));
 
     const auto result = run_pulp(
         {"inspect",
@@ -223,6 +316,8 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
          "--command", "DOM.getDocument"},
         10000);
 
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     CHECK(result.stdout_output == R"({"instance": "second"})"
@@ -251,8 +346,14 @@ TEST_CASE("pulp inspect rejects a stale publication after server restart",
     record.session_id = fixture.session.info().session_id;
     record.instance_id = fixture.session.info().instance_id;
     record.plugin_id = fixture.session.info().plugin_id;
-    REQUIRE(fixture.server.start_authenticated(InspectorServerConfig{
-        &fixture.session, &fixture.publisher, record, *token}));
+    fixture.rpc = fixture.main_thread.make_rpc();
+    InspectorServerConfig restarted_config;
+    restarted_config.session = &fixture.session;
+    restarted_config.discovery = &fixture.publisher;
+    restarted_config.record = record;
+    restarted_config.token = *token;
+    restarted_config.main_thread_rpc = fixture.rpc;
+    REQUIRE(fixture.server.start_authenticated(std::move(restarted_config)));
     fixture.port = static_cast<std::uint16_t>(fixture.server.port());
     REQUIRE(fixture.publisher.record().has_value());
     const auto current_publication =
@@ -303,6 +404,8 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
          "--params", R"({"id":"gain","value":0.75})"},
         10000);
 
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.stdout_output == R"({"applied": true})"
@@ -344,6 +447,8 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
                              "--output", out.string()},
                             10000);
 
+    INFO("stdout: " << written.stdout_output);
+    INFO("stderr: " << written.stderr_output);
     REQUIRE_FALSE(written.timed_out);
     REQUIRE(written.exit_code == 0);
     REQUIRE(written.stderr_output.find("Connecting to 127.0.0.1:" +
