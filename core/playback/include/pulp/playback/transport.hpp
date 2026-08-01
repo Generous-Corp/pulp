@@ -101,6 +101,48 @@ struct TransportSnapshot {
     bool has_precise_host_loop = false;
 };
 
+/// Where the transport is, published for a reader that is not the audio thread.
+///
+/// This is the counterpart to TransportSnapshot, and the difference is the
+/// lifetime of what it carries. A snapshot borrows `const CompiledTempoMap*`
+/// from the compiled program, which is correct for a block renderer that
+/// consumes it inside the callback that produced it, and unsafe for a view that
+/// keeps a copy across frames while the engine may adopt a different program
+/// underneath. Every field here is a value, so a retained reading goes stale,
+/// never invalid.
+///
+/// The vocabulary is the transport's own. Projecting a reading into the UI
+/// vocabulary a timeline editor speaks is the job of whoever implements that
+/// seam, because playback's dependency floor excludes the editor rung.
+struct TransportPlayhead {
+    /// Monotonic per publish. Two readings with the same value are the same
+    /// reading, which is how a reader skips redundant work. Zero means nothing
+    /// has been published yet. reset() deliberately does not restart it: a
+    /// restarted counter would make a new reading indistinguishable from one a
+    /// reader already acted on.
+    std::uint64_t sequence = 0;
+    /// Identity of the continuous playback interval this reading belongs to.
+    /// A change means continuity broke, so a reader interpolating between two
+    /// readings must not interpolate across one.
+    std::uint64_t playback_epoch = 0;
+    /// Position of the FIRST frame of the published block. That frame has not
+    /// left the device yet, so it is the least-ahead-of-audible position the
+    /// transport can state; publishing the block's end would put every reading
+    /// one buffer into the future.
+    timebase::TickPosition position{};
+    LoopRegion loop{};
+    double tempo_bpm = 120.0;
+    /// True whenever the position advances on its own. Mirrors
+    /// TransportSnapshot::is_playing, so it is also true while scrubbing and a
+    /// reader asking only "does the playhead move" needs no scrub branch.
+    bool is_playing = false;
+    bool scrubbing = false;
+
+    constexpr bool operator==(const TransportPlayhead&) const = default;
+};
+
+static_assert(std::is_trivially_copyable_v<TransportPlayhead>);
+
 /// Validates the shared structural contract consumed by every block renderer.
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept;
 
@@ -135,6 +177,10 @@ struct MasterTransportConfig {
 /// Master musical transport with one control-thread writer and one audio-thread
 /// consumer. Control methods publish one coherent desired-state snapshot through
 /// SeqLock. begin_block() is allocation-free and never locks.
+///
+/// Position travels in both directions, through one SeqLock each. The control
+/// thread states where playback should go; the audio thread publishes where it
+/// actually is, so a view can read the playhead without touching a callback.
 class MasterTransport {
   public:
     static constexpr audio::RtSafetyClass begin_block_rt_safety_class =
@@ -184,6 +230,17 @@ class MasterTransport {
     /// a source is configured; the ordinary document-clock path is unchanged.
     TransportError begin_block(std::uint32_t frame_count, TempoSyncHostTime output_host_time,
                                TransportSnapshot& snapshot) noexcept;
+
+    /// The latest published playhead reading, by value.
+    ///
+    /// Call it from any thread that is not the audio thread, as often as a
+    /// frame needs it: it allocates nothing, takes no lock, and returns a
+    /// coherent reading rather than one torn across a concurrent publish — at
+    /// worst it retries while a publish is in flight. It returns the newest
+    /// reading, never a backlog: a reader that skipped frames sees where
+    /// playback is now, not where it was.
+    TransportPlayhead playhead() const noexcept { return playhead_.read(); }
+
     void reset() noexcept;
 
   private:
@@ -220,8 +277,14 @@ class MasterTransport {
                                 TransportSnapshot& snapshot) noexcept;
     void finish_projected_block(const DesiredState& desired, const BlockProjection& projection,
                                 TransportSnapshot& snapshot) noexcept;
+    /// Stamps a reading with the next sequence number and publishes it. Every
+    /// publication goes through here, so no site can skip the stamp and leave a
+    /// new reading indistinguishable from the one before it.
+    void publish_playhead(TransportPlayhead reading) noexcept;
 
     runtime::SeqLock<DesiredState> desired_{};
+    runtime::SeqLock<TransportPlayhead> playhead_{};
+    std::uint64_t playhead_sequence_ = 0;
     DesiredState control_state_{};
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;
     timebase::TempoCursor tempo_cursor_{};
