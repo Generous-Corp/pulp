@@ -121,7 +121,10 @@ private:
     // single-flight slot. Request waiters use the same mutex, so completion and
     // cancellation have one ordering point.
     void finish_locked(const std::shared_ptr<Request>& request, EvalResult result);
-    static bool interrupt_if_active(const std::shared_ptr<Request>& request);
+    // mutex_ must be held. The engine interrupt seam is explicitly nonblocking;
+    // retaining the lock through the call prevents detach() from returning and
+    // the caller-owned engine from being destroyed before the dereference.
+    static bool interrupt_if_active_locked(const std::shared_ptr<Request>& request);
 
     friend struct ScriptInspectorBridgeTestAccess;
 
