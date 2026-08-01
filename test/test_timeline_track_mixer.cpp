@@ -48,7 +48,7 @@ template <typename T, std::size_t Count = 0> constexpr std::size_t field_count()
         return Count;
 }
 
-constexpr std::size_t kTrackInputFields = 10;
+constexpr std::size_t kTrackInputFields = 11;
 static_assert(field_count<TrackInput>() == kTrackInputFields,
               "TrackInput gained or lost a member. Carry it in detail::track_input_of "
               "(core/timeline/src/track.cpp) so an id remap stops resetting it, then update "
@@ -361,4 +361,38 @@ TEST_CASE("Remapping a track carries its authored mixer and arm intent",
     REQUIRE(rebuilt->mixer().pan == -0.75f);
     REQUIRE(rebuilt->record_armed());
     REQUIRE(rebuilt->name() == "authored track");
+}
+
+TEST_CASE("Remapping a track carries the tuning it overrides the project's with",
+          "[timeline][tuning][remap]") {
+    // `TuningReference` is content-addressed rather than identity-addressed, so
+    // a remap has nothing to rewrite and must carry it through untouched. The
+    // failure this pins is not a wrong tuning but an absent one: dropping the
+    // member returns the track to whatever the project states, which is a
+    // playable document that sounds wrong rather than an error anyone sees.
+    //
+    // The authored pitch is deliberately not the default. A track that fell
+    // back to the project's tuning would still answer 440 kmHz, so asserting
+    // the default would pass whether or not the override survived.
+    const TuningReference authored{.system = TuningSystem::EqualTemperament,
+                                   .reference_pitch_millihertz = 432'000};
+    REQUIRE(authored.reference_pitch_millihertz != kDefaultReferencePitchMillihertz);
+    const auto original = take_result(
+        Track::create(TrackInput{.id = {4}, .name = "retuned track", .tuning = authored}));
+    REQUIRE(original.tuning().has_value());
+
+    ItemIdAllocator allocator(100);
+    const auto remapped = take_result(remap_ids(original, allocator));
+    REQUIRE(remapped.track.id() != original.id());
+    // Presence first: the defect drops the member, and comparing a disengaged
+    // optional to an engaged one would report a value mismatch for what is
+    // really an absence.
+    REQUIRE(remapped.track.tuning().has_value());
+    REQUIRE(*remapped.track.tuning() == authored);
+
+    // A track that states no tuning must still state none afterwards, so the
+    // fix cannot be a default that manufactures an override nobody authored.
+    const auto untuned = take_result(Track::create(TrackInput{.id = {7}, .name = "untuned track"}));
+    REQUIRE_FALSE(untuned.tuning().has_value());
+    REQUIRE_FALSE(take_result(remap_ids(untuned, allocator)).track.tuning().has_value());
 }

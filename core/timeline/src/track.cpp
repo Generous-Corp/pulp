@@ -514,6 +514,7 @@ TrackInput track_input_of(const Track& track) {
         .active_take_lane_id = track.active_take_lane_id(),
         .freeze = track.freeze(),
         .mixer = track.mixer(),
+        .tuning = track.tuning(),
     };
 }
 
