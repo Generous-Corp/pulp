@@ -87,6 +87,29 @@ TEST_CASE("Swing moves the interior snap boundary without moving the bar",
     CHECK(grid->snap(meter, {4 * kTicksPerQuarter}) == TickPosition{4 * kTicksPerQuarter});
 }
 
+TEST_CASE("Swing restarts from a meter change whose bar is off the tick-zero grid",
+          "[timeline-editor][snap-grid]") {
+    constexpr auto first_bar = 3 * kTicksPerQuarter / 2;
+    const std::array points{
+        MeterPoint{{0}, {3, 8}},
+        MeterPoint{{first_bar}, {4, 4}},
+    };
+    const auto meter = compile(points);
+    constexpr TickDuration eighth{kTicksPerQuarter / 2};
+    auto grid = SnapGrid::create(eighth, kTripletSwing);
+    REQUIRE(grid);
+
+    constexpr auto local_offbeat = 2 * kTicksPerQuarter / 3;
+    constexpr TickPosition offbeat{first_bar + local_offbeat};
+    CHECK(grid->snap(meter, offbeat) == offbeat);
+    CHECK(grid->snap(meter, {offbeat.value - 1}, SnapDirection::AtOrBefore) ==
+          TickPosition{first_bar});
+    CHECK(grid->snap(meter, {offbeat.value - 1}, SnapDirection::AtOrAfter) == offbeat);
+    CHECK(grid->snap(meter, {offbeat.value + 1}, SnapDirection::AtOrBefore) == offbeat);
+    CHECK(grid->snap(meter, {offbeat.value + 1}, SnapDirection::AtOrAfter) ==
+          TickPosition{first_bar + kTicksPerQuarter});
+}
+
 TEST_CASE("Tick snapping remains total at both signed endpoints", "[timeline-editor][snap-grid]") {
     const std::array points{MeterPoint{{0}, {4, 4}}};
     const auto meter = compile(points);
@@ -97,8 +120,20 @@ TEST_CASE("Tick snapping remains total at both signed endpoints", "[timeline-edi
     constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
     CHECK(grid->snap(meter, {minimum}, SnapDirection::AtOrBefore) == TickPosition{minimum});
     CHECK(grid->snap(meter, {maximum}, SnapDirection::AtOrAfter) == TickPosition{maximum});
-    CHECK(grid->snap(meter, {minimum}).value >= minimum);
-    CHECK(grid->snap(meter, {maximum}).value <= maximum);
+    const auto first_boundary = grid->snap(meter, {minimum}, SnapDirection::AtOrAfter);
+    const auto last_boundary = grid->snap(meter, {maximum}, SnapDirection::AtOrBefore);
+    REQUIRE(first_boundary.value > minimum);
+    REQUIRE(last_boundary.value < maximum);
+    CHECK(grid->snap(meter, first_boundary, SnapDirection::AtOrBefore) == first_boundary);
+    CHECK(grid->snap(meter, first_boundary, SnapDirection::AtOrAfter) == first_boundary);
+    CHECK(grid->snap(meter, last_boundary, SnapDirection::AtOrBefore) == last_boundary);
+    CHECK(grid->snap(meter, last_boundary, SnapDirection::AtOrAfter) == last_boundary);
+    CHECK(grid->snap(meter, {minimum}) == first_boundary);
+    CHECK(grid->snap(meter, {minimum + 1}) == first_boundary);
+    CHECK(grid->snap(meter, {minimum + 2}) == first_boundary);
+    CHECK(grid->snap(meter, {maximum}) == last_boundary);
+    CHECK(grid->snap(meter, {maximum - 1}) == last_boundary);
+    CHECK(grid->snap(meter, {maximum - 2}) == last_boundary);
     static_assert(noexcept(std::declval<const SnapGrid&>().snap(
         std::declval<const CompiledMeterMap&>(), TickPosition{})));
 }

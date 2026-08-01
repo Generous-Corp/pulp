@@ -45,7 +45,9 @@ class SnapGrid {
     ///
     /// All directions include an exact boundary. Nearest resolves an exact
     /// midpoint toward the later tick so two input devices cannot disagree
-    /// through incidental rounding.
+    /// through incidental rounding. A directional request with no
+    /// representable boundary on that side clamps to the signed endpoint;
+    /// nearest still chooses a real representable boundary on the other side.
     timebase::TickPosition snap(const timebase::CompiledMeterMap& meter_map,
                                 timebase::TickPosition position,
                                 SnapDirection direction = SnapDirection::Nearest) const noexcept;

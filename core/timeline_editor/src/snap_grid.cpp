@@ -72,19 +72,33 @@ timebase::TickPosition SnapGrid::snap(const timebase::CompiledMeterMap& meter_ma
 
     auto before = std::numeric_limits<std::int64_t>::min();
     auto after = std::numeric_limits<std::int64_t>::max();
+    bool has_before = false;
+    bool has_after = false;
     for (std::size_t index = 0; index < candidate_count; ++index) {
-        const auto candidate =
-            meter_map.bar_to_tick(bar_position.bar, {local_candidates[index]}).value;
-        if (candidate <= position.value)
+        const auto delta = local_candidates[index] - bar_position.tick_in_bar.value;
+        if ((delta > 0 && position.value > std::numeric_limits<std::int64_t>::max() - delta) ||
+            (delta < 0 && position.value < std::numeric_limits<std::int64_t>::min() - delta)) {
+            continue;
+        }
+        const auto candidate = position.value + delta;
+        if (candidate <= position.value) {
             before = std::max(before, candidate);
-        if (candidate >= position.value)
+            has_before = true;
+        }
+        if (candidate >= position.value) {
             after = std::min(after, candidate);
+            has_after = true;
+        }
     }
 
     if (direction == SnapDirection::AtOrBefore)
         return {before};
     if (direction == SnapDirection::AtOrAfter)
         return {after};
+    if (!has_before)
+        return {after};
+    if (!has_after)
+        return {before};
 
     const auto distance_before = distance(position.value, before);
     const auto distance_after = distance(after, position.value);
