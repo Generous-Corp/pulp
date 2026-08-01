@@ -2,25 +2,29 @@
 #
 # Kept as evidence rather than a claim. All twelve held.
 #
-# The run before this one held eleven; the one before that, six. What moved
-# was not the model. Every failure in between was the checker rejecting a
-# correct patch, or the generator being told nothing about the thing it got
-# wrong:
+# Five runs today, in order: 6, 11, 10, 12, 10, 12. The model did not change.
+# Every failure was the checker rejecting a correct patch, the generator being
+# told nothing about what it got wrong, or -- once -- a crash in the harness:
 #
 #   - the kick's VCA was set to level 0 and went silent, because the model was
-#     shown every module's ports and nothing about its params -- no names, no
-#     ranges, no defaults -- and a level knob multiplies its CV.
+#     shown every module's ports and nothing about its params. A level knob
+#     multiplies its CV, so zero is silence however hard the envelope fires.
 #   - a gate relayed through a multiple was asked to look like a gate at the
 #     MULT's own jack, which is role Cv whatever is fed into it.
 #   - an envelope reaching an oscillator's V/OCT was wanted at a cv_in; our
 #     manifests call that jack Pitch and the vendor inference calls it Cv.
 #   - an oscillator reaching a filter through a mixer, and a register reaching
-#     a pitch input through a quantizer, were read as never arriving.
+#     a pitch input through a quantizer, read as never arriving.
+#   - saving a rejected attempt passed the GATE's report to the LINT branch,
+#     where it does not exist yet. That ends the run, not the attempt, and it
+#     fires only when a prompt's first patch fails the lint -- so it survived a
+#     clean run and then cost two prompts on the next.
 #
-# The last two failed INTERMITTENTLY across runs, because whether they fire
-# depends on which of several correct patches the model happens to write. A
-# pass rate that moves with no code change is a checker problem, not a model
-# problem.
+# The pass rate moved between runs with no change to the model, which is the
+# thing worth remembering: it depends on which of several correct patches the
+# model happens to write, and a checker that admits only some of them fails at
+# random. A moving pass rate is a checker problem wearing a generator's
+# clothes.
 #
 # Four of the twelve reach their idiom by implication rather than by name
 # (3, 6, 9, 11), so the half that goes untested when the examples are written
@@ -28,33 +32,32 @@
 #
 # Re-run with: tools/rack/prove_idioms.sh
 # Per-prompt transcripts and every failed attempt's patch land beside this
-# file, in idiom-proof-logs/, which is where they stay -- the previous run's
-# went to a scratchpad under /tmp and are gone.
+# file, in idiom-proof-logs/, which is where they stay.
 #
  1. generative a krell patch where each note chooses the next one's -> krell (named)
-    HOLDS  a-krell-patch-where-each-note-chooses-th-5.vcv
+    HOLDS  a-krell-patch-where-each-note-chooses-th-7.vcv
  2. generative an evolving ambient drone that never settles         -> wandering-drone (named)
-    HOLDS  an-evolving-ambient-drone-that-never-set-4.vcv
+    HOLDS  an-evolving-ambient-drone-that-never-set-6.vcv
  3. generative a melody that repeats then slowly mutates            -> turing-machine (implied)
-    HOLDS  a-melody-that-repeats-then-slowly-mutate-3.vcv
+    HOLDS  a-melody-that-repeats-then-slowly-mutate-4.vcv
  4. rhythm    a bouncing ball rhythm that slows down as it settles -> bouncing-ball (named)
-    HOLDS  a-bouncing-ball-rhythm-that-slows-down-a-6.vcv
+    HOLDS  a-bouncing-ball-rhythm-that-slows-down-a-7.vcv
  5. rhythm    a kick drum with a fast pitch sweep                  -> kick-drum (named)
-    HOLDS  a-kick-drum-with-a-fast-pitch-sweep-4.vcv
+    HOLDS  a-kick-drum-with-a-fast-pitch-sweep-6.vcv
  6. rhythm    four different speeds coming from one clock          -> generative-clock-divider (implied)
-    HOLDS  four-different-speeds-coming-from-one-cl-5.vcv
+    HOLDS  four-different-speeds-coming-from-one-cl-7.vcv
  7. voice     a classic subtractive voice with a filter envelope   -> subtractive-voice (named)
-    HOLDS  a-classic-subtractive-voice-with-a-filte-12.vcv
+    HOLDS  a-classic-subtractive-voice-with-a-filte-15.vcv
  8. voice     a west coast voice through a low pass gate           -> west-coast-voice (named)
-    HOLDS  a-west-coast-voice-through-a-low-pass-ga-6.vcv
+    HOLDS  a-west-coast-voice-through-a-low-pass-ga-8.vcv
  9. voice     a bass sound that stays in the key of C              -> quantized-voice (implied)
-    HOLDS  a-bass-sound-that-stays-in-the-key-of-c-3.vcv
+    HOLDS  a-bass-sound-that-stays-in-the-key-of-c-5.vcv
 10. modulation slow vibrato on a sustained note                     -> vibrato (named)
-    HOLDS  slow-vibrato-on-a-sustained-note-6.vcv
+    HOLDS  slow-vibrato-on-a-sustained-note-8.vcv
 11. texture   wind and rain that keeps shifting                    -> noise-texture (implied)
-    HOLDS  wind-and-rain-that-keeps-shifting-6.vcv
+    HOLDS  wind-and-rain-that-keeps-shifting-8.vcv
 12. texture   two detuned oscillators beating against each other   -> drone-cluster (named)
-    HOLDS  two-detuned-oscillators-beating-against--4.vcv
+    HOLDS  two-detuned-oscillators-beating-against--6.vcv
 
 12 held, 0 did not
 across every attempt of the runs that failed: 0 silent, 0 rejected by the lint, 0 wrong idiom
