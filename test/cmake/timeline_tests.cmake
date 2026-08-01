@@ -42,6 +42,12 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 pulp_add_test_suite(pulp-test-sequencer-ui-host
     SOURCES test_sequencer_ui_host.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
+# Names both rungs at once, which neither rung may do for itself. The link list
+# is the point: standing above the transport and the editor is what makes "both
+# describe a loop with one type" a statement the build checks, rather than a
+# claim two headers make separately and can drift apart on.
+pulp_add_test_suite(pulp-test-timebase-loop-region
+    LIBRARIES pulp::playback pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp
