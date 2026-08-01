@@ -93,7 +93,14 @@ artifact is needed. Never modify canonical project JSON text directly.
   length-mismatched Stretch artifact fails compilation; it never degrades to
   native-rate playback.
 - `MidiContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
-  are positive, pitch is MIDI 0-127, and channel is 0-15.
+  are positive, pitch is MIDI 0-127, and channel is 0-15. Beside the notes it
+  carries `MidiExpressionLane` controller streams, each an owned identity with
+  points in `(position, id)` order and at most one lane per address. The document
+  side is complete — authoring, persistence, id remap, and copy all carry lanes —
+  but **playback refuses to compile a lane-bearing clip** rather than dropping the
+  lanes silently, so a document that authors one cannot be played until the note
+  program can carry controller values. See the playback skill for the two refusal
+  codes and which of them the renderer is allowed to delete.
 - `SequenceRef` makes a musical clip a non-owning placement of another
   sequence. Its source window begins at `source_start`; project construction
   rejects missing targets, cycles, and nesting deeper than eight reference
