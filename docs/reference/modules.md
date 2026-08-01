@@ -1240,6 +1240,32 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+`undo_gesture_budget` answers how long a gesture can stream before the document
+refuses it, which an editor needs *before* it opens one. A gesture coalesces
+every `Update` into a single undo group, that group stays open until its `End`,
+and only closed groups are evictable — so the charge accumulates with nothing
+able to reclaim it, and past `UndoLimits::max_retained_bytes` the next step comes
+back `ConflictCode::UndoFull`: a drag that stops responding rather than one that
+degrades. The answer is `max_retained_bytes / step_bytes` and does not depend on
+what the undo stack already holds, because a session has one open gesture at a
+time, so every group present when one opens is closed and evictable.
+
+```cpp
+#include <pulp/timeline_editor/gesture_budget.hpp>
+
+// Priced before the gesture opens, from the step the drag is about to repeat.
+const auto budget = undo_gesture_budget(limits.undo, forward, inverse);
+if (budget.steps < expected_frames)
+    hold_the_edit_locally_and_commit_one_single_on_release();
+else
+    stream_updates_into_one_open_group();
+```
+
+A `GesturePhase::Single` edit is closed on admission and therefore immediately
+evictable, so the fallback branch has no step ceiling at all — only undo depth.
+This is the undo ceiling alone: `JournalLimits` bounds the same gesture
+independently, has no automatic eviction, and can bind first.
+
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no
 mocking framework. It is also a legitimate deployment: an editor embedded in a

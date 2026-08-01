@@ -65,6 +65,13 @@ pulp_add_test_suite(pulp-test-playback-production
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
+# The editor rung predicts a ceiling the document model enforces, so the two must
+# be named together: the prediction is only worth anything if a real session
+# refuses at exactly the step it names. Linking the model alone would leave the
+# prediction untested, and the editor alone could not reach a session at all.
+pulp_add_test_suite(pulp-test-timeline-gesture-budget
+    SOURCES test_timeline_gesture_budget.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
