@@ -13,6 +13,7 @@
     ".github/workflows/release-path-pr-gate.yml": 1,
     ".github/workflows/sandbox-e2e.yml": 1,
     ".github/workflows/sanitizers.yml": 1,
+    ".github/workflows/timeline-fuzz.yml": 2,
     ".github/workflows/timeline-hardening.yml": 1,
     ".github/workflows/tracing-build.yml": 1
   },

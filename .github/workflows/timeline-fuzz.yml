@@ -62,12 +62,21 @@ permissions:
 jobs:
   deterministic:
     name: Deterministic corpus replay
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
+
+      # The oracle parses documents, but the target is built out of a whole-repo
+      # configure, and core/audio's `find_package(ALSA REQUIRED)` makes the
+      # native Linux headers a hard prerequisite of that configure — not of the
+      # fuzzing. setup.sh checks for the same headers and exits non-zero without
+      # them, so this step has to come first.
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -101,13 +110,18 @@ jobs:
     # Skipped on pull_request: the deterministic lane already runs every oracle
     # on the PR path, and a coverage-guided run whose budget is short enough for
     # a PR explores too little to justify the build.
-    if: github.event_name != 'pull_request'
+    if: >-
+      (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp')
+      && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
