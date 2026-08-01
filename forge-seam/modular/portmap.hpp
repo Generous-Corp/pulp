@@ -81,6 +81,31 @@ public:
     ///   3  lights and displays
     static constexpr int kScanVersion = 3;
 
+    /// The first scanner that recorded controls at all.
+    ///
+    /// Below this, "no params" means nothing was looked for. At or above it,
+    /// "no params" is a measurement: Fundamental's Merge and Split really do
+    /// have sixteen jacks and not one knob, and telling somebody we could not
+    /// measure their controls is as wrong as drawing controls they lack.
+    static constexpr int kScanVersionWithParams = 2;
+
+    /// Do we know where this module's controls are?
+    ///
+    /// Three states collapse into this one answer, and getting them confused
+    /// puts the UNMAPPED badge on the wrong panels in both directions:
+    ///
+    ///   params recorded            -> known
+    ///   none, by a scanner that looks -> known; it HAS none (Merge, Split)
+    ///   none, by one that did not     -> unknown; nobody looked
+    ///
+    /// Free rather than a member so a test can ask it of a MappedModule it
+    /// built, instead of through the process-wide map read off this machine.
+    /// Asserting the fields separately proved nothing: the rule lived in the
+    /// caller, and reverting it left every assertion green.
+    static bool controls_known(const MappedModule& m) {
+        return !m.params.empty() || m.scan_version >= kScanVersionWithParams;
+    }
+
     /// Why a module cannot be drawn faithfully, if it cannot.
     enum class Gap {
         none,       ///< measured, by the current scanner

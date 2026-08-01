@@ -5519,6 +5519,34 @@ TEST_CASE("an entry from an older scanner is not passed off as measured",
     CHECK(ai->params.size() == 1);
     CHECK(older.gap_for("Core", "AudioInterface2", "2.6.4") ==
           forge_modular::PortMap::Gap::stale);
+
+    // And the fourth case, which "has no params" alone gets backwards: a
+    // module that genuinely HAS no controls. Fundamental's Merge is sixteen
+    // jacks and not one knob, and saying we could not measure its controls is
+    // as wrong as drawing controls it does not have.
+    //
+    // The scan version is what separates them. Below the first scanner that
+    // recorded controls, "no params" means nothing looked; at or above it,
+    // "no params" is a measurement.
+    const std::string knobless = R"({
+  "modules": [
+    {
+      "plugin": "Fundamental",
+      "model": "Merge",
+      "pluginVersion": "2.6.4",
+      "scan": 2,
+      "size": [45.0, 380.0],
+      "params": [],
+      "inputs": [{"index": 0, "name": "Channel 1", "x": 22.0, "y": 100.0}],
+      "outputs": [{"index": 0, "name": "Polyphonic", "x": 22.0, "y": 330.0}]
+    }
+  ]
+})";
+    const auto merged = forge_modular::PortMap::parse(knobless);
+    const auto* mg = merged.find("Fundamental", "Merge");
+    REQUIRE(mg != nullptr);
+    CHECK(mg->params.empty());
+    CHECK(mg->scan_version >= forge_modular::PortMap::kScanVersionWithParams);
 }
 
 // The UNMAPPED mark is drawn, and only where it belongs.
@@ -5612,6 +5640,30 @@ TEST_CASE("a module drawn without its controls is marked as unmapped",
 //
 // The fixture that missed it used one brand for both modules. This loads the
 // real patches instead, so the question is asked of the data that ships.
+TEST_CASE("a module with no knobs is not called unmapped", "[portmap][loader]") {
+    // params.empty() alone said "we could not measure this module's controls"
+    // for every module that HAS no controls -- Merge, Split, a mult. The badge
+    // then appears on a panel whose emptiness is the truth about it.
+    using forge_modular::PortMap;
+    forge_modular::MappedModule measured;      // a scanner that looks for params
+    measured.scan_version = PortMap::kScanVersionWithParams;
+    forge_modular::MappedModule unmeasured;    // one that never did
+    unmeasured.scan_version = 1;
+    forge_modular::MappedModule knobbed;
+    knobbed.scan_version = 1;
+    knobbed.params.push_back({0, "Level", 10.0f, 20.0f, 5.0f, 5.0f});
+
+    // Identical params -- both empty -- and opposite answers. Asked of the
+    // rule itself, so removing it from the rule fails here rather than
+    // leaving every assertion green while the badge goes back on Merge.
+    CHECK(measured.params.empty());
+    CHECK(unmeasured.params.empty());
+    CHECK(PortMap::controls_known(measured));
+    CHECK_FALSE(PortMap::controls_known(unmeasured));
+    // And an old entry that DID record controls is still known.
+    CHECK(PortMap::controls_known(knobbed));
+}
+
 TEST_CASE("a module we made is never marked unmapped", "[portmap][loader]") {
     // The patch that travels with the tests, so this runs in a rebuilt
     // worktree too -- the repo's examples/ directory is not there. The first

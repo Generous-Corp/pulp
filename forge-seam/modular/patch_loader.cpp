@@ -235,7 +235,7 @@ LoadedPatch load_patch(const std::string& path) {
             // lights" prompt would ask -- but the badge means the narrower
             // thing a person can see: we cannot show you this module's
             // controls.
-            rm.controls_measured = !mapped->params.empty();
+            rm.controls_measured = PortMap::controls_known(*mapped);
         } else {
             // Our own modules are not scanned and never need to be: their
             // controls come from the manifest their panel was emitted from,
