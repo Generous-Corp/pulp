@@ -25,7 +25,31 @@ export const TOKEN_EXPRESSION = `(() => {
       if (name.startsWith('--')) names.add(name);
     }
   }
-  const roots = [document.documentElement, document.body].filter(Boolean);
+  // A design that scopes its palette -- which a themed one does -- declares its
+  // custom properties on the element carrying the theme, not on <html>. Reading
+  // only the document roots returns EMPTY for every token, and the consumer
+  // silently falls back to its own stock colours: a navy track and a white
+  // pointer land on a cream faceplate while every pixel gate stays green,
+  // because the marks are ours and the backdrop still matches.
+  //
+  // Theme-carrying elements come first: a scoped value must win over whatever
+  // the document root happens to inherit.
+  const roots = [
+    ...document.querySelectorAll('[data-theme]'),
+    document.documentElement,
+    document.body,
+  ].filter(Boolean);
+  // Rule-walking above reaches only same-origin sheets whose cssRules we are
+  // allowed to read; a linked sheet the capture serves can throw, and that
+  // throw is swallowed. When it does, NO name is collected and every token
+  // silently resolves empty. Computed style needs no sheet access, so it names
+  // what actually applies -- including anything the walk could not see.
+  for (const root of roots) {
+    const computed = getComputedStyle(root);
+    for (const name of computed) {
+      if (typeof name === 'string' && name.startsWith('--')) names.add(name);
+    }
+  }
   const records = [];
   for (const name of [...names].sort()) {
     let value = '';
