@@ -6878,3 +6878,107 @@ TEST_CASE("the composer field offers arrow keys to the mention list first",
     letter.is_down = true;
     CHECK_FALSE(mentions.handle_key_event(letter));
 }
+
+TEST_CASE("a second build is refused while one is still running",
+          "[build][lock]") {
+    // Reported from m5: "the first patch I tapped opened an existing one", and
+    // a patch asked for as an acid line that opened under another name. Two
+    // generations had finished six seconds apart — both launched, both
+    // redirecting into the one `last-run.log`, each overwriting the other from
+    // offset zero. The app reads the outcome, the stage AND the artifact path
+    // out of that file, so the explanation on screen described one patch while
+    // the filename named another.
+    //
+    // Nothing stopped the second Build. `busy()` existed and start_build_with
+    // never asked it.
+    HermeticProjects isolated;
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-build-lock";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto log = dir / "run.log";
+    { std::ofstream f(log); f << "  asking the model\n"; }
+
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.watch_build_log(log.string());
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::running);
+
+    // The first one goes.
+    REQUIRE(shell.start_build_with("an acid line with accent and slide").empty());
+    REQUIRE(engine.submissions.size() == 1);
+
+    // The second does not, and says why rather than doing nothing.
+    const auto why = shell.start_build_with("an ambient generative drone");
+    INFO("second build said: " << why);
+    CHECK_FALSE(why.empty());
+    CHECK(why.find("already building") != std::string::npos);
+    // The assertion that carries the weight: a refusal that still submits is
+    // the bug with an apology attached.
+    CHECK(engine.submissions.size() == 1);
+
+    // And the lock LIFTS when the run ends, or the app would take one prompt
+    // per launch. Without this, deleting the release would pass everything
+    // above.
+    { std::ofstream f(log, std::ios::app);
+      f << "  built 10 modules, 12 cables \xE2\x86\x92 " << (dir / "a.vcv").string()
+        << "\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() != forge_modular::BuildOutcome::running);
+    CHECK(shell.start_build_with("an ambient generative drone").empty());
+    CHECK(engine.submissions.size() == 2);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("every run writes its own log", "[build][lock]") {
+    // The lock stops a second build from THIS shell. It cannot stop a run left
+    // over from a previous launch of the app, which survives by design — a
+    // generation is started with nohup + setsid so closing the window does not
+    // kill it. While every run redirected into one `last-run.log`, that
+    // leftover wrote over the new run's transcript from offset zero, and the
+    // app reads its outcome, its stage and its artifact path out of that file.
+    //
+    // So the collision is removed rather than merely made unlikely: a run's
+    // log is its own file.
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-per-run-log";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto tools = dir / "tools";
+    std::filesystem::create_directories(tools, ec);
+    // `available()` wants both, and submit() must not actually run them.
+    for (const char* t : {"generate.py", "patch.py"}) {
+        std::ofstream f(tools / t);
+        f << "import sys; sys.exit(0)\n";
+    }
+
+    forge_modular::ProcessEngine engine(tools.string(),
+                                        (dir / "last-run.log").string());
+    const auto first_default = engine.log_path();
+    CHECK(first_default == (dir / "last-run.log").string());
+
+    engine.submit("an acid line with accent and slide", /*patch_mode=*/true);
+    const auto a = engine.log_path();
+    engine.submit("an ambient generative drone", /*patch_mode=*/true);
+    const auto b = engine.log_path();
+
+    INFO("first run's log:  " << a);
+    INFO("second run's log: " << b);
+    CHECK(a != first_default);          // it moved off the shared file
+    CHECK(b != first_default);
+    CHECK(a != b);                      // and the two runs do not share one
+    // Beside the log the shell starts on, not in a temp directory: a
+    // generation costs minutes and its transcript is the only record of what
+    // the model was asked and answered.
+    CHECK(std::filesystem::path(a).parent_path() == dir / "runs");
+
+    std::filesystem::remove_all(dir, ec);
+}

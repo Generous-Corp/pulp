@@ -59,6 +59,18 @@ public:
         (void)patch_path;
         return {};
     }
+
+    /// The log the run just submitted is writing, or empty when this engine
+    /// does not keep one per run. Every run sharing a single log let two
+    /// overlapping generations overwrite each other's output, and the shell
+    /// reads the outcome, the stage and the artifact path out of that file.
+    virtual std::string log_path() const { return {}; }
+
+    /// True when a generator is running right now, whoever launched it —
+    /// including one left over from a previous launch of the app, which
+    /// survives by design (nohup + setsid) and which the shell's own `busy()`
+    /// therefore cannot see.
+    virtual bool generator_running() const { return false; }
 };
 
 /// Build a Forge Modular processor with its generator already connected.
@@ -371,6 +383,13 @@ private:
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;
     std::string open_patch_;
+    /// A build this shell started and has not yet seen end.
+    ///
+    /// Not `busy()`, which is `watching_ && outcome == running` — and a log
+    /// that has never been written reads as `running`, so `busy()` is true for
+    /// a shell that is merely watching and has started nothing. Using it as
+    /// the lock refused the FIRST build of every session.
+    bool in_flight_ = false;
     PatchExplanation* explanation_ = nullptr;
     ModuleSummary* module_summary_ = nullptr;
     void refresh_module_summary();

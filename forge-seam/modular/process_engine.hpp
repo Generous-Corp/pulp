@@ -21,8 +21,11 @@ namespace forge_modular {
 
 class ProcessEngine final : public EngineClient {
 public:
-    /// `tools_dir` holds generate.py and patch.py. `log_path` is where a run's
-    /// output lands, and what the shell tails.
+    /// `tools_dir` holds generate.py and patch.py. `log_path` is where the
+    /// FIRST run's output lands and what the shell tails until a build starts;
+    /// each submit then picks its own file in `log_path`'s directory, under
+    /// `runs/`. Passing an empty `log_path` keeps a fixed path (tests that
+    /// hand-write a log rely on the path not moving under them).
     ProcessEngine(std::string tools_dir, std::string log_path);
 
     bool available() const override;
@@ -49,7 +52,27 @@ public:
     /// Where the most recent run put its artifact, or empty.
     std::string last_artifact() const { return artifact_; }
 
-    const std::string& log_path() const { return log_path_; }
+    /// The log the CURRENT run is writing, which changes with every submit.
+    ///
+    /// Every run used to redirect into one `last-run.log`. Two generations
+    /// overlapping — a second Build pressed while the first was still going,
+    /// or a run left over from a previous launch of the app — then wrote over
+    /// each other from offset zero, and the file the app reads for the
+    /// outcome, the stage AND the artifact path became a mixture of both. It
+    /// happened: two patches finished six seconds apart, the explanation on
+    /// screen described one patch while the file named the other, and Rack
+    /// opened something the user had not asked for. One file per run makes
+    /// that impossible rather than unlikely.
+    std::string log_path() const override { return log_path_; }
+
+    /// True when a generator process is running RIGHT NOW, whoever started it.
+    ///
+    /// Distinct from the shell's `busy()`, which only knows about runs this
+    /// editor has watched. A generation outlives the window — it is launched
+    /// with nohup + setsid precisely so closing the app does not kill it — so
+    /// after a restart the shell believes nothing is happening while a
+    /// generator is still writing.
+    bool generator_running() const override;
 
     /// Run a tool and collect its output. Public so a test can drive the same
     /// path the app does rather than a private shortcut.
@@ -58,6 +81,8 @@ public:
 private:
     std::string tools_dir_;
     std::string log_path_;
+    /// Directory the per-run logs go in; empty pins log_path_ where it is.
+    std::string log_base_;
     std::string error_;
     std::string artifact_;
     // Probing the toolchain touches a filesystem that may be removable,

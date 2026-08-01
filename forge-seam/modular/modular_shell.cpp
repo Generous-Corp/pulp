@@ -818,6 +818,35 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
         return why.empty() ? "the generator would not start" : why;
     }
 
+    // One generation at a time.
+    //
+    // Nothing stopped a second Build. Two runs then wrote over each other's
+    // log — the one file the app reads for the outcome, the stage and the
+    // artifact path — and the result was an explanation describing one patch
+    // beside a filename naming another, with Rack opening whichever the log
+    // happened to mention first. Reported as "it opened an existing one" and
+    // "Rack showed a different patch name".
+    //
+    // `busy()` alone is not enough: a generation is launched with nohup +
+    // setsid so it survives the window closing, so after a restart the shell
+    // believes nothing is running while a generator is still writing. The
+    // engine is asked about the actual process too.
+    // Two questions, because neither answers alone.
+    //
+    // The engine knows about a generator process whoever started it, including
+    // one left over from a previous launch of the app — a generation survives
+    // the window closing by design. But there is a moment after submit before
+    // the process exists, so a fast second press would slip through.
+    //
+    // `in_flight_` covers that moment: a build this shell started, on a log it
+    // is watching, that has not reported an end. All three parts matter —
+    // `busy()` alone reads `running` for a shell that is merely watching a log
+    // nothing has written, which refused the FIRST build of every session.
+    const bool ours = in_flight_ && watching_ &&
+                      monitor_.outcome() == BuildOutcome::running;
+    if (ours || engine_->generator_running())
+        return "a patch is already building — let it finish first";
+
     // A prompt typed on Home starts a NEW project. Continuing the last one
     // makes two unrelated builds share a transcript, and the second inherits
     // the first one's stage -- reported after seeing one composer hold two
@@ -877,6 +906,16 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     c->narrate(prompt.substr(0, 200));
     if (input) input->set_text("");
     engine_->submit(prompt, artifact_ == Artifact::patch);
+    in_flight_ = true;
+    // Follow the file this run actually chose. The engine gives every run its
+    // own, so a shell still tailing the previous one would report the previous
+    // run's outcome for the whole of this one.
+    if (const auto chosen = engine_->log_path();
+        !chosen.empty() && chosen != monitor_log_path_) {
+        monitor_log_path_ = chosen;
+        monitor_.watch(chosen);
+        watching_ = true;
+    }
     return engine_->last_error();
 }
 
@@ -1230,6 +1269,8 @@ void ForgeModularShell::on_poll() {
     // "materializing…" under a transcript that had already printed
     // "gave up after 3 attempts" -- the screen contradicting itself.
     const auto outcome = monitor_.outcome();
+    if (watching_ && outcome != BuildOutcome::running)
+        in_flight_ = false;
     if (watching_ && outcome != BuildOutcome::running &&
         outcome != reported_outcome_) {
         reported_outcome_ = outcome;
