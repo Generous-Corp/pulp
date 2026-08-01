@@ -516,10 +516,15 @@ TEST_CASE("scrolling one editor's pane closes only that editor's dropdown",
     auto family = load_family();
     for (auto& p : family) p->open_editor();
 
-    press(*family[0]->combo(), {10, 14});
+    // Open the SCROLLING editor's dropdown FIRST, so the process-global mirror
+    // ends up naming the OTHER editor. Without that ordering the mirror happens
+    // to name the scrolling editor's own popup and a process-wide close shuts
+    // the right one by accident — the assertions would pass against the bug.
     press(*family[1]->combo(), {10, 14});
+    press(*family[0]->combo(), {10, 14});
     REQUIRE(family[0]->combo()->is_open());
     REQUIRE(family[1]->combo()->is_open());
+    REQUIRE(ComboBox::active_popup_ == family[0]->combo());
 
     // A scroll gesture dismisses the dropdown in ITS OWN editor only.
     family[1]->scroll()->scroll_by(0.0f, 30.0f, false);
