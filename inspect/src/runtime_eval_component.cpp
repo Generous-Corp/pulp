@@ -46,7 +46,8 @@ public:
             out.error = "no scripted-UI engine attached";
             return out;
         }
-        const auto result = bridge_->evaluate(std::string(code), kRuntimeEvalDeadline);
+        const auto result = bridge_->evaluate(
+            std::string(code), kRuntimeEvalDeadline, kRuntimeEvalMaxResultBytes);
         out.ok = result.ok;
         out.timed_out = result.timed_out;
         out.busy = result.busy;

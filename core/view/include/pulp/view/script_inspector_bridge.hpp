@@ -75,7 +75,8 @@ public:
     // to `timeout`. On timeout the running evaluation is interrupted (if the
     // engine supports it) so a runaway loop cannot wedge the bridge forever.
     EvalResult evaluate(const std::string& code,
-                        std::chrono::milliseconds timeout = kDefaultTimeout);
+                        std::chrono::milliseconds timeout = kDefaultTimeout,
+                        std::size_t max_result_bytes = 1024 * 1024);
 
     // [any thread] Capability snapshot (empty engine name when detached).
     Capabilities capabilities() const;
@@ -96,6 +97,7 @@ private:
 
     struct Request {
         std::string code;
+        std::size_t max_result_bytes = 0;
         std::condition_variable cv;
         RequestState state = RequestState::queued;
         bool timeout_requested = false;
@@ -114,7 +116,8 @@ private:
     // Runs engine->evaluate on the engine thread, serializing the result or the
     // thrown exception into an EvalResult. Takes the engine explicitly so the
     // caller's snapshot is the one used. Caller guarantees engine-thread.
-    EvalResult serialize_eval(ScriptEngine* engine, const std::string& code) const;
+    EvalResult serialize_eval(ScriptEngine* engine, const std::string& code,
+                              std::size_t max_result_bytes) const;
 
     // mutex_ must be held. Publishes a terminal result and releases the
     // single-flight slot. Request waiters use the same mutex, so completion and

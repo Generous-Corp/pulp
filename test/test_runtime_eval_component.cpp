@@ -61,6 +61,32 @@ TEST_CASE("Runtime eval component caps serialized results",
     REQUIRE(recovered.json == "42");
 }
 
+TEST_CASE("Runtime eval component rejects cyclic and deeply nested results",
+          "[inspect][runtime-eval][component][negative][limits]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    auto evaluator = make_script_runtime_evaluator(&bridge);
+
+    const auto cyclic = evaluator->evaluate(
+        "(() => { const value = {}; value.self = value; return value; })()");
+    REQUIRE_FALSE(cyclic.ok);
+    REQUIRE(cyclic.error ==
+            "Runtime.evaluate result contains a cycle");
+
+    const auto deep = evaluator->evaluate(
+        "(() => { let root = {}, value = root;"
+        " for (let i = 0; i < 40; ++i) value = value.child = {};"
+        " return root; })()");
+    REQUIRE_FALSE(deep.ok);
+    REQUIRE(deep.error ==
+            "Runtime.evaluate result exceeds the 32-level depth limit");
+
+    const auto recovered = evaluator->evaluate("({ answer: 6 * 7 })");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "{\"answer\":42}");
+}
+
 TEST_CASE("Runtime eval component independently rejects oversized code",
           "[inspect][runtime-eval][component][negative][limits]") {
     ScriptEngine engine;

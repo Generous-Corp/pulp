@@ -78,8 +78,11 @@ TEST_CASE("A late engine interrupt is cleared before the next evaluation",
     engine.request_interrupt();
     engine.clear_pending_interrupt();
 
-    const auto value = engine.evaluate("6 * 7");
-    REQUIRE(value.getWithDefault<std::int64_t>(0) == 42);
+    const auto value = engine.evaluate(
+        "let total = 0;"
+        "for (let i = 0; i < 100000; ++i) total += i;"
+        "total");
+    REQUIRE(value.getWithDefault<std::int64_t>(0) == 4999950000);
 }
 
 TEST_CASE("Owner-thread evaluate is single-flight and explicitly interruptible",

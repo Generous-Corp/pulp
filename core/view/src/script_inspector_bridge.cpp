@@ -5,34 +5,9 @@
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/script_engine.hpp>
 
-#include <choc/containers/choc_Value.h>
-#include <choc/text/choc_JSON.h>
-
 #include <algorithm>
 
 namespace pulp::view {
-
-namespace {
-// Serialize a value to JSON that is guaranteed valid so it can be embedded raw
-// in the response frame. choc renders non-finite numbers (NaN / Infinity from
-// e.g. `1/0`) as bare tokens that are not valid JSON; if the render doesn't
-// round-trip through the parser, fall back to null rather than emit a response
-// the client can't parse.
-std::string value_to_json(const choc::value::Value& value) {
-    if (value.isVoid()) return "null";
-    std::string json = choc::json::toString(value);
-    // Validate that the render is parseable JSON before embedding it raw. Wrap
-    // in an array because choc::json::parse rejects bare top-level scalars
-    // (`42`, `"abc"`) — the wrap accepts those yet still rejects non-finite
-    // number tokens (NaN / Infinity from e.g. `1/0`), which we replace with null.
-    try {
-        (void)choc::json::parse("[" + json + "]");
-    } catch (...) {
-        return "null";
-    }
-    return json;
-}
-}  // namespace
 
 ScriptInspectorBridge::~ScriptInspectorBridge() {
     detach();
@@ -53,7 +28,8 @@ void ScriptInspectorBridge::attach(ScriptEngine* engine) {
         caps_.can_interrupt = engine->supports_interrupt();
         // This bridge promises a deadline on every path. A backend without a
         // cross-thread interrupt seam cannot safely offer Runtime.evaluate.
-        caps_.can_evaluate = caps_.can_interrupt;
+        caps_.can_evaluate =
+            caps_.can_interrupt && engine->supports_bounded_json_evaluation();
         // can_break / can_step / can_inspect_locals stay false — mainline
         // QuickJS exposes no source-line breakpoint or scope-inspection API.
     }
@@ -85,7 +61,8 @@ void ScriptInspectorBridge::detach() {
 }
 
 ScriptInspectorBridge::EvalResult
-ScriptInspectorBridge::serialize_eval(ScriptEngine* engine, const std::string& code) const {
+ScriptInspectorBridge::serialize_eval(ScriptEngine* engine, const std::string& code,
+                                      std::size_t max_result_bytes) const {
     EvalResult r;
     if (!engine) {
         r.detached = true;
@@ -93,9 +70,8 @@ ScriptInspectorBridge::serialize_eval(ScriptEngine* engine, const std::string& c
         return r;
     }
     try {
-        choc::value::Value value = engine->evaluate(code);
         r.ok = true;
-        r.json = value_to_json(value);
+        r.json = engine->evaluate_bounded_json(code, max_result_bytes);
     } catch (const std::exception& e) {
         r.ok = false;
         r.error = e.what();
@@ -107,7 +83,9 @@ ScriptInspectorBridge::serialize_eval(ScriptEngine* engine, const std::string& c
 }
 
 ScriptInspectorBridge::EvalResult
-ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::milliseconds timeout) {
+ScriptInspectorBridge::evaluate(const std::string& code,
+                                std::chrono::milliseconds timeout,
+                                std::size_t max_result_bytes) {
     std::shared_ptr<Request> req;
     ScriptEngine* engine = nullptr;
     bool owner_thread = false;
@@ -133,6 +111,7 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
         in_flight_ = true;
         req = std::make_shared<Request>();
         req->code = code;
+        req->max_result_bytes = max_result_bytes;
         engine = engine_;
         owner_thread = have_engine_thread_ && std::this_thread::get_id() == engine_thread_;
         if (owner_thread) {
@@ -160,7 +139,7 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
             interrupt_if_active_locked(req);
         });
 
-        EvalResult result = serialize_eval(engine, code);
+        EvalResult result = serialize_eval(engine, code, max_result_bytes);
         bool interrupt_was_issued = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -259,7 +238,7 @@ bool ScriptInspectorBridge::pump() {
 
     EvalResult result;
     if (engine) {
-        result = serialize_eval(engine, req->code);
+        result = serialize_eval(engine, req->code, req->max_result_bytes);
     } else {
         result.detached = true;
         result.error = "engine detached before evaluation ran";
