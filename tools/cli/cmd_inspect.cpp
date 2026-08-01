@@ -58,7 +58,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "  --normalized      Interpret --value in normalized [0,1] domain\n"
                 << "  --command METHOD  Send one command and print its result\n"
                 << "  --params JSON     JSON params for --command (default: {})\n"
-                << "  --output FILE     Write the one-shot result to FILE\n\n"
+                << "  --output FILE     Write a --command response to FILE\n\n"
                 << "Normal launches do not start an inspector endpoint. A standalone\n"
                 << "must be explicitly launched with an inspector profile. Discovery is\n"
                 << "ephemeral and every connection proves possession of its owner-private\n"

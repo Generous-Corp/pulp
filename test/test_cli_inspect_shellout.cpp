@@ -220,6 +220,13 @@ TEST_CASE("pulp inspect profiles and list provide stable JSON",
           "[cli][shellout][inspect][workflow]") {
     REQUIRE(binary_exists());
 
+    const auto help = run_pulp({"inspect", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    CHECK(help.stdout_output.find(
+              "--output FILE     Write a --command response to FILE") !=
+          std::string::npos);
+
     const auto profiles = run_pulp({"inspect", "profiles", "--json"}, 10000);
     REQUIRE_FALSE(profiles.timed_out);
     REQUIRE(profiles.exit_code == 0);

@@ -118,6 +118,20 @@ identifiers into subsequent calls, check
 `pulp_inspect_capabilities` before acting, and verify mutations with a typed
 reread or `pulp_inspect_screenshot`. Ordinary launches publish no endpoint.
 
+The equivalent installed CLI orientation is explicit:
+
+```bash
+pulp inspect profiles --json
+pulp inspect list --json
+pulp inspect capabilities --json \
+  --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID > capabilities.json
+```
+
+Copy all three selectors from the one selected `list` entry. The
+`capabilities` response distinguishes the profile catalog from the
+`effective` authority this exact publication actually grants.
+
 Use the CLI's typed parameter command with an integer parameter ID and numeric
 value. First read the live parameter catalog, select an ID and value from that
 response, perform the typed write, then reread with the same exact selectors:
