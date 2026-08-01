@@ -33,9 +33,29 @@ import subprocess
 import sys
 import time
 
-APP = os.environ.get(
-    "FORGE_MODULAR_APP",
-    "/tmp/forge-cur/build/modular/Forge Modular.app")
+def _resolve_app() -> str:
+    """The app to drive: the explicit one, else a local build, else installed.
+
+    Defaulting to the build directory made this a build-machine-only tool. On
+    any other machine — the one the app is actually being tested on — the
+    default named a path that does not exist, so the driver had to be told
+    where the app was every time, and a proof you must hand-configure is a
+    proof nobody runs.
+    """
+    explicit = os.environ.get("FORGE_MODULAR_APP")
+    if explicit:
+        return explicit
+    for candidate in ("/tmp/forge-cur/build/modular/Forge Modular.app",
+                      "/Applications/Forge Modular.app",
+                      os.path.expanduser("~/Applications/Forge Modular.app")):
+        if os.path.isdir(candidate):
+            return candidate
+    # Nothing found: keep the build path so the error names the build, which is
+    # the likeliest thing missing on the machine that has none of them.
+    return "/tmp/forge-cur/build/modular/Forge Modular.app"
+
+
+APP = _resolve_app()
 NAME = "Forge Modular"
 HOME = os.path.expanduser("~/Library/Application Support/Forge Modular")
 LOG = os.path.join(HOME, "last-run.log")

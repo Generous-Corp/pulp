@@ -176,7 +176,46 @@ else
     echo "  or run: mdimport -r /Applications/\"Forge Modular.app\""
 fi'
 
-step "8. signature and quarantine"
+# A UI proof that runs ON this machine, as one command.
+#
+# The arrow keys can only be proven against a live window: what was wrong with
+# them was WHICH VIEW the window dispatched to, and nothing in-process can see
+# that. Accessibility and Screen Recording cannot be granted over SSH, so this
+# cannot run from here — but leaving a human to work out the invocation is how
+# a proof stops being run. It gets a one-word launcher and a straight answer
+# about whether it can work yet.
+step "8. the UI proof"
+remote 'mkdir -p ~/bin
+cat > ~/bin/forge-modular-prove <<'"'"'LAUNCH'"'"'
+#!/usr/bin/env bash
+# Drive the installed Forge Modular and prove the mention list answers keys.
+cd "$HOME/Library/Application Support/Forge Modular/tools/rack" || exit 1
+exec python3 prove_arrows.py "$@"
+LAUNCH
+chmod +x ~/bin/forge-modular-prove
+echo "  installed: ~/bin/forge-modular-prove"
+python3 - <<'"'"'PY'"'"'
+import subprocess, os
+# Both permissions are per-APPLICATION (the terminal running this), so they are
+# reported rather than assumed. A refusal here is about the terminal, never the
+# app under test.
+ok = True
+r = subprocess.run(["screencapture", "-x", "-R", "0,0,4,4", "/tmp/fm-perm.png"],
+                   capture_output=True)
+if r.returncode != 0:
+    print("  Screen Recording: NOT granted to this terminal")
+    ok = False
+else:
+    print("  Screen Recording: granted")
+    os.remove("/tmp/fm-perm.png")
+if ok:
+    print("  run it on this machine with:  forge-modular-prove")
+else:
+    print("  grant it in System Settings > Privacy & Security, then run:")
+    print("      forge-modular-prove")
+PY'
+
+step "9. signature and quarantine"
 # A bundle that arrives without a valid signature will be refused by Gatekeeper
 # on a machine that did not build it, which reads as "the plugin is broken".
 remote '
@@ -194,4 +233,4 @@ for p in ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
 done
 '
 
-step "done. Step 8 proves it: CLI, the app by clicking Build, and REAPER."
+step "done. Step 9 proves it: CLI, the app by clicking Build, and REAPER."

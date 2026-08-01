@@ -540,6 +540,77 @@ def label(inv, m, disambig=None):
     return name
 
 
+def hp_of(inv: dict, m: dict) -> int:
+    """A module's width in HP, from the inventory rather than from the patch.
+
+    The patch does not carry widths -- Rack derives them from the installed
+    plugin -- so this is the only true source. `panel[0]` is stored in points
+    at 15 points per HP (kHorizontalPitch), the same convention sidecar() reads.
+    """
+    entry = (inv.get(m.get("plugin"), {}).get("modules", {})
+                .get(m.get("model"), {}))
+    panel = entry.get("panel")
+    if panel and panel[0]:
+        return max(1, round(panel[0] / PITCH_PT))
+    # An uninstalled module has no measured panel. Rack draws it as a
+    # placeholder; 8 HP is the common width and, crucially, is never zero --
+    # a zero would stack every later module on top of it.
+    return 8
+
+
+def reflow(patch: dict, inv: dict) -> dict:
+    """Place the modules left to right at their real widths, no overlaps.
+
+    The model chooses positions, and it does not know how wide anything is: it
+    guesses, and its guesses were wrong by 2 HP in both directions on the same
+    patch. Four modules of ten overlapped their neighbour -- LFO over STEPS,
+    STEPS over SEQ, SEQ over SLEW, SLEW over VCO -- while the rest left ragged
+    gaps. Rack draws exactly what the file says, so the rack a user opens had
+    panels sitting on top of one another.
+
+    Widths are not the model's job. It decides WHAT and HOW IT IS WIRED; where
+    the panels sit is arithmetic, and doing it here removes the whole class of
+    error rather than asking the model to be better at it.
+
+    The model's left-to-right ORDER is kept -- it carries intent, usually
+    signal flow -- and so is each module's row.
+    """
+    rows: dict[int, list] = {}
+    for m in patch.get("modules", []):
+        pos = m.get("pos")
+        if not isinstance(pos, list) or len(pos) != 2:
+            continue
+        rows.setdefault(int(pos[1]), []).append(m)
+    for row, mods in rows.items():
+        mods.sort(key=lambda m: m["pos"][0])
+        x = 0
+        for m in mods:
+            m["pos"] = [x, row]
+            x += hp_of(inv, m)
+    return patch
+
+
+def overlaps(patch: dict, inv: dict) -> list[str]:
+    """Every pair of modules whose panels intersect, as readable sentences."""
+    out = []
+    rows: dict[int, list] = {}
+    for m in patch.get("modules", []):
+        pos = m.get("pos")
+        if not isinstance(pos, list) or len(pos) != 2:
+            continue
+        rows.setdefault(int(pos[1]), []).append(m)
+    for row, mods in rows.items():
+        mods = sorted(mods, key=lambda m: m["pos"][0])
+        for a, b in zip(mods, mods[1:]):
+            end = a["pos"][0] + hp_of(inv, a)
+            if b["pos"][0] < end:
+                out.append(
+                    f"{a.get('model')} (at {a['pos'][0]}HP, {hp_of(inv, a)}HP "
+                    f"wide) overlaps {b.get('model')} (at {b['pos'][0]}HP) by "
+                    f"{end - b['pos'][0]}HP on row {row}")
+    return out
+
+
 def sidecar(patch: dict, inv: dict, why: dict | None = None) -> dict:
     """Everything about a patch that the app cannot work out for itself.
 
@@ -759,6 +830,11 @@ def lint(patch: dict, inv: dict) -> list[str]:
                         f"(has: {', '.join(sorted(plug['modules'])[:6])}…)")
         if not isinstance(m.get("pos"), list) or len(m.get("pos", [])) != 2:
             errs.append(f"module {m.get('id')} has no valid pos [x, y]")
+
+    # Overlapping panels. lint reported "ok: 0 problem(s)" for a patch whose
+    # first four modules each sat on top of their neighbour: it checked that a
+    # pos EXISTED and never that two of them could both be true.
+    errs.extend(overlaps(patch, inv))
 
     known = set(ids)
     for c in patch.get("cables", []):
@@ -1701,6 +1777,8 @@ def main(argv):
                 n += 1
         # Colour by structure before writing, so the file Rack opens and the
         # file the app reads agree about what every cable is.
+        # Panels first, so the file Rack opens has no overlaps in it.
+        patch = reflow(patch, inv)
         patch = color_cables_by_role(patch, inv)
         json.dump(patch, open(out, "w"), indent=1)
         # The reason each cable exists, beside the patch that has the cables.

@@ -418,13 +418,121 @@ def check_mention_resolves() -> int:
         print("  ok     an unknown module still resolves to nothing")
     return bad
 
+
+def check_layout() -> int:
+    """Panels must not overlap, and lint must be able to see it when they do.
+
+    Written in this file's own convention, not as pytest functions: `main()`
+    below is what actually runs, and three `test_*` functions appended to the
+    end of the file would never have been called. They passed under `pytest`
+    and were invisible to the harness -- the same "green because it did not
+    run" this suite exists to catch.
+
+    Uses a synthetic inventory rather than the installed one, so it runs on a
+    machine with no Rack, where main() skips everything else.
+    """
+    bad = 0
+    ran = 0
+    inv = {"ForgeModular": {"modules": {
+        "LFO":   {"panel": [6 * P.PITCH_PT, 380.0]},
+        "STEPS": {"panel": [12 * P.PITCH_PT, 380.0]},
+        "SEQ":   {"panel": [12 * P.PITCH_PT, 380.0]},
+        "VCA":   {"panel": [3 * P.PITCH_PT, 380.0]},
+    }}}
+    # The exact shape that shipped: the model advanced by 4, 10, 10 for widths
+    # of 6, 12, 12, so each module sat 2 HP inside its neighbour. Rack draws
+    # what the file says, so the panels overlapped on screen.
+    doc = {"modules": [
+        {"id": 1, "plugin": "ForgeModular", "model": "LFO",   "pos": [0, 0]},
+        {"id": 2, "plugin": "ForgeModular", "model": "STEPS", "pos": [4, 0]},
+        {"id": 3, "plugin": "ForgeModular", "model": "SEQ",   "pos": [14, 0]},
+        {"id": 4, "plugin": "ForgeModular", "model": "VCA",   "pos": [24, 0]},
+    ], "cables": []}
+
+    ran += 1
+    found = P.overlaps(doc, inv)
+    if len(found) != 3:
+        print(f"  WRONG  overlap detection found {len(found)}, expected 3")
+        bad += 1
+    elif "LFO" not in found[0] or "STEPS" not in found[0]:
+        print(f"  WRONG  overlap message does not name both modules: {found[0]}")
+        bad += 1
+    else:
+        print("  ok     overlapping panels are detected and named")
+
+    # lint has to carry it, or a bad patch is written and nothing objects. It
+    # reported "ok: 0 problem(s)" for a real patch with four overlaps.
+    ran += 1
+    if not any("overlaps" in e for e in P.lint(doc, inv)):
+        print("  WRONG  lint passes a patch whose panels overlap")
+        bad += 1
+    else:
+        print("  ok     lint rejects a patch whose panels overlap")
+
+    ran += 1
+    P.reflow(doc, inv)
+    if P.overlaps(doc, inv):
+        print(f"  WRONG  reflow left overlaps: {P.overlaps(doc, inv)}")
+        bad += 1
+    elif [m["pos"] for m in doc["modules"]] != [[0, 0], [6, 0], [18, 0], [30, 0]]:
+        print(f"  WRONG  reflow placed them at "
+              f"{[m['pos'] for m in doc['modules']]}, not at their real widths")
+        bad += 1
+    else:
+        print("  ok     reflow tiles panels at their real widths, in order")
+
+    # Rows are laid out independently, or a second row is appended to the first.
+    two = {"modules": [
+        {"id": 1, "plugin": "ForgeModular", "model": "VCA", "pos": [0, 0]},
+        {"id": 2, "plugin": "ForgeModular", "model": "VCA", "pos": [9, 0]},
+        {"id": 3, "plugin": "ForgeModular", "model": "VCA", "pos": [3, 1]},
+    ], "cables": []}
+    ran += 1
+    P.reflow(two, inv)
+    if [m["pos"] for m in two["modules"]] != [[0, 0], [3, 0], [0, 1]]:
+        print(f"  WRONG  rows not laid out independently: "
+              f"{[m['pos'] for m in two['modules']]}")
+        bad += 1
+    else:
+        print("  ok     each row is laid out on its own")
+
+    # An unmeasured module must never be zero wide: a zero stacks every later
+    # module on the same HP -- the overlap bug in its worst form, and silent,
+    # because every position is still a valid [x, y].
+    unknown = {"modules": [
+        {"id": 1, "plugin": "Nobody", "model": "Unknown", "pos": [0, 0]},
+        {"id": 2, "plugin": "Nobody", "model": "Unknown", "pos": [1, 0]},
+    ], "cables": []}
+    ran += 1
+    if P.hp_of({}, unknown["modules"][0]) <= 0:
+        print("  WRONG  an unmeasured module is zero HP wide")
+        bad += 1
+    else:
+        P.reflow(unknown, {})
+        if unknown["modules"][0]["pos"][0] == unknown["modules"][1]["pos"][0]:
+            print("  WRONG  unmeasured modules stack on the same HP")
+            bad += 1
+        else:
+            print("  ok     an unmeasured module still advances the cursor")
+    # (bad, ran) rather than a bare count. The tally below printed
+    # "18/18 correct" while 23 checks had run, because the total was a literal
+    # that nobody remembers to grow — a number that cannot go up is not a
+    # measure of coverage.
+    return bad, ran
+
+
 def main():
+    # First, and outside the skip below: these need no installed Rack, and the
+    # skip returns 0 — so a check placed after it does not run on a machine
+    # without Fundamental and reports success anyway.
+    layout_bad, layout_ran = check_layout()
+
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
-        print("SKIP: needs Rack with Fundamental installed")
-        return 0
+        print("SKIP: the rest needs Rack with Fundamental installed")
+        return 1 if layout_bad else 0
 
-    bad = 0
+    bad = layout_bad
     for name, pch, should_pass, expect in CASES:
         errs = P.lint(pch, inv)
         passed = not errs
@@ -449,9 +557,11 @@ def main():
     bad += check_preview_matches_rack()
     bad += check_attempt_keeping()
     bad += check_mention_resolves()
-    print(f"\n{len(CASES) + 6 - bad}/{len(CASES) + 6} correct")
+    total = len(CASES) + 6 + layout_ran
+    print(f"\n{total - bad}/{total} correct")
     return 1 if bad else 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

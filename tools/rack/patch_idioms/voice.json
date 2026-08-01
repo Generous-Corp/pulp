@@ -1,268 +1,683 @@
 {
-  "family": "voice",
-  "$comment": [
-    "Patches whose subject is a note: something decides a pitch, something",
-    "decides when, and something shapes the sound in between. The oldest and",
-    "least glamorous family, and the one most prompts turn out to mean."
-  ],
-
-  "idioms": [
+ "family": "voice",
+ "$comment": [
+  "Patches whose subject is a note: something decides a pitch, something",
+  "decides when, and something shapes the sound in between. The oldest and",
+  "least glamorous family, and the one most prompts turn out to mean."
+ ],
+ "idioms": [
+  {
+   "slug": "subtractive-voice",
+   "names": [
+    "subtractive voice",
+    "subtractive patch",
+    "classic voice"
+   ],
+   "implies": [
+    "oscillator into a filter",
+    "basic synth voice",
+    "saw through a filter"
+   ],
+   "is": "An oscillator through a filter through an amplifier, with an envelope opening the amplifier — the standard voice everything else is a variation on.",
+   "sounds_right_when": "notes have a clear start and end rather than droning, and the filter audibly removes harmonics.",
+   "source": "The east-coast signal chain as set out in Strange",
+   "at_least": {
+    "audio_oscillator": 1,
+    "filter": 1,
+    "amplifier": 1
+   },
+   "topology": [
     {
-      "slug": "subtractive-voice",
-      "names": ["subtractive voice", "subtractive patch", "classic voice"],
-      "implies": ["oscillator into a filter", "basic synth voice", "saw through a filter"],
-      "is": "An oscillator through a filter through an amplifier, with an envelope opening the amplifier — the standard voice everything else is a variation on.",
-      "sounds_right_when": "notes have a clear start and end rather than droning, and the filter audibly removes harmonics.",
-      "source": "The east-coast signal chain as set out in Strange",
-      "at_least": {"audio_oscillator": 1, "filter": 1, "amplifier": 1},
-      "topology": [
-        {"id": "osc-to-filter", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "the oscillator has to reach the filter"},
-        {"id": "filter-to-vca", "from_module": "filter", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "the filter has to reach the amplifier"},
-        {"id": "envelope-opens-vca", "from_module": "envelope", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "an envelope has to open the amplifier, or the voice drones instead of playing notes"}
-      ],
-      "behaviour": {"rhythmic": true},
-      "common_mistakes": [
-        {"id": "no-envelope", "do": "cut", "requirement": "envelope-opens-vca",
-         "message": "nothing opens the amplifier, so the voice drones instead of articulating"},
-        {"id": "filter-bypassed", "do": "cut", "requirement": "osc-to-filter",
-         "message": "the oscillator never reaches the filter, so nothing is subtracted"},
-        {"id": "no-vca", "do": "drop_module", "module": "amplifier",
-         "message": "there is no amplifier, so nothing shapes the loudness"}
-      ]
+     "id": "osc-to-filter",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "filter",
+     "to_port": "audio_in",
+     "describe": "the oscillator has to reach the filter"
     },
-
     {
-      "slug": "west-coast-voice",
-      "names": ["west coast", "west coast voice", "buchla voice"],
-      "implies": ["low pass gate", "lpg", "plucky without a filter", "wavefolded voice"],
-      "is": "A wavefolded oscillator through a low-pass gate, where one control opens both loudness and brightness together — the west-coast alternative to filter-plus-VCA.",
-      "sounds_right_when": "notes are percussive and get duller as they decay, rather than simply quieter.",
-      "source": "Buchla's low-pass gate practice; Make Noise's account of the same idea",
-      "at_least": {"waveshaper": 1},
-      "topology": [
-        {"id": "osc-to-folder", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "waveshaper", "to_port": "audio_in",
-         "describe": "the oscillator has to reach the folder — folding is where west-coast harmonics come from"},
-        {"id": "folder-onward", "from_module": "waveshaper", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "the folded signal has to reach a gate or amplifier"},
-        {"id": "envelope-opens", "from_module": "envelope", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "an envelope has to open it, or the fold sustains rather than plucking"}
-      ],
-      "behaviour": {"rhythmic": true},
-      "common_mistakes": [
-        {"id": "no-fold", "do": "cut", "requirement": "osc-to-folder",
-         "message": "nothing is folded, so this is an east-coast voice wearing the name"},
-        {"id": "no-envelope", "do": "cut", "requirement": "envelope-opens",
-         "message": "nothing opens the gate, so the voice sustains instead of plucking"}
-      ]
+     "id": "filter-to-vca",
+     "from_module": "filter",
+     "from_port": "audio_out",
+     "to_module": "amplifier",
+     "to_port": "audio_in",
+     "describe": "the filter has to reach the amplifier"
     },
-
     {
-      "slug": "sequenced-voice",
-      "names": ["sequenced voice", "sequenced melody", "step sequence"],
-      "implies": ["a sequencer playing a melody", "16 step sequence", "sequenced bassline"],
-      "is": "A sequencer supplying both pitch and gate to a voice, so the pattern plays itself in time.",
-      "sounds_right_when": "the same phrase repeats in time, with each step clearly articulated.",
-      "source": "Standard practice; Strange's chapter on sequential controllers",
-      "at_least": {"sequencer": 1},
-      "topology": [
-        {"id": "pitch", "from_module": "sequencer", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "pitch_in",
-         "describe": "the sequencer's pitch has to reach the oscillator"},
-        {"id": "gate", "from_module": "sequencer", "from_port": "gate_out",
-         "to_module": "envelope", "to_port": "gate_in",
-         "describe": "the sequencer's gate has to fire an envelope, or every step runs together"},
-        {"id": "clock", "from_module": "clock", "from_port": "clock_out",
-         "to_module": "sequencer", "to_port": "clock_in",
-         "describe": "the sequencer has to be clocked, or it never advances"}
-      ],
-      "behaviour": {"keeps_going": true, "rhythmic": true},
-      "common_mistakes": [
-        {"id": "unclocked", "do": "cut", "requirement": "clock",
-         "message": "the sequencer is never clocked, so it sits on step one"},
-        {"id": "no-gate", "do": "cut", "requirement": "gate",
-         "message": "no gate reaches an envelope, so the steps never articulate"},
-        {"id": "no-pitch", "do": "cut", "requirement": "pitch",
-         "message": "the sequence never reaches a pitch input"}
-      ]
-    },
-
-    {
-      "slug": "drone-voice",
-      "names": ["drone", "sustained tone"],
-      "implies": ["continuous tone", "held note", "no envelope"],
-      "is": "An oscillator held open through to the output, with no envelope gating it — deliberately continuous.",
-      "sounds_right_when": "it never stops and never articulates.",
-      "source": "The simplest patch there is",
-      "at_least": {"audio_oscillator": 1},
-      "topology": [
-        {"id": "reaches-output", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "any", "to_port": "audio_in",
-         "describe": "the oscillator has to reach something downstream"}
-      ],
-      "behaviour": {"keeps_going": true, "sustained": true},
-      "common_mistakes": [
-        {"id": "goes-nowhere", "do": "cut", "requirement": "reaches-output",
-         "message": "the oscillator is not patched into anything"}
-      ]
-    },
-
-    {
-      "slug": "fm-voice",
-      "names": ["fm voice", "fm patch", "frequency modulation"],
-      "implies": ["one oscillator modulating another", "metallic tone", "bell tone"],
-      "is": "One oscillator modulating another's frequency at audio rate, producing sidebands rather than vibrato.",
-      "sounds_right_when": "the timbre is metallic or bell-like and changes character with modulation depth, not just pitch.",
-      "source": "Chowning's FM synthesis, as practised in modular form",
-      "at_least": {"audio_oscillator": 2},
-      "topology": [
-        {"id": "modulator", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "audio_oscillator", "to_port": "cv_in", "different_module": true,
-         "describe": "one oscillator has to modulate the other's frequency at audio rate"},
-        {"id": "carrier-out", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "the carrier has to reach an amplifier"}
-      ],
-      "behaviour": {},
-      "common_mistakes": [
-        {"id": "no-modulation", "do": "cut", "requirement": "modulator",
-         "message": "neither oscillator modulates the other, so there is no FM"},
-        {"id": "carrier-unheard", "do": "cut", "requirement": "carrier-out",
-         "message": "the carrier never reaches an amplifier"}
-      ]
-    },
-
-    {
-      "slug": "quantized-voice",
-      "names": ["quantized voice", "quantised voice", "in key"],
-      "implies": ["in the key of", "snapped to a scale", "stays in key", "quantized pitch"],
-      "is": "A pitch source passed through a quantizer before the oscillator, so whatever voltage arrives lands on a note of the chosen scale.",
-      "sounds_right_when": "every note belongs to the scale, however random the source is.",
-      "source": "Standard practice wherever a random or continuous source drives pitch",
-      "at_least": {"quantizer": 1},
-      "topology": [
-        {"id": "into-quantizer", "from_module": "any", "from_port": "cv_out",
-         "to_module": "quantizer", "to_port": "cv_in",
-         "describe": "a pitch source has to reach the quantizer"},
-        {"id": "quantized-pitch", "from_module": "quantizer", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "pitch_in",
-         "describe": "the quantizer's output has to be what reaches the oscillator — quantizing a voltage nobody uses changes nothing"}
-      ],
-      "behaviour": {},
-      "common_mistakes": [
-        {"id": "quantizer-bypassed", "do": "cut", "requirement": "quantized-pitch",
-         "message": "the oscillator's pitch does not come from the quantizer, so nothing is actually in key"},
-        {"id": "quantizes-nothing", "do": "cut", "requirement": "into-quantizer",
-         "message": "the quantizer has no input"}
-      ]
-    },
-
-    {
-      "slug": "keyboard-voice",
-      "names": ["keyboard voice", "playable voice", "midi voice"],
-      "implies": ["played from a keyboard", "midi controlled", "play it with midi"],
-      "is": "A MIDI or keyboard interface supplying pitch and gate to a voice, so a person plays it rather than the patch playing itself.",
-      "sounds_right_when": "nothing happens until a key is pressed.",
-      "source": "Standard practice",
-      "at_least": {"audio_oscillator": 1, "sequencer": 1},
-      "topology": [
-        {"id": "pitch", "from_module": "any", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "pitch_in",
-         "describe": "a pitch source has to reach the oscillator"},
-        {"id": "gate", "from_module": "any", "from_port": "gate_out",
-         "to_module": "envelope", "to_port": "gate_in",
-         "describe": "a gate has to fire the envelope"}
-      ],
-      "behaviour": {},
-      "common_mistakes": [
-        {"id": "no-gate", "do": "cut", "requirement": "gate",
-         "message": "no gate reaches an envelope, so pressing a key changes nothing"},
-        {"id": "no-pitch", "do": "cut", "requirement": "pitch",
-         "message": "nothing sets the oscillator's pitch"}
-      ]
-    },
-
-    {
-      "slug": "paraphonic-voice",
-      "names": ["paraphonic", "chord voice"],
-      "implies": ["several oscillators one filter", "chords from one filter", "stacked oscillators"],
-      "is": "Several oscillators mixed into one filter and amplifier, so a chord is possible but every note shares one envelope.",
-      "sounds_right_when": "notes sound together but re-articulate as a group rather than individually.",
-      "source": "Standard practice; the honest name for what most modular 'polyphony' is",
-      "at_least": {"audio_oscillator": 2, "mixer": 1},
-      "topology": [
-        {"id": "mix", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "mixer", "to_port": "audio_in",
-         "describe": "the oscillators have to be mixed"},
-        {"id": "shared-filter", "from_module": "mixer", "from_port": "audio_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "the mix has to reach the shared filter"}
-      ],
-      "behaviour": {},
-      "common_mistakes": [
-        {"id": "unmixed", "do": "cut", "requirement": "mix",
-         "message": "the oscillators are never mixed together"},
-        {"id": "no-shared-path", "do": "cut", "requirement": "shared-filter",
-         "message": "the mix never reaches a filter"}
-      ]
-    },
-
-    {
-      "slug": "sub-bass-voice",
-      "names": ["sub bass", "bass voice", "bassline"],
-      "implies": ["deep bass", "low end", "sub oscillator"],
-      "is": "A low oscillator through a low-pass filter with a fast envelope, kept simple so the low end stays clean.",
-      "sounds_right_when": "the note is low and defined rather than muddy, and stops cleanly.",
-      "source": "Standard practice",
-      "at_least": {"audio_oscillator": 1, "filter": 1},
-      "topology": [
-        {"id": "through-filter", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "the oscillator has to reach a low-pass filter"},
-        {"id": "fast-envelope", "from_module": "envelope", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "an envelope has to shape it, or the bass drones"}
-      ],
-      "behaviour": {"rhythmic": true},
-      "common_mistakes": [
-        {"id": "unfiltered", "do": "cut", "requirement": "through-filter",
-         "message": "the bass is never filtered"},
-        {"id": "no-envelope", "do": "cut", "requirement": "fast-envelope",
-         "message": "nothing shapes the bass, so it drones"}
-      ]
-    },
-
-    {
-      "slug": "vocal-formant-voice",
-      "names": ["formant voice", "vocal patch", "vowel patch"],
-      "implies": ["vowel sounds", "talking", "vocal timbre"],
-      "is": "A harmonically rich source through resonant filters tuned to formant regions, so the timbre reads as a vowel.",
-      "sounds_right_when": "you hear a vowel rather than a filter sweep.",
-      "source": "Strange's treatment of formant synthesis with resonant filters",
-      "at_least": {"filter": 2},
-      "topology": [
-        {"id": "source", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "a harmonically rich source has to reach the formant filters"},
-        {"id": "formants-mixed", "from_module": "filter", "from_port": "audio_out",
-         "to_module": "mixer", "to_port": "audio_in",
-         "describe": "the filter bands have to be summed, or only one formant is heard"}
-      ],
-      "behaviour": {},
-      "common_mistakes": [
-        {"id": "unsummed", "do": "cut", "requirement": "formants-mixed",
-         "message": "the formant bands are never summed, so there is no vowel"},
-        {"id": "no-source", "do": "cut", "requirement": "source",
-         "message": "nothing feeds the formant filters"}
-      ]
+     "id": "envelope-opens-vca",
+     "from_module": "envelope",
+     "from_port": "cv_out",
+     "to_module": "amplifier",
+     "to_port": "cv_in",
+     "describe": "an envelope has to open the amplifier, or the voice drones instead of playing notes"
     }
-  ]
+   ],
+   "behaviour": {
+    "rhythmic": true
+   },
+   "common_mistakes": [
+    {
+     "id": "no-envelope",
+     "do": "cut",
+     "requirement": "envelope-opens-vca",
+     "message": "nothing opens the amplifier, so the voice drones instead of articulating"
+    },
+    {
+     "id": "filter-bypassed",
+     "do": "cut",
+     "requirement": "osc-to-filter",
+     "message": "the oscillator never reaches the filter, so nothing is subtracted"
+    },
+    {
+     "id": "no-vca",
+     "do": "drop_module",
+     "module": "amplifier",
+     "message": "there is no amplifier, so nothing shapes the loudness"
+    }
+   ]
+  },
+  {
+   "slug": "west-coast-voice",
+   "names": [
+    "west coast",
+    "west coast voice",
+    "buchla voice"
+   ],
+   "implies": [
+    "low pass gate",
+    "lpg",
+    "plucky without a filter",
+    "wavefolded voice"
+   ],
+   "is": "A wavefolded oscillator through a low-pass gate, where one control opens both loudness and brightness together — the west-coast alternative to filter-plus-VCA.",
+   "sounds_right_when": "notes are percussive and get duller as they decay, rather than simply quieter.",
+   "source": "Buchla's low-pass gate practice; Make Noise's account of the same idea",
+   "at_least": {
+    "waveshaper": 1
+   },
+   "topology": [
+    {
+     "id": "osc-to-folder",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "waveshaper",
+     "to_port": "audio_in",
+     "describe": "the oscillator has to reach the folder — folding is where west-coast harmonics come from"
+    },
+    {
+     "id": "folder-onward",
+     "from_module": "waveshaper",
+     "from_port": "audio_out",
+     "to_module": "amplifier",
+     "to_port": "audio_in",
+     "describe": "the folded signal has to reach a gate or amplifier"
+    },
+    {
+     "id": "envelope-opens",
+     "from_module": "envelope",
+     "from_port": "cv_out",
+     "to_module": "amplifier",
+     "to_port": "cv_in",
+     "describe": "an envelope has to open it, or the fold sustains rather than plucking"
+    }
+   ],
+   "behaviour": {
+    "rhythmic": true
+   },
+   "common_mistakes": [
+    {
+     "id": "no-fold",
+     "do": "cut",
+     "requirement": "osc-to-folder",
+     "message": "nothing is folded, so this is an east-coast voice wearing the name"
+    },
+    {
+     "id": "no-envelope",
+     "do": "cut",
+     "requirement": "envelope-opens",
+     "message": "nothing opens the gate, so the voice sustains instead of plucking"
+    }
+   ]
+  },
+  {
+   "slug": "sequenced-voice",
+   "names": [
+    "sequenced voice",
+    "sequenced melody",
+    "step sequence"
+   ],
+   "implies": [
+    "a sequencer playing a melody",
+    "16 step sequence",
+    "sequenced bassline"
+   ],
+   "is": "A sequencer supplying both pitch and gate to a voice, so the pattern plays itself in time.",
+   "sounds_right_when": "the same phrase repeats in time, with each step clearly articulated.",
+   "source": "Standard practice; Strange's chapter on sequential controllers",
+   "at_least": {
+    "sequencer": 1
+   },
+   "topology": [
+    {
+     "id": "pitch",
+     "from_module": "sequencer",
+     "from_port": "cv_out",
+     "to_module": "audio_oscillator",
+     "to_port": "pitch_in",
+     "describe": "the sequencer's pitch has to reach the oscillator"
+    },
+    {
+     "id": "gate",
+     "from_module": "sequencer",
+     "from_port": "gate_out",
+     "to_module": "envelope",
+     "to_port": "gate_in",
+     "describe": "the sequencer's gate has to fire an envelope, or every step runs together"
+    },
+    {
+     "id": "clock",
+     "from_module": "clock",
+     "from_port": "clock_out",
+     "to_module": "sequencer",
+     "to_port": "clock_in",
+     "describe": "the sequencer has to be clocked, or it never advances"
+    }
+   ],
+   "behaviour": {
+    "keeps_going": true,
+    "rhythmic": true
+   },
+   "common_mistakes": [
+    {
+     "id": "unclocked",
+     "do": "cut",
+     "requirement": "clock",
+     "message": "the sequencer is never clocked, so it sits on step one"
+    },
+    {
+     "id": "no-gate",
+     "do": "cut",
+     "requirement": "gate",
+     "message": "no gate reaches an envelope, so the steps never articulate"
+    },
+    {
+     "id": "no-pitch",
+     "do": "cut",
+     "requirement": "pitch",
+     "message": "the sequence never reaches a pitch input"
+    }
+   ]
+  },
+  {
+   "slug": "drone-voice",
+   "names": [
+    "drone",
+    "sustained tone"
+   ],
+   "implies": [
+    "continuous tone",
+    "held note",
+    "no envelope"
+   ],
+   "is": "An oscillator held open through to the output, with no envelope gating it — deliberately continuous.",
+   "sounds_right_when": "it never stops and never articulates.",
+   "source": "The simplest patch there is",
+   "at_least": {
+    "audio_oscillator": 1
+   },
+   "topology": [
+    {
+     "id": "reaches-output",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "any",
+     "to_port": "audio_in",
+     "describe": "the oscillator has to reach something downstream"
+    }
+   ],
+   "behaviour": {
+    "keeps_going": true,
+    "sustained": true
+   },
+   "common_mistakes": [
+    {
+     "id": "goes-nowhere",
+     "do": "cut",
+     "requirement": "reaches-output",
+     "message": "the oscillator is not patched into anything"
+    }
+   ]
+  },
+  {
+   "slug": "fm-voice",
+   "names": [
+    "fm voice",
+    "fm patch",
+    "frequency modulation"
+   ],
+   "implies": [
+    "one oscillator modulating another",
+    "metallic tone",
+    "bell tone"
+   ],
+   "is": "One oscillator modulating another's frequency at audio rate, producing sidebands rather than vibrato.",
+   "sounds_right_when": "the timbre is metallic or bell-like and changes character with modulation depth, not just pitch.",
+   "source": "Chowning's FM synthesis, as practised in modular form",
+   "at_least": {
+    "audio_oscillator": 2
+   },
+   "topology": [
+    {
+     "id": "modulator",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "audio_oscillator",
+     "to_port": "cv_in",
+     "different_module": true,
+     "describe": "one oscillator has to modulate the other's frequency at audio rate"
+    },
+    {
+     "id": "carrier-out",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "amplifier",
+     "to_port": "audio_in",
+     "describe": "the carrier has to reach an amplifier"
+    }
+   ],
+   "behaviour": {},
+   "common_mistakes": [
+    {
+     "id": "no-modulation",
+     "do": "cut",
+     "requirement": "modulator",
+     "message": "neither oscillator modulates the other, so there is no FM"
+    },
+    {
+     "id": "carrier-unheard",
+     "do": "cut",
+     "requirement": "carrier-out",
+     "message": "the carrier never reaches an amplifier"
+    }
+   ]
+  },
+  {
+   "slug": "quantized-voice",
+   "names": [
+    "quantized voice",
+    "quantised voice",
+    "in key"
+   ],
+   "implies": [
+    "in the key of",
+    "snapped to a scale",
+    "stays in key",
+    "quantized pitch"
+   ],
+   "is": "A pitch source passed through a quantizer before the oscillator, so whatever voltage arrives lands on a note of the chosen scale.",
+   "sounds_right_when": "every note belongs to the scale, however random the source is.",
+   "source": "Standard practice wherever a random or continuous source drives pitch",
+   "at_least": {
+    "quantizer": 1
+   },
+   "topology": [
+    {
+     "id": "into-quantizer",
+     "from_module": "any",
+     "from_port": "cv_out",
+     "to_module": "quantizer",
+     "to_port": "cv_in",
+     "describe": "a pitch source has to reach the quantizer"
+    },
+    {
+     "id": "quantized-pitch",
+     "from_module": "quantizer",
+     "from_port": "cv_out",
+     "to_module": "audio_oscillator",
+     "to_port": "pitch_in",
+     "describe": "the quantizer's output has to be what reaches the oscillator — quantizing a voltage nobody uses changes nothing"
+    }
+   ],
+   "behaviour": {},
+   "common_mistakes": [
+    {
+     "id": "quantizer-bypassed",
+     "do": "cut",
+     "requirement": "quantized-pitch",
+     "message": "the oscillator's pitch does not come from the quantizer, so nothing is actually in key"
+    },
+    {
+     "id": "quantizes-nothing",
+     "do": "cut",
+     "requirement": "into-quantizer",
+     "message": "the quantizer has no input"
+    }
+   ]
+  },
+  {
+   "slug": "keyboard-voice",
+   "names": [
+    "keyboard voice",
+    "playable voice",
+    "midi voice"
+   ],
+   "implies": [
+    "played from a keyboard",
+    "midi controlled",
+    "play it with midi"
+   ],
+   "is": "A MIDI or keyboard interface supplying pitch and gate to a voice, so a person plays it rather than the patch playing itself.",
+   "sounds_right_when": "nothing happens until a key is pressed.",
+   "source": "Standard practice",
+   "at_least": {
+    "audio_oscillator": 1,
+    "sequencer": 1
+   },
+   "topology": [
+    {
+     "id": "pitch",
+     "from_module": "any",
+     "from_port": "cv_out",
+     "to_module": "audio_oscillator",
+     "to_port": "pitch_in",
+     "describe": "a pitch source has to reach the oscillator"
+    },
+    {
+     "id": "gate",
+     "from_module": "any",
+     "from_port": "gate_out",
+     "to_module": "envelope",
+     "to_port": "gate_in",
+     "describe": "a gate has to fire the envelope"
+    }
+   ],
+   "behaviour": {},
+   "common_mistakes": [
+    {
+     "id": "no-gate",
+     "do": "cut",
+     "requirement": "gate",
+     "message": "no gate reaches an envelope, so pressing a key changes nothing"
+    },
+    {
+     "id": "no-pitch",
+     "do": "cut",
+     "requirement": "pitch",
+     "message": "nothing sets the oscillator's pitch"
+    }
+   ]
+  },
+  {
+   "slug": "paraphonic-voice",
+   "names": [
+    "paraphonic",
+    "chord voice"
+   ],
+   "implies": [
+    "several oscillators one filter",
+    "chords from one filter",
+    "stacked oscillators"
+   ],
+   "is": "Several oscillators mixed into one filter and amplifier, so a chord is possible but every note shares one envelope.",
+   "sounds_right_when": "notes sound together but re-articulate as a group rather than individually.",
+   "source": "Standard practice; the honest name for what most modular 'polyphony' is",
+   "at_least": {
+    "audio_oscillator": 2,
+    "mixer": 1
+   },
+   "topology": [
+    {
+     "id": "mix",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "mixer",
+     "to_port": "audio_in",
+     "describe": "the oscillators have to be mixed"
+    },
+    {
+     "id": "shared-filter",
+     "from_module": "mixer",
+     "from_port": "audio_out",
+     "to_module": "filter",
+     "to_port": "audio_in",
+     "describe": "the mix has to reach the shared filter"
+    }
+   ],
+   "behaviour": {},
+   "common_mistakes": [
+    {
+     "id": "unmixed",
+     "do": "cut",
+     "requirement": "mix",
+     "message": "the oscillators are never mixed together"
+    },
+    {
+     "id": "no-shared-path",
+     "do": "cut",
+     "requirement": "shared-filter",
+     "message": "the mix never reaches a filter"
+    }
+   ]
+  },
+  {
+   "slug": "sub-bass-voice",
+   "names": [
+    "sub bass",
+    "bass voice",
+    "bassline"
+   ],
+   "implies": [
+    "deep bass",
+    "low end",
+    "sub oscillator"
+   ],
+   "is": "A low oscillator through a low-pass filter with a fast envelope, kept simple so the low end stays clean.",
+   "sounds_right_when": "the note is low and defined rather than muddy, and stops cleanly.",
+   "source": "Standard practice",
+   "at_least": {
+    "audio_oscillator": 1,
+    "filter": 1
+   },
+   "topology": [
+    {
+     "id": "through-filter",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "filter",
+     "to_port": "audio_in",
+     "describe": "the oscillator has to reach a low-pass filter"
+    },
+    {
+     "id": "fast-envelope",
+     "from_module": "envelope",
+     "from_port": "cv_out",
+     "to_module": "amplifier",
+     "to_port": "cv_in",
+     "describe": "an envelope has to shape it, or the bass drones"
+    }
+   ],
+   "behaviour": {
+    "rhythmic": true
+   },
+   "common_mistakes": [
+    {
+     "id": "unfiltered",
+     "do": "cut",
+     "requirement": "through-filter",
+     "message": "the bass is never filtered"
+    },
+    {
+     "id": "no-envelope",
+     "do": "cut",
+     "requirement": "fast-envelope",
+     "message": "nothing shapes the bass, so it drones"
+    }
+   ]
+  },
+  {
+   "slug": "vocal-formant-voice",
+   "names": [
+    "formant voice",
+    "vocal patch",
+    "vowel patch"
+   ],
+   "implies": [
+    "vowel sounds",
+    "talking",
+    "vocal timbre"
+   ],
+   "is": "A harmonically rich source through resonant filters tuned to formant regions, so the timbre reads as a vowel.",
+   "sounds_right_when": "you hear a vowel rather than a filter sweep.",
+   "source": "Strange's treatment of formant synthesis with resonant filters",
+   "at_least": {
+    "filter": 2
+   },
+   "topology": [
+    {
+     "id": "source",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "filter",
+     "to_port": "audio_in",
+     "describe": "a harmonically rich source has to reach the formant filters"
+    },
+    {
+     "id": "formants-mixed",
+     "from_module": "filter",
+     "from_port": "audio_out",
+     "to_module": "mixer",
+     "to_port": "audio_in",
+     "describe": "the filter bands have to be summed, or only one formant is heard"
+    }
+   ],
+   "behaviour": {},
+   "common_mistakes": [
+    {
+     "id": "unsummed",
+     "do": "cut",
+     "requirement": "formants-mixed",
+     "message": "the formant bands are never summed, so there is no vowel"
+    },
+    {
+     "id": "no-source",
+     "do": "cut",
+     "requirement": "source",
+     "message": "nothing feeds the formant filters"
+    }
+   ]
+  },
+  {
+   "slug": "acid-voice",
+   "names": [
+    "acid",
+    "acid line",
+    "acid bassline",
+    "acid patch",
+    "303",
+    "tb-303",
+    "acid rave",
+    "rave line",
+    "squelchy bassline"
+   ],
+   "implies": [
+    "squelchy bassline",
+    "sliding bassline with accents",
+    "rubbery resonant bass",
+    "roland 303 sound"
+   ],
+   "is": "A single sawtooth voice through a steeply resonant low-pass, played by a step sequencer whose pitch passes through a slew so notes slide into one another, with a second sequenced lane opening the cutoff on chosen steps. The slide and the accent are the whole idiom: without them it is an ordinary bassline.",
+   "sounds_right_when": "it is a repeating RIFF rather than a wandering line — the ear should be able to sing it back after two passes. Acid lives on a few pitches from ONE minor scale, hammered, with the root repeated often and at least one jump of a full octave (an octave is 1.0 V, a semitone 1/12 V, a fifth 0.583 V). Only some notes slide, so keep the slew time short — a tenth of a step or less — or every note glides and it sounds seasick. The filter is the instrument: resonance high enough to whistle (0.75 of its range or more) and a cutoff that starts LOW, so the accent has somewhere to open to. Keep the envelope's decay a fraction of a step with no sustain, so notes stop before the next begins.",
+   "source": "The TB-303's fixed architecture, as used in Chicago acid house",
+   "at_least": {
+    "audio_oscillator": 1,
+    "filter": 1,
+    "amplifier": 1,
+    "envelope": 1,
+    "sequencer": 1,
+    "slew": 1
+   },
+   "topology": [
+    {
+     "id": "seq-to-slew",
+     "from_module": "sequencer",
+     "from_port": "cv_out",
+     "to_module": "slew",
+     "to_port": "cv_in",
+     "describe": "the sequencer's pitch has to pass through a slew — that is the slide"
+    },
+    {
+     "id": "slew-to-osc",
+     "from_module": "slew",
+     "from_port": "cv_out",
+     "to_module": "audio_oscillator",
+     "to_port": "pitch_in",
+     "describe": "the slewed pitch has to reach the oscillator, not the raw sequencer output"
+    },
+    {
+     "id": "osc-to-filter",
+     "from_module": "audio_oscillator",
+     "from_port": "audio_out",
+     "to_module": "filter",
+     "to_port": "audio_in",
+     "describe": "the oscillator has to reach the filter"
+    },
+    {
+     "id": "filter-to-vca",
+     "from_module": "filter",
+     "from_port": "audio_out",
+     "to_module": "amplifier",
+     "to_port": "audio_in",
+     "describe": "the filter has to reach the amplifier"
+    },
+    {
+     "id": "env-to-vca",
+     "from_module": "envelope",
+     "from_port": "cv_out",
+     "to_module": "amplifier",
+     "to_port": "cv_in",
+     "describe": "an envelope has to articulate each note, or it drones"
+    },
+    {
+     "id": "accent-to-cutoff",
+     "from_module": "any",
+     "from_port": "cv_out",
+     "to_module": "filter",
+     "to_port": "cv_in",
+     "describe": "something sequenced has to open the cutoff on chosen steps — the accent"
+    }
+   ],
+   "common_mistakes": [
+    {
+     "id": "no-slide",
+     "do": "cut",
+     "requirement": "seq-to-slew",
+     "message": "the sequencer's pitch skips the slew, so no note slides into the next — the sound is a plain bassline"
+    },
+    {
+     "id": "raw-pitch",
+     "do": "cut",
+     "requirement": "slew-to-osc",
+     "message": "the oscillator takes the raw sequencer output, so the slew is wired to nothing and there is no glide"
+    },
+    {
+     "id": "no-accent",
+     "do": "cut",
+     "requirement": "accent-to-cutoff",
+     "message": "nothing opens the cutoff on chosen steps, so every note is equally dull and the squelch never happens"
+    },
+    {
+     "id": "drones",
+     "do": "cut",
+     "requirement": "env-to-vca",
+     "message": "no envelope on the amplifier, so the line drones instead of articulating each step"
+    },
+    {
+     "id": "no-slew-at-all",
+     "do": "drop_module",
+     "module": "slew",
+     "message": "there is no slew in the patch, so the slide the idiom is named for cannot exist"
+    }
+   ]
+  }
+ ]
 }
