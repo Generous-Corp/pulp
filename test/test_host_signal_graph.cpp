@@ -12,6 +12,8 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+
+#include "support/thread_progress.hpp"
 #if defined(__unix__) || defined(__APPLE__)
 #include "native_components/rt_test_scope.hpp"
 #endif
@@ -3295,8 +3297,14 @@ TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
         }
     });
 
-    started.wait();
-    first_block.wait();
+    // Bounded: `future::wait()` has no timeout, so if a genuine regression means
+    // the audio thread never reaches graph.process(), this barrier hangs the
+    // suite instead of failing it — on a runner that is a job timeout with no
+    // useful output, strictly worse than the flake the barrier was added to fix.
+    // A CHECK here reports the barrier itself, and the assertions after the join
+    // then report the zero counters as the failure they are.
+    CHECK(started.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+    CHECK(first_block.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
 
     bool all_gain_updates_succeeded = true;
     bool all_injects_succeeded = true;

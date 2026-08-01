@@ -31,6 +31,8 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -1076,8 +1078,14 @@ TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
     // Deterministic handshake: wait for the audio thread to start before
     // we begin mutating, then wait for one block to complete so the test
     // cannot pass or fail without exercising graph.process at least once.
-    started.wait();
-    first_block.wait();
+    // Bounded: `future::wait()` has no timeout, so if a genuine regression means
+    // the audio thread never reaches graph.process(), this barrier hangs the
+    // suite instead of failing it — on a runner that is a job timeout with no
+    // useful output, strictly worse than the flake the barrier was added to fix.
+    // A CHECK here reports the barrier itself, and the assertions after the join
+    // then report the zero counters as the failure they are.
+    CHECK(started.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+    CHECK(first_block.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
 
     // Hammer the graph with remove → add → prepare cycles. Each iteration
     // drops the live snapshot and republishes a fresh one; the audio
