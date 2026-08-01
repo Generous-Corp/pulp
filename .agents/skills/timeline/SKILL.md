@@ -397,8 +397,22 @@ artifact is needed. Never modify canonical project JSON text directly.
   breakage appears only when the two branches meet on main — neither PR's CI can
   see it alone. Check `corpus.index` covers the tree before merging a
   fixture-adding branch.
+- **The corpus runs twice per PR: natively under ctest, and compiled to WASM.**
+  `core/interchange/wasm/CMakeLists.txt` is an Emscripten-only root that builds
+  the runner from the portable sources, and `tools/ci/wasm-fixture-lane.sh`
+  drives it (job `Timeline fixture corpus (WASM)` in `web-plugins.yml`). Two
+  things follow. The wasm root **hand-lists** its sources, because linking
+  `pulp::timeline` would drag in `pulp::runtime`'s mbedTLS/HTTP — so a source
+  the desktop build gains is one the wasm build can silently miss; the root
+  fails its configure when `core/interchange/src` drifts from its list, but the
+  timeline list it borrows from `PulpTimelineSources.cmake` is shared and stays
+  honest on its own. And the lane deliberately runs the corpus a second time
+  against a broken copy and requires red, so a wasm build that validated
+  nothing cannot pass. Run it locally with
+  `source ~/emsdk/emsdk_env.sh && tools/ci/wasm-fixture-lane.sh <build-dir> 6`.
 - A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
-  also emitted by `collect_summary()` in `test/fixture_runner_main.cpp`, which
+  also emitted by `collect_summary()` in
+  `core/interchange/tools/fixture_runner_main.cpp`, which
   lists the counts one by one and is not generated. Add the count and skip that
   list and every manifest regenerates clean while the new entity goes uncounted
   in every fixture — the corpus reports green on a document whose new structure
