@@ -3880,6 +3880,41 @@ Spec + design:
 
 ## Automated Validation Loop
 
+### Score the artifact that ships, not the render beside it
+
+The importer's own A/B — the `Similarity: 98% — Validation: PASS` in a
+design-import log — measures the **DesignIR render it built in memory**. It
+does not measure the emitted `ui.js`, which is what a plugin loads. Those
+diverge, and when they do the log certifies the panel anyway: a panel scoring
+**0.13** was reported at **0.98** by that gate, twice, to a user looking at
+an "IMG" placeholder.
+
+`tools/import-validation/verify_rendered_panel.py` closes that hole. It renders
+the artifact on disk and scores it against the importer's own reference render.
+Run it on the emitted artifact after a design import, and prefer the
+**installed** copy over the freshly generated one — an asset path that resolves
+during the run can be gone by the time the plugin opens.
+
+```bash
+tools/import-validation/verify_rendered_panel.py \
+  --artifact <project>/build.ui.js \
+  --reference <capture>/validation-proof/render/render.png \
+  --tokens <capture>/tokens.json --width 900 --height 602 --scale 2
+```
+
+Two things that decide whether its number means anything, both enforced:
+the render must have `PULP_SHOT_NO_RECONCILE=1` (the viewport clamp rescales a
+capture backdrop out from under its controls, and errs in *both* directions —
+0.33/0.44 clamped where the truth was 0.13/0.98), and the renderer must come
+from the same tree as the importer (a stale one no-ops the artifact's token
+calls and scores near zero, looking exactly like a broken design).
+
+Its similarity is blind to palette regressions — an artifact whose tokens never
+reach the widget theme keys renders blue knobs on a cream faceplate and still
+scores **0.940**. The `--tokens` foreign-colour check is the only thing that
+catches that class. Full rationale, thresholds and the acceptance record:
+[`tools/import-validation/RENDERED-PANEL-GATE.md`](../../../tools/import-validation/RENDERED-PANEL-GATE.md).
+
 ### Freshness check (MUST run first)
 
 Before running any roundtrip harness against the framework, **verify your checkout is current with `origin/main`**. A stale feature branch can produce "wrong UI variant" diff scores that reflect old framework code, not parser behavior.
