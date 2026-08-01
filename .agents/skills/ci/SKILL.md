@@ -2418,6 +2418,12 @@ authenticating as the same user. Operational rules:
   targets remain after --skip-target filtering").
 - Reduce burst: `git clone --depth 1` instead of recursive tree-API
   dumps; space `gh` calls; never tight-loop `gh` (back off / schedule).
+- The local Shipyard CMake profile must resolve Python through
+  `tools/ci/find_python311.py` and pass the result as
+  `Python3_EXECUTABLE`. Apple's command-line tools still expose Python 3.9,
+  which can configure most of Pulp but cannot run the `tomllib`-based decisions
+  contract tests; allowing CMake to pick it produces a two-test false red after
+  the entire Debug build has completed.
 
 ```bash
 # Primary: Shipyard

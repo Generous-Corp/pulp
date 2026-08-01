@@ -193,6 +193,13 @@ cap=2 runner; it belongs in a dedicated cap=1 nightly/perf lane. The full lane m
 what runs where, the label taxonomy, and how to route a new test — is
 [docs/guides/test-lanes.md](test-lanes.md).
 
+The same profile resolves its CMake interpreter through
+`tools/ci/find_python311.py` and passes the result as `Python3_EXECUTABLE`.
+Apple's command-line tools still expose Python 3.9, which can configure the
+project but cannot run the `tomllib`-based decisions-contract tests; the
+selector uses an installed 3.11+ interpreter or an existing `uv` 3.12 runtime
+and fails before the hour-long Debug build if neither exists.
+
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned
