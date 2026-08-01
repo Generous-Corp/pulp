@@ -289,9 +289,13 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     if (!detail::fence_file(staged_file))
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::StagedFileFenced);
-    if (!detail::publish_no_replace(staged_file, impl_->destination))
+    const auto publication = detail::publish_no_replace(
+        staged_file, impl_->destination, detail::NoReplaceSourceKind::RegularFile);
+    if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
+    if (publication != detail::NoReplaceOutcome::Published)
+        return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
     impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
@@ -340,9 +344,13 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         if (!detail::fence_directory(directory))
             return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, directory);
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryTreeFenced);
-    if (!detail::publish_no_replace(impl_->staging, impl_->destination))
+    const auto publication = detail::publish_no_replace(
+        impl_->staging, impl_->destination, detail::NoReplaceSourceKind::Directory);
+    if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
+    if (publication != detail::NoReplaceOutcome::Published)
+        return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
     impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);

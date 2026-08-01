@@ -254,8 +254,9 @@ TEST_CASE("Project package stages content by verified hash and round trips its g
     REQUIRE(opened);
     REQUIRE(canonical_project(opened.value().project, schema) ==
             canonical_project(project, schema));
-    REQUIRE(opened.value().journal_directory == temporary.path / "journal");
-    REQUIRE(opened.value().cache_directory == temporary.path / "cache");
+    const auto canonical_root = fs::canonical(temporary.path);
+    REQUIRE(opened.value().journal_directory == canonical_root / "journal");
+    REQUIRE(opened.value().cache_directory == canonical_root / "cache");
     require_visible_media_is_valid(temporary.path, opened.value(), media);
     REQUIRE(read_text(temporary.path / "project.json") == canonical_project(project, schema));
     for (std::size_t index = 0; index < extra_references.size(); ++index) {
@@ -716,6 +717,74 @@ TEST_CASE("Atomic project-package publisher rejects symlinked write ancestors",
 
     REQUIRE_FALSE(publisher->write("redirect/escaped.txt", "escape"));
     REQUIRE_FALSE(fs::exists(external / "escaped.txt"));
+}
+
+#if !defined(_WIN32)
+TEST_CASE("No-replace fallback publishes regular files without replacement",
+          "[project-package][atomic-publisher][linux-fallback]") {
+    TemporaryPackage temporary("atomic-file-fallback");
+    fs::create_directories(temporary.path);
+    const auto source = temporary.path / "source";
+    const auto destination = temporary.path / "destination";
+    std::ofstream(source) << "payload";
+
+    const auto result = pulp::project_package::detail::publish_no_replace_fallback(
+        source, destination,
+        pulp::project_package::detail::NoReplaceSourceKind::RegularFile);
+
+    REQUIRE(result == pulp::project_package::detail::NoReplaceOutcome::Published);
+    REQUIRE_FALSE(fs::exists(source));
+    REQUIRE(read_text(destination) == "payload");
+}
+
+TEST_CASE("No-replace fallback never applies the regular-file link path to directories",
+          "[project-package][atomic-publisher][linux-fallback]") {
+    TemporaryPackage temporary("atomic-directory-fallback");
+    fs::create_directories(temporary.path);
+    const auto source = temporary.path / "source";
+    const auto destination = temporary.path / "destination";
+    fs::create_directory(source);
+
+    const auto result = pulp::project_package::detail::publish_no_replace_fallback(
+        source, destination,
+        pulp::project_package::detail::NoReplaceSourceKind::Directory);
+
+    REQUIRE(result == pulp::project_package::detail::NoReplaceOutcome::Unsupported);
+    REQUIRE(fs::is_directory(source));
+    REQUIRE_FALSE(fs::exists(destination));
+}
+#endif
+
+TEST_CASE("Opening through a symlinked ancestor returns canonical working directories",
+          "[project-package][open][symlink]") {
+    TemporaryPackage temporary("open-canonical-root");
+    const auto first_parent = temporary.path / "first";
+    const auto second_parent = temporary.path / "second";
+    fs::create_directories(first_parent);
+    fs::create_directories(second_parent);
+    const auto package = first_parent / "package";
+    const std::vector<std::uint8_t> media{'c', 'a', 'n', 'o', 'n'};
+    const auto hash = hash_bytes(media);
+    publish_baseline(package, hash, media, make_project("canonical", "media", hash));
+
+    const auto alias = temporary.path / "alias";
+    std::error_code error;
+    fs::create_directory_symlink(first_parent, alias, error);
+    if (error)
+        SKIP("directory symlink creation is unavailable: " << error.message());
+
+    const auto opened = open_package(alias / "package", registry());
+    REQUIRE(opened);
+    const auto canonical_package = fs::canonical(package);
+    REQUIRE(opened->journal_directory == canonical_package / "journal");
+    REQUIRE(opened->cache_directory == canonical_package / "cache");
+
+    fs::remove(alias, error);
+    REQUIRE_FALSE(error);
+    fs::create_directory_symlink(second_parent, alias, error);
+    REQUIRE_FALSE(error);
+    REQUIRE(opened->journal_directory == canonical_package / "journal");
+    REQUIRE(opened->cache_directory == canonical_package / "cache");
 }
 
 TEST_CASE("Package writer fences the same pre-existing blob handle that it verified",

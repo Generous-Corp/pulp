@@ -354,8 +354,12 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
                                            detail::PackageFaultPoint::StagedFileWritten,
                                            detail::PackageFaultPoint::StagedFileFenced))
         return failure<BlobReference>(PackageErrorCode::IoError, temporary);
-    if (!detail::publish_no_replace(temporary, destination)) {
+    const auto publication = detail::publish_no_replace(
+        temporary, destination, detail::NoReplaceSourceKind::RegularFile);
+    if (publication != detail::NoReplaceOutcome::Published) {
         fs::remove(temporary, error);
+        if (publication != detail::NoReplaceOutcome::DestinationExists)
+            return failure<BlobReference>(PackageErrorCode::IoError, destination);
         auto file = detail::PinnedFile::open(destination, true);
         if (!file || !file->hash_matches(expected.to_hex(), impl_->limits.max_blob_bytes))
             return failure<BlobReference>(PackageErrorCode::PublicationConflict, destination);
@@ -418,29 +422,37 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
              const PackageLimits& limits) noexcept {
     if (!is_real_directory(root))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, root);
+    std::error_code error;
+    const auto canonical_root = fs::canonical(root, error);
+    if (error || !is_real_directory(canonical_root))
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
     constexpr std::string_view required[] = {"media", "state", "artifacts", "receipts", "journal"};
     for (const auto directory : required)
-        if (!is_real_directory(root / directory))
-            return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, root / directory);
+        if (!is_real_directory(canonical_root / directory))
+            return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout,
+                                              canonical_root / directory);
     bool cache_recreated = false;
-    const auto cache = root / "cache";
+    const auto cache = canonical_root / "cache";
     if (!is_real_directory(cache)) {
-        std::error_code error;
+        error.clear();
         const bool created = fs::create_directory(cache, error);
         if ((!created && error) || !is_real_directory(cache) ||
-            (created && !detail::fence_directory(root)))
+            (created && !detail::fence_directory(canonical_root)))
             return failure<OpenPackageResult>(PackageErrorCode::IoError, cache);
         cache_recreated = created;
     }
-    auto encoded = read_file(root / kProjectFile, limits.max_project_bytes);
+    auto encoded = read_file(canonical_root / kProjectFile, limits.max_project_bytes);
     if (!encoded)
         return failure<OpenPackageResult>(encoded.error().code, encoded.error().path);
     const std::string_view json(reinterpret_cast<const char*>(encoded->data()), encoded->size());
     auto decoded = timeline::deserialize_project(json, registry);
-    if (!decoded || !validate_project_references(root, decoded.value(), limits.max_blob_bytes))
-        return failure<OpenPackageResult>(PackageErrorCode::InvalidGeneration, root / kProjectFile);
+    if (!decoded ||
+        !validate_project_references(canonical_root, decoded.value(), limits.max_blob_bytes))
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidGeneration,
+                                          canonical_root / kProjectFile);
     return runtime::Result<OpenPackageResult, PackageError>(runtime::Ok(
-        OpenPackageResult{std::move(decoded).value(), root / "journal", cache, cache_recreated}));
+        OpenPackageResult{std::move(decoded).value(), canonical_root / "journal", cache,
+                          cache_recreated}));
 }
 
 runtime::Result<std::vector<std::uint8_t>, PackageError>

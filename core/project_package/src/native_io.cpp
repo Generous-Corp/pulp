@@ -530,29 +530,59 @@ bool fence_directory(const std::filesystem::path& directory) noexcept {
 #endif
 }
 
-bool publish_no_replace(const std::filesystem::path& source,
-                        const std::filesystem::path& destination) noexcept {
+NoReplaceOutcome publish_no_replace_fallback(const std::filesystem::path& source,
+                                             const std::filesystem::path& destination,
+                                             NoReplaceSourceKind kind) noexcept {
 #if defined(_WIN32)
-    return ::MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+    (void)source;
+    (void)destination;
+    (void)kind;
+    return NoReplaceOutcome::Unsupported;
+#else
+    if (kind == NoReplaceSourceKind::Directory)
+        return NoReplaceOutcome::Unsupported;
+    if (::link(source.c_str(), destination.c_str()) != 0)
+        return errno == EEXIST ? NoReplaceOutcome::DestinationExists : NoReplaceOutcome::Failed;
+    // The destination becomes visible atomically when link() succeeds. Failure
+    // to remove the private source is cleanup debt, not a failed publication;
+    // reporting failure here would let callers retry after publication.
+    (void)::unlink(source.c_str());
+    return NoReplaceOutcome::Published;
+#endif
+}
+
+NoReplaceOutcome publish_no_replace(const std::filesystem::path& source,
+                                    const std::filesystem::path& destination,
+                                    NoReplaceSourceKind kind) noexcept {
+#if defined(_WIN32)
+    if (::MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH) != 0)
+        return NoReplaceOutcome::Published;
+    const auto error = ::GetLastError();
+    return error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS
+               ? NoReplaceOutcome::DestinationExists
+               : NoReplaceOutcome::Failed;
 #elif defined(__APPLE__)
-    return ::renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) == 0;
+    if (::renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) == 0)
+        return NoReplaceOutcome::Published;
+    return errno == EEXIST ? NoReplaceOutcome::DestinationExists : NoReplaceOutcome::Failed;
 #elif defined(__linux__)
     if (::syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, destination.c_str(),
                   RENAME_NOREPLACE) == 0)
-        return true;
+        return NoReplaceOutcome::Published;
+    if (errno == EEXIST)
+        return NoReplaceOutcome::DestinationExists;
     if (errno != ENOSYS && errno != EINVAL)
-        return false;
-    if (::link(source.c_str(), destination.c_str()) != 0)
-        return false;
-    // The destination becomes visible atomically when link() succeeds. Failure
-    // to remove the private source is cleanup debt, not a failed publication;
-    // reporting false here would let callers retry after publication.
-    (void)::unlink(source.c_str());
-    return true;
+        return NoReplaceOutcome::Failed;
+    // link/unlink is an atomic no-replace fallback for regular files only.
+    // POSIX forbids hard-linking directories, and plain rename() could replace
+    // an empty destination created by a racing publisher, so fail closed when
+    // the kernel/filesystem lacks RENAME_NOREPLACE for a directory tree.
+    return publish_no_replace_fallback(source, destination, kind);
 #else
     (void)source;
     (void)destination;
-    return false;
+    (void)kind;
+    return NoReplaceOutcome::Unsupported;
 #endif
 }
 
