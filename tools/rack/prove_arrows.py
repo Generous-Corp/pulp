@@ -45,7 +45,7 @@ REGIONS = {
     "composer": (0.30, 0.44, 0.72, 0.52),
     # Where the amber strip for a not-installed pick lands: under the composer
     # box, in the space the list was occupying.
-    "notice":   (0.20, 0.60, 0.60, 0.72),
+    "notice":   (0.18, 0.55, 0.60, 0.68),
 }
 
 
