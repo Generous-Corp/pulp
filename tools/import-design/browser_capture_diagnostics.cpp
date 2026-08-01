@@ -73,6 +73,17 @@ std::string browser_unavailable_human(
         out << discovery.diagnostic.message << "\n"
             << "Choose one of: auto, managed, system.\n"
             << "Example: pulp config set import_design.browser auto";
+    } else if (code == "browser-version-unreadable") {
+        // Reading the version has been seen to fail transiently and then
+        // succeed on the same browser, so the first advice is to retry, not to
+        // replace a browser that may be perfectly fine.
+        out << discovery.diagnostic.message << "\n"
+            << "Retry the import; the probe already retried once.\n"
+            << "If it persists, run the browser's --version by hand to see "
+               "what it reports,\n"
+            << "or select a known-good installation with: "
+               "pulp import-design --browser <path>\n\n"
+            << "Use --offline for the lower-fidelity static/runtime fallback.";
     } else {
         out << discovery.diagnostic.message << "\n"
             << "Install Pulp's pinned browser with: "
@@ -114,6 +125,8 @@ std::string browser_unavailable_json(
         remediation = "pulp-tool-install-chrome-for-testing";
     } else if (code == "browser-mode-invalid") {
         remediation = "set-browser-mode";
+    } else if (code == "browser-version-unreadable") {
+        remediation = "retry-or-select-browser";
     } else {
         install_url = kChromeDownloadUrl;
         remediation = code == "browser-incompatible"

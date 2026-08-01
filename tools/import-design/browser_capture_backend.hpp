@@ -46,7 +46,13 @@ struct BrowserCandidate {
 enum class BrowserProbeFailure {
     none,
     browser_unavailable,
+    // The browser answered and is genuinely below the supported floor.
     browser_incompatible,
+    // The browser's version could not be read at all — it did not answer in
+    // time, exited non-zero, or printed something unrecognized. This says
+    // nothing about which version is installed and must never be reported as a
+    // version verdict.
+    browser_version_unreadable,
     node_unavailable,
     node_incompatible,
     capture_runtime_unavailable,
