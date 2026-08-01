@@ -3,10 +3,12 @@
 #include "browser_capture_backend.hpp"
 #include "browser_capture_ir.hpp"
 #include "browser_capture_workspace.hpp"
+#include "browser_knob_sprites.hpp"
 #include "claude_html_dependencies.hpp"
 #include "html_intake.hpp"
 #include "html_project_stager.hpp"
 
+#include <string>
 #include <system_error>
 
 namespace pulp::import_design {
@@ -162,6 +164,20 @@ BrowserHtmlImportResult import_browser_html(
             "could not lower browser capture to DesignIR: " + lowered.error,
             shape,
             std::move(workspaces)};
+    }
+    // Give each knob whose author declared a pointer its own slice of the
+    // capture, cleaned of the pointer frozen into it, so the design's indicator
+    // can be driven by the parameter instead of standing still. Fails the
+    // import rather than dropping the pointer silently: a declared indicator
+    // that produced nothing is exactly the failure that reads as "it works" in
+    // every pixel gate.
+    std::string sprite_error;
+    if (apply_browser_capture_knob_sprites(
+            *lowered.design_ir, lowered.reference_png, capture_directory,
+            &sprite_error) == 0 &&
+        !sprite_error.empty()) {
+        return BrowserHtmlFailure{
+            3, std::move(sprite_error), shape, std::move(workspaces)};
     }
     return BrowserHtmlCaptured{
         shape,

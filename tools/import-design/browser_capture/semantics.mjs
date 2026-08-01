@@ -106,6 +106,54 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return null;
     }
   };
+  // The moving part of the control, when the author marked it with
+  // data-pulp-indicator: the dot, hairline or wedge the design draws to show
+  // where the value sits. Null when unmarked, for the same reason paintBox is
+  // null when unmarked -- a capture is one flat picture, so nothing in it says
+  // which pixels are the pointer and which are the face, and guessing installs
+  // a live pointer over a design that has none.
+  //
+  // Page coordinates, same frame as the candidate's own bounds and its paint
+  // box, so a consumer can express the pointer relative to the dial without a
+  // second coordinate system.
+  //
+  // The colour is resolved by the browser rather than declared, on the same
+  // reasoning as accentColor: a pack default is not what this control ended up
+  // painted in. background-color first (a dot or wedge is a filled box), then
+  // the border and text colours (a hairline drawn as a border, or a glyph).
+  // An author whose pointer is a gradient or a mask -- where no single computed
+  // colour is the right answer -- states it as the attribute's own value.
+  const indicatorBox = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked) return null;
+      const box = marked.getBoundingClientRect();
+      if (!(box.width > 0) || !(box.height > 0)) return null;
+      const declared = (marked.getAttribute('data-pulp-indicator') || '').trim();
+      const style = window.getComputedStyle(marked);
+      const opaque = value => {
+        const text = (value || '').trim();
+        if (!text || text === 'transparent') return '';
+        // rgba(...) with a zero alpha is the computed form of "not painted".
+        if (text.indexOf('rgba(') === 0 && text.replace(/ /g, '').indexOf(',0)') > 0)
+          return '';
+        return text;
+      };
+      const color = declared ||
+        opaque(style.backgroundColor) ||
+        opaque(style.borderTopColor) ||
+        opaque(style.color);
+      return {
+        left: box.left + window.scrollX,
+        top: box.top + window.scrollY,
+        width: box.width,
+        height: box.height,
+        color: color
+      };
+    } catch (e) {
+      return null;
+    }
+  };
   // The accent this control is actually drawn in, resolved by the browser.
   //
   // Reading the PACK's accent token instead is wrong whenever a panel scopes or
@@ -292,6 +340,10 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // only the author knows which child is the painted control. Inferring it
       // would hard-code one design system's class vocabulary into the importer.
       paint_bounds: paintBox(element),
+      // The pointer inside that box, when the author marked one. Declared for
+      // the same reason the paint box is: the capture cannot tell a pointer
+      // from the face it sits on.
+      indicator: indicatorBox(element),
       accent: accentColor(element),
       data_pulp: data,
       evidence,

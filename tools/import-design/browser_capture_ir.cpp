@@ -203,6 +203,77 @@ bool validate_semantic_report(const fs::path& path,
     return true;
 }
 
+/// A declared pointer, expressed the way the renderer wants it.
+///
+/// `Knob::paint` draws the design's own pointer as a radial stroke swept along
+/// the value arc, and takes its extent as FRACTIONS of the dial's half-extent
+/// (the same convention `hoist_captured_art_knobs` records for the Figma lane)
+/// so the numbers survive any later rescale of the control.
+///
+/// The declared rectangle is not axis-aligned with the radius it sits on: a dot
+/// at 7 o'clock is a square whose diagonal, not its width, spans the radial
+/// direction. Projecting the box's half-extents onto the radial unit vector and
+/// its perpendicular gives the true along-radius reach and across-radius width
+/// for a pointer at ANY angle, which a plain width/height read does not.
+struct DeclaredPointer {
+    float r_in = 0.0f;
+    float r_out = 0.0f;
+    float width = 0.0f;
+};
+
+std::optional<DeclaredPointer> pointer_fractions(double dial_left,
+                                                 double dial_top,
+                                                 double dial_width,
+                                                 double dial_height,
+                                                 double ind_left,
+                                                 double ind_top,
+                                                 double ind_width,
+                                                 double ind_height) {
+    const double half = std::min(dial_width, dial_height) * 0.5;
+    if (!(half > 0.0) || !(ind_width > 0.0) || !(ind_height > 0.0))
+        return std::nullopt;
+    const double cx = dial_left + dial_width * 0.5;
+    const double cy = dial_top + dial_height * 0.5;
+    const double dx = (ind_left + ind_width * 0.5) - cx;
+    const double dy = (ind_top + ind_height * 0.5) - cy;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    // A pointer centred on the dial has no radial direction to sweep along, so
+    // there is nothing to reproduce. Refuse rather than divide by zero and
+    // stamp a pointer that pivots on itself.
+    if (!(distance > 0.0)) return std::nullopt;
+    const double ux = dx / distance;
+    const double uy = dy / distance;
+    const double hx = ind_width * 0.5;
+    const double hy = ind_height * 0.5;
+    // Support function of the axis-aligned box along the radial axis, and along
+    // the axis perpendicular to it.
+    const double along = std::abs(ux) * hx + std::abs(uy) * hy;
+    const double across = std::abs(uy) * hx + std::abs(ux) * hy;
+    DeclaredPointer out;
+    out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
+    out.r_out = static_cast<float>((distance + along) / half);
+    out.width = static_cast<float>((2.0 * across) / half);
+    if (!(out.r_out > out.r_in)) return std::nullopt;
+    return out;
+}
+
+/// A CSS-pixel page rectangle as the capture PNG's own integer pixel rectangle,
+/// serialized "x,y,w,h".
+///
+/// Rounded at the edges rather than at origin+size so a crop and the pointer
+/// inside it stay aligned: rounding a size independently of its origin can move
+/// a boundary by a pixel, which is enough to leave a sliver of the erased
+/// pointer showing at the edge of the rectangle meant to contain it.
+std::string device_pixel_rect(double left, double top,
+                              double width, double height, double dpr) {
+    const long x0 = std::lround(left * dpr);
+    const long y0 = std::lround(top * dpr);
+    const long x1 = std::lround((left + width) * dpr);
+    const long y1 = std::lround((top + height) * dpr);
+    return std::to_string(x0) + "," + std::to_string(y0) + "," +
+           std::to_string(x1 - x0) + "," + std::to_string(y1 - y0);
+}
+
 /// Lower each bound semantic candidate into a control node beneath the
 /// faithful-capture backdrop.
 ///
@@ -222,7 +293,7 @@ bool validate_semantic_report(const fs::path& path,
 /// leaving that part of the picture alone.
 int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
-                            double dx, double dy,
+                            double dx, double dy, double dpr,
                             pulp::view::IRNode& root,
                             int& undeclared_paint_boxes,
                             std::string& error) {
@@ -355,6 +426,52 @@ int lower_semantic_controls(const fs::path& path,
             control.attributes["design_track"] = track;
         if (const auto ind = token("css/text-strong"); !ind.empty())
             control.attributes["design_indicator"] = ind;
+
+        // A knob whose author marked the moving part gets the design's OWN
+        // pointer back, riding its bound parameter. `design_indicator` above is
+        // only a COLOUR -- with no geometry the engine has nothing to move, so
+        // an imported knob showed the pointer frozen wherever the capture
+        // happened to catch it.
+        //
+        // The runtime attributes are exactly the ones the Figma lane's
+        // `hoist_captured_art_knobs` stamps (`knob_ind_*`), so the materializer
+        // and `Knob::paint` need no browser-specific branch. Only the producer
+        // differs: Figma finds a hairline CHILD LAYER, a capture has no layers
+        // at all, so the author declares which pixels are the pointer.
+        //
+        // The two device-pixel rectangles are hand-off state for the sprite
+        // pass (`apply_browser_capture_knob_sprites`), which crops the control
+        // out of the panel capture and erases the pointer baked into that crop.
+        // It consumes and removes them; they are not a runtime contract.
+        const auto indicator = object_member(candidate, "indicator");
+        if (widget == pulp::view::AudioWidgetType::knob && indicator.isObject() &&
+            box.isObject()) {
+            const double dial_left = number_member(box, "left", 0.0);
+            const double dial_top = number_member(box, "top", 0.0);
+            const double dial_w = number_member(box, "width", 0.0);
+            const double dial_h = number_member(box, "height", 0.0);
+            const double ind_left = number_member(indicator, "left", 0.0);
+            const double ind_top = number_member(indicator, "top", 0.0);
+            const double ind_w = number_member(indicator, "width", 0.0);
+            const double ind_h = number_member(indicator, "height", 0.0);
+            if (const auto pointer = pointer_fractions(
+                    dial_left, dial_top, dial_w, dial_h,
+                    ind_left, ind_top, ind_w, ind_h)) {
+                control.attributes["knob_ind_r_in"] =
+                    std::to_string(pointer->r_in);
+                control.attributes["knob_ind_r_out"] =
+                    std::to_string(pointer->r_out);
+                control.attributes["knob_ind_w"] =
+                    std::to_string(pointer->width);
+                if (const auto color = string_member(indicator, "color");
+                    !color.empty())
+                    control.attributes["knob_ind_color"] = color;
+                control.attributes["browser_sprite_crop_px"] =
+                    device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                control.attributes["browser_sprite_indicator_px"] =
+                    device_pixel_rect(ind_left, ind_top, ind_w, ind_h, dpr);
+            }
+        }
 
         root.children.push_back(std::move(control));
         ++lowered;
@@ -827,7 +944,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double control_dy = crop_to_surface ? -surface_top : 0.0;
     int undeclared_paint_boxes = 0;
     const int lowered = lower_semantic_controls(
-        *semantic_report, ir, control_dx, control_dy, ir.root,
+        *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
         undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
