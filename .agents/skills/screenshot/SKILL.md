@@ -82,6 +82,32 @@ empty vessel boxes + filename text; Skia → the gradient beakers/knobs/curves
 all composite and the montage matches the Figma reference. Post-#6223 both
 backends composite the images; Skia still wins on gradient/AA fidelity.
 
+## Scoring an imported capture? Set `PULP_SHOT_NO_RECONCILE=1`
+
+`pulp-screenshot` reconciles oversize absolutely-positioned descendants to the
+capture viewport (`reconcile_oversize_absolute_subtree`). That exists so
+runtime-imported React trees with a hardcoded oversize container still land
+inside the frame, and it is the right default — leave it on for ordinary
+captures.
+
+It is **wrong for a faithful-capture import**, whose backdrop is exactly the
+shape the clamp targets: `position:absolute`, a literal width (e.g. 1280px in a
+920px root), no opposite-edge anchor, carrying bound controls positioned against
+it. The clamp rescales the artwork out from under those controls. Nothing
+errors; you simply score a different image than the one on disk, and the error
+runs in **both** directions — it flatters a broken panel and crushes a correct
+one, so it cannot even be corrected for after the fact.
+
+So any comparison of a rendered panel against a reference render must set the
+opt-out, or it is measuring the clamp:
+
+```bash
+PULP_SHOT_NO_RECONCILE=1 pulp-screenshot --script build.ui.js --backend skia …
+```
+
+Unset, empty, `0` and `false` all mean "reconcile", so a variable left exported
+as `0` cannot silently disable reconciliation for every capture on the machine.
+
 ## Imported-design validation
 
 `pulp import-design --validate --reference <png> --diff <png> [--render-size WxH]`
