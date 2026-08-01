@@ -147,6 +147,39 @@ Two things that WILL bite:
   subscribe) that first publish is lost, and the consumer waits for a change that
   already happened.
 
+## A Worker and a worklet share no heap — a program crosses as bytes
+
+A Worker's wasm and a worklet's wasm are **separate linear memories**, so a
+pointer either one writes is meaningless in the other. That is why a compiled
+`playback::PlaybackProgram` — a graph of `shared_ptr` and `std::vector` — can
+never be published from a compiler Worker to a realtime worklet directly, and
+why `pulp/playback/program_wire.hpp` exists: it is the flat, pointer-free,
+versioned byte range that crossing form takes, with a validating decoder that
+allocates nothing and borrows typed spans straight out of the buffer.
+
+Consequences for anything on the web lane that publishes program state:
+
+- Size the destination with `program_wire_encoded_size` and write into a
+  caller-owned span. Both the encoder and the decoder allocate nothing, which is
+  what lets a producer write straight into a `SharedArrayBuffer` ring and a
+  worklet adopt without touching the allocator.
+- The buffer's base must be eight-byte aligned or the decoder rejects it — a
+  ring's slot stride has to be a multiple of eight, not merely large enough.
+- Payloads crossing this boundary are **untrusted input**. Never hand a worklet
+  bytes it has not run through `decode_program_wire`; the decoder is where
+  truncation, a spliced length, an unknown section, and an out-of-range index
+  all become typed rejections instead of an out-of-bounds read in the render
+  callback.
+- A rejected generation must leave the previously adopted program playing.
+  Adoption is `decode` then swap, never swap then validate.
+- **Adopt on `(producer_epoch, generation)`, never on `generation` alone.** A
+  differing epoch means a different producer: reset carried cursor state and
+  adopt unconditionally, because generations from two producers are not
+  comparable. This is the case a page hits whenever it rebuilds its Worker while
+  the `AudioContext` survives — the new Worker republishes generation 1, and a
+  consumer comparing generations alone refuses every publish from then on and
+  renders a stale program with no diagnostic to distinguish it from silence.
+
 ## The worklet has no second thread
 
 A WAM module runs entirely inside the audio worklet: **there is no `std::thread`
