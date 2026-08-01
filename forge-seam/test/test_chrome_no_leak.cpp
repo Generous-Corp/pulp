@@ -5797,3 +5797,56 @@ TEST_CASE("an uninstallable pick explains itself", "[mention][refusal]") {
     CHECK(refused.state ==
           forge_modular::MentionCandidate::Availability::available);
 }
+
+// The audio interface gets its jacks, like any other vendor module.
+//
+// Reported from the app: cables into AUDIO end at the panel edge and the
+// module shows no jacks, while every other module has them. The port map DOES
+// carry it — Core/AudioInterface2, two inputs at y=286, two outputs at y=334 —
+// so if the drawing docks at the edge, the loader did not find the entry.
+TEST_CASE("the audio interface is placed like any other module",
+          "[portmap][audio]") {
+    const std::string map = R"({
+  "modules": [
+    {
+      "plugin": "Core",
+      "model": "AudioInterface2",
+      "pluginVersion": "2.6.4",
+      "scan": 3,
+      "size": [75.0, 380.0],
+      "params": [{"index": 0, "name": "Level", "x": 37.0, "y": 120.0,
+                  "w": 30.0, "h": 30.0}],
+      "inputs": [
+        {"index": 0, "name": "To \"device output 1\"", "x": 21.5, "y": 286.0},
+        {"index": 1, "name": "To \"device output 2\"", "x": 53.5, "y": 286.0}
+      ],
+      "outputs": [
+        {"index": 0, "name": "From \"device input 1\"", "x": 21.5, "y": 334.0}
+      ]
+    }
+  ]
+})";
+    const auto pm = forge_modular::PortMap::parse(map);
+    const auto* ai = pm.find("Core", "AudioInterface2");
+    REQUIRE(ai != nullptr);
+    CHECK(ai->inputs.size() == 2);
+    CHECK(ai->width == 75.0f);
+    // Whatever else is true, an entry with jacks must not read as unmeasured.
+    CHECK(forge_modular::PortMap::controls_known(*ai));
+
+    // And through the real loader, on a real patch: the audio interface must
+    // come back PLACED with jacks, or its cables dock at the panel edge and it
+    // draws as a face with no holes — which is how it was reported.
+    const auto patch_path = baseline_dir().parent_path() / "app-generated-patch.vcv";
+    REQUIRE(std::filesystem::exists(patch_path));
+    const auto loaded = forge_modular::load_patch(patch_path.string());
+    const forge_modular::RackModule* audio = nullptr;
+    for (const auto& m : loaded.modules)
+        if (m.brand == "Core" && m.name.rfind("AudioInterface", 0) == 0)
+            audio = &m;
+    REQUIRE(audio != nullptr);
+    INFO("placed=" << audio->placed << " ports=" << audio->ports.size()
+                   << " hp=" << audio->hp);
+    CHECK(audio->placed);
+    CHECK(audio->ports.size() >= 2);
+}

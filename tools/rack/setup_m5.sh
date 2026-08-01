@@ -99,6 +99,30 @@ rsync -a --exclude=__pycache__ -e ssh \
       "$HOST:$RESC/examples/forge-modular/" \
       && say "module pack copied" || say "MODULE PACK FAILED TO COPY"
 
+# The port map, if this machine has one.
+#
+# It is where a vendor module's jacks come from, and a machine without one
+# draws every vendor module as a face with no holes, cables docking at the
+# panel edge. That is how it was reported: our own modules had their jacks --
+# they come from their manifests -- and the Core audio interface, the one
+# vendor module in the patch, had none.
+#
+# Core's modules are compiled into Rack, so their geometry is the same
+# everywhere and carrying the measurement is honest. Anything measured here
+# for a plugin the target does not have is simply never looked up.
+PORTMAP="$HOME/Library/Application Support/Rack2/forge-portmap.json"
+if [ "$CHECK" -eq 0 ] && [ -f "$PORTMAP" ]; then
+    remote 'mkdir -p ~/Library/Application\ Support/Rack2' 2>/dev/null
+    if scp -q "$PORTMAP" "$HOST:Library/Application Support/Rack2/forge-portmap.json" 2>/dev/null; then
+        say "port map copied ($(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["modules"]))' "$PORTMAP" 2>/dev/null || echo '?') modules)"
+    else
+        say "PORT MAP FAILED TO COPY — vendor modules will draw without jacks"
+    fi
+elif [ ! -f "$PORTMAP" ]; then
+    say "no port map here to copy — vendor modules draw without jacks until"
+    say "  somebody presses SCAN in CARTOG on the target"
+fi
+
 step "6. proving the toolchain works there"
 remote '
 cd ~/Library/Application\ Support/"Forge Modular"/tools/rack 2>/dev/null || {
