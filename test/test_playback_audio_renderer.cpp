@@ -1,5 +1,7 @@
 #include "playback_audio_renderer_test_support.hpp"
 
+#include <random>
+
 TEST_CASE("audio renderer decodes WAV bytes into the immutable asset pool") {
     const std::array<std::int16_t, 4> samples{0, 16'384, -16'384, 32'767};
     const auto bytes = mono_pcm16_wav(samples);
@@ -977,4 +979,100 @@ TEST_CASE("expired compile deadlines stop an in-progress audio link pass") {
     REQUIRE_FALSE(store.has_value());
     executor.drain();
     REQUIRE(store.has_value());
+}
+
+namespace {
+
+// A deterministic, fully specified generator: mt19937's output sequence is
+// fixed by the standard, and the mapping to [-1, 1] avoids the distribution
+// templates, whose output is implementation-defined. Two seeds give two
+// uncorrelated takes, which is the case a crossfade shape has to answer for —
+// correlated material sums coherently and passes under either shape, proving
+// nothing.
+std::vector<float> uncorrelated_noise(std::size_t frames, std::uint32_t seed) {
+    std::vector<float> samples(frames);
+    std::mt19937 engine(seed);
+    for (auto& sample : samples)
+        sample = 0.25f * (static_cast<float>(engine()) / 2'147'483'647.5f - 1.0f);
+    return samples;
+}
+
+double window_power_db(const std::vector<float>& samples, std::size_t begin, std::size_t end) {
+    REQUIRE(end > begin);
+    REQUIRE(end <= samples.size());
+    double sum = 0.0;
+    for (std::size_t index = begin; index < end; ++index)
+        sum += static_cast<double>(samples[index]) * static_cast<double>(samples[index]);
+    return 10.0 * std::log10(sum / static_cast<double>(end - begin));
+}
+
+} // namespace
+
+TEST_CASE("complementary equal-power fades hold power across a crossfade that linear dips") {
+    constexpr std::size_t kClipFrames = 16'384;
+    constexpr std::uint64_t kCrossfadeFrames = 8'192;
+    constexpr std::size_t kSecondStart = kClipFrames - kCrossfadeFrames;
+    constexpr std::size_t kTotalFrames = kSecondStart + kClipFrames;
+
+    auto render = [](ClipFadeShape shape) {
+        auto outgoing = absolute_media_clip(100, 0, kClipFrames, 3, 0, kClipFrames,
+                                            {.gain_linear = 1.0f,
+                                             .fade_in_duration = 0,
+                                             .fade_out_duration = kCrossfadeFrames,
+                                             .fade_shape = shape});
+        auto incoming = absolute_media_clip(101, static_cast<std::int64_t>(kSecondStart),
+                                            kClipFrames, 4, 0, kClipFrames,
+                                            {.gain_linear = 1.0f,
+                                             .fade_in_duration = kCrossfadeFrames,
+                                             .fade_out_duration = 0,
+                                             .fade_shape = shape});
+        auto project = project_with_tracks(
+            {take(Track::create({10}, "outgoing", {outgoing})),
+             take(Track::create({11}, "incoming", {incoming}))},
+            {{3, "outgoing", kClipFrames, {48'000, 1}}, {4, "incoming", kClipFrames, {48'000, 1}}});
+        CompiledFixture compiled(project, map_120(),
+                                 pool({{3, audio_data({uncorrelated_noise(kClipFrames, 20'260'731)})},
+                                       {4, audio_data({uncorrelated_noise(kClipFrames, 90'210'419)})}}));
+        auto program = compiled.store.read();
+        Output output(1, kTotalFrames);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *program, snapshot(*program, static_cast<std::uint32_t>(kTotalFrames)),
+                    output.view()) == AudioRenderStatus::Rendered);
+        return output.storage[0];
+    };
+
+    // Steady state: inside the outgoing clip, before its fade begins, with the
+    // incoming clip not yet started.
+    constexpr std::size_t kSteadyBegin = 1'024;
+    constexpr std::size_t kSteadyEnd = 5'120;
+    // A window centred on the crossfade, narrow enough that it reports the
+    // midpoint rather than an average over the whole transition. The dip lives
+    // at the midpoint; averaged over the full region a linear pair loses only
+    // about 1.8 dB, which understates what it sounds like.
+    constexpr std::size_t kMidpoint = kSecondStart + kCrossfadeFrames / 2;
+    constexpr std::size_t kMidpointBegin = kMidpoint - kCrossfadeFrames / 20;
+    constexpr std::size_t kMidpointEnd = kMidpoint + kCrossfadeFrames / 20;
+
+    const auto equal_power = render(ClipFadeShape::EqualPower);
+    const auto steady_db = window_power_db(equal_power, kSteadyBegin, kSteadyEnd);
+    const auto equal_power_midpoint_db =
+        window_power_db(equal_power, kMidpointBegin, kMidpointEnd);
+    const auto equal_power_region_db =
+        window_power_db(equal_power, kSecondStart, kSecondStart + kCrossfadeFrames);
+    INFO("steady " << steady_db << " dB, equal-power midpoint " << equal_power_midpoint_db
+                   << " dB, equal-power region " << equal_power_region_db << " dB");
+    REQUIRE_THAT(equal_power_midpoint_db, WithinAbs(steady_db, 0.5));
+    REQUIRE_THAT(equal_power_region_db, WithinAbs(steady_db, 0.5));
+
+    // The control that makes the assertion above falsifiable: the same
+    // measurement over the same material with the linear shape must dip by
+    // about 3 dB, so a green equal-power result cannot be coming from the
+    // measurement being insensitive to the curve.
+    const auto linear = render(ClipFadeShape::Linear);
+    const auto linear_steady_db = window_power_db(linear, kSteadyBegin, kSteadyEnd);
+    const auto linear_midpoint_db = window_power_db(linear, kMidpointBegin, kMidpointEnd);
+    INFO("linear steady " << linear_steady_db << " dB, linear midpoint " << linear_midpoint_db
+                          << " dB");
+    REQUIRE_THAT(linear_steady_db, WithinAbs(steady_db, 1.0e-9));
+    REQUIRE_THAT(linear_midpoint_db - linear_steady_db, WithinAbs(-3.01, 0.5));
 }

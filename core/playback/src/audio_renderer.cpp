@@ -215,7 +215,9 @@ validate_clip_program(const AudioClipRendererProgram& clip,
     }
     if (!std::isfinite(clip.gain_linear) || clip.gain_linear < 0.0f ||
         clip.fade_in_frames > clip.timeline_frame_count ||
-        clip.fade_out_frames > clip.timeline_frame_count)
+        clip.fade_out_frames > clip.timeline_frame_count ||
+        (clip.fade_shape != timeline::ClipFadeShape::Linear &&
+         clip.fade_shape != timeline::ClipFadeShape::EqualPower))
         return error(AudioRendererErrorCode::InvalidFade);
     if (!clip.conversion_artifact ||
         !clip.conversion_artifact->matches(clip.audio, clip.source_start, clip.source_frame_count,
@@ -582,6 +584,7 @@ detail::compile_audio_clip_program_cached(
             playback.gain_linear,
             fade_in_frames,
             fade_out_frames,
+            playback.fade_shape,
             AudioClipRendererProgram::SourceKind::ArrangementClip,
             0,
             AudioClipRendererProgram::TimeDomain::Musical,
@@ -645,6 +648,7 @@ detail::compile_audio_clip_program_cached(
         playback.gain_linear,
         fade_in_frames,
         fade_out_frames,
+        playback.fade_shape,
         AudioClipRendererProgram::SourceKind::ArrangementClip,
         0,
         clip.time_anchor() == timeline::ClipTimeAnchor::Musical
@@ -820,6 +824,7 @@ detail::compile_take_comp_segment_program_cached(
         1.0f,
         0,
         0,
+        timeline::ClipFadeShape::Linear,
         AudioClipRendererProgram::SourceKind::TakeCompSegment,
         static_cast<std::uint32_t>(segment_index + 1),
         AudioClipRendererProgram::TimeDomain::Absolute,
@@ -894,6 +899,7 @@ detail::compile_track_freeze_program_cached(const timeline::Track& track,
         1.0f,
         0,
         0,
+        timeline::ClipFadeShape::Linear,
         AudioClipRendererProgram::SourceKind::FrozenTrack,
         0,
         AudioClipRendererProgram::TimeDomain::Absolute,

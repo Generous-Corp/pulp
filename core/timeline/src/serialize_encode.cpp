@@ -455,11 +455,22 @@ bool write_clip(EncodeContext& context, const Clip& clip) {
                 time_conform = "stretch";
                 break;
         }
+        std::string_view fade_shape;
+        switch (playback.fade_shape) {
+            case ClipFadeShape::Linear:
+                fade_shape = "linear";
+                break;
+            case ClipFadeShape::EqualPower:
+                fade_shape = "equal_power";
+                break;
+        }
         if (!context.writer.append("{\"content\":") || !write_content(context, clip.content()) ||
             !context.writer.append(",\"fade_in_duration\":") ||
             !context.writer.u64(playback.fade_in_duration, true) ||
             !context.writer.append(",\"fade_out_duration\":") ||
             !context.writer.u64(playback.fade_out_duration, true) ||
+            !context.writer.append(",\"fade_shape\":") ||
+            !context.writer.quoted(fade_shape) ||
             !context.writer.append(",\"gain_linear_bits\":") ||
             !context.writer.u64(std::bit_cast<std::uint32_t>(playback.gain_linear), true) ||
             !context.writer.append(",\"id\":") || !context.writer.u64(clip.id().value, true) ||

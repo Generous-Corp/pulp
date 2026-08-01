@@ -71,8 +71,16 @@ void record_clip(ConceptCensus& out, const timeline::Project& project,
     const timeline::ClipPlaybackProperties playback = clip.playback_properties();
     if (playback.gain_linear != 1.0f)
         out.record(Concept::ClipGain, id, limits);
-    if (playback.fade_in_duration != 0 || playback.fade_out_duration != 0)
+    if (playback.fade_in_duration != 0 || playback.fade_out_duration != 0) {
         out.record(Concept::ClipFades, id, limits);
+        // Additive, not an alternative: the durations are still there, and a
+        // format that carries them satisfies ClipFades honestly. A non-linear
+        // curve is the separable part such a format would silently flatten, so
+        // it needs its own concept for the loss to be nameable. A shape on a
+        // clip with no fade region is unobservable and records nothing.
+        if (playback.fade_shape != timeline::ClipFadeShape::Linear)
+            out.record(Concept::ClipFadeShape, id, limits);
+    }
 }
 
 void record_track(ConceptCensus& out, const timeline::Project& project,
