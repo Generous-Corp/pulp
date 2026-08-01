@@ -27,12 +27,25 @@ and what will bite whoever picks it up.
 - **Step 6.** M5 carries all four bundles; AU reads `FrgR` (was a stale
   `FgMd`); Gatekeeper accepts on a machine that did not build them; the
   toolchain proves itself there — 54 idioms, 114 negative controls, 0 wrong.
-- **Step 7, partly.** On the M5: AU, VST3 and CLAP all installed with verifying
-  signatures. Locally: CLI PASS — a patch generated and held its idiom. The
-  M5's CLI does NOT pass; see item 1.
-- **The dozen prompts**: 6 held, 6 did not. All 12 now RESOLVE to an idiom,
-  where 2 previously matched nothing. Kept at
-  `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt`.
+- **Step 7, partly.** The M5 carries the current build of all four bundles,
+  Developer ID signed, **notarized Accepted and stapled**; the app assesses as
+  *Notarized Developer ID* and the three plugins validate their staples.
+  (`spctl --assess --type exec` on a plugin says "does not seem to be an app" —
+  that is the wrong assessment type for a bundle, not a finding.)
+  Locally: CLI PASS — a patch generated and held its idiom.
+
+  The M5's CLI does NOT pass, and until today the instrument could not have
+  told you either way: `prove_surfaces.sh` promised FORGE_HOST in its header
+  and never read it, so naming a remote host ran the proof HERE and printed
+  PASS. It re-execs over SSH now and refuses to fall back. The honest failure
+  is the login keychain: over SSH the model CLI cannot reach its credential,
+  so that surface needs a window on the M5 or an unlocked keychain.
+- **The dozen prompts**: 12 held, 0 did not — run end to end, four of them
+  reaching their idiom by implication rather than by name. Every failure on
+  the way was the checker rejecting a correct patch, or the model being told
+  nothing about what it got wrong; never patch quality. Kept at
+  `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt`, with every
+  failed attempt's patch beside it.
 
 ---
 
