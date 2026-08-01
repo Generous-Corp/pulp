@@ -68,6 +68,35 @@ std::filesystem::path baseline_dir() {
 
 bool updating() { return std::getenv("FORGE_NO_LEAK_UPDATE") != nullptr; }
 
+/// A patch the generator really produced, or the one that travels with these
+/// tests.
+///
+/// Four tests hardcoded "/tmp/ambient-drone.vcv" and skipped when it was
+/// missing — which it has been since macOS cleared /tmp, so all four have been
+/// reporting as passes while running nothing. The generator writes into the
+/// installed pack, and a recorded patch sits beside these tests, so there is
+/// no need to depend on a temp file that outlived nothing.
+std::string a_real_patch() {
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path dir =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/patches";
+    std::error_code ec;
+    std::filesystem::path newest;
+    std::filesystem::file_time_type best{};
+    if (std::filesystem::exists(dir, ec)) {
+        for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+            if (e.path().extension() != ".vcv") continue;
+            const auto when = std::filesystem::last_write_time(e, ec);
+            if (newest.empty() || when > best) { newest = e.path(); best = when; }
+        }
+    }
+    if (!newest.empty()) return newest.string();
+    const auto travelling = baseline_dir().parent_path() / "app-generated-patch.vcv";
+    return std::filesystem::exists(travelling) ? travelling.string() : std::string{};
+}
+
+
 /// Render against an empty, private project store.
 ///
 /// The home shelf renders whatever projects are on disk, so these baselines were
@@ -3641,10 +3670,17 @@ TEST_CASE("Ask answers about a real patch, through the app's own path",
     // about whether the app reaches it -- the app had no engine connected at
     // all until this existed, so Build did nothing there while the command
     // line worked perfectly.
-    const std::string tools = "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
-    const std::string patch = "/tmp/ambient-drone.vcv";
-    if (!std::filesystem::exists(tools) || !std::filesystem::exists(patch)) {
-        WARN("toolchain or generated patch not present; skipping");
+    // The INSTALLED toolchain, not a path on one machine's disk. Hardcoding a
+    // checkout meant this skipped anywhere else — and skipping is reported as
+    // a pass.
+    const char* home = std::getenv("HOME");
+    const std::string tools =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/tools/rack";
+    const std::string patch = a_real_patch();
+    if (!std::filesystem::exists(tools) || patch.empty()) {
+        WARN("no installed toolchain or generated patch — skipped, NOT passed. "
+             "Run tools/rack/install_toolchain.sh.");
         return;
     }
 
@@ -3701,11 +3737,8 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
     // fixtures. This reads the .vcv the generator actually produced -- the
     // same file Rack opened -- so the preview cannot be right about a patch
     // that does not exist.
-    const std::string patch = "/tmp/ambient-drone.vcv";
-    if (!std::filesystem::exists(patch)) {
-        WARN("no generated patch present; skipping");
-        return;
-    }
+    const std::string patch = a_real_patch();
+    REQUIRE_FALSE(patch.empty());
 
     const auto loaded = forge_modular::load_patch(patch);
     INFO(loaded.error);
@@ -3733,8 +3766,16 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
         if (c.role == forge_modular::SignalRole::audio) ++audio;
         if (c.role == forge_modular::SignalRole::mod) ++mod;
     }
+    // Audio is the one role every generated patch must carry: the gate
+    // refuses a patch whose cables into the audio interface are all silent,
+    // so a patch that exists reaches the interface.
     CHECK(audio > 0);
-    CHECK(mod > 0);
+    // Modulation is NOT required. This asserted it because it ran against one
+    // hardcoded patch that happened to have some; run against whatever the
+    // generator last produced, a drone cluster with five cables and no
+    // modulation fails it — and the patch is perfectly correct. A test that
+    // only holds for one file is a test of that file.
+    INFO("modulation cables: " << mod);
 
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
@@ -4225,11 +4266,8 @@ TEST_CASE("a finished patch shows itself and can be opened", "[phase7][artifact]
     auto* chrome = shell.chrome();
     chrome->enter_build();
 
-    const std::string real = "/tmp/ambient-drone.vcv";
-    if (!std::filesystem::exists(real)) {
-        WARN("no generated patch present; skipping");
-        return;
-    }
+    const std::string real = a_real_patch();
+    REQUIRE_FALSE(real.empty());
 
     const auto log = std::filesystem::temp_directory_path() / "fm-patchdone.log";
     std::filesystem::remove(log);
@@ -4335,11 +4373,8 @@ TEST_CASE("Open in Rack picks a sensible place to open", "[phase7][artifact]") {
     REQUIRE(view != nullptr);
     shell.chrome()->enter_build();
 
-    const std::string real = "/tmp/ambient-drone.vcv";
-    if (!std::filesystem::exists(real)) {
-        WARN("no generated patch present; skipping");
-        return;
-    }
+    const std::string real = a_real_patch();
+    REQUIRE_FALSE(real.empty());
     const auto log = std::filesystem::temp_directory_path() / "fm-where.log";
     std::filesystem::remove(log);
     shell.watch_build_log(log.string());
