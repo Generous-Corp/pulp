@@ -284,6 +284,16 @@ that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
 the matching argv flags) can be exercised end-to-end on every PR
 without a real window or virtual display.
 
+A screenshot-only run opens **no audio device** — no audio system, no
+device, no render callback — so it can never make sound on a shared or
+unattended machine. Meters and other live-signal UI therefore read zero
+in the capture, and the Settings tab lists no devices. Two ways to keep
+audio live: ask for a readout in the same run (`--audio-probe-json`,
+`--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`,
+each produced by the render callback), or opt in explicitly with
+`PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
+when the pixels themselves must show live signal.
+
 #### Live Audio Inspector flags
 
 The live Audio Inspector is a floating developer window that observes the
