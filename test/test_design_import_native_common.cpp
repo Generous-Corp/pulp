@@ -9,6 +9,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -768,4 +769,64 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+}
+
+TEST_CASE("an imported design names the widget colours it did not state",
+          "[view][import][native][tokens]") {
+    // A widget key the design supplies no colour for is left unset, and the
+    // widget paints its own built-in default. That is invisible in the pixels
+    // — the render simply carries a colour from nowhere — so materialization
+    // has to say which keys went unfilled. Without this the "no fallback
+    // palette" contract has no observable failure mode.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.tokens.colors["css/accent"] = "#C4622A";  // stated; must NOT be named
+
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.diagnostics_out = &diagnostics;
+    auto root = build_native_view_tree(ir, {}, options);
+    REQUIRE(root != nullptr);
+
+    const auto gap = std::find_if(
+        diagnostics.begin(), diagnostics.end(),
+        [](const ImportDiagnostic& d) { return d.code == "design-token-unmapped"; });
+    REQUIRE(gap != diagnostics.end());
+    CHECK(gap->severity == ImportDiagnosticSeverity::warning);
+    CHECK(gap->kind == ImportDiagnosticKind::fallback_used);
+    // The design said nothing about a signal ramp, so the meter's zones are
+    // unfilled and must be named.
+    CHECK(gap->message.find("meter.green") != std::string::npos);
+    // It DID state an accent, so the keys that accent supplies are not gaps.
+    CHECK(gap->message.find("control.fill") == std::string::npos);
+    CHECK(gap->message.find("knob.arc,") == std::string::npos);
+}
+
+TEST_CASE("a design that states every widget colour reports no gap",
+          "[view][import][native][tokens]") {
+    // The other half of the contract: the diagnostic must be able to be
+    // absent, or its presence above proves nothing.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    for (const char* key : {"accent.primary", "accent.secondary", "accent.error",
+                            "accent.warning", "accent.success", "accent.info",
+                            "control.fill", "control.track", "control.thumb",
+                            "control.border", "knob.arc", "knob.arc.bg",
+                            "knob.thumb", "slider.track", "slider.fill",
+                            "slider.thumb", "meter.green", "meter.yellow",
+                            "meter.red", "waveform.line", "focus.ring"})
+        ir.tokens.colors[key] = "#C4622A";
+
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.diagnostics_out = &diagnostics;
+    auto root = build_native_view_tree(ir, {}, options);
+    REQUIRE(root != nullptr);
+
+    CHECK(std::none_of(diagnostics.begin(), diagnostics.end(),
+                       [](const ImportDiagnostic& d) {
+                           return d.code == "design-token-unmapped";
+                       }));
 }
