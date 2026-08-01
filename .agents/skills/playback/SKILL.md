@@ -398,6 +398,20 @@ remaining-frame count as exact integer arithmetic, the fractional one clamps a
 `long double` that can land past the last frame. Anything that reads the
 authored shape belongs in `fade_gain`, which both call.
 
+The fractional overload narrows progress to `float` before it calls `fade_gain`,
+and that narrowing is load-bearing rather than cosmetic. `fade_gain` is a
+template that deduces its type from the argument, so handing it the `long double`
+position instantiates a double-width sin for `EqualPower` — once per output
+sample on the realtime stretch path — while the gain is narrowed to float on
+return regardless, so the width buys nothing. Nothing guards this: the RT probes
+look for allocation, and a wider sin does not allocate. It is also easy to
+under-read on a Mac, because the lowering is arch-dependent — `long double` is
+`double` on arm64, so the wide call shows up there as `_sin`, where x86_64 gets
+the 80-bit `_sinl`. Verify on the emitted object rather than at the source level,
+since a cast that deduction discards still compiles:
+`nm -u build/core/playback/CMakeFiles/pulp-playback.dir/src/realtime_stretch_renderer.cpp.o | grep -i sin`
+should report `_sinf` and nothing wider.
+
 Fade **progress is measured in frames**, in every shape. The compiler converts
 authored fade endpoints from ticks to frames
 (`audio_renderer.cpp`, the musical branch of the clip lowering); the renderer
@@ -686,11 +700,56 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   wall-clock lookahead and the largest audio callback, while
   `StreamingSampleSource` independently caps producer read-ahead at the
   declaration's horizon.
+- `GeneratedEventSource` is a bounded push handoff for producer-generated MIDI:
+  keep revisable staging separate from immutable committed SPSC slots, begin a
+  nonzero strictly newer playback epoch quiescently on seek/restart, and commit
+  complete half-open monotonic-tick batches only at the declared quantization
+  grid. Validate each UMP word count from its message type. Audio pulls never
+  regress the permanent elapsed frontier; a missing or discarded span reports
+  exact lag, emits no generated events, and requests active-note flush. A
+  deadline miss selects only the producer-declared fallback policy.
 - A new `core/playback/src/*.cpp` is compiled by
   `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
+
+## A refusal of something authorable costs a written reason
+
+`tools/scripts/negative_capability_check.py` (ctest
+`playback-negative-capability`, selftest
+`playback-negative-capability-selftest`) reads the refusal-shaped members of
+`CompileErrorCode` — anything spelled `Unsupported`, `NotSupported`,
+`Rejected`, `Refused`, or `Disallowed` — finds every site that raises one, and
+decides whether the refused construct is reachable from the timeline authoring
+surface. An authorable refusal needs an entry in
+`tools/scripts/negative_capability_allowlist.json` carrying an owner, a
+`status` of `live-defect` or `intended`, and a reason.
+
+The class it guards is worth naming: a construct a user **can** author and the
+compiler then refuses is worse than the construct not existing. The document
+saves, reloads, copies and round-trips, and only playback says no — with
+nothing at authoring time to warn anyone. The gate does not forbid these; it
+forbids adding one for free.
+
+A refusal reads as authorable when the source above the raise reads a symbol
+declared in `core/timeline/include/pulp/timeline/**` or named by
+`core/timeline/schema/timeline_schema.json` — a model accessor, a model type,
+an enum constant, a schema field. A refusal that only inspects internal
+lowering state passes without an entry.
+
+**Three things it cannot see, so do not read a pass as "the compiler accepts
+everything authorable":** a refusal expressed by dropping, clamping, or
+substituting rather than by naming a code; a refusal raised through a different
+error enum, such as an importer's or a renderer's; and an authored read that
+sits further than `AUTHORING_LOOKBACK_LINES` above the raise or arrives through
+an internal struct field that no longer names its model origin.
+
+All three seeded entries are `live-defect` — expression lanes on a clip,
+expression lanes on a trimmed nested clip, and the nested-sequence flattening
+refusals. They are tracked, not resolved. Removing one from the allowlist is
+how you assert the refusal is gone; the gate fails an entry whose raise site no
+longer exists, so a reason cannot outlive its code.
 
 ## Dependency floor
 
@@ -700,6 +759,28 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
 `target_link_libraries` in its `CMakeLists.txt`. Both axes must stay inside the
 declared set, so reaching for a format, host, or view type fails the gate even
 when the build would have linked.
+
+**The link axis is transitive, and playback is the module that shows why.** The
+check follows what a linked library itself links, to a fixed point, so a row
+cannot stay green by depending on a module that breaches it. `core/playback`
+links `pulp::audio`, which links `pulp::state`, `pulp::signal` and
+`pulp::sample-bank-manifest` PUBLIC and, through `pulp::state`, `pulp::events`
+PRIVATE — four modules the row never named. Those are recorded in
+`LINK_CLOSURE_DEBT`, deliberately *not* folded into `MODULE_FLOORS`: a floor row
+also governs which headers the module's sources may include, so widening the row
+would have granted `core/playback` the right to `#include <pulp/state/...>` as a
+side effect of writing down a link fact. An entry there is a debt, not a
+permission — cut the underlying link and delete the entry, and the gate tightens
+with no other edit.
+
+The PUBLIC/PRIVATE split survives the trip and matters for a
+pay-for-what-you-use claim: `state`, `signal` and `sample-bank-manifest` arrive
+PUBLIC, so their include directories propagate and a playback consumer genuinely
+can reach `<pulp/state/...>` today; `events` is PRIVATE and link-only; and
+`signal` is an INTERFACE library, so paying for it costs headers rather than
+object code. Whether playback *should* reach the state store is an open design
+question the debt list does not answer — it exists so the gate can police
+whatever answer is reached.
 
 The table holds every engine-adjacent module, not just playback, and the selftest
 is generic over it. Adding a module there is how a new `core/` target gets the
@@ -725,6 +806,34 @@ direction. An editor learns where the playhead is through
 audio — so a plugin that draws a piano roll over its own engine consumes the
 editor without acquiring a transport.
 
+**The module does not acquire a transport; the plugin binary does.** That row
+governs `core/timeline_editor`'s own includes and links, and it holds. It says
+nothing about what the plugin packaging adds around it, and measuring the other
+direction shows the difference. `tools/cmake/PulpLinkFloor.cmake` walks CMake's
+resolved link graph for a consumer; run over `StepSequencer_CLAP` it reports:
+
+```
+playback: StepSequencer_CLAP -> pulp-view -> pulp-view-script
+            -> pulp-view-core -> pulp-host -> pulp-playback
+```
+
+VST3, CLAP and AU each link `${_PULP_VIEW_TARGET}` unconditionally in
+`PulpPluginFormats.cmake` — drawing or not — and the view stack reaches the
+plugin host and, through it, this module. So every Pulp plugin links `playback`
+today, and the outbound gate is right to stay green about it: nothing in
+`core/playback` or `core/timeline_editor` reached upward to cause it. Cite the
+editor row for what a *module* costs, and a link-floor report for what a
+*binary* costs; they are different claims and only one of them is about the
+artifact a host loads. The inbound side is documented in the `timeline` skill.
+
+Read that report as an upper bound and nothing more. `TIER` proves only that
+nothing outside it is reached, so a tier can name `playback` — or the editor
+rung — while the binary links neither, and still pass. If what you need to show
+is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
+`REQUIRE` list, which fails naming any module that is absent from the measured
+closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
+by it; it does not link `timeline_editor` at all.
+
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
 compiled program. That is correct for a block renderer, which consumes the
@@ -734,6 +843,16 @@ Never widen the UI-facing seam by passing a `TransportSnapshot` — project the
 fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_generation`
 is what lets a view tell a stale reading from a live one without holding anything
 a program swap can invalidate.
+
+A value type both rungs genuinely need goes in `core/timebase`, never duplicated
+into each. `timebase` is the whole of what the two floors have in common beyond
+`platform`/`runtime`, so it is the only home that does not require widening a
+row. `LoopRegion` is the worked example: `playback::LoopRegion` is an alias of
+`timebase::LoopRegion` beside the existing `MeterSignature` one, and
+`UiPlayhead::loop` names the same type — a loop set on the transport reaches an
+editor reading with nothing to convert. Do not read this as licence to share the
+*readings* themselves: `TransportPlayhead` and `UiPlayhead` stay separate
+because their fields differ in kind, not merely in spelling.
 
 ### Position leaves the transport in two directions, one SeqLock each
 

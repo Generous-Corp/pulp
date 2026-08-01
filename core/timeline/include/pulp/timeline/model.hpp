@@ -170,6 +170,11 @@ class Track {
     runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
     /// Returns a snapshot with finite, in-range gain and pan.
     runtime::Result<Track, ModelError> with_mixer(TrackMixer mixer) const;
+    /// Returns a snapshot carrying a replacement authored name.
+    ///
+    /// Owned collection storage and the compile-structure token are shared with
+    /// the old Track: a name is a label, not a processing property.
+    Track with_name(std::string name) const;
 
     /// Returns the stable track identity.
     ItemId id() const noexcept;
@@ -663,6 +668,18 @@ class Sequence {
     /// the requested position.
     runtime::Result<Sequence, ModelError>
     insert_track(Track track, std::optional<ItemId> before_track_id = std::nullopt) const;
+    /// Moves a track before an existing track in authored order, or to the end.
+    ///
+    /// This rewrites `track_order()` and nothing else: `tracks()`, every index
+    /// derived from it, and the compile-structure token all carry over, because
+    /// a reorder changes display order alone. Composing it out of erase and
+    /// insert would instead rebuild the whole subtree, mint a fresh compile
+    /// token, and refuse outright for a track whose clip a launcher slot
+    /// sources.
+    ///
+    /// `before_track_id` may not name the moved track itself.
+    runtime::Result<Sequence, ModelError>
+    move_track(ItemId track_id, std::optional<ItemId> before_track_id = std::nullopt) const;
     /// Removes a track and its owned clips by identity.
     runtime::Result<Sequence, ModelError> erase_track(ItemId id) const;
     /// Inserts a validated marker and returns a new snapshot.
