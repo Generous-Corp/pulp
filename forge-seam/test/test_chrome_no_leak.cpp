@@ -5749,6 +5749,13 @@ TEST_CASE("arrows move the mention list without clicking into it",
     // The hook has to be on the FIELD. The window host dispatches to its own
     // root, which for the standalone is an outer chrome the shell never sees,
     // so a hook on the shell's view is never reached.
+    // Polled BEFORE the wrap, the way the app does it: the editor's tree
+    // exists and is built, and the chrome inserts it into the window root
+    // afterwards. A hook installed here lands on the inner root, and if it
+    // latches it stays there — the window never calls it and the arrows do
+    // nothing, which is what was reported after the first attempt at this.
+    shell.on_poll();
+
     // WRAP the shell's view, the way the standalone does.
     //
     // Without this the shell's own view IS the root, a hook on it is reached,

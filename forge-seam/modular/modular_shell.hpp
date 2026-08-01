@@ -353,7 +353,10 @@ private:
     void offer_random();
 
     MentionOverlay mentions_;
-    bool key_hook_installed_ = false;
+    /// The view the mention keys are installed on, so a tree that is
+    /// re-parented later gets them on its NEW root rather than keeping
+    /// them on a root the window no longer dispatches to.
+    pulp::view::View* key_hook_root_ = nullptr;
     /// What the last shown rack lacks measurements for, and how to fix it.
     /// Exposed so a test can read it rather than scrape the chrome.
     std::string unmapped_note_;

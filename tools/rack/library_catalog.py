@@ -85,6 +85,17 @@ def fetch(argv):
 
     index = load_index()
     todo = []
+    # Premium plugins are counted and not fetched, so the gap is a number
+    # somebody can see rather than an absence. VCV publishes 67 of them and not
+    # one is open source, so their MODULE lists exist nowhere public — the @
+    # list can offer only what it can name, and every module it does offer is
+    # therefore from a free plugin. That is what lets the row say "GET · FREE"
+    # honestly; test_catalog_is_free.py holds it to that.
+    premium = sum(1 for m in manifests.values()
+                  if str(m.get("premium", "")).lower() == "true")
+    if premium:
+        print(f"  {premium} premium plugin(s) skipped — no public module list")
+
     for slug, m in sorted(manifests.items()):
         if str(m.get("openSource", "")).lower() != "true":
             continue

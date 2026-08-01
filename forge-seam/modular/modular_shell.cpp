@@ -1389,14 +1389,27 @@ void ForgeModularShell::ensure_key_hook() {
     //
     // Done once, from the poll, because the tree is not attached when the
     // composer is built and the walk would stop short.
-    if (key_hook_installed_) return;
     auto* c = chrome();
     if (!c) return;
     auto* input = c->prompt_input();
     if (!input || !input->parent()) return;
     pulp::view::View* top = input;
     while (top->parent()) top = top->parent();
-    key_hook_installed_ = true;
+
+    // Re-checked every poll, NOT latched on a bool.
+    //
+    // The window host dispatches to whatever view was handed to
+    // WindowHost::create — for the standalone that is the chrome's
+    // window_root, which WRAPS the editor. The editor's tree is built first
+    // and inserted into it after, so a hook installed at the first poll where
+    // the field has a parent lands on the INNER root and stays there: the
+    // window never calls it and the arrows do nothing, which is exactly what
+    // was reported after the first attempt at this.
+    //
+    // Comparing the view we installed on costs a pointer and survives the tree
+    // being re-parented at any time.
+    if (top == key_hook_root_) return;
+    key_hook_root_ = top;
     auto prior = std::move(top->on_global_key);
     top->on_global_key = [this, prior = std::move(prior)](
                              const pulp::view::KeyEvent& e) {
