@@ -50,6 +50,10 @@ on:
         description: 'Merge-ready age (min) that, sustained two sweeps, opens an issue'
         required: false
         default: '45'
+      queue_threshold_minutes:
+        description: 'Merge-queue head age (min) without a new batch that opens an issue'
+        required: false
+        default: '30'
       dry_run:
         description: 'Log findings but do not touch the tracking issue'
         required: false
@@ -73,6 +77,7 @@ jobs:
 
     env:
       THRESHOLD_MINUTES: ${{ github.event.inputs.threshold_minutes || '45' }}
+      QUEUE_THRESHOLD_MINUTES: ${{ github.event.inputs.queue_threshold_minutes || '30' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       TRACKING_TITLE: 'Merge stall: green PRs are not merging'
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -124,6 +129,7 @@ jobs:
               --repo '${{ github.repository }}' \
               --base main \
               --threshold-minutes "${THRESHOLD_MINUTES}" \
+              --queue-threshold-minutes "${QUEUE_THRESHOLD_MINUTES}" \
               --prev-state prev/state.json \
               --findings-out findings.json \
               --snapshot-out snapshot.json \
@@ -132,8 +138,10 @@ jobs:
               --summary-out "${GITHUB_STEP_SUMMARY}" \
               | tee scan.log
 
-          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] == 'alarm'))")
+          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] in ('alarm', 'queue_alarm')))")
           echo "count=${count}" >> "$GITHUB_OUTPUT"
+          degraded=$(python3 -c "import json; print('true' if json.load(open('snapshot.json')).get('errors') else 'false')")
+          echo "degraded=${degraded}" >> "$GITHUB_OUTPUT"
           echo "Alarm count: ${count}"
 
       - name: Persist this-sweep state
@@ -150,6 +158,7 @@ jobs:
         shell: bash
         env:
           COUNT: ${{ steps.scan.outputs.count }}
+          DEGRADED: ${{ steps.scan.outputs.degraded }}
         run: |
           set -euo pipefail
 
@@ -169,6 +178,10 @@ jobs:
           existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
 
           if [ "$COUNT" -eq 0 ]; then
+              if [ "$DEGRADED" = "true" ]; then
+                  echo "Collection was degraded — preserving any existing tracker until a complete sweep proves recovery."
+                  exit 0
+              fi
               if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
                   echo "Merges are flowing again — closing tracker #${existing}."
                   gh api -X POST "/repos/${repo}/issues/${existing}/comments" \

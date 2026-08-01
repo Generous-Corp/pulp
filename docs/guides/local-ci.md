@@ -1168,7 +1168,8 @@ automated process dereferences it on a schedule and alarms on failure.
 ### Off-fleet merge-stall watchdog (`merge-stall-check.yml`)
 
 `.github/workflows/merge-stall-check.yml` sweeps every 30 minutes and opens a
-tracking issue when PRs are **merge-ready but not merging**. It runs on
+tracking issue when PRs are **merge-ready but not merging** or the GitHub merge
+queue has stopped advancing. It runs on
 `ubuntu-latest` for the same reason as the queue-age watchdog: the wedge it
 catches lives in whatever presses the merge button (Shipyard's per-host
 queue-tick), so an on-fleet guard would die with the thing it watches.
@@ -1186,8 +1187,9 @@ hours with 34 PRs open and nothing merging while every check was green.)
 
 1. **Required checks green** — every check in the repo's REQUIRED set. That set
    is read from branch protection at runtime, not hardcoded; if the token cannot
-   read protection rules it falls back to the documented `main` set (`macos`,
-   `Enforce version & skill sync`).
+   read protection rules it falls back to the complete documented `main` set:
+   `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
+   deploy`, `Vellum trusted freeze`, and `Vellum freeze`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -1210,23 +1212,33 @@ reaches the second observation, so it never trips. The cross-sweep memory is the
 set of stuck PR numbers, persisted as a workflow artifact — crash-safe, held by
 GitHub independently of this repo or any host.
 
+**Merge-queue predicate.** Once the queue is non-empty, the watchdog also reads
+its GraphQL `MergeQueue.entries` head and the latest `merge_group` Actions run.
+It alarms when the head has waited at least 30 minutes and no new merge-group
+batch has started in that window. The age window is already the anti-flap
+period, so this condition alarms on its first observed sweep. The report names
+the head PR, queue depth/state, last batch start, and any required check that is
+missing, queued, in progress, or red. This catches the incident where a required
+hosted alias waited behind advisory work while matching self-hosted build
+capacity was idle.
+
 The issue is edited in place each sweep and closes automatically once no PR is
 stuck merge-ready — the same open/update/auto-close contract as the release
-watchdogs (see [release-watchdog.md](release-watchdog.md)).
+watchdogs (see [release-watchdog.md](release-watchdog.md)). A degraded API sweep
+never closes an existing tracker; only a complete snapshot can prove recovery.
 
 Analysis and the predicate live in `tools/scripts/merge_stall_watchdog.py`,
 tested by `tools/scripts/test_merge_stall_watchdog.py` — which pins the
 must-stay-quiet cases (young PR, DIRTY, BLOCKED, no auto-merge, single-sweep
 blip) as regressions so a future edit that would make the guard cry wolf fails
-at PR time. The script also carries an inert, clearly-marked stub for a **second
-condition to add once a GitHub merge queue is enabled** ("queue depth > 0 AND no
-`merge_group` check started in 30 min" — a wedged *queue*, distinct from a wedged
-auto-merger); it stays off until the queue is live.
+at PR time. Queue-specific tests pin empty/young/recent-batch cases quiet and an
+old head plus old batch as an immediate alarm.
 
 ```bash
 # Dry-run a sweep by hand (log findings, do not touch the issue)
 gh workflow run merge-stall-check.yml -f dry_run=true
 gh workflow run merge-stall-check.yml -f threshold_minutes=60
+gh workflow run merge-stall-check.yml -f queue_threshold_minutes=30
 
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
