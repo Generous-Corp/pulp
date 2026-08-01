@@ -280,3 +280,70 @@ quietly was not there.
 **Run `sync.sh` before finishing any session that touched the shell.** The
 worktree lives in /tmp and macOS clears it; a test written there and not synced
 is simply gone.
+
+## A window-root key hook cannot have the arrows while somebody is typing
+
+AppKit offers every key-down to `performKeyEquivalent:` before `keyDown:`, and
+that path asks the **focused view** before the root's `on_global_key`. The
+composer is a multi-line `TextEditor`, so it claims Up and Down for line
+movement and returns consumed. Anything under the composer that wants an arrow
+— an @-mention list, a completion popup — therefore never sees one, because the
+field has focus for exactly as long as the list is up.
+
+Moving the hook between views on the root cannot fix this, and it was tried
+twice. The chrome exposes `ForgeChrome::set_prompt_key_filter`, consulted inside
+the field before its own handling; that is the only place that wins. Keep the
+root hook as well — it carries the keys when focus is anywhere else.
+
+The tell, if this recurs: log the events reaching the root hook. A key the field
+has eaten arrives **only** as `is_down=false` (the key-up), while letters and
+Tab arrive with `is_down=true`. And the give-away symptom is that clicking a row
+makes the arrows start working, because that moves focus off the field — which
+reads as the arrows being intermittent rather than as the field eating them.
+
+## Showing a view is a layout change, and render_to_png hides it
+
+`set_visible(true)` + `request_repaint()` draws the view at the size it last
+had; for a view that has never been visible that is no size at all. It needs
+`invalidate_layout()` on the view, its panel, and the ancestors.
+
+The headless picture tests cannot catch this: `render_to_png` lays the tree out
+from scratch on every call, so a notice that the running app could not draw
+appears perfectly in the PNG. Anything about *appearing* has to be proven
+against the running window.
+
+## Two copies of the app, and the one you are not testing
+
+macOS searches `/Applications` **and** `~/Applications`, and a copy in the home
+one shadows the installed copy for Spotlight and the Dock. Both this machine and
+m5 accumulated an older, unsigned build there. There is no way to tell from the
+running window which one answered, and a fix tested against the wrong binary
+reports as not working — it cost a session on each machine. `setup_m5.sh` now
+removes both locations; `drive_app.py` identifies the app by the **executable
+path** (via `ps -o comm=`, since macOS `pgrep` has no `-a`) and refuses to drive
+when a copy from another build is running.
+
+## Driving the real window
+
+`tools/rack/prove_arrows.py` types `@br`, presses Down, presses Return, and
+compares captured regions. Two things make it a proof rather than a picture:
+
+* a **control frame** — two captures with nothing pressed between them, which
+  must be identical, so a difference afterwards is the key press and not the
+  blinking caret that is in every one of these frames;
+* assertions that name what changed. Its first version called Return a PASS over
+  a picture of a *rack*: "the region changed" is true of any navigation.
+
+`uidriver key <name|code>` sends a key that produces no text — `type` goes
+through `setUnicodeString`, which carries no key code, so before this there was
+no way to send an arrow at all. Both need Accessibility and Screen Recording, so
+they run from a Terminal on the machine, never over SSH.
+
+## Signing: `stapler validate` never says "validated"
+
+It prints `The validate action worked!`. A checker grepping for "validated"
+reported every bundle as NOT stapled in the same run that had just stapled them.
+Use the exit code. `tools/rack/sign_bundles.sh` signs (inner dylibs first),
+notarizes, staples and re-reports all four bundles; `--check` reports without
+changing anything, and names an ad-hoc signature as ad-hoc rather than printing
+an empty authority that skims past as fine.

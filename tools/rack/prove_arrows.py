@@ -43,6 +43,9 @@ import drive_app as D  # noqa: E402
 REGIONS = {
     "list":     (0.30, 0.52, 0.72, 0.86),
     "composer": (0.30, 0.44, 0.72, 0.52),
+    # Where the amber strip for a not-installed pick lands: under the composer
+    # box, in the space the list was occupying.
+    "notice":   (0.20, 0.60, 0.60, 0.72),
 }
 
 
@@ -143,6 +146,13 @@ def main(argv: list[str]) -> int:
     d = look("d")
     ret_moved, ret_frac = differs(c["composer"], d["composer"])
     print(f"  composer region moved {ret_frac * 100:.3f}% of pixels")
+    # The picked row is a module that is not installed, so it must also leave a
+    # notice on screen. Checked because the first version of this proof called
+    # Return a PASS on a picture of a RACK: "the region changed" is true of any
+    # navigation, and a criterion that broad cannot tell an insert from the app
+    # leaving the screen.
+    notice_moved, notice_frac = differs(c["notice"], d["notice"])
+    print(f"  notice region moved {notice_frac * 100:.3f}% of pixels")
 
     if not keep:
         print("\nquitting")
@@ -163,6 +173,12 @@ def main(argv: list[str]) -> int:
     else:
         print("  FAIL  Return changed nothing in the composer")
         print(f"        compare {c['composer']} and {d['composer']}")
+        ok = False
+    if notice_moved:
+        print("  PASS  an uninstalled pick leaves a notice on screen")
+    else:
+        print("  FAIL  nothing appeared to explain the uninstalled pick")
+        print(f"        compare {c['notice']} and {d['notice']}")
         ok = False
     print(f"\n  pictures in {tmp}")
     return 0 if ok else 1

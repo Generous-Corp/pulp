@@ -30,6 +30,13 @@ case "${1:-}" in
 esac
 
 say()  { printf '  %s\n' "$*"; }
+
+# `stapler validate` prints "The validate action worked!" on success -- it never
+# says "validated", so grepping for that word reported every stapled bundle as
+# NOT stapled, in the same run that had just stapled them. The exit code is the
+# answer; the wording is not.
+stapled_word() { xcrun stapler validate "$1" >/dev/null 2>&1 \
+                 && echo "stapled" || echo "NOT stapled"; }
 step() { printf '\n%s\n' "$*"; }
 
 BUNDLES=(
@@ -53,8 +60,7 @@ for b in "${BUNDLES[@]}"; do
     # than printing nothing is the difference between a report that is read and
     # one that is skimmed past, which is how this went wrong the first time.
     [ -n "$auth" ] || auth="AD-HOC — Gatekeeper will refuse this elsewhere"
-    stapled=$(xcrun stapler validate "$b" 2>&1 | grep -qi 'validated' \
-              && echo "stapled" || echo "not stapled")
+    stapled=$(stapled_word "$b")
     say "$(basename "$b"): $auth; $stapled"
 done
 [ "$missing" -eq 0 ] || { echo; echo "build them first"; exit 1; }
@@ -115,14 +121,8 @@ step "4. notarizing"
 : "${PULP_NOTARY_KEY_PATH:?no notary key: provide notary.env}"
 : "${PULP_NOTARY_KEY_ID:?no notary key id}"
 : "${PULP_NOTARY_ISSUER_ID:?no notary issuer}"
-# notarytool takes an upload container, not a bundle directory. One zip of all
-# four is one submission and one wait, rather than four of each.
-ZIP="${TMPDIR:-/tmp}/forge-modular-notarize.zip"
-rm -f "$ZIP"
-( cd "$BUILD" && ditto -c -k --keepParent --sequesterRsrc \
-    "AU/Forge Modular.component" "${TMPDIR:-/tmp}/fm-au.zip" ) || exit 1
-# ditto takes one source, so each bundle is zipped and the zips are submitted
-# together in a parent zip -- notarytool notarizes what it finds inside.
+# notarytool takes an upload container, not a bundle directory, and ditto takes
+# one source -- so each bundle is zipped and submitted on its own.
 for pair in "AU/Forge Modular.component:fm-au" \
             "VST3/Forge Modular.vst3:fm-vst3" \
             "CLAP/Forge Modular.clap:fm-clap" \
@@ -131,9 +131,6 @@ for pair in "AU/Forge Modular.component:fm-au" \
     ( cd "$BUILD" && ditto -c -k --keepParent --sequesterRsrc \
         "$src" "${TMPDIR:-/tmp}/$name.zip" ) || exit 1
 done
-( cd "${TMPDIR:-/tmp}" && ditto -c -k --sequesterRsrc \
-    fm-au.zip "$ZIP" ) >/dev/null 2>&1 || true
-
 submit() { # <zip>
     xcrun notarytool submit "$1" \
         --key "$PULP_NOTARY_KEY_PATH" \
@@ -170,8 +167,7 @@ for b in "${BUNDLES[@]}"; do
     auth=$(codesign -dv --verbose=2 "$b" 2>&1 | grep -E '^Authority=' | head -1)
     auth="${auth#Authority=}"
     [ -n "$auth" ] || auth="AD-HOC"
-    stapled=$(xcrun stapler validate "$b" 2>&1 | grep -qi 'validated' \
-              && echo "stapled" || echo "NOT stapled")
+    stapled=$(stapled_word "$b")
     say "$(basename "$b"): $auth; $stapled"
 done
 

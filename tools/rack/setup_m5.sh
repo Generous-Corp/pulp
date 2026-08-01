@@ -36,7 +36,8 @@ remote '
 for p in ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
          ~/Library/Audio/Plug-Ins/VST3/"Forge Modular.vst3" \
          ~/Library/Audio/Plug-Ins/CLAP/"Forge Modular.clap" \
-         /Applications/"Forge Modular.app"; do
+         /Applications/"Forge Modular.app" \
+         ~/Applications/"Forge Modular.app"; do
     [ -e "$p" ] && echo "  present: $p"
 done
 sub=$(plutil -extract AudioComponents.0.subtype raw \
@@ -56,12 +57,24 @@ fi
 # A stale bundle with a DIFFERENT AU subtype is not overwritten by copying the
 # new one -- both register, and the DAW may scan either. Removing first is the
 # only way the machine ends up with exactly what was built.
+# ~/Applications is removed TOO, and it is not paranoia.
+#
+# macOS searches both /Applications and ~/Applications, and a copy in the home
+# one shadows the installed copy for Spotlight and the Dock without saying so.
+# This machine carried an UNSIGNED build there, two days older than the one in
+# /Applications, and there is no way to tell from the running window which of
+# them answered. It cost a session on each of two machines: a fix was tested
+# against a binary that did not contain it, and reported as not working.
 step "3. removing stale artifacts"
 remote '
+for p in ~/Applications/"Forge Modular.app"; do
+    [ -e "$p" ] && echo "  removing a shadowing copy: $p"
+done
 rm -rf ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
        ~/Library/Audio/Plug-Ins/VST3/"Forge Modular.vst3" \
        ~/Library/Audio/Plug-Ins/CLAP/"Forge Modular.clap" \
-       /Applications/"Forge Modular.app"
+       /Applications/"Forge Modular.app" \
+       ~/Applications/"Forge Modular.app"
 killall -9 AudioComponentRegistrar 2>/dev/null
 echo "  removed, and the AU registrar restarted"
 '
