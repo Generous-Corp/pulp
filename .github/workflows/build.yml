@@ -645,13 +645,21 @@ jobs:
                   "the required ubuntu check)",
                   file=sys.stderr,
               )
-          include.append({
-              "key": "linux",
-              "name": "Linux (x64)",
-              "runs_on_json": linux_runs_on,
-              "provider": linux_provider,
-              "route_reason": linux_route_reason,
-          })
+          if EVENT_NAME != "merge_group":
+              include.append({
+                  "key": "linux",
+                  "name": "Linux (x64)",
+                  "runs_on_json": linux_runs_on,
+                  "provider": linux_provider,
+                  "route_reason": linux_route_reason,
+              })
+          else:
+              print(
+                  "resolve-provider: merge_group — advisory Linux leg omitted; "
+                  "PR-head Linux already reported and the queue requires the "
+                  "real self-hosted macOS build directly",
+                  file=sys.stderr,
+              )
 
           matrix = {"include": include}
 
@@ -1469,21 +1477,22 @@ jobs:
         run: cmake --build build-ble --config Release --target pulp-midi
 
   # ── Stable-name status aliases for advisory platforms ─────────────────────
-  # Branch protection requires a context literally named `macos`. Keep it
-  # independent of the advisory Linux/Windows matrix legs: this job polls
-  # the macOS matrix leg and exits as soon as that leg reports, instead of
-  # depending on the whole `build` matrix. Linux and Windows keep stable
-  # advisory aliases for visibility only.
+  # Stable required `macos` alias. PR/dispatch runs use the polling job below so
+  # advisory matrix legs cannot delay the required context. merge_group uses a
+  # separate job with the same displayed name after its macOS-only matrix
+  # completes, so it occupies hosted Linux only long enough to report.
 
   # ── macos alias (REQUIRED branch-protection check) ───────────────────────
-  # Always runs (`if: always()`) so the required `macos` context always
-  # reports — never left pending. On a skip-safe PR (classify said no native
+  # On a skip-safe PR (classify said no native
   # build) it reports a fast green from Ubuntu without touching the macOS
   # runner. On a code PR it mirrors the macOS matrix leg's conclusion.
   # Fail-closed: if the `classify` job itself did not succeed, the
   # native_build_required output is untrusted — this gate fails RED rather
   # than letting a PR merge on an unverified classification.
   macos:
+    # A skipped job still emits its displayed check name. Give the inactive
+    # merge-group copy a non-required name so it cannot satisfy `macos` early.
+    name: ${{ github.event_name == 'merge_group' && 'macos-pr-unused' || 'macos' }}
     needs: [resolve-provider, classify]
     # This job only polls the Actions API and sleeps while the real macOS matrix
     # leg runs. Keeping it on `pulp-preamble` consumes the exact scarce runner
@@ -1493,7 +1502,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push'
+    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
     steps:
       - name: macOS leg outcome (required)
         env:
@@ -1556,6 +1565,36 @@ jobs:
           echo "macOS leg ${conclusion:-not found} — failing macos gate (required)"
           exit 1
 
+  macos-merge-group:
+    # Symmetric bootstrap: on non-merge events this skipped job must not emit
+    # the required name owned by the polling path above.
+    name: ${{ github.event_name == 'merge_group' && 'macos' || 'macos-merge-unused' }}
+    needs: [build, classify]
+    # This path does not poll: the macOS-only build is terminal before it
+    # starts. Use the short-lived preamble pool so a green owned build cannot
+    # sit behind unrelated hosted-Linux congestion.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    if: always() && github.event_name == 'merge_group'
+    steps:
+      - name: macOS-only merge-group outcome (required)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.classify.result }}" != "success" ]; then
+            echo "classify did not succeed — failing macos gate closed"
+            exit 1
+          fi
+          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
+            echo "Skip-safe merge group — macos gate ✓"
+            exit 0
+          fi
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "Self-hosted macOS-only matrix green — macos gate ✓"
+            exit 0
+          fi
+          echo "Self-hosted macOS-only matrix result=${{ needs.build.result }} — failing macos gate"
+          exit 1
+
   linux:
     needs: [build, classify]
     # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
@@ -1570,7 +1609,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push'
+    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -1617,7 +1656,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: always() && github.event_name != 'push'
+    if: always() && github.event_name != 'push' && github.event_name != 'merge_group'
     steps:
       - name: Windows leg outcome (advisory)
         env:
@@ -1634,8 +1673,7 @@ jobs:
             exit 0
           fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "Windows runs in the merge queue, not on the PR head — windows alias ✓"
-            echo "(advisory; the serial merge_group validation builds PR ∪ main on Windows before this lands)"
+            echo "Windows runs in nightly/explicit validation, not on the PR head — windows alias ✓"
             exit 0
           fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.run_windows }}" != "true" ]; then

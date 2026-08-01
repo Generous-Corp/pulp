@@ -336,23 +336,19 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_drops_windows_but_keeps_macos_and_linux(self) -> None:
-        """Windows must not sit in the path every merge takes.
+    def test_merge_group_matrix_keeps_only_required_macos(self) -> None:
+        """Advisory hosted legs must not sit in the path every merge takes.
 
         A merge-group leg runs per queued entry, so Windows there is the single
         largest consumer of hosted minutes while gating nothing — `windows` is
         advisory, and only `macos` plus the version/skill and Vellum checks are
-        required. Coverage moves to the nightly cross-platform suite, which
-        still catches a Windows break; it just files it as work instead of
-        stalling every merge behind it.
+        required. Linux has already reported on the PR head; broader coverage
+        remains in the nightly cross-platform suite.
         """
         keys = self._matrix_keys("merge_group")
         self.assertNotIn("windows", keys)
-        # Same negative control as the pull_request case: the saving has to come
-        # from Windows alone. macOS uses hardware we own while merge-group Linux
-        # uses the hosted pool; dropping either would still cost signal.
         self.assertIn("macos", keys)
-        self.assertIn("linux", keys)
+        self.assertNotIn("linux", keys)
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
         """Reduced by default, still reachable on demand.
@@ -399,21 +395,43 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
     def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
         """The long-polling required alias must leave classifiers runnable.
 
-        `macos` can poll the real matrix leg for an hour. If it runs on
-        `pulp-preamble`, several merge-group aliases occupy every runner capable
-        of starting the next run's fail-closed classify/resolve jobs. Hosted
-        Linux is sufficient for the API-only alias; an explicit dedicated alias
-        pool remains configurable.
+        If it runs on `pulp-preamble`, several aliases can occupy every runner
+        capable of starting the next run's fail-closed classify/resolve jobs.
+        Hosted Linux is sufficient for the short API-only report.
         """
         runs_on = self.workflow["jobs"]["macos"]["runs-on"]
         self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
         self.assertIn("ubuntu-latest", runs_on)
         self.assertNotIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
 
-    def test_required_macos_gate_still_runs_on_pull_request(self) -> None:
-        """The required gate must keep reporting from the PR head."""
+        merge_runs_on = self.workflow["jobs"]["macos-merge-group"]["runs-on"]
+        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", merge_runs_on)
+        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
+
+    def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
+        """PR polling stays independent; merge-group reporting stays short."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
-        self.assertNotIn("pull_request", condition)
+        self.assertIn("github.event_name != 'merge_group'", condition)
+        self.assertNotIn("build", self.workflow["jobs"]["macos"]["needs"])
+
+        pr_alias = self.workflow["jobs"]["macos"]
+        self.assertIn("macos-pr-unused", pr_alias["name"])
+
+        merge_alias = self.workflow["jobs"]["macos-merge-group"]
+        self.assertIn("macos-merge-unused", merge_alias["name"])
+        self.assertIn("'macos'", merge_alias["name"])
+        self.assertIn("build", merge_alias["needs"])
+        self.assertIn("classify", merge_alias["needs"])
+        merge_condition = " ".join(merge_alias["if"].split())
+        self.assertEqual(
+            merge_condition, "always() && github.event_name == 'merge_group'"
+        )
+
+    def test_advisory_aliases_do_not_run_without_merge_group_legs(self) -> None:
+        for name in ("linux", "windows"):
+            with self.subTest(job=name):
+                condition = " ".join(self.workflow["jobs"][name]["if"].split())
+                self.assertIn("github.event_name != 'merge_group'", condition)
 
 
 class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):

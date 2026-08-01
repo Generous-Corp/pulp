@@ -1154,7 +1154,11 @@ uses, or the golden warms a cache the real jobs never touch.
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
 - The required `macos` alias in `.github/workflows/build.yml` mirrors the
-  macOS matrix leg by polling the Actions jobs API. Keep that poll retry-safe:
+  macOS matrix leg by polling the Actions jobs API. On merge groups it depends
+  on the completed macOS-only build matrix, so it reports in seconds instead of
+  occupying hosted capacity through the native build. The merge-group report
+  uses the short-lived preamble pool so hosted congestion cannot delay a green
+  owned build. Keep the PR-head poll retry-safe:
   API failures or malformed JSON must log and continue the loop, not trip
   `set -euo pipefail` before the macOS leg has a chance to report.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The

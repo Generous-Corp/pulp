@@ -626,10 +626,10 @@ Each trigger runs a deliberately different slice of the matrix:
 | | PR run | `merge_group` run | `push: main` cache run |
 |---|---|---|---|
 | macOS matrix leg | yes | yes | **no** — omitted by `resolve-provider` |
-| Linux matrix leg | yes | yes | yes (publishes the cache) |
-| Windows matrix leg | **no** — see below | yes | yes (publishes the cache) |
-| `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | yes | no |
-| `macos` / `linux` / `windows` alias jobs | yes | yes | no |
+| Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
+| Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
+| `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
+| required `macos` alias | yes | yes, after the macOS build completes | no |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
 The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
@@ -667,11 +667,10 @@ its entry in `AWAITING_CHECKS` until the ruleset's check-response timeout
 expires, evicts it, and nothing lands at all. macOS is never implicated: it
 runs on the self-hosted Macs, which sit outside the hosted pool.
 
-So Windows runs where it actually gates:
+So Windows runs where it supplies independent value without blocking every merge:
 
-- **`merge_group`** — the serial queue validation, which builds PR ∪ main.
-  This is strictly better coverage than a PR-head build, and being serial it
-  costs at most one run's worth of Windows jobs at a time.
+- **nightly cross-platform validation** — catches Windows regressions as
+  follow-up work without consuming the merge queue's hosted slots.
 - **`push: main`** — publishes the Windows ccache.
 - **`workflow_dispatch`** — explicit reruns when you want Windows early.
 
@@ -682,26 +681,21 @@ private Mac Pro VMs. The advisory `windows` alias job
 short-circuits to green on `pull_request` — without that it would fail closed
 looking for a matrix leg that deliberately did not run.
 
-The trade is later Windows feedback: a Windows-only break is caught when the PR
-reaches the queue rather than on the PR head, costing one eviction and a
-requeue. That is cheaper than the failure it replaces, where *no* PR could
-merge at all. Dispatch `build.yml` manually against the branch if you want
-Windows before enqueueing.
+The trade is later Windows feedback. Dispatch `build.yml` manually against the
+branch when a Windows-touching change needs proof before merge.
 
 `tools/scripts/test_windows_runner_policy.py` locks this in: it executes
-`resolve-provider`'s matrix resolver for each event and asserts the Windows leg
-is absent on `pull_request` and present on `merge_group` / `workflow_dispatch`,
-that all three compile gates skip `pull_request`, and — as a negative control —
-that macOS and Linux still run on the PR head.
+`resolve-provider`'s matrix resolver for each event and asserts hosted Linux and
+Windows are absent on `merge_group`, Windows remains reachable through
+`workflow_dispatch`, and macOS plus Linux still run on the PR head.
 
-## Reporting aliases never pin the shared hosted pool
+## The required macOS alias never long-polls on the merge queue
 
-The `macos` / `linux` / `windows` alias jobs all resolve their runner from
-`PULP_PREAMBLE_RUNS_ON_JSON` rather than naming `ubuntu-latest` directly.
-
-For `macos` that keeps the *required* gate off a pool it can be starved on. For
-`linux` and `windows` — both advisory — the reason is sharper, and it is a
-failure mode rather than a preference.
+Branch protection requires the stable `macos` alias so local/overflow provider
+changes cannot rename the gate. On `merge_group`, the build matrix contains only
+the real self-hosted macOS leg and the alias depends on that completed build.
+The hosted alias therefore runs only long enough to report the result; it does
+not occupy a hosted slot while polling through the native compile/test.
 
 An alias is the **last job in the run**: it waits for the matrix leg and reports
 the outcome. Starve it of a runner and it never starts, so the *run* never
