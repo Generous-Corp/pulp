@@ -1594,6 +1594,15 @@ Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
 timeline translation units do not include or link `pulp::format`, `pulp::host`,
 or `pulp::view`.
 
+`test/cmake/timeline_tests.cmake` is the manifest that registers the
+`pulp-test-playback-*` suites alongside the document-model ones, so a new
+playback-side suite is added there rather than in a new manifest — including
+`pulp-test-playback-program-wire`, which covers the flat program wire the web
+lane publishes generations over (`pulp/playback/program_wire.hpp`; the format's
+own rules live in the `playback` skill). Sharing the manifest does not make the
+program wire part of the document schema: it encodes a *compiled* program, and
+a document-model change reaches it only through the compiler.
+
 `test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
 runtime tests. That shared CMake inventory does not make profile JSON, capture
 evidence, or sampler rendering part of the timeline document schema; keep those
