@@ -2,6 +2,7 @@
 
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
+#include "serialize_decode_support.hpp"
 
 #include <array>
 #include <bit>
@@ -348,9 +349,31 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             decode_command_notes(*replacement.value(), context, data_path + "/replacement");
         if (!decoded_replacement)
             return runtime::Err(decoded_replacement.error());
+        // Optional, like the fade shape above and for the same reason: a
+        // command carries no migration path, so an envelope written before
+        // these fields existed has to keep decoding to what it meant then —
+        // omitted arrays, and a reducer that derives the surviving modifiers
+        // from the clip.
+        std::vector<NoteModifier> expected_modifiers;
+        std::vector<NoteModifier> replacement_modifiers;
+        if (const auto* value = command.find("expected_modifiers")) {
+            auto modifiers = decode_note_modifiers(*value, decoded_expected.value().size(),
+                                                   data_path + "/expected_modifiers");
+            if (!modifiers)
+                return runtime::Err(modifiers.error());
+            expected_modifiers = std::move(modifiers).value();
+        }
+        if (const auto* value = command.find("replacement_modifiers")) {
+            auto modifiers = decode_note_modifiers(*value, decoded_replacement.value().size(),
+                                                   data_path + "/replacement_modifiers");
+            if (!modifiers)
+                return runtime::Err(modifiers.error());
+            replacement_modifiers = std::move(modifiers).value();
+        }
         return runtime::Ok(Command(ReplaceNoteContent{
             decoded.value()[0], decoded.value()[1], decoded.value()[2],
-            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value(),
+            std::move(expected_modifiers), std::move(replacement_modifiers)}));
     }
     if (type.value() == "pulp.timeline.command.set_clip_playback_properties") {
         auto decoded = ids();
