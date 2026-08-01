@@ -778,6 +778,32 @@ Things worth knowing before changing it:
   therefore takes the points and refuses any that did not compile the program's
   map — `CompiledTempoMap::matches()` is what keeps the two honest.
 
+### `producer_epoch` does not replace `instance_token` — they answer different questions
+
+`program_wire.hpp` omits `instance_token` and says `producer_epoch` "replaces
+that guard across a realm." **It does not, and a test pins the gap**
+(`test_playback_program_wire.cpp`, "one producer's successive programs are
+indistinguishable on the wire").
+
+- **`producer_epoch` distinguishes PRODUCERS.** It is required to be stable for a
+  producer's lifetime, so two programs from *one* producer share it.
+- **`instance_token` distinguished PROGRAMS FROM ONE PRODUCER.**
+  `next_instance_token()` is a process-global monotonic counter, so every compile
+  mints a fresh one, and `AutomationCursor` requires it to match *as well as* the
+  lane key before reporting `Unchanged`.
+
+`generation` is **caller-supplied**, not minted per compile. So two compiles of
+one lane at one generation give the same `lane_id`, the same `generation`, the
+same `producer_epoch` and no token — **byte-identical payloads**. A consumer
+computing `Unchanged` from them reaches the opposite answer to the in-process
+cursor: a silently wrong render, not a decode error.
+
+The header's reasoning is sound for the case it was written against — a producer
+torn down and recreated, which its neighbouring case covers — and does not reach
+the more common one, a single worker recompiling. **Before extending the wire's
+exclusion list, check whether the replacement identifier answers the same
+question as the thing it replaces, not merely a nearby one.**
+
 ## A refusal of something authorable costs a written reason
 
 `tools/scripts/negative_capability_check.py` (ctest
