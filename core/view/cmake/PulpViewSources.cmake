@@ -69,6 +69,7 @@ target_sources(pulp-view-core PRIVATE
     src/gpu_surface_observer.cpp
     src/plugin_frame_renderer.cpp
     src/design_frame_view.cpp
+    src/design_fit_view.cpp
     src/design_param_binding.cpp
     src/svg_fragment.cpp
     src/callout_box.cpp
