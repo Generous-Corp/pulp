@@ -5903,3 +5903,66 @@ TEST_CASE("a hovered cable names what it joins", "[rack][hover][render]") {
     // thousands. Enough to tell "something was drawn" from "the cables faded".
     CHECK(differing > 3000);
 }
+
+// The audio interface DRAWS its jacks, not just carries them.
+//
+// The map having coordinates and the panel showing holes are two claims. The
+// second is the one that was reported wrong, and the first is what I checked
+// when I said it was fixed.
+TEST_CASE("the audio interface draws where its cables land", "[audio][render]") {
+    auto preview = std::make_shared<forge_modular::RackPreview>();
+    preview->set_bounds(pulp::view::Rect{0, 0, 700, 460});
+
+    forge_modular::RackModule vca;
+    vca.id = "vca"; vca.brand = "ForgeModular"; vca.name = "VCA"; vca.hp = 3;
+    vca.placed = true;
+    vca.ports.push_back({"out0", "OUT", 0.5f, 300.0f, false});
+
+    // As patch_loader builds it from the port map: real jack coordinates.
+    forge_modular::RackModule audio;
+    audio.id = "audio"; audio.brand = "Core"; audio.name = "AudioInterface2";
+    audio.hp = 5; audio.placed = true;
+    audio.ports.push_back({"in0", "To \"device output 1\"", 21.5f / 75.0f, 286.0f, true});
+    audio.ports.push_back({"in1", "To \"device output 2\"", 53.5f / 75.0f, 286.0f, true});
+
+    std::vector<forge_modular::RackModule> mods{vca, audio};
+    std::vector<forge_modular::Connection> cables{
+        {"vca", "out0", "audio", "in0", forge_modular::SignalRole::audio, ""},
+        {"vca", "out0", "audio", "in1", forge_modular::SignalRole::audio, ""},
+    };
+    preview->set_rack(mods, cables);
+
+    const auto path = std::filesystem::temp_directory_path() / "audio-jacks.png";
+    REQUIRE(pulp::view::render_to_file(*preview, 700, 460, path.string(), 1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+
+    // A docked cable draws a collar at the panel EDGE; a landed one draws a
+    // ring on the face. So the question "did it land" is answerable in pixels:
+    // the same rack with the jack coordinates removed must look different.
+    const auto with_jacks = decode_rgba(read_all(path));
+    REQUIRE(with_jacks.width > 0);
+
+    auto stripped = mods;
+    stripped[1].ports.clear();
+    stripped[1].placed = false;          // what a machine with no port map has
+    preview->set_rack(stripped, cables);
+    const auto blind_path =
+        std::filesystem::temp_directory_path() / "audio-nojacks.png";
+    REQUIRE(pulp::view::render_to_file(*preview, 700, 460, blind_path.string(),
+                                       1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    const auto without = decode_rgba(read_all(blind_path));
+    REQUIRE(without.width == with_jacks.width);
+
+    int differing = 0;
+    for (std::size_t at = 0; at + 3 < without.pixels.size(); at += 4)
+        if (without.pixels[at] != with_jacks.pixels[at] ||
+            without.pixels[at + 1] != with_jacks.pixels[at + 1] ||
+            without.pixels[at + 2] != with_jacks.pixels[at + 2])
+            ++differing;
+    INFO("differing pixels: " << differing);
+    // Two cables rerouted from the face to the rim is a large change. If this
+    // is small, the map made no difference to the drawing and copying it to
+    // another machine fixes nothing.
+    CHECK(differing > 2000);
+}
