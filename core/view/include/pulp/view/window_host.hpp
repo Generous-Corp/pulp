@@ -580,6 +580,19 @@ public:
     // inserting a virtual among existing methods would shift every later slot.
     virtual bool is_gpu_backed() const { return gpu_surface() != nullptr; }
 
+    /// True only when request_close_deferred() schedules close handling for a
+    /// later native event-loop turn. External standalone hosts must override
+    /// both methods when inspector startup can occur from an idle callback.
+    virtual bool supports_deferred_close() const {
+        return false;
+    }
+
+    /// Schedule request_close() for a later native event-loop turn. The base
+    /// implementation deliberately does not close synchronously.
+    virtual void request_close_deferred() {
+        note_unsupported_feature("request_close_deferred");
+    }
+
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently
     /// no-ops (the base-class default ran because the host did not override it).

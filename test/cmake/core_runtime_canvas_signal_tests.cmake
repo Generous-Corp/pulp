@@ -333,8 +333,6 @@ pulp_add_test_suite(pulp-test-standalone-inspector
 if(TARGET pulp::inspect AND NOT IOS)
     target_compile_definitions(pulp-standalone PRIVATE
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
-    target_compile_definitions(pulp-inspect-protocol PRIVATE
-        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=1
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)

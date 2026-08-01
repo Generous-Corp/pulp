@@ -112,6 +112,26 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
     });
 }
 
+static void request_cocoa_window_close_deferred(NSWindow* window, bool initially_hidden) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (initially_hidden) {
+          mark_cocoa_dispatchers_stopping();
+          if (window != nil)
+              [window close];
+          [NSApp stop:nil];
+          post_cocoa_stop_event();
+          return;
+      }
+      if (window != nil) {
+          [window performClose:nil];
+      } else {
+          mark_cocoa_dispatchers_stopping();
+          [NSApp stop:nil];
+          post_cocoa_stop_event();
+      }
+    });
+}
+
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
@@ -1589,6 +1609,14 @@ public:
         request_app_close(window_);
     }
 
+    bool supports_deferred_close() const override {
+        return true;
+    }
+
+    void request_close_deferred() override {
+        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
+    }
+
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
         delegate_.onClose = ^{ if (close_callback_) close_callback_(); };
@@ -1948,6 +1976,14 @@ public:
             return;
         }
         request_app_close(window_);
+    }
+
+    bool supports_deferred_close() const override {
+        return true;
+    }
+
+    void request_close_deferred() override {
+        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {

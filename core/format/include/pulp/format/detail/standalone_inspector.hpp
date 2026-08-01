@@ -23,13 +23,13 @@ class InspectorOverlay;
 
 namespace pulp::format::detail {
 
-#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
 struct StandaloneInspectorLifecycleState {
     bool rpc_accepting = false;
     bool dispatch_accepting = false;
     bool borrowed_sources_attached = false;
 };
 
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
 /// Process-local fixture seam that may take ownership of the next inspector
 /// RPC closure and report whether it accepted that closure.
 using StandaloneInspectorRpcPostOverride =
@@ -59,9 +59,7 @@ class StandaloneInspectorRuntime {
     /// Used after a platform event loop exits and by deterministic lifecycle tests.
     bool try_finish_retirement();
     bool retirement_pending() const;
-#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
     StandaloneInspectorLifecycleState lifecycle_state() const;
-#endif
     void set_overlay_active(bool active);
     bool startup_failed() const { return startup_failed_; }
     std::function<void()> wrap_close(std::function<void()> close_editor);

@@ -255,7 +255,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         return shutdown_fence_;
     }
 
-#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
     StandaloneInspectorLifecycleState lifecycle_state() const {
         return {
             .rpc_accepting = rpc_ && rpc_->active(),
@@ -263,7 +262,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             .borrowed_sources_attached = !sources_detached_,
         };
     }
-#endif
 
     void detach_borrowed_sources() {
         if (sources_detached_)
@@ -541,6 +539,11 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         runtime::log_error("Standalone: Development Inspector requires an event-loop exit drain");
         return nullptr;
     }
+    if (!window.supports_deferred_close()) {
+        runtime::log_error(
+            "Standalone: Development Inspector requires deferred window close support");
+        return nullptr;
+    }
     // Processor-level editor replacement needs every borrowed inspector source
     // to detach before the swap and reattach to the new processor lifetime.
     // That complete workflow is Phase 8; Phase 2 fails closed instead of
@@ -610,8 +613,7 @@ void StandaloneInspectorRuntime::pump() {
             startup_failed_ = true;
             runtime::log_error(
                 "Standalone: could not start authenticated inspector session");
-            auto* window = &window_;
-            (void)events::MainThreadDispatcher::call_async([window] { window->request_close(); });
+            window_.request_close_deferred();
             return;
         }
     }
@@ -640,11 +642,9 @@ bool StandaloneInspectorRuntime::retirement_pending() const {
     return retirement_->pending();
 }
 
-#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
 StandaloneInspectorLifecycleState StandaloneInspectorRuntime::lifecycle_state() const {
     return impl_ ? impl_->lifecycle_state() : StandaloneInspectorLifecycleState{};
 }
-#endif
 
 void StandaloneInspectorRuntime::set_overlay_active(bool active) {
     if (retirement_->begun())

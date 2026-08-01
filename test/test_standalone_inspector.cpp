@@ -92,9 +92,12 @@ public:
     bool capture_supported = true;
     bool blocking_event_loop = true;
     bool exit_drain_supported = true;
+    bool deferred_close_supported = true;
     std::function<void()> close_callback;
     std::function<void()> capture_callback;
     std::function<bool()> event_loop_step;
+    std::function<void()> deferred_close;
+    int deferred_close_calls = 0;
     int run_until_calls = 0;
     int readiness_checks = 0;
     bool run_until_ready = false;
@@ -112,6 +115,18 @@ public:
     bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
     bool event_loop_supports_exit_drain() const override {
         return exit_drain_supported;
+    }
+    bool supports_deferred_close() const override {
+        return deferred_close_supported;
+    }
+    void request_close_deferred() override {
+        ++deferred_close_calls;
+        deferred_close = [this] { request_close(); };
+    }
+    void run_deferred_close() {
+        auto close = std::move(deferred_close);
+        if (close)
+            close();
     }
     void request_close() override {
         if (close_callback)
@@ -320,6 +335,20 @@ TEST_CASE("Standalone inspector rejects an event loop without exit draining",
     REQUIRE(runtime == nullptr);
 }
 
+TEST_CASE("Standalone inspector rejects a host without deferred close",
+          "[standalone][inspect][lifecycle][negative]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+    window.deferred_close_supported = false;
+    auto runtime =
+        StandaloneInspectorRuntime::create(app, processor, bridge, root, window, "develop", {});
+    REQUIRE(runtime == nullptr);
+}
+
 TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
           "[standalone][inspect][negative]") {
     const auto suffix = std::to_string(
@@ -351,8 +380,13 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     auto runtime = StandaloneInspectorRuntime::create(
         app, *processor, bridge, *bridge.view(), window, "develop", {});
     REQUIRE(runtime != nullptr);
+    int close_calls = 0;
+    window.set_close_callback(runtime->wrap_close([&] { ++close_calls; }));
     runtime->pump();
     REQUIRE(runtime->startup_failed());
+    REQUIRE(window.deferred_close_calls == 1);
+    REQUIRE(close_calls == 0);
+    REQUIRE(static_cast<bool>(window.deferred_close));
 
     {
         std::ofstream source(script);
@@ -361,6 +395,8 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     std::string reload_error;
     REQUIRE(processor->active_scripted_ui()->reload(&reload_error));
     REQUIRE(primary_logs == std::vector<std::string>{"after-failure"});
+    window.run_deferred_close();
+    REQUIRE(close_calls == 1);
     bridge.close();
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
