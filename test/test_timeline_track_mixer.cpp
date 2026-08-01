@@ -6,12 +6,53 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <string>
+#include <utility>
 
 using namespace timeline_test;
 
 namespace {
+
+// `detail::track_input_of` names every TrackInput member so an identity rewrite
+// can copy the whole authored input and overwrite only the identities. That
+// listing is hand-written, and a designated initializer defaults an omitted
+// member without a diagnostic, so nothing in the compiler ties it to the struct
+// it mirrors. Counting the members here ties the two together: TrackInput
+// admits exactly kTrackInputFields brace arguments, and widening the struct
+// stops this build until `track_input_of` carries the new member too.
+//
+// The count is the largest N for which `TrackInput{a1, ..., aN}` is well formed,
+// found by probing with a value convertible to anything.
+// The conversion is only ever probed, never run; it is defined rather than left
+// undefined so instantiating it through a member's constructor does not warn.
+struct AnyField {
+    template <typename T> constexpr operator T() const {
+        return T{};
+    }
+};
+
+template <typename T, std::size_t... Index>
+concept BraceInitializableWith = requires { T{(static_cast<void>(Index), AnyField{})...}; };
+
+template <typename T, std::size_t Count>
+constexpr bool brace_initializable = []<std::size_t... Index>(std::index_sequence<Index...>) {
+    return BraceInitializableWith<T, Index...>;
+}(std::make_index_sequence<Count>{});
+
+template <typename T, std::size_t Count = 0> constexpr std::size_t field_count() {
+    if constexpr (brace_initializable<T, Count + 1>)
+        return field_count<T, Count + 1>();
+    else
+        return Count;
+}
+
+constexpr std::size_t kTrackInputFields = 10;
+static_assert(field_count<TrackInput>() == kTrackInputFields,
+              "TrackInput gained or lost a member. Carry it in detail::track_input_of "
+              "(core/timeline/src/track.cpp) so an id remap stops resetting it, then update "
+              "kTrackInputFields.");
 
 template <typename T, typename E> T take_result(pulp::runtime::Result<T, E> result) {
     REQUIRE(result);
