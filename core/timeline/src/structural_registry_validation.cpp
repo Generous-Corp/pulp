@@ -189,6 +189,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"content", SchemaValueKind::Object},
         {"fade_in_duration", SchemaValueKind::U64String, false},
         {"fade_out_duration", SchemaValueKind::U64String, false},
+        {"fade_shape", SchemaValueKind::String},
         {"gain_linear_bits", SchemaValueKind::U64String, false},
         {"id", SchemaValueKind::U64String},
         {"time_conform", SchemaValueKind::String},

@@ -60,15 +60,16 @@ enum class Concept : std::uint16_t {
     ClipNoteVelocityQuantized = 46,
     TempoValueQuantized = 47,
     ClipMediaWindow = 48,
-    SequenceSectionRole = 49,
-    ContextChordBass = 50,
-    ContextChordExtension = 51,
-    ContextChordVoicing = 52,
-    TuningProject = 53,
-    TuningInstrument = 54,
+    ClipFadeShape = 49,
+    SequenceSectionRole = 50,
+    ContextChordBass = 51,
+    ContextChordExtension = 52,
+    ContextChordVoicing = 53,
+    TuningProject = 54,
+    TuningInstrument = 55,
 };
 
-inline constexpr std::size_t kConceptCount = 55;
+inline constexpr std::size_t kConceptCount = 56;
 
 namespace detail {
 struct ConceptRecord {
@@ -127,6 +128,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"clip.note-velocity-quantized", "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value.", true},
     {"tempo.value-quantized", "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation.", true},
     {"clip.media-window", "A media clip that plays a source subrange rather than the referenced asset's complete frame range.", true},
+    {"clip.fade-shape", "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like.", true},
     {"sequence.section-role", "A region that names the structural part it spans, beyond its free-text name.", true},
     {"context.chord-bass", "A chord statement naming the pitch class in the bass, rather than sounding root position.", true},
     {"context.chord-extension", "A chord statement carrying added scale degrees beyond its quality.", true},

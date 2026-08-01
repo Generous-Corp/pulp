@@ -230,7 +230,7 @@ TEST_CASE("Timeline clips persist time-conform intent and legacy clips default t
 
     const auto encoded = take(serialize_project(project, registry));
     REQUIRE(encoded.json.find("\"time_conform\":\"stretch\"") != std::string::npos);
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.clip\",\"version\":2") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.clip\",\"version\":3") !=
             std::string::npos);
     const auto decoded = take(deserialize_project(encoded.json, registry));
     REQUIRE(decoded.find_sequence({2})->find_track({3})->find_clip({4})->time_conform() ==
@@ -238,12 +238,15 @@ TEST_CASE("Timeline clips persist time-conform intent and legacy clips default t
     REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
 
     auto legacy = encoded.json;
-    const std::string field = ",\"time_conform\":\"stretch\"";
-    const auto field_position = legacy.find(field);
-    REQUIRE(field_position != std::string::npos);
-    legacy.erase(field_position, field.size());
+    // A version-one clip predates both later fields, so both come back out.
+    for (const std::string field :
+         {std::string(",\"time_conform\":\"stretch\""), std::string(",\"fade_shape\":\"linear\"")}) {
+        const auto field_position = legacy.find(field);
+        REQUIRE(field_position != std::string::npos);
+        legacy.erase(field_position, field.size());
+    }
     const std::string clip_version =
-        "\"type_name\":\"pulp.timeline.clip\",\"version\":2";
+        "\"type_name\":\"pulp.timeline.clip\",\"version\":3";
     const auto version_position = legacy.find(clip_version);
     REQUIRE(version_position != std::string::npos);
     legacy.replace(version_position, clip_version.size(),
@@ -369,6 +372,121 @@ TEST_CASE("Timeline clip schema migration defaults none and refuses authored con
         registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 1, authored);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+}
+
+TEST_CASE("Timeline clip schema migration defaults linear and refuses authored shape loss") {
+    const auto registry = builtins();
+    const std::string v2 =
+        R"({"data":{"content":{"data":{},"type_name":"pulp.timeline.content.empty","version":1},"fade_in_duration":"12","fade_out_duration":"24","gain_linear_bits":"1065353216","id":"4","time_conform":"none","time_range":{"duration_ticks":"100","kind":"musical","start_ticks":"0"}},"type_name":"pulp.timeline.clip","version":2})";
+    const auto v3 = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 3, v2));
+    REQUIRE(v3.find("\"fade_shape\":\"linear\"") != std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 3, 2, v3)) == v2);
+
+    auto authored = v3;
+    const auto linear = authored.find("\"fade_shape\":\"linear\"");
+    REQUIRE(linear != std::string::npos);
+    authored.replace(linear, std::string_view("\"fade_shape\":\"linear\"").size(),
+                     "\"fade_shape\":\"equal_power\"");
+    const auto refused =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 3, 2, authored);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+
+    // The whole ladder, so a v1 document still reaches the current version.
+    const std::string v1 =
+        R"({"data":{"content":{"data":{},"type_name":"pulp.timeline.content.empty","version":1},"fade_in_duration":"12","fade_out_duration":"24","gain_linear_bits":"1065353216","id":"4","time_range":{"duration_ticks":"100","kind":"musical","start_ticks":"0"}},"type_name":"pulp.timeline.clip","version":1})";
+    const auto climbed =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 1, 3, v1));
+    REQUIRE(climbed.find("\"time_conform\":\"none\"") != std::string::npos);
+    REQUIRE(climbed.find("\"fade_shape\":\"linear\"") != std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 3, 1, climbed)) ==
+            v1);
+}
+
+TEST_CASE("Timeline clips persist fade shape and legacy clips default to linear") {
+    // The encoder has no spelling for an out-of-range shape, so the model has to
+    // refuse one — otherwise `serialize_project` writes a document its own
+    // decoder rejects.
+    const auto invalid_model =
+        Clip::create({4}, {0}, {100}, MediaRef{{6}, {0}, 100},
+                     {.gain_linear = 1.0f,
+                      .fade_in_duration = 0,
+                      .fade_out_duration = 0,
+                      .fade_shape = static_cast<ClipFadeShape>(255)});
+    REQUIRE_FALSE(invalid_model);
+    REQUIRE(invalid_model.error().code == ModelErrorCode::InvalidClipPlaybackProperties);
+
+    const auto registry = builtins();
+    auto clip = take(Clip::create({4}, {0}, {100}, MediaRef{{6}, {0}, 100},
+                                  {.gain_linear = 1.0f,
+                                   .fade_in_duration = 12,
+                                   .fade_out_duration = 24,
+                                   .fade_shape = ClipFadeShape::EqualPower}));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    MediaAsset asset{{6},           "source.wav", 100, {48'000, 1}, hash('e'),
+                     AssetStoragePolicy::External, {},  {}};
+    auto project =
+        take(Project::create(ProjectInput{{1}, "fade shape", 7, {2}, {asset}, {sequence}}));
+
+    const auto encoded = take(serialize_project(project, registry));
+    REQUIRE(encoded.json.find("\"fade_shape\":\"equal_power\"") != std::string::npos);
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.clip\",\"version\":3") !=
+            std::string::npos);
+    const auto decoded = take(deserialize_project(encoded.json, registry));
+    REQUIRE(decoded.find_sequence({2})->find_track({3})->find_clip({4})->playback_properties() ==
+            clip.playback_properties());
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
+
+    const std::string field = ",\"fade_shape\":\"equal_power\"";
+    const std::string clip_version = "\"type_name\":\"pulp.timeline.clip\",\"version\":3";
+    auto legacy = encoded.json;
+    const auto field_position = legacy.find(field);
+    REQUIRE(field_position != std::string::npos);
+    legacy.erase(field_position, field.size());
+    const auto version_position = legacy.find(clip_version);
+    REQUIRE(version_position != std::string::npos);
+    legacy.replace(version_position, clip_version.size(),
+                   "\"type_name\":\"pulp.timeline.clip\",\"version\":2");
+    const auto legacy_decoded = take(deserialize_project(legacy, registry));
+    REQUIRE(legacy_decoded.find_sequence({2})
+                ->find_track({3})
+                ->find_clip({4})
+                ->playback_properties()
+                .fade_shape == ClipFadeShape::Linear);
+
+    // A version that predates the field cannot carry it: accepting one would let
+    // a document claim a shape no reader of that version honors.
+    auto smuggled = encoded.json;
+    const auto smuggled_version = smuggled.find(clip_version);
+    REQUIRE(smuggled_version != std::string::npos);
+    smuggled.replace(smuggled_version, clip_version.size(),
+                     "\"type_name\":\"pulp.timeline.clip\",\"version\":2");
+    const auto smuggle_rejected = deserialize_project(smuggled, registry);
+    REQUIRE_FALSE(smuggle_rejected);
+    REQUIRE(smuggle_rejected.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(smuggle_rejected.error().path.ends_with("/fade_shape"));
+
+    auto missing = encoded.json;
+    const auto missing_field = missing.find(field);
+    REQUIRE(missing_field != std::string::npos);
+    missing.erase(missing_field, field.size());
+    const auto missing_rejected = deserialize_project(missing, registry);
+    REQUIRE_FALSE(missing_rejected);
+    // The structural preflight rejects the shape before the decoder runs, which
+    // is why this is InvalidSchema rather than the decoder's MissingField.
+    REQUIRE(missing_rejected.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(missing_rejected.error().path.ends_with("/fade_shape"));
+
+    auto malformed = encoded.json;
+    const auto value = malformed.find("\"fade_shape\":\"equal_power\"");
+    REQUIRE(value != std::string::npos);
+    malformed.replace(value, std::string_view("\"fade_shape\":\"equal_power\"").size(),
+                      "\"fade_shape\":\"logarithmic\"");
+    const auto rejected = deserialize_project(malformed, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(rejected.error().path.ends_with("/fade_shape"));
 }
 
 TEST_CASE("Timeline clip schema migration preserves noncanonical layout and ignores nested decoys") {

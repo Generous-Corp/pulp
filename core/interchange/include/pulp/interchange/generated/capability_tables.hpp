@@ -123,6 +123,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
+        {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", ""}, // sequence.section-role
         {ImportLevel::None, "", ""}, // context.chord-bass
         {ImportLevel::None, "", ""}, // context.chord-extension
@@ -181,6 +182,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
+        {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", ""}, // sequence.section-role
         {ImportLevel::None, "", ""}, // context.chord-bass
         {ImportLevel::None, "", ""}, // context.chord-extension
@@ -202,7 +204,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.media
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity"}, // clip.gain
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges"}, // clip.fades
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit clip fades, so authored fade-in and fade-out durations are dropped and the clip exports with hard edges"}, // clip.fades
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.crossfade"}, // clip.crossfade
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.warp"}, // clip.warp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.launch"}, // clip.launch
@@ -242,6 +244,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note-velocity-quantized
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject arrangement markers carry a name and span but no typed structural role"}, // sequence.section-role
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries quality and root but no bass"}, // context.chord-bass
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries no added scale degrees"}, // context.chord-extension
@@ -260,7 +263,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files carry MIDI events rather than audio media, so media clips are omitted"}, // clip.media
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip gain, so authored clip gain is omitted"}, // clip.gain
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so authored fade shapes are omitted"}, // clip.fades
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so authored fade-in and fade-out durations are omitted"}, // clip.fades
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.crossfade"}, // clip.crossfade
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.warp"}, // clip.warp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files describe a linear arrangement, so launcher scenes are omitted"}, // clip.launch
@@ -300,6 +303,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::ClipNote, LossClass::Approximated, "16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity"}, // clip.note-velocity-quantized
         {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "tempo values are rounded to the nearest representable integer microseconds per quarter note"}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer emits a region's name and span but not the part it names"}, // sequence.section-role
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-bass
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-extension

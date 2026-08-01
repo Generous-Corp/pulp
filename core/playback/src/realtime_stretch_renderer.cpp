@@ -1,5 +1,6 @@
 #include <pulp/playback/realtime_stretch_renderer.hpp>
 
+#include "clip_fade_envelope.hpp"
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/offline_stretch_artifact.hpp>
 #include <pulp/playback/program.hpp>
@@ -44,16 +45,7 @@ long double tick_end(const TransportRange& range) noexcept {
                                         : static_cast<long double>(range.timeline_tick_end.value);
 }
 
-float clip_envelope(const AudioClipRendererProgram& clip, long double relative) noexcept {
-    auto value = static_cast<long double>(clip.gain_linear);
-    if (clip.fade_in_frames != 0 && relative < clip.fade_in_frames)
-        value *= relative / static_cast<long double>(clip.fade_in_frames);
-    const auto remaining =
-        std::max(0.0L, static_cast<long double>(clip.timeline_frame_count - 1u) - relative);
-    if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
-        value *= remaining / static_cast<long double>(clip.fade_out_frames);
-    return static_cast<float>(value);
-}
+using detail::clip_envelope;
 
 float artifact_sample(const AudioClipRendererProgram& clip, std::size_t channel,
                       long double document_position) noexcept {

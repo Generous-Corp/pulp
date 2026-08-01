@@ -500,7 +500,20 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
             decoded_gain.value() > std::numeric_limits<std::uint32_t>::max())
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path + "/data");
         playback = {std::bit_cast<float>(static_cast<std::uint32_t>(decoded_gain.value())),
-                    decoded_fade_in.value(), decoded_fade_out.value()};
+                    decoded_fade_in.value(), decoded_fade_out.value(), ClipFadeShape::Linear};
+    }
+    const auto* fade_shape = data->find("fade_shape");
+    if (detail::clip_schema_policy.requires_fade_shape(structural.value().version)) {
+        if (!fade_shape)
+            return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data/fade_shape");
+        if (fade_shape->kind != JsonValue::Kind::String)
+            return fail<Clip>(PersistenceErrorCode::UnexpectedType, path + "/data/fade_shape");
+        if (fade_shape->scalar == "equal_power")
+            playback.fade_shape = ClipFadeShape::EqualPower;
+        else if (fade_shape->scalar != "linear")
+            return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/fade_shape");
+    } else if (fade_shape) {
+        return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/fade_shape");
     }
     TimeConform time_conform = TimeConform::None;
     const auto* conform = data->find("time_conform");

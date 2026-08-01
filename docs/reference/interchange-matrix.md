@@ -68,6 +68,7 @@ is not a reason to add a model feature.
 | `clip.note-velocity-quantized` | yes | A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value. |
 | `tempo.value-quantized` | yes | A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation. |
 | `clip.media-window` | yes | A media clip that plays a source subrange rather than the referenced asset's complete frame range. |
+| `clip.fade-shape` | yes | A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like. |
 | `sequence.section-role` | yes | A region that names the structural part it spans, beyond its free-text name. |
 | `context.chord-bass` | yes | A chord statement naming the pitch class in the bass, rather than sounding root position. |
 | `context.chord-extension` | yes | A chord statement carrying added scale degrees beyond its quality. |
@@ -132,6 +133,7 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.note-velocity-quantized` | none | not declared |
 | `tempo.value-quantized` | none | not declared |
 | `clip.media-window` | none | not declared |
+| `clip.fade-shape` | none | not declared |
 | `sequence.section-role` | none | not declared |
 | `context.chord-bass` | none | not declared |
 | `context.chord-extension` | none | not declared |
@@ -152,7 +154,7 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.note` | full |  |  |  |
 | `clip.media` | full |  |  |  |
 | `clip.gain` | drop |  | dropped | the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity |
-| `clip.fades` | drop |  | dropped | the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges |
+| `clip.fades` | drop |  | dropped | the writer does not emit clip fades, so authored fade-in and fade-out durations are dropped and the clip exports with hard edges |
 | `clip.crossfade` | drop | | dropped | not declared |
 | `clip.warp` | drop | | dropped | not declared |
 | `clip.launch` | drop | | dropped | not declared |
@@ -192,6 +194,7 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.note-velocity-quantized` | full |  |  |  |
 | `tempo.value-quantized` | full |  |  |  |
 | `clip.media-window` | drop |  | dropped | the writer references the complete media asset, so a nonzero source start or partial frame count is dropped |
+| `clip.fade-shape` | drop |  | dropped | the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped |
 | `sequence.section-role` | drop |  | dropped | DAWproject arrangement markers carry a name and span but no typed structural role |
 | `context.chord-bass` | drop |  | dropped | the DAWproject chord representation carries quality and root but no bass |
 | `context.chord-extension` | drop |  | dropped | the DAWproject chord representation carries no added scale degrees |
@@ -256,6 +259,7 @@ Format id `smf`. Writer registered: yes.
 | `clip.note-velocity-quantized` | none | not declared |
 | `tempo.value-quantized` | none | not declared |
 | `clip.media-window` | none | not declared |
+| `clip.fade-shape` | none | not declared |
 | `sequence.section-role` | none | not declared |
 | `context.chord-bass` | none | not declared |
 | `context.chord-extension` | none | not declared |
@@ -276,7 +280,7 @@ Format id `smf`. Writer registered: yes.
 | `clip.note` | full |  |  |  |
 | `clip.media` | drop |  | dropped | Standard MIDI Files carry MIDI events rather than audio media, so media clips are omitted |
 | `clip.gain` | drop |  | dropped | Standard MIDI Files have no per-clip gain, so authored clip gain is omitted |
-| `clip.fades` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so authored fade shapes are omitted |
+| `clip.fades` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so authored fade-in and fade-out durations are omitted |
 | `clip.crossfade` | drop | | dropped | not declared |
 | `clip.warp` | drop | | dropped | not declared |
 | `clip.launch` | drop |  | dropped | Standard MIDI Files describe a linear arrangement, so launcher scenes are omitted |
@@ -316,6 +320,7 @@ Format id `smf`. Writer registered: yes.
 | `clip.note-velocity-quantized` | degrade | `clip.note` | approximated | 16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity |
 | `tempo.value-quantized` | degrade | `tempo.map` | approximated | tempo values are rounded to the nearest representable integer microseconds per quarter note |
 | `clip.media-window` | drop | | dropped | not declared |
+| `clip.fade-shape` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped |
 | `sequence.section-role` | drop |  | dropped | the bounded writer emits a region's name and span but not the part it names |
 | `context.chord-bass` | drop |  | dropped | the bounded writer does not emit chord or scale context |
 | `context.chord-extension` | drop |  | dropped | the bounded writer does not emit chord or scale context |
