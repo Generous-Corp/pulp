@@ -56,6 +56,8 @@ toolchain_report() { # <repo tools/rack dir> <installed tools/rack dir>
         printf '  NOTE the module packs differ: %s manifest(s) here, %s installed.\n' \
                "$mine" "$theirs"
         printf '       Modules generated on this machine live only in the\n'
-        printf '       installed pack until they are copied back.\n'
+        printf '       installed pack until they are copied back:\n'
+        printf '         tools/rack/copy_back.py            # what is stranded\n'
+        printf '         tools/rack/copy_back.py --apply    # bring it here\n'
     fi
 }
