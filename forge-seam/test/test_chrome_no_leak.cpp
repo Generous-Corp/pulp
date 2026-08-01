@@ -794,10 +794,13 @@ TEST_CASE("Forge Modular reports an unwired install rather than claiming success
 // KNOWN FAILING, and hidden so the suite stays honest rather than red: this
 // segfaults because ForgeModularShell::ensure_default_build() is a no-op while
 // ForgeShell::create_view() calls it "so the editor always maps to a live
-// graph". Run it deliberately with:  forge-test-chrome-no-leak "[.crash]"
-// It should pass the moment a default build exists, and it is the regression
-// test for that fix.
-TEST_CASE("Forge Modular's view tree can be walked", "[.crash]") {
+// graph".
+//
+// It ran hidden ([.crash]) while it waited for a default build to exist. That
+// has been true for a long time and it passes, so it runs with everything
+// else: it is the regression test for a segfault, and a regression test that
+// only runs when somebody remembers to ask for it is not guarding anything.
+TEST_CASE("Forge Modular's view tree can be walked", "[seam][crash]") {
     // Two segfaults pointed here: a human's crash in rebuild_marketplace_cards
     // and a walk of this tree. Both touched code that reads the project store,
     // so this now runs against the same isolated store the baselines use.
