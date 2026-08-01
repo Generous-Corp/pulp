@@ -502,6 +502,113 @@ TEST_CASE("server stop is reentrant from a main-thread domain operation",
     CHECK(reader.list().empty());
 }
 
+TEST_CASE("shutdown fence waits for callback-deferred server teardown",
+          "[inspect][client][teardown][main-thread][shutdown-fence]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    bool wrapper_destroyed = false;
+    bool release_handler = false;
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    std::weak_ptr<InspectorMainThreadRpc> rpc_lifetime = rpc;
+    auto binding = std::make_shared<ThrowingPublicationBinding>();
+    StaticPublicationBindings bindings({{
+        InspectorCapability::StateRead,
+        binding,
+    }});
+    auto server = std::make_unique<InspectorServer>();
+    const auto shutdown_fence = server->shutdown_fence();
+    InspectorSession session(
+        {"session-deferred-shutdown-fence", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            server.reset();
+            std::unique_lock lock(mutex);
+            wrapper_destroyed = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_handler; });
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.domain_bindings = &bindings;
+    config.main_thread_rpc = rpc;
+    REQUIRE(server->start_authenticated(std::move(config)));
+    rpc.reset();
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+
+    pulp::inspect::InspectorMessage response;
+    std::thread requester([&] {
+        response = client.request("State.getParameters");
+    });
+    std::function<void()> main_task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return static_cast<bool>(queued);
+        }));
+        main_task = std::move(queued);
+    }
+    std::thread executor([&] { main_task(); });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return wrapper_destroyed;
+        }));
+    }
+
+    CHECK_FALSE(server);
+    CHECK_FALSE(shutdown_fence.wait_for(std::chrono::milliseconds(100)));
+    CHECK_FALSE(shutdown_fence.ready());
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 0);
+    CHECK_FALSE(reader.list().empty());
+    CHECK_FALSE(rpc_lifetime.expired());
+
+    {
+        std::lock_guard lock(mutex);
+        release_handler = true;
+    }
+    cv.notify_all();
+    executor.join();
+    requester.join();
+
+    REQUIRE(shutdown_fence.wait_for(std::chrono::seconds(1)));
+    CHECK(shutdown_fence.ready());
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(reader.list().empty());
+    CHECK(rpc_lifetime.expired());
+    if (response.is_error)
+        CHECK(response.error_code == "connection_closed");
+}
+
 TEST_CASE("server can be released from a request callback",
           "[inspect][client][teardown][owner-lifetime]") {
     TemporaryDirectory temporary;

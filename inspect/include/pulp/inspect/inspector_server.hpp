@@ -20,9 +20,12 @@
 
 namespace pulp::inspect {
 
-/// Waitable proof that an InspectorServer's cleanup worker has exited. Capture
-/// this before allowing publication/domain callbacks to destroy the server.
-/// Waiting from the cleanup worker itself returns false instead of deadlocking.
+/// Waitable proof that an InspectorServer's cleanup worker has exited and all
+/// stop transitions, including callback-deferred teardown, have completed.
+/// Capture this before allowing publication/domain callbacks to destroy the
+/// server. Wait only from a thread outside inspector callbacks and RPC
+/// execution: an RPC callback can be the work that must finish before the
+/// fence becomes ready. Cleanup-worker self-waits are mechanically refused.
 class InspectorServerShutdownFence {
 public:
     struct State;

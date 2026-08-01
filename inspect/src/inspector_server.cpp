@@ -23,26 +23,83 @@ struct InspectorServerShutdownFence::State {
     std::mutex mutex;
     std::condition_variable cv;
     std::thread::id worker_thread;
-    std::atomic<bool> exited{false};
+    bool worker_exited = false;
+    std::size_t active_stop_transitions = 0;
+    std::size_t deferred_teardowns = 0;
+    std::atomic<bool> ready{false};
+
+    bool ready_locked() const noexcept {
+        return worker_exited && active_stop_transitions == 0 &&
+               deferred_teardowns == 0;
+    }
+
+    void publish_ready_locked() noexcept {
+        ready.store(ready_locked(), std::memory_order_release);
+    }
+
+    void begin_stop_transition() {
+        std::lock_guard lock(mutex);
+        ++active_stop_transitions;
+        publish_ready_locked();
+    }
+
+    void end_stop_transition() {
+        {
+            std::lock_guard lock(mutex);
+            --active_stop_transitions;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_deferred_teardown() {
+        std::lock_guard lock(mutex);
+        ++deferred_teardowns;
+        publish_ready_locked();
+    }
+
+    void end_deferred_teardown() {
+        {
+            std::lock_guard lock(mutex);
+            --deferred_teardowns;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void mark_worker_started() {
+        std::lock_guard lock(mutex);
+        worker_thread = std::this_thread::get_id();
+        worker_exited = false;
+        publish_ready_locked();
+    }
+
+    void mark_worker_exited() {
+        {
+            std::lock_guard lock(mutex);
+            worker_thread = {};
+            worker_exited = true;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
 };
 
 bool InspectorServerShutdownFence::ready() const noexcept {
     if (!state_)
         return true;
-    return state_->exited.load(std::memory_order_acquire);
+    return state_->ready.load(std::memory_order_acquire);
 }
 
 bool InspectorServerShutdownFence::wait() const {
     if (!state_)
         return true;
     std::unique_lock lock(state_->mutex);
-    if (!state_->exited.load(std::memory_order_acquire) &&
+    if (!state_->ready_locked() &&
         state_->worker_thread == std::this_thread::get_id()) {
         return false;
     }
-    state_->cv.wait(lock, [&] {
-        return state_->exited.load(std::memory_order_acquire);
-    });
+    state_->cv.wait(lock, [&] { return state_->ready_locked(); });
     return true;
 }
 
@@ -51,13 +108,12 @@ bool InspectorServerShutdownFence::wait_for(
     if (!state_)
         return true;
     std::unique_lock lock(state_->mutex);
-    if (!state_->exited.load(std::memory_order_acquire) &&
+    if (!state_->ready_locked() &&
         state_->worker_thread == std::this_thread::get_id()) {
         return false;
     }
-    return state_->cv.wait_for(lock, timeout, [&] {
-        return state_->exited.load(std::memory_order_acquire);
-    });
+    return state_->cv.wait_for(lock, timeout,
+                               [&] { return state_->ready_locked(); });
 }
 
 namespace {
@@ -352,20 +408,10 @@ public:
 
     void cleanup_loop() {
         const auto fence = cleanup_fence;
-        {
-            std::lock_guard lock(fence->mutex);
-            fence->worker_thread = std::this_thread::get_id();
-        }
+        fence->mark_worker_started();
         struct WorkerGuard {
             std::shared_ptr<InspectorServerShutdownFence::State> fence;
-            ~WorkerGuard() {
-                {
-                    std::lock_guard lock(fence->mutex);
-                    fence->worker_thread = {};
-                    fence->exited.store(true, std::memory_order_release);
-                }
-                fence->cv.notify_all();
-            }
+            ~WorkerGuard() { fence->mark_worker_exited(); }
         } worker_guard{fence};
         std::unique_lock lock(clients_mutex);
         while (true) {
@@ -600,16 +646,32 @@ void InspectorServer::Impl::stop() {
         bool expected = false;
         if (deferred_stop_started.compare_exchange_strong(
                 expected, true, std::memory_order_acq_rel)) {
+            cleanup_fence->begin_deferred_teardown();
+            struct DeferredRegistrationGuard {
+                std::shared_ptr<InspectorServerShutdownFence::State> fence;
+                std::atomic<bool>* started;
+                bool registered = false;
+                ~DeferredRegistrationGuard() {
+                    if (!registered) {
+                        started->store(false, std::memory_order_release);
+                        fence->end_deferred_teardown();
+                    }
+                }
+            } registration{cleanup_fence, &deferred_stop_started};
             const bool deferred = rpc->after_current_operation(
-                [keep_alive] {
+                [keep_alive, fence = cleanup_fence] {
+                    struct DeferredTeardownGuard {
+                        std::shared_ptr<
+                            InspectorServerShutdownFence::State> fence;
+                        ~DeferredTeardownGuard() {
+                            fence->end_deferred_teardown();
+                        }
+                    } teardown{fence};
                     keep_alive->stop();
                     keep_alive->deferred_stop_started.store(
                         false, std::memory_order_release);
                 });
-            if (!deferred) {
-                deferred_stop_started.store(false,
-                                            std::memory_order_release);
-            }
+            registration.registered = deferred;
         }
         return;
     }
@@ -647,6 +709,15 @@ void InspectorServer::Impl::stop_generation(
 }
 
 void InspectorServer::Impl::stop_locked() {
+    struct StopTransitionGuard {
+        std::shared_ptr<InspectorServerShutdownFence::State> fence;
+        explicit StopTransitionGuard(
+            std::shared_ptr<InspectorServerShutdownFence::State> state)
+            : fence(std::move(state)) {
+            fence->begin_stop_transition();
+        }
+        ~StopTransitionGuard() { fence->end_stop_transition(); }
+    } stop_transition{cleanup_fence};
     session_generation.fetch_add(1, std::memory_order_acq_rel);
     transition_waiting_for_callbacks.store(true, std::memory_order_release);
     std::shared_ptr<InspectorMainThreadRpc> rpc_to_cancel;
