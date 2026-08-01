@@ -601,6 +601,57 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
 
+### Rebuilding a `MidiContent` from its notes alone silently drops everything else
+
+A `MidiContent` carries four things, not one: the note array, a sparse
+`NoteModifier` companion array keyed by note identity (probability, every-Nth /
+first / fill condition, ratchet count), the `modifier_seed` those probability
+draws are derived from, and the clip's controller/expression lanes.
+`MidiContent::create` is overloaded, and the shorter overloads default away
+exactly the state a rebuild means to keep — they **compile wherever the
+four-argument overload does**. So any path that rebuilds a clip's content by
+handing the notes back to `create` erases authored document state with no error
+and no diagnostic. Reach for the four-argument overload on every rebuild path.
+
+Re-attachment is **not uniform across the three companions**, and making it
+uniform is its own bug:
+
+- **Filter the modifier array to the surviving note ids.** Modifiers key on
+  `note_id`, and `create` rejects one that names a note the content does not
+  carry (`MissingItem`), so a blind pass-through converts an ordinary note
+  deletion into a hard model failure. Dropping the orphan is the right answer,
+  not an error: the modifier has no identity left to key to, and the same edit
+  already tombstones that note's identity.
+- **Carry the seed verbatim, even when no modifier survives.** It is authored
+  document state that selects the replay, not a cache — zeroing it changes which
+  notes sound as soon as a modifier is authored again.
+- **Pass the lanes through unfiltered.** A `MidiExpressionLane` keys on a
+  `MidiLaneAddress` — `{group, channel, status, bank, index}`, a channel-voice
+  stream address that references no note at all. Applying the surviving-note-id
+  filter to lanes as well is the reflexive "keep these consistent" edit, and
+  because no lane identity is ever a note identity it deletes the clip's
+  controller streams the moment an edit removes a note. Only a test that
+  authors lanes *and* shrinks the note set catches it.
+
+The rebuild paths that must each handle all three independently are
+`reduce_replace_note_content` (`transaction_note_internal.cpp`), `rebuild_clip`
+(`id_remap.cpp`, which additionally rewrites each `note_id`, lane id, and point
+id through the remap table while leaving the address alone), and
+`finish_pending_leaf` (`core/playback/src/sequence_content_lowerer.cpp`, where a
+nested clip trimmed to its audible window filters modifiers to the retained
+notes and refuses a clip with lanes outright — trimming has no defined answer
+for a point that sits before the retained window yet still sounds inside it).
+
+**Known limit worth knowing before you file it as a bug:** `ReplaceNoteContent`
+transports note arrays only. Preserve-and-prune therefore makes the command's
+inverse exact for every edit that keeps its notes, but *not* for one that
+removes a modifier-bearing note — undo restores the note and its identity while
+its modifier stays dropped. Lanes are unaffected: they never leave the clip.
+Closing the modifier gap means carrying modifiers in the command payload, which
+is a serialized schema surface; `decode_command` gates on exact version equality
+with no upgrade hook, so it has to arrive as optional fields at v1, never a
+version bump.
+
 ### Sequence-owned context and the compile-context subscription contract
 
 A `Sequence` owns a `ChordScaleLane` — an ordered set of `ChordScaleEvent`s
