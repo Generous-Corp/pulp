@@ -8,6 +8,8 @@
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
+
 namespace pulp::view {
 
 namespace {
@@ -24,7 +26,7 @@ std::string value_to_json(const choc::value::Value& value) {
     // (`42`, `"abc"`) — the wrap accepts those yet still rejects non-finite
     // number tokens (NaN / Infinity from e.g. `1/0`), which we replace with null.
     try {
-        choc::json::parse("[" + json + "]");
+        (void)choc::json::parse("[" + json + "]");
     } catch (...) {
         return "null";
     }
@@ -33,10 +35,14 @@ std::string value_to_json(const choc::value::Value& value) {
 }  // namespace
 
 ScriptInspectorBridge::~ScriptInspectorBridge() {
-    detach();  // wake any waiter blocked on a pending request
+    detach();
 }
 
 void ScriptInspectorBridge::attach(ScriptEngine* engine) {
+    // Replacing an attachment first fences any old queued/running request. In
+    // the normal lifecycle this is a cheap no-op; on reload it prevents a late
+    // completion from touching the replacement engine.
+    detach();
     std::lock_guard<std::mutex> lock(mutex_);
     engine_ = engine;
     engine_thread_ = std::this_thread::get_id();
@@ -44,8 +50,10 @@ void ScriptInspectorBridge::attach(ScriptEngine* engine) {
     caps_ = Capabilities{};
     if (engine) {
         caps_.engine = std::string(engine_type_name(engine->engine_type()));
-        caps_.can_evaluate = true;
         caps_.can_interrupt = engine->supports_interrupt();
+        // This bridge promises a deadline on every path. A backend without a
+        // cross-thread interrupt seam cannot safely offer Runtime.evaluate.
+        caps_.can_evaluate = caps_.can_interrupt;
         // can_break / can_step / can_inspect_locals stay false — mainline
         // QuickJS exposes no source-line breakpoint or scope-inspection API.
     }
@@ -53,23 +61,29 @@ void ScriptInspectorBridge::attach(ScriptEngine* engine) {
 
 void ScriptInspectorBridge::detach() {
     std::shared_ptr<Request> stranded;
+    std::shared_ptr<Request> running;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
         engine_ = nullptr;
         caps_ = Capabilities{};
         stranded = std::move(pending_);
-        pending_.reset();
-        in_flight_ = false;
-    }
-    if (stranded) {
-        {
-            std::lock_guard<std::mutex> l(stranded->m);
-            stranded->result = EvalResult{};
-            stranded->result.detached = true;
-            stranded->result.error = "engine detached before evaluation ran";
-            stranded->done = true;
+        if (stranded) {
+            EvalResult result;
+            result.detached = true;
+            result.error = "engine detached before evaluation ran";
+            finish_locked(stranded, std::move(result));
         }
-        stranded->cv.notify_all();
+        if (running_) {
+            running_->detach_requested = true;
+            running = running_;
+        }
+        lock.unlock();
+
+        if (running)
+            interrupt_if_active(running);
+
+        lock.lock();
+        state_cv_.wait(lock, [&] { return !running_; });
     }
 }
 
@@ -98,6 +112,8 @@ ScriptInspectorBridge::serialize_eval(ScriptEngine* engine, const std::string& c
 ScriptInspectorBridge::EvalResult
 ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::milliseconds timeout) {
     std::shared_ptr<Request> req;
+    ScriptEngine* engine = nullptr;
+    bool owner_thread = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!engine_) {
@@ -106,45 +122,88 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
             r.error = "no engine attached";
             return r;
         }
-        // Same-thread client: run inline. A pump() to fulfill a queued request
-        // can never arrive on the thread that would have driven it, so queuing
-        // here would deadlock. This inline path intentionally holds mutex_ across
-        // the evaluation and is therefore not interruptible — a same-thread REPL
-        // eval has no other thread to interrupt it anyway; the interruptible path
-        // is the cross-thread pump() below.
-        if (have_engine_thread_ && std::this_thread::get_id() == engine_thread_) {
-            return serialize_eval(engine_, code);
-        }
         if (in_flight_) {
             EvalResult r;
             r.busy = true;
             r.error = "an evaluation is already in flight";
             return r;
         }
+        if (!caps_.can_interrupt) {
+            EvalResult r;
+            r.error = "attached engine cannot enforce an evaluation deadline";
+            return r;
+        }
         in_flight_ = true;
         req = std::make_shared<Request>();
         req->code = code;
-        pending_ = req;
+        engine = engine_;
+        owner_thread = have_engine_thread_ && std::this_thread::get_id() == engine_thread_;
+        if (owner_thread) {
+            req->state = RequestState::running;
+            req->engine = engine;
+            req->can_interrupt = caps_.can_interrupt;
+            req->interrupt_window_open.store(true, std::memory_order_release);
+            running_ = req;
+        } else {
+            pending_ = req;
+        }
+        state_cv_.notify_all();
     }
 
-    std::unique_lock<std::mutex> l(req->m);
-    if (req->cv.wait_for(l, timeout, [&] { return req->done; }))
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::max(timeout, std::chrono::milliseconds::zero());
+
+    if (owner_thread) {
+        std::thread watchdog([this, req, deadline] {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (req->cv.wait_until(lock, deadline,
+                                   [&] { return req->state == RequestState::finished; }))
+                return;
+            req->timeout_requested = true;
+            lock.unlock();
+            interrupt_if_active(req);
+        });
+
+        EvalResult result = serialize_eval(engine, code);
+        req->interrupt_window_open.exchange(false, std::memory_order_acq_rel);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (req->detach_requested) {
+                result = EvalResult{};
+                result.detached = true;
+                result.error = "engine detached during evaluation";
+            } else if (req->timeout_requested) {
+                result = EvalResult{};
+                result.timed_out = true;
+                result.error = "evaluation timed out";
+            } else if (req->interrupt_requested) {
+                result = EvalResult{};
+                result.error = "evaluation interrupted";
+            }
+            finish_locked(req, std::move(result));
+        }
+        watchdog.join();
+        return req->result;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (req->cv.wait_until(lock, deadline,
+                           [&] { return req->state == RequestState::finished; }))
         return req->result;
 
-    // Timed out waiting for the engine thread. Abort a runaway evaluation (if
-    // the engine can) and give the abort a brief window to unwind before we
-    // report the timeout. A late pump() completion after this point writes into
-    // req (still alive via the caller's shared_ptr) but no one reads it.
-    l.unlock();
-    interrupt();
-    l.lock();
-    if (req->cv.wait_for(l, std::chrono::milliseconds(300), [&] { return req->done; }))
+    EvalResult timeout_result;
+    timeout_result.timed_out = true;
+    timeout_result.error = "evaluation timed out";
+    if (req->state == RequestState::queued) {
+        pending_.reset();
+        finish_locked(req, timeout_result);
         return req->result;
+    }
 
-    EvalResult r;
-    r.timed_out = true;
-    r.error = "evaluation timed out";
-    return r;
+    req->timeout_requested = true;
+    lock.unlock();
+    interrupt_if_active(req);
+    return timeout_result;
 }
 
 ScriptInspectorBridge::Capabilities ScriptInspectorBridge::capabilities() const {
@@ -153,13 +212,25 @@ ScriptInspectorBridge::Capabilities ScriptInspectorBridge::capabilities() const 
 }
 
 bool ScriptInspectorBridge::interrupt() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    // Only arm the interrupt while an evaluation is actually in flight — arming
-    // it idle would abort the *next* evaluation instead (QuickJS clears the
-    // cancel flag on the next interrupt check, which only fires during JS).
-    if (!engine_ || !caps_.can_interrupt || !in_flight_)
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!in_flight_)
         return false;
-    engine_->request_interrupt();  // atomic store; safe from this foreign thread
+    if (pending_) {
+        auto request = std::move(pending_);
+        EvalResult result;
+        result.error = "evaluation interrupted before it ran";
+        finish_locked(request, std::move(result));
+        return true;
+    }
+    if (!running_ || !running_->can_interrupt)
+        return false;
+    auto request = running_;
+    if (!request->interrupt_window_open.exchange(false, std::memory_order_acq_rel))
+        return false;
+    request->interrupt_requested = true;
+    auto* engine = request->engine;
+    lock.unlock();
+    engine->request_interrupt();
     return true;
 }
 
@@ -175,8 +246,13 @@ bool ScriptInspectorBridge::pump() {
         if (!pending_)
             return false;
         req = std::move(pending_);
-        pending_.reset();
-        engine = engine_;  // stable: engine_ is only mutated on this (engine) thread
+        req->state = RequestState::running;
+        req->engine = engine_;
+        req->can_interrupt = caps_.can_interrupt;
+        req->interrupt_window_open.store(true, std::memory_order_release);
+        running_ = req;
+        engine = engine_;
+        state_cv_.notify_all();
     }
 
     EvalResult result;
@@ -186,23 +262,50 @@ bool ScriptInspectorBridge::pump() {
         result.detached = true;
         result.error = "engine detached before evaluation ran";
     }
+    req->interrupt_window_open.exchange(false, std::memory_order_acq_rel);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        in_flight_ = false;
+        if (req->detach_requested) {
+            result = EvalResult{};
+            result.detached = true;
+            result.error = "engine detached during evaluation";
+        } else if (req->timeout_requested) {
+            result = EvalResult{};
+            result.timed_out = true;
+            result.error = "evaluation timed out";
+        } else if (req->interrupt_requested) {
+            result = EvalResult{};
+            result.error = "evaluation interrupted";
+        }
+        finish_locked(req, std::move(result));
     }
-    {
-        std::lock_guard<std::mutex> l(req->m);
-        req->result = std::move(result);
-        req->done = true;
-    }
-    req->cv.notify_all();
     return true;
 }
 
 bool ScriptInspectorBridge::is_busy() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return in_flight_;
+}
+
+void ScriptInspectorBridge::finish_locked(const std::shared_ptr<Request>& request,
+                                           EvalResult result) {
+    request->result = std::move(result);
+    request->state = RequestState::finished;
+    if (pending_ == request) pending_.reset();
+    if (running_ == request) running_.reset();
+    in_flight_ = false;
+    request->cv.notify_all();
+    state_cv_.notify_all();
+}
+
+bool ScriptInspectorBridge::interrupt_if_active(const std::shared_ptr<Request>& request) {
+    if (!request->can_interrupt || !request->engine)
+        return false;
+    if (!request->interrupt_window_open.exchange(false, std::memory_order_acq_rel))
+        return false;
+    request->engine->request_interrupt();
+    return true;
 }
 
 } // namespace pulp::view
