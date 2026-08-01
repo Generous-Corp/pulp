@@ -17,6 +17,9 @@
 //!   arg + `PULP_FRAMES=<n>` when not the default of 1.
 //! - `--watch` — re-launch the binary on source changes. Consumed by
 //!   the CLI; NOT forwarded.
+//! - `--inspect[=<profile>]` / `--inspect-capability <id>` — activate the
+//!   Development Inspector in a GPU-enabled desktop build. Forwarded through
+//!   `PULP_INSPECT_PROFILE` / `PULP_INSPECT_CAPABILITIES`.
 //! - `--audio-inspector` — forwarded as `--audio-inspector` and
 //!   `PULP_AUDIO_INSPECTOR=1`.
 //! - `--audio-probe-json <path>` — implies `--headless`, forwarded as

@@ -298,6 +298,10 @@ when the pixels themselves must show live signal.
 
 #### Development Inspector profiles
 
+Standalone inspector activation requires a GPU-enabled desktop build. A build
+with `PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime
+disabled even when the protocol/client SDK components are present.
+
 - `--inspect` enables the `develop` profile for this standalone instance.
 - `--inspect=observe|develop` selects a named capability set.
 - `--inspect=custom --inspect-capability <id>...` selects an explicit,
@@ -1279,8 +1283,9 @@ Remaining limitation:
 **Status**: experimental
 
 Authenticated low-level client for an explicitly enabled inspector session.
-Use `pulp run --inspect` (or `--inspect=<profile>`) to activate a standalone;
-normal `pulp run` and plugin-format launches start no endpoint. The client reads
+Use `pulp run --inspect` (or `--inspect=<profile>`) in a GPU-enabled desktop
+build to activate a standalone; normal `pulp run`, GPU-off/mobile builds, and
+plugin-format launches start no endpoint. The client reads
 owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.

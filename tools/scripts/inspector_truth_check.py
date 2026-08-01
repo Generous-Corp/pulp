@@ -115,7 +115,8 @@ FORBIDDEN_CLAIMS = {
 
 REQUIRED_CLAIMS = {
     ".claude/commands/inspect.md": (
-        "unavailable in normal launches",
+        "GPU-enabled desktop",
+        "pulp run --inspect",
         "explicitly wired custom fixture",
     ),
     "docs/agent-integrations.md": (

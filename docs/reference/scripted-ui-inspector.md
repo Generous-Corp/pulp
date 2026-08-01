@@ -23,7 +23,8 @@ backend, or the Chrome DevTools inspector that JSC/V8 expose), gated behind the
 
 The component methods use the inspector JSON message shape (`Domain.method` +
 `params`). They are reachable only after `pulp run --inspect` (or another
-explicit profile) constructs and wires the standalone server; `pulp inspect`
+explicit profile) in a GPU-enabled desktop build constructs and wires the
+standalone server; `pulp inspect`
 is the experimental low-level client.
 
 ### `Runtime.getCapabilities`
