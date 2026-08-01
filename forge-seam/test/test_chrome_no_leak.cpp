@@ -6160,3 +6160,55 @@ TEST_CASE("the port map parser reads a real scan", "[portmap][join]") {
     }
     CHECK(any_jack);
 }
+
+// The explanations the generator wrote reach the ones the app shows.
+//
+// patch.py writes a .why.json beside every patch; patch_loader reads it and
+// hangs the text on each cable. That sidecar is the whole "a patch explains
+// itself" promise, and the two halves are a Python writer and a C++ reader
+// with nothing between them — a renamed key parses clean and yields a patch
+// whose cables all have empty reasons, which reads as a model that said
+// nothing rather than a reader that dropped it.
+//
+// So this uses a sidecar the generator actually produced, not a fixture.
+TEST_CASE("a generated patch arrives with its reasons attached",
+          "[portmap][join][why]") {
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path dir =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/patches";
+    if (!std::filesystem::exists(dir)) {
+        WARN("no generated patches on this machine — skipped, not passed");
+        return;
+    }
+
+    // The newest patch that has a sidecar beside it.
+    std::filesystem::path newest;
+    std::filesystem::file_time_type best{};
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+        if (e.path().extension() != ".vcv") continue;
+        const auto side = e.path().string().substr(
+                              0, e.path().string().size() - 4) + ".why.json";
+        if (!std::filesystem::exists(side)) continue;
+        const auto when = std::filesystem::last_write_time(e, ec);
+        if (newest.empty() || when > best) { newest = e.path(); best = when; }
+    }
+    if (newest.empty()) {
+        WARN("no patch with a sidecar — skipped, not passed");
+        return;
+    }
+    INFO("patch: " << newest.filename().string());
+
+    const auto loaded = forge_modular::load_patch(newest.string());
+    REQUIRE_FALSE(loaded.connections.empty());
+
+    // At least one cable must carry a reason. Zero means the reader took
+    // nothing from a file the writer filled — the silent half of this join.
+    std::size_t with_why = 0;
+    for (const auto& c : loaded.connections)
+        if (!c.why.empty()) ++with_why;
+    INFO(with_why << " of " << loaded.connections.size()
+                  << " cables carry a reason");
+    CHECK(with_why > 0);
+}
