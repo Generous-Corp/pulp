@@ -253,11 +253,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->project_id() != request_->project->id() ||
                      live->sequence_id() != request_->sequence_id ||
                      live->tempo_map_owner().get() != request_->tempo_map.get() ||
+                     live->tempo_map().sample_rate().normalized() != request_->sample_rate ||
                      live->audio_assets_owner().get() != request_->audio_assets.get() ||
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
-                     live->generated_id_base() != request_->project->next_item_id() ||
-                     live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
+                     live->generated_id_base() != request_->project->next_item_id();
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
             *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
             request_->max_expanded_clips);
@@ -289,7 +289,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 if (sample_rate_converter) {
                     const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
                     auto seeded = audio_compiler_.converters().seed(
-                        source_rate, request_->tempo_map->sample_rate(), sample_rate_converter,
+                        source_rate, request_->sample_rate, sample_rate_converter,
                         clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
@@ -797,12 +797,18 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         core_->status.last_error = error;
         return runtime::Err(error);
     };
+    const auto normalized_rate = request.sample_rate.normalized();
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
+        !normalized_rate.valid() ||
+        normalized_rate.as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate) ||
+        normalized_rate != request.tempo_map->sample_rate().normalized() ||
         request.document_revision == 0 || !request.automation_limits.valid() ||
         request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
         request.maximum_note_events_per_track == 0 ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
+    request.sample_rate = normalized_rate;
     const auto* sequence = request.project->find_sequence(request.sequence_id);
     if (!sequence)
         return reject(
@@ -865,6 +871,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                                 core_->pending->sequence_id != request.sequence_id ||
                                 core_->pending->project->id() != request.project->id() ||
                                 core_->pending->tempo_map.get() != request.tempo_map.get() ||
+                                core_->pending->sample_rate != request.sample_rate ||
                                 core_->pending->audio_assets.get() != request.audio_assets.get() ||
                                 core_->pending->audio_limits != request.audio_limits;
             request.dirty.tracks = std::move(dirty);

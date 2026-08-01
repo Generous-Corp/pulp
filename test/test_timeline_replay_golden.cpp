@@ -28,10 +28,11 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
     return std::move(result).value();
 }
 
-std::shared_ptr<const CompiledTempoMap> tempo_map() {
+std::shared_ptr<const CompiledTempoMap>
+tempo_map(RationalRate sample_rate = {48'000, 1}) {
     const std::array points{TempoPoint{{0}, 120.0}};
     return std::make_shared<const CompiledTempoMap>(
-        take(CompiledTempoMap::compile(points, RationalRate{48'000, 1})));
+        take(CompiledTempoMap::compile(points, sample_rate)));
 }
 
 TickPosition tick_at_sample(const CompiledTempoMap& map, std::int64_t sample) {
@@ -95,7 +96,8 @@ struct RenderTrace {
 RenderTrace render_trace(std::shared_ptr<const Project> project,
                          const std::shared_ptr<const CompiledTempoMap>& map,
                          const std::shared_ptr<const DecodedAudioAssetPool>& assets,
-                         std::span<const std::uint32_t> block_sizes) {
+                         std::span<const std::uint32_t> block_sizes,
+                         RationalRate declared_rate = {0, 1}) {
     PlaybackProgramStore store;
     DeferredCompileExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
@@ -103,6 +105,8 @@ RenderTrace render_trace(std::shared_ptr<const Project> project,
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = map;
+    request.sample_rate =
+        declared_rate.valid() ? declared_rate : request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = assets;
@@ -249,4 +253,59 @@ TEST_CASE("audio and note render trace rejects blocks above the prepared maximum
     REQUIRE(transport.prepare(*map, {.max_buffer_size = 9}) == TransportError::None);
     TransportSnapshot untouched;
     REQUIRE(transport.begin_block(10, untouched) == TransportError::InvalidFrameCount);
+}
+
+TEST_CASE("program compilation renders exact native streams at declared sample rates") {
+    const auto authored_map = tempo_map();
+    const auto project = std::make_shared<const Project>(make_checkpoint(*authored_map));
+    const auto assets = make_audio_pool();
+    constexpr std::array schedule{3u, 7u, 5u, 9u, 8u, 3u, 7u, 5u, 9u, 8u};
+    struct Case {
+        RationalRate rate;
+        std::string_view fixture;
+    };
+    constexpr std::array cases{
+        Case{{44'100, 1}, "compile-rate-44100.golden"},
+        Case{{48'000, 1}, "compile-rate-48000.golden"},
+        Case{{96'000, 1}, "compile-rate-96000.golden"},
+    };
+
+    for (const auto& test : cases) {
+        const auto map = tempo_map(test.rate);
+        const auto trace = render_trace(project, map, assets, schedule, test.rate);
+        const auto actual = hex(trace.bytes);
+        INFO("actual " << test.fixture << ": " << actual);
+        REQUIRE(actual == read_fixture(test.fixture));
+    }
+}
+
+TEST_CASE("program compilation rejects invalid or tempo-map-mismatched declared rates") {
+    const auto map = tempo_map();
+    const auto project = std::make_shared<const Project>(make_checkpoint(*map));
+
+    const auto submit = [&](RationalRate declared_rate) {
+        PlaybackProgramStore store;
+        DeferredCompileExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = project;
+        request.sequence_id = {2};
+        request.tempo_map = map;
+        request.sample_rate = declared_rate;
+        request.document_revision = 1;
+        request.dirty.all = true;
+        return compiler.submit(std::move(request));
+    };
+
+    for (const auto rate : std::array{
+             RationalRate{0, 1},
+             RationalRate{timebase::kMaximumCompiledSampleRate + 1u, 1},
+             RationalRate{44'100, 1},
+         }) {
+        const auto result = submit(rate);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == CompileErrorCode::InvalidRequest);
+    }
+
+    REQUIRE(submit({96'000, 2}));
 }

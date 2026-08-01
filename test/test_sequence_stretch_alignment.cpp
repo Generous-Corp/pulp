@@ -468,6 +468,7 @@ TEST_CASE("tempo-map change aligns audio and MIDI with executable reverted-confo
         request.project = tempo_change_alignment_project(conform);
         request.sequence_id = {2};
         request.tempo_map = map;
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = assets;

@@ -359,6 +359,7 @@ compile_project(const LoadedProject& loaded, std::uint32_t sample_rate) {
     request.project = std::make_shared<const pulp::timeline::Project>(loaded.value);
     request.sequence_id = loaded.value.root_sequence_id();
     request.tempo_map = result->tempo_map;
+    request.sample_rate = {sample_rate, 1};
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = std::move(assets).value();

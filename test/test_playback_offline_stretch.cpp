@@ -428,6 +428,7 @@ TEST_CASE("program compiler publishes and renders offline Stretch one-to-one",
     request.project = fixture.project;
     request.sequence_id = {2};
     request.tempo_map = fixture.map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 7;
     request.dirty.all = true;
     request.audio_assets = pool({fixture.decoded});

@@ -120,6 +120,7 @@ void TimelineAudioPlayerProcessor::prepare(const format::PrepareContext& context
     request.project = std::move(project);
     request.sequence_id = {3};
     request.tempo_map = std::move(map);
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.audio_assets = std::move(pool).value();
     request.audio_limits.max_channels = 2;
