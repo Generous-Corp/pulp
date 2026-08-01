@@ -228,8 +228,8 @@ struct AuthenticatedFixture {
     InspectorSession session;
     InspectorServer server;
 
-    AuthenticatedFixture()
-        : policy([] {
+    explicit AuthenticatedFixture(bool enable_trace_session = false)
+        : policy([enable_trace_session] {
               InspectorPolicyConfig result;
               result.profile = InspectorProfile::Develop;
               result.available_capabilities = {
@@ -240,8 +240,11 @@ struct AuthenticatedFixture {
                   InspectorCapability::CaptureImage,
                   InspectorCapability::DiagnosticsRead,
                   InspectorCapability::TraceControl,
-                  InspectorCapability::TraceSessionControl,
               };
+              if (enable_trace_session) {
+                  result.available_capabilities.push_back(
+                      InspectorCapability::TraceSessionControl);
+              }
               return result;
           }()),
           session(
@@ -281,7 +284,8 @@ struct AuthenticatedFixture {
         record.plugin_id = session.info().plugin_id;
         InspectorServerConfig config{
             &session, &publisher, record, *token};
-        config.domain_bindings = &domain_bindings;
+        if (enable_trace_session)
+            config.domain_bindings = &domain_bindings;
         config.main_thread_rpc = make_inline_test_main_thread_rpc();
         REQUIRE(start_test_inspector_server(server, std::move(config)));
     }

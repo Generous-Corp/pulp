@@ -2555,7 +2555,7 @@ TEST_CASE("Every live inspector MCP schema accepts an exact publication selector
 
 TEST_CASE("MCP direct client completes authenticated read mutation and denial round trips",
           "[mcp][tools][inspect][authenticated]") {
-    AuthenticatedFixture fixture;
+    AuthenticatedFixture fixture(true);
     ScopedEnvVar runtime_dir("PULP_INSPECTOR_RUNTIME_DIR",
                              fixture.temporary.path.string());
     const auto records = fixture.reader.list();
