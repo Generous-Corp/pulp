@@ -380,6 +380,42 @@ TEST_CASE("telemetry poll retains source and transport loss debt until delivery"
           first_channel["sourceDropped"].getWithDefault<std::int64_t>(0));
 }
 
+TEST_CASE("telemetry subscription starts after the event overflow baseline",
+          "[inspect][telemetry][broker][events]") {
+    ValueChannelSet channels;
+    auto* events = channels.declare_events("onsets");
+    REQUIRE(events != nullptr);
+    auto now = std::chrono::steady_clock::now();
+    ValueChannelTelemetryBroker broker({}, [&] { return now; });
+    REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
+
+    const pulp::view::ValueEvent occurrence{.frame_index = 3, .value = 1.0f};
+    for (int i = 0; i < 20; ++i)
+        events->publish(&occurrence, 1);
+
+    std::vector<InspectorMessage> emitted;
+    broker.set_event_sink([&](std::string_view, const InspectorMessage& event, std::string_view) {
+        emitted.push_back(event);
+        return InspectorTargetedEventResult::Queued;
+    });
+    const auto subscribed = broker.handle(InspectorRequestContext{.client_id = "new-client"},
+                                          request(1, pulp::inspect::methods::kTelemetrySubscribe,
+                                                  R"({"channels":["onsets"],"rateHz":60})"));
+    REQUIRE_FALSE(subscribed.is_error);
+    broker.poll();
+    REQUIRE(emitted.size() == 1);
+    const auto baseline = channel(json(emitted[0]), "onsets");
+    CHECK(baseline["payload"].size() == 0);
+    CHECK(baseline["sourceDropped"].getWithDefault<std::int64_t>(-1) == 0);
+    CHECK(baseline["coalesced"].getWithDefault<std::int64_t>(-1) == 0);
+
+    events->publish(&occurrence, 1);
+    now += 20ms;
+    broker.poll();
+    REQUIRE(emitted.size() == 2);
+    CHECK(channel(json(emitted[1]), "onsets")["payload"].size() == 1);
+}
+
 TEST_CASE("telemetry fans one event drain to isolated client delivery state",
           "[inspect][telemetry][broker][fanout]") {
     ValueChannelSet channels;
@@ -697,13 +733,22 @@ TEST_CASE("telemetry preserves named subscriptions across same-set reattach",
     CHECK(sample["sourceGeneration"].getWithDefault<std::int64_t>(0) == 2);
     CHECK(broker.subscription_count() == 1);
 
+    now += 100ms;
+    broker.replace_with_empty_source();
+    broker.poll();
+    REQUIRE(emitted.size() == 2);
+    const auto empty_sample = json(emitted[1]);
+    CHECK(empty_sample["sourceGeneration"].getWithDefault<std::int64_t>(0) == 3);
+    CHECK(empty_sample["reattached"].getWithDefault(false));
+    CHECK(channel(empty_sample, "gain")["staleReason"].getString() == "unavailable_after_reattach");
+
     broker.clear_attachment();
     ValueChannelSet replacement;
     replacement.declare_scalar("different");
     REQUIRE(broker.replace_attachment(replacement.attach_telemetry()));
     broker.poll();
-    REQUIRE(emitted.size() == 2);
-    const auto removed_sample = json(emitted[1]);
+    REQUIRE(emitted.size() == 3);
+    const auto removed_sample = json(emitted[2]);
     const auto removed = channel(removed_sample, "gain");
     CHECK(removed["staleReason"].getString() == "unavailable_after_reattach");
     CHECK(removed_sample["reattached"].getWithDefault(false));
