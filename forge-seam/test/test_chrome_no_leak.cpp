@@ -6212,3 +6212,48 @@ TEST_CASE("a generated patch arrives with its reasons attached",
                   << " cables carry a reason");
     CHECK(with_why > 0);
 }
+
+// The monitor classifies REAL generator output, not just fixtures.
+//
+// BuildMonitor::classify decides whether a log line is progress, a refusal, an
+// error or the success that ends a build, and every test for it here feeds it
+// strings somebody typed. A generator that rewords a line leaves those passing
+// while the app misreads the real thing — showing a finished build as still
+// running, or a refusal as an error.
+//
+// prove_idioms.sh leaves real transcripts behind, so this uses those.
+TEST_CASE("the build monitor reads a real generator log",
+          "[buildlog][join]") {
+    // A recorded run that TRAVELS with the tests. Reaching for the live logs
+    // under tools/ resolved inside the Forge worktree, found nothing, and
+    // skipped — reported by Catch2 as a passing test case.
+    const auto log = baseline_dir().parent_path() / "real-generator-run.log";
+    REQUIRE(std::filesystem::exists(log));
+
+    std::size_t lines = 0, success = 0, errors = 0, refusals = 0;
+    {
+        std::ifstream f(log);
+        std::string line;
+        while (std::getline(f, line)) {
+            ++lines;
+            switch (forge_modular::BuildMonitor::classify(line)) {
+                case forge_modular::BuildLine::Kind::success:  ++success;  break;
+                case forge_modular::BuildLine::Kind::error:    ++errors;   break;
+                case forge_modular::BuildLine::Kind::refusal:  ++refusals; break;
+                default: break;
+            }
+        }
+    }
+    INFO(lines << " real log lines: " << success << " success, " << errors
+               << " error, " << refusals << " refusal");
+    REQUIRE(lines > 10);
+
+    // A run of twelve prompts that all held ends in success lines. Zero means
+    // the monitor cannot see the end of a build in the generator's own words,
+    // and the app would show a finished run as still going.
+    CHECK(success > 0);
+
+    // And a log full of successful builds must not read as full of errors —
+    // the app paints an error state and stops watching.
+    CHECK(errors < lines / 4);
+}
