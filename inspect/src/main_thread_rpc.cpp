@@ -46,8 +46,12 @@ void run_completion(InspectorMainThreadRpc::Completion completion) noexcept {
 }
 
 struct PendingCall {
-    PendingCall(std::int64_t id, InspectorMainThreadRpc::Completion done)
-        : request_id(id), completion(std::move(done)) {}
+    PendingCall(std::int64_t id,
+                InspectorMainThreadRpc::Operation pending_operation,
+                InspectorMainThreadRpc::Completion done)
+        : request_id(id),
+          operation(std::move(pending_operation)),
+          completion(std::move(done)) {}
 
     std::int64_t request_id = 0;
     std::mutex mutex;
@@ -58,6 +62,7 @@ struct PendingCall {
     bool slot_held = true;
     bool completion_called = false;
     InspectorMessage response;
+    InspectorMainThreadRpc::Operation operation;
     InspectorMainThreadRpc::Completion completion;
 };
 
@@ -65,6 +70,11 @@ struct PendingCall {
 
 class InspectorMainThreadRpc::Impl {
 public:
+    struct PostedLifetimeCallbacks {
+        InspectorMainThreadRpc::Completion begin;
+        InspectorMainThreadRpc::Completion end;
+    };
+
     Config config;
     Post post;
     IsMainThread is_main_thread;
@@ -74,6 +84,8 @@ public:
     std::condition_variable pending_cv;
     std::vector<std::weak_ptr<PendingCall>> pending;
     std::size_t pending_count = 0;
+    std::size_t posted_lifetime_count = 0;
+    std::shared_ptr<const PostedLifetimeCallbacks> posted_lifetime_callbacks;
     std::map<std::thread::id, std::size_t> operation_threads;
     std::map<std::thread::id, std::vector<InspectorMainThreadRpc::Completion>>
         after_operation;
@@ -131,6 +143,40 @@ public:
         std::shared_ptr<Impl> impl;
     };
 
+    class PostedLifetime {
+    public:
+        explicit PostedLifetime(std::shared_ptr<Impl> owner)
+            : impl(std::move(owner)) {
+            {
+                std::lock_guard lock(impl->pending_mutex);
+                ++impl->posted_lifetime_count;
+                callbacks = impl->posted_lifetime_callbacks;
+            }
+            try {
+                if (callbacks && callbacks->begin)
+                    callbacks->begin();
+            } catch (...) {
+            }
+        }
+
+        ~PostedLifetime() {
+            {
+                std::lock_guard lock(impl->pending_mutex);
+                --impl->posted_lifetime_count;
+            }
+            impl->pending_cv.notify_all();
+            try {
+                if (callbacks && callbacks->end)
+                    callbacks->end();
+            } catch (...) {
+            }
+        }
+
+    private:
+        std::shared_ptr<Impl> impl;
+        std::shared_ptr<const PostedLifetimeCallbacks> callbacks;
+    };
+
     bool register_call(const std::shared_ptr<PendingCall>& call) {
         std::lock_guard lock(pending_mutex);
         pending.erase(
@@ -149,6 +195,7 @@ public:
                        InspectorMessage response) {
         bool notify = false;
         bool release_slot = false;
+        InspectorMainThreadRpc::Operation retired_operation;
         InspectorMainThreadRpc::Completion completion;
         {
             std::lock_guard lock(call->mutex);
@@ -157,6 +204,7 @@ public:
                 call->response_ready = true;
                 notify = true;
             }
+            retired_operation = std::move(call->operation);
             release_slot = call->slot_held;
             call->slot_held = false;
             if (!call->completion_called) {
@@ -164,6 +212,7 @@ public:
                 completion = std::move(call->completion);
             }
         }
+        retired_operation = {};
         if (notify)
             call->cv.notify_all();
         run_completion(std::move(completion));
@@ -244,8 +293,8 @@ InspectorMessage InspectorMainThreadRpc::call(
         return cancelled(request_id);
     }
 
-    auto pending =
-        std::make_shared<PendingCall>(request_id, std::move(completion));
+    auto pending = std::make_shared<PendingCall>(
+        request_id, std::move(operation), std::move(completion));
     if (!impl->register_call(pending)) {
         auto response = !impl->accepting.load(std::memory_order_acquire)
             ? cancelled(request_id)
@@ -260,29 +309,45 @@ InspectorMessage InspectorMainThreadRpc::call(
         return response;
     }
 
-    const bool posted = impl->post && impl->post(
-        [impl, pending, request_id, operation = std::move(operation)]() mutable {
+    std::function<void()> posted_task =
+        [lifetime = std::make_shared<Impl::PostedLifetime>(impl),
+         impl, pending, request_id]() mutable {
+            (void)lifetime;
             std::lock_guard operation_lock(impl->operation_mutex);
             bool should_run = false;
+            bool cancelled_before_start = false;
+            Operation operation;
             {
                 std::lock_guard lock(pending->mutex);
-                if (pending->cancelled_before_start)
-                    return;
-                if (impl->accepting.load(std::memory_order_acquire)) {
+                cancelled_before_start = pending->cancelled_before_start;
+                if (cancelled_before_start) {
+                    operation = std::move(pending->operation);
+                } else if (impl->accepting.load(std::memory_order_acquire)) {
                     pending->started = true;
+                    operation = std::move(pending->operation);
                     should_run = true;
                 } else {
                     pending->cancelled_before_start = true;
+                    operation = std::move(pending->operation);
                 }
             }
+            if (cancelled_before_start) {
+                operation = {};
+                return;
+            }
             if (!should_run) {
+                operation = {};
                 impl->complete_call(pending, cancelled(request_id));
                 return;
             }
             Impl::OperationGuard running(impl);
             auto response = run_operation(request_id, operation);
             impl->complete_call(pending, std::move(response));
-        });
+        };
+    bool posted = false;
+    if (impl->post)
+        posted = impl->post(std::move(posted_task));
+    posted_task = {};
     if (!posted) {
         impl->complete_call(
             pending,
@@ -309,7 +374,11 @@ InspectorMessage InspectorMainThreadRpc::call(
         } else {
             pending->cancelled_before_start = true;
         }
+        Operation retired_operation;
+        if (!may_have_applied)
+            retired_operation = std::move(pending->operation);
         lock.unlock();
+        retired_operation = {};
         if (!may_have_applied)
             impl->complete_call(pending, timeout_response);
         return timeout_response;
@@ -336,13 +405,16 @@ void InspectorMainThreadRpc::cancel() {
     }
     for (const auto& call : calls) {
         bool cancel_before_start = false;
+        Operation retired_operation;
         {
             std::lock_guard lock(call->mutex);
             if (!call->started && !call->response_ready) {
                 call->cancelled_before_start = true;
+                retired_operation = std::move(call->operation);
                 cancel_before_start = true;
             }
         }
+        retired_operation = {};
         if (cancel_before_start)
             impl->complete_call(call, cancelled(call->request_id));
     }
@@ -357,6 +429,22 @@ void InspectorMainThreadRpc::cancel_and_wait() {
     impl->pending_cv.wait(lock, [&] {
         return impl->pending_count == 0 && impl->operation_threads.empty();
     });
+}
+
+bool InspectorMainThreadRpc::set_posted_lifetime_callbacks(
+    Completion begin, Completion end) {
+    const auto impl = impl_;
+    if (!impl)
+        return false;
+    auto callbacks = std::make_shared<Impl::PostedLifetimeCallbacks>();
+    callbacks->begin = std::move(begin);
+    callbacks->end = std::move(end);
+    std::lock_guard lock(impl->pending_mutex);
+    if (impl->posted_lifetime_count != 0 ||
+        impl->posted_lifetime_callbacks)
+        return false;
+    impl->posted_lifetime_callbacks = std::move(callbacks);
+    return true;
 }
 
 bool InspectorMainThreadRpc::executing_on_current_thread() const {

@@ -429,6 +429,101 @@ TEST_CASE("server stop cancels queued domain work without draining it",
            response.error_code == "connection_closed"));
 }
 
+TEST_CASE("shutdown fence tracks cancelled accepted post storage",
+          "[inspect][client][teardown][main-thread][queued]"
+          "[shutdown-fence][posted-lifetime]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    std::atomic<bool> handled{false};
+    InspectorSession session(
+        {"session-cancelled-post-lifetime", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            handled.store(true, std::memory_order_release);
+            return make_response(request.id, "{}");
+        });
+    auto server = std::make_unique<InspectorServer>();
+    const auto shutdown_fence = server->shutdown_fence();
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.main_thread_rpc = rpc;
+    REQUIRE(server->start_authenticated(std::move(config)));
+    rpc.reset();
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+
+    pulp::inspect::InspectorMessage response;
+    std::thread requester([&] {
+        response = client.request("State.getParameters");
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return static_cast<bool>(queued);
+        }));
+    }
+
+    server.reset();
+    requester.join();
+    CHECK_FALSE(handled.load(std::memory_order_acquire));
+    CHECK((response.error_code == "dispatch_cancelled" ||
+           response.error_code == "connection_closed"));
+    CHECK_FALSE(shutdown_fence.wait_for(std::chrono::milliseconds(50)));
+    CHECK_FALSE(shutdown_fence.ready());
+
+    SECTION("destroying the cancelled callable releases the fence") {
+        {
+            std::lock_guard lock(mutex);
+            queued = {};
+        }
+    }
+
+    SECTION("executing the cancelled callable is inert before release") {
+        std::function<void()> cancelled_task;
+        {
+            std::lock_guard lock(mutex);
+            cancelled_task = std::move(queued);
+        }
+        cancelled_task();
+        CHECK_FALSE(handled.load(std::memory_order_acquire));
+        CHECK_FALSE(shutdown_fence.ready());
+        cancelled_task = {};
+    }
+
+    REQUIRE(shutdown_fence.wait_for(std::chrono::seconds(1)));
+    CHECK(shutdown_fence.ready());
+    CHECK_FALSE(handled.load(std::memory_order_acquire));
+}
+
 TEST_CASE("server stop is reentrant from a main-thread domain operation",
           "[inspect][client][teardown][main-thread][reentrant]") {
     TemporaryDirectory temporary;
@@ -599,6 +694,7 @@ TEST_CASE("shutdown fence waits for callback-deferred server teardown",
     cv.notify_all();
     executor.join();
     requester.join();
+    main_task = {};
 
     REQUIRE(shutdown_fence.wait_for(std::chrono::seconds(1)));
     CHECK(shutdown_fence.ready());

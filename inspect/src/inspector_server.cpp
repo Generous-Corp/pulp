@@ -27,11 +27,13 @@ struct InspectorServerShutdownFence::State {
     std::size_t active_stop_transitions = 0;
     std::size_t deferred_teardowns = 0;
     std::size_t active_server_callbacks = 0;
+    std::size_t accepted_posted_closures = 0;
     std::atomic<bool> ready{false};
 
     bool ready_locked() const noexcept {
         return worker_exited && active_stop_transitions == 0 &&
-               deferred_teardowns == 0 && active_server_callbacks == 0;
+               deferred_teardowns == 0 && active_server_callbacks == 0 &&
+               accepted_posted_closures == 0;
     }
 
     void publish_ready_locked() noexcept {
@@ -78,6 +80,21 @@ struct InspectorServerShutdownFence::State {
         {
             std::lock_guard lock(mutex);
             --active_server_callbacks;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_posted_closure() {
+        std::lock_guard lock(mutex);
+        ++accepted_posted_closures;
+        publish_ready_locked();
+    }
+
+    void end_posted_closure() {
+        {
+            std::lock_guard lock(mutex);
+            --accepted_posted_closures;
             publish_ready_locked();
         }
         cv.notify_all();
@@ -579,6 +596,14 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
             ? std::move(config.main_thread_rpc)
             : std::make_shared<InspectorMainThreadRpc>();
         if (!main_thread_rpc->active()) {
+            session = nullptr;
+            main_thread_rpc.reset();
+            return false;
+        }
+        const auto fence = cleanup_fence;
+        if (!main_thread_rpc->set_posted_lifetime_callbacks(
+                [fence] { fence->begin_posted_closure(); },
+                [fence] { fence->end_posted_closure(); })) {
             session = nullptr;
             main_thread_rpc.reset();
             return false;

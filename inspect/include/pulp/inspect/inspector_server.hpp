@@ -22,7 +22,8 @@ namespace pulp::inspect {
 
 /// Waitable proof that an InspectorServer's cleanup worker has exited and all
 /// stop transitions, callback-deferred teardown, and causal server callbacks
-/// have completed.
+/// have completed, and that the dispatcher has released every accepted posted
+/// RPC callable.
 /// Capture this before allowing publication/domain callbacks to destroy the
 /// server. Wait only from a thread outside inspector callbacks and RPC
 /// execution: an RPC callback can be the work that must finish before the
