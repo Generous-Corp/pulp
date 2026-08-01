@@ -64,7 +64,29 @@ step "3. removing stale artifacts"
 scp -q "$REPO/tools/rack/clean_installs.sh" "$HOST:/tmp/forge-clean-installs.sh" \
     && remote 'bash /tmp/forge-clean-installs.sh --yes; rm -f /tmp/forge-clean-installs.sh' \
     || say "could not send the cleaner — stale copies may remain"
+# Quit the app BEFORE replacing it.
+#
+# rm -rf + rsync over a bundle whose binary is mapped into a running process
+# is a live executable being deleted and rewritten underneath itself. Both of
+# this machine's unexplained crashes happened in that window — at startup, in
+# CoreFoundation and CoreText, with malloc reporting a corrupted free list,
+# which is what a half-replaced image looks like from the inside. Every other
+# crash here has a fix commit within minutes of it; these two do not, and this
+# is the difference between them.
 remote '
+if pgrep -f "/Applications/Forge Modular.app/Contents/MacOS" >/dev/null 2>&1; then
+    echo "  the app is running — quitting it before replacing it"
+    osascript -e '"'"'tell application "Forge Modular" to quit'"'"' >/dev/null 2>&1
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -f "/Applications/Forge Modular.app/Contents/MacOS" >/dev/null 2>&1 || break
+        sleep 1
+    done
+    if pgrep -f "/Applications/Forge Modular.app/Contents/MacOS" >/dev/null 2>&1; then
+        echo "  IT WOULD NOT QUIT — refusing to overwrite a running binary."
+        echo "  Quit Forge Modular and run this again."
+        exit 3
+    fi
+fi
 rm -rf ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
        ~/Library/Audio/Plug-Ins/VST3/"Forge Modular.vst3" \
        ~/Library/Audio/Plug-Ins/CLAP/"Forge Modular.clap" \
