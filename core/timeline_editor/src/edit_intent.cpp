@@ -1,13 +1,115 @@
 #include <pulp/timeline_editor/edit_intent.hpp>
 
+#include <limits>
 #include <utility>
 
 namespace pulp::timeline_editor {
 
 using namespace pulp::timeline;
 
-runtime::Result<Transaction, ModelError>
-lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity) {
+namespace {
+
+bool equal_optional_clip(const std::optional<Clip>& lhs, const std::optional<Clip>& rhs) noexcept {
+    if (lhs.has_value() != rhs.has_value())
+        return false;
+    return !lhs || equivalent(*lhs, *rhs);
+}
+
+bool equal_optional_range(const std::optional<ClipTimeRange>& lhs,
+                          const std::optional<ClipTimeRange>& rhs) noexcept {
+    if (lhs.has_value() != rhs.has_value())
+        return false;
+    return !lhs || equivalent(*lhs, *rhs);
+}
+
+constexpr bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.start == rhs.start && lhs.duration == rhs.duration &&
+           lhs.velocity == rhs.velocity && lhs.pitch == rhs.pitch && lhs.channel == rhs.channel;
+}
+
+bool equal_optional_note(const std::optional<NoteEvent>& lhs,
+                         const std::optional<NoteEvent>& rhs) noexcept {
+    if (lhs.has_value() != rhs.has_value())
+        return false;
+    return !lhs || equal_note(*lhs, *rhs);
+}
+
+std::optional<ModelError> validate_note(const NoteEvent& note) noexcept {
+    if (!note.id.valid())
+        return ModelError{ModelErrorCode::InvalidItemId, note.id, {}};
+    if (note.duration.value <= 0 ||
+        note.start.value > std::numeric_limits<std::int64_t>::max() - note.duration.value ||
+        note.pitch > 127 || note.channel > 15)
+        return ModelError{ModelErrorCode::InvalidNote, note.id, {}};
+    return std::nullopt;
+}
+
+} // namespace
+
+bool EditIntent::operator==(const EditIntent& other) const noexcept {
+    return kind == other.kind && phase == other.phase && sequence_id == other.sequence_id &&
+           track_id == other.track_id && clip_id == other.clip_id &&
+           equal_optional_range(expected_range, other.expected_range) &&
+           equal_optional_range(replacement_range, other.replacement_range) &&
+           equal_optional_clip(clip, other.clip);
+}
+
+bool NoteEditIntent::operator==(const NoteEditIntent& other) const noexcept {
+    return kind == other.kind && phase == other.phase && sequence_id == other.sequence_id &&
+           track_id == other.track_id && clip_id == other.clip_id &&
+           equal_optional_note(expected, other.expected) &&
+           equal_optional_note(replacement, other.replacement);
+}
+
+std::optional<ModelError> validate_note_edit_intent(const NoteEditIntent& intent) noexcept {
+    if (!intent.sequence_id.valid())
+        return ModelError{ModelErrorCode::InvalidItemId, intent.sequence_id, {}};
+    if (!intent.track_id.valid())
+        return ModelError{ModelErrorCode::InvalidItemId, intent.track_id, {}};
+    if (!intent.clip_id.valid())
+        return ModelError{ModelErrorCode::InvalidItemId, intent.clip_id, {}};
+    if (intent.expected) {
+        if (auto error = validate_note(*intent.expected))
+            return error;
+    }
+    if (intent.replacement) {
+        if (auto error = validate_note(*intent.replacement))
+            return error;
+    }
+
+    const auto missing = [&]() {
+        return std::optional<ModelError>(
+            ModelError{ModelErrorCode::MissingItem, intent.clip_id, {}});
+    };
+    const auto unexpected = [&]() {
+        return std::optional<ModelError>(
+            ModelError{ModelErrorCode::InvalidNote, intent.clip_id, {}});
+    };
+
+    switch (intent.kind) {
+    case NoteEditIntentKind::Insert:
+        if (intent.expected)
+            return unexpected();
+        return intent.replacement ? std::nullopt : missing();
+    case NoteEditIntentKind::Erase:
+        if (intent.replacement)
+            return unexpected();
+        return intent.expected ? std::nullopt : missing();
+    case NoteEditIntentKind::Move:
+    case NoteEditIntentKind::Resize:
+    case NoteEditIntentKind::SetVelocity:
+        if (!intent.expected || !intent.replacement)
+            return missing();
+        if (intent.expected->id != intent.replacement->id)
+            return ModelError{ModelErrorCode::IdentityConflict, intent.expected->id,
+                              intent.replacement->id};
+        return std::nullopt;
+    }
+    return unexpected();
+}
+
+runtime::Result<Transaction, ModelError> lower_edit_intent(const EditIntent& intent,
+                                                           const EditIntentIdentity& identity) {
     const auto invalid = [&](ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
         return runtime::Result<Transaction, ModelError>(
             runtime::Err(ModelError{code, item, related}));
@@ -42,8 +144,7 @@ lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity) 
         if (!intent.clip_id.valid())
             return invalid(ModelErrorCode::MissingItem, intent.track_id);
         result.commands.push_back(
-            {identity.command_id,
-             RemoveClip{intent.sequence_id, intent.track_id, intent.clip_id}});
+            {identity.command_id, RemoveClip{intent.sequence_id, intent.track_id, intent.clip_id}});
         break;
     // Move and Resize lower to the same command on purpose: a resize IS a move
     // whose replacement range changes extent rather than position. The verbs stay
@@ -56,9 +157,8 @@ lower_edit_intent(const EditIntent& intent, const EditIntentIdentity& identity) 
         if (!intent.expected_range || !intent.replacement_range)
             return invalid(ModelErrorCode::InvalidMediaRange, intent.clip_id);
         result.commands.push_back(
-            {identity.command_id,
-             MoveClip{intent.sequence_id, intent.track_id, intent.clip_id,
-                      *intent.expected_range, *intent.replacement_range}});
+            {identity.command_id, MoveClip{intent.sequence_id, intent.track_id, intent.clip_id,
+                                           *intent.expected_range, *intent.replacement_range}});
         break;
     }
 

@@ -1219,6 +1219,14 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
+only a replacement note, erase carries only the expected note, and move, resize,
+and velocity edits carry both snapshots with the same note identity.
+`validate_note_edit_intent` checks that shape and the note domain before a host
+accepts it. Note intents deliberately have no transaction lowerer yet: granular
+note commands own that later boundary, so this editor API does not disguise an
+O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no
 mocking framework. It is also a legitimate deployment: an editor embedded in a

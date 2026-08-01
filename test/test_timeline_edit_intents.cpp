@@ -60,6 +60,19 @@ EditIntentIdentity fixed_identity() {
     return identity;
 }
 
+NoteEvent note(ItemId id = {20}, std::int64_t start = 0, std::int64_t duration = kTicksPerQuarter) {
+    return NoteEvent{id, {start}, {duration}, 48'000, 64, 2};
+}
+
+NoteEditIntent note_intent(NoteEditIntentKind kind) {
+    NoteEditIntent intent;
+    intent.kind = kind;
+    intent.sequence_id = {3};
+    intent.track_id = {4};
+    intent.clip_id = {5};
+    return intent;
+}
+
 } // namespace
 
 TEST_CASE("Edit intents from a mouse and a touch pointer lower to identical transactions") {
@@ -76,10 +89,10 @@ TEST_CASE("Edit intents from a mouse and a touch pointer lower to identical tran
     REQUIRE(touch_hit.kind == WaveformHandleKind::selection_start);
     REQUIRE(mouse_hit.sample == touch_hit.sample);
 
-    auto from_mouse = lower_edit_intent(intent_from_hit(mouse_hit, GesturePhase::Single),
-                                        fixed_identity());
-    auto from_touch = lower_edit_intent(intent_from_hit(touch_hit, GesturePhase::Single),
-                                        fixed_identity());
+    auto from_mouse =
+        lower_edit_intent(intent_from_hit(mouse_hit, GesturePhase::Single), fixed_identity());
+    auto from_touch =
+        lower_edit_intent(intent_from_hit(touch_hit, GesturePhase::Single), fixed_identity());
     REQUIRE(from_mouse);
     REQUIRE(from_touch);
     REQUIRE(equivalent(from_mouse.value(), from_touch.value()));
@@ -210,4 +223,97 @@ TEST_CASE("A gesture reaches a host as an intent and the host as a transaction")
     REQUIRE(direct);
     REQUIRE(via_host);
     REQUIRE(equivalent(direct.value(), via_host.value()));
+}
+
+TEST_CASE("Edit intents compare the complete pointer-neutral value") {
+    EditIntent lhs;
+    lhs.kind = EditIntentKind::Move;
+    lhs.sequence_id = {3};
+    lhs.track_id = {4};
+    lhs.clip_id = {5};
+    lhs.expected_range = MusicalTimeRange{{0}, {kTicksPerQuarter}};
+    lhs.replacement_range = MusicalTimeRange{{100}, {kTicksPerQuarter}};
+    auto rhs = lhs;
+    REQUIRE(lhs == rhs);
+
+    rhs.replacement_range = MusicalTimeRange{{101}, {kTicksPerQuarter}};
+    REQUIRE_FALSE(lhs == rhs);
+
+    EditIntent draw;
+    draw.kind = EditIntentKind::Draw;
+    draw.sequence_id = {3};
+    draw.track_id = {4};
+    draw.clip = make_note_clip({9}, {10}, 0);
+    auto same_draw = draw;
+    REQUIRE(draw == same_draw);
+    same_draw.clip = make_note_clip({11}, {12}, 0);
+    REQUIRE_FALSE(draw == same_draw);
+}
+
+TEST_CASE("Note edit intents validate each payload shape") {
+    auto insert = note_intent(NoteEditIntentKind::Insert);
+    insert.replacement = note();
+    REQUIRE_FALSE(validate_note_edit_intent(insert));
+
+    auto erase = note_intent(NoteEditIntentKind::Erase);
+    erase.expected = note();
+    REQUIRE_FALSE(validate_note_edit_intent(erase));
+
+    for (const auto kind :
+         {NoteEditIntentKind::Move, NoteEditIntentKind::Resize, NoteEditIntentKind::SetVelocity}) {
+        auto transform = note_intent(kind);
+        transform.expected = note();
+        transform.replacement = note({20}, kTicksPerQuarter, 2 * kTicksPerQuarter);
+        REQUIRE_FALSE(validate_note_edit_intent(transform));
+    }
+}
+
+TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads") {
+    auto missing = note_intent(NoteEditIntentKind::Insert);
+    auto error = validate_note_edit_intent(missing);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::MissingItem);
+
+    auto ambiguous = note_intent(NoteEditIntentKind::Insert);
+    ambiguous.expected = note();
+    ambiguous.replacement = note();
+    error = validate_note_edit_intent(ambiguous);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::InvalidNote);
+
+    auto mismatched = note_intent(NoteEditIntentKind::Move);
+    mismatched.expected = note({20});
+    mismatched.replacement = note({21}, kTicksPerQuarter);
+    error = validate_note_edit_intent(mismatched);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::IdentityConflict);
+    REQUIRE(error->item == ItemId{20});
+    REQUIRE(error->related_item == ItemId{21});
+
+    auto malformed = note_intent(NoteEditIntentKind::Erase);
+    malformed.expected = note({20}, 0, 0);
+    error = validate_note_edit_intent(malformed);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::InvalidNote);
+    REQUIRE(error->item == ItemId{20});
+}
+
+TEST_CASE("A note gesture crosses the host seam as one comparable value") {
+    static_assert(std::is_same_v<NoteEditIntentHost::IntentType, NoteEditIntent>);
+
+    auto submitted = note_intent(NoteEditIntentKind::Move);
+    submitted.phase = GesturePhase::Update;
+    submitted.expected = note();
+    submitted.replacement = note({20}, kTicksPerQuarter);
+    REQUIRE_FALSE(validate_note_edit_intent(submitted));
+
+    ScriptedUiHost<NoteEditIntent> concrete;
+    NoteEditIntentHost& host = concrete;
+    REQUIRE(host.submit_intent(submitted).status == IntentStatus::Accepted);
+    REQUIRE(concrete.intents().size() == 1);
+    REQUIRE(concrete.intents().front() == submitted);
+
+    auto different = submitted;
+    different.replacement->pitch = 65;
+    REQUIRE_FALSE(different == submitted);
 }
