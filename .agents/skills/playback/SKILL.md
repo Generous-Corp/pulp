@@ -521,6 +521,22 @@ must red both that fuzz and the deterministic
 `a scrub window restart releases the notes it strands` case; if it does not, the
 scrub coverage has gone vacuous.
 
+### A playhead-coherence test needs a cross-field invariant, not a changing value
+
+`concurrent playhead readings are never internally inconsistent` runs the writer
+and the reader on separate threads and asserts that every reading it observes is
+internally coherent. Asserting only that the value changes would pass on a torn
+implementation, which also changes. The invariant comes from the fixture: a
+**step** tempo map makes `tempo_bpm` a pure function of `position`, so a reading
+assembled from two different publishes pairs a position on one side of the step
+with the tempo from the other, and no legal reading does that.
+
+Two controls keep the test from going vacuous, and both belong in any test of
+this shape. The same predicate runs single-threaded first, which proves the
+invariant holds of a coherent reading before it is trusted to detect an
+incoherent one. And the test asserts it observed at least one publish — without
+that, a reader that never caught the writer would pass everything.
+
 ### The RT probe's wiring fails closed — keep it that way
 
 `ScopedRtProcessProbe` has two backends. In the counting backend
@@ -718,3 +734,49 @@ Never widen the UI-facing seam by passing a `TransportSnapshot` — project the
 fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_generation`
 is what lets a view tell a stale reading from a live one without holding anything
 a program swap can invalidate.
+
+### Position leaves the transport in two directions, one SeqLock each
+
+`MasterTransport` publishes `desired_` toward the audio thread and
+`TransportPlayhead` back toward everyone else. The audio thread writes the
+second one for every block it *accepts* — a block whose ranges failed validation
+is one the caller was told not to render, so it must not become the position a
+view draws either — and `playhead()` reads it from a view, a meter, or a test,
+allocating nothing and taking no lock. `prepare()` and `reset()` publish too, so
+a reader between a lifecycle change and the first callback sees the transport's
+starting state rather than the previous program's position or a default one.
+
+Four properties of it are decisions rather than accidents:
+
+- **A reading names the block's FIRST frame** (`ranges[0].timeline_tick_start`),
+  not its last. That frame has not left the device yet, so it is the
+  least-ahead-of-audible position the transport can honestly state; publishing
+  the block's end would put every reading a whole buffer into the future.
+- **The type is playback's own, not `timeline_editor::UiPlayhead`.** The floor
+  above forbids that include outright, and the split is right independently of
+  the gate: `UiPlayhead::program_generation` names a compiled program, which a
+  transport does not know about. Whoever implements `SequencerUiHost` owns the
+  projection and supplies the generation from the program it adopted.
+- **`sequence` survives `reset()`.** Every other field of the reading is cleared
+  there and the counter is deliberately excluded, because a reader tells
+  readings apart by sequence and a restarted counter would let a fresh reading
+  impersonate one the reader already drew. `reset()` publishes a retired reading
+  rather than leaving the previous lifecycle's position readable until the next
+  block, which is exactly the moment a view would otherwise draw a playhead
+  belonging to a program that is gone.
+- **Every publication is stamped in one place.** `publish_playhead()` takes the
+  reading, assigns the sequence, and writes; no call site assigns the counter
+  itself. A site that forgot to would publish a reading a reader treats as one
+  it already handled — a silent stall rather than a build failure, which is why
+  the stamp is structural rather than a convention.
+
+`SeqLock` is the primitive because the payload is a trivially-copyable
+multi-field struct that a reader wants the newest of, whole. `TripleBuffer`
+would also work and costs 3x the storage for nothing at this size; `SpscQueue`
+is wrong in kind — a view wants the latest reading, never every reading.
+
+Publishing from `reset()` makes the control thread a second writer of a lock the
+audio thread otherwise owns. That is the shape `reset()` already has for
+`desired_`, whose ordinary writer is the control thread, and it is bounded the
+same way: a caller that reset a transport concurrently with `begin_block()`
+would be racing the plain assignments in `reset()` long before it raced this one.
