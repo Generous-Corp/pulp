@@ -4915,3 +4915,25 @@ TEST_CASE("WidgetBridge does not report a hover sample as a pointerup",
 
     CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 0);
 }
+
+// The negative control for dropping the id seed: removing a default must not
+// remove the real thing. Covers the FACTORY call shape and the accessible
+// name, neither of which the tag-path case above reaches — an id that stopped
+// painting but still got read aloud would be a half-fix.
+TEST_CASE("an explicit label still reaches a bridge-made control",
+          "[view][bridge][labels]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k1', 'root');
+        setLabel('k1', 'RATE');
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k1"));
+    REQUIRE(knob != nullptr);
+    CHECK(knob->label() == "RATE");
+    CHECK(knob->access_label() == "RATE");
+}
