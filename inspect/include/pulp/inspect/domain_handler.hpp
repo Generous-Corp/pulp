@@ -6,13 +6,14 @@
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/publication_binding.hpp>
+#include <pulp/inspect/runtime_evaluator.hpp>
 #include <pulp/inspect/test_input.hpp>
 
 #include <memory>
 #include <string>
 #include <utility>
 
-namespace pulp::view { class View; class ScriptInspectorBridge; }
+namespace pulp::view { class View; }
 namespace pulp::render { class RenderPassManager; class DirtyTracker; }
 
 namespace pulp::inspect {
@@ -48,11 +49,11 @@ public:
     void set_overlay(InspectorOverlay* overlay);
     void set_state_inspector(StateInspector* state) { state_ = state; }
     void set_console_capture(ConsoleCapture* console) { console_ = console; }
-    /// Wire the scripted-UI runtime inspector so `Runtime.getCapabilities`
-    /// reports the live engine and `Console`/`Runtime` reflect it. The bridge
-    /// marshals evaluation onto the engine thread; without it, those methods
-    /// report the engine as unavailable.
-    void set_script_inspector(view::ScriptInspectorBridge* bridge) { script_inspector_ = bridge; }
+    /// Inject the separately linked arbitrary-execution component. Without it,
+    /// Runtime status remains available but evaluation reports no engine.
+    void set_runtime_evaluator(RuntimeEvaluator* evaluator) {
+        runtime_evaluator_ = evaluator;
+    }
 
     /// Opt in to `Runtime.evaluate` / `Runtime.interrupt`. OFF by default:
     /// evaluate is arbitrary code execution in the plugin's JS context, and the
@@ -124,7 +125,7 @@ private:
     InspectorOverlay* overlay_ = nullptr;
     StateInspector* state_ = nullptr;
     ConsoleCapture* console_ = nullptr;
-    view::ScriptInspectorBridge* script_inspector_ = nullptr;
+    RuntimeEvaluator* runtime_evaluator_ = nullptr;
     bool runtime_eval_enabled_ = false;
     std::string runtime_eval_denial_;
     AudioInspector* audio_ = nullptr;

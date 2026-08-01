@@ -601,7 +601,6 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
     CapabilitySet unsafe;
     unsafe.grant(ReloadCapability::Exec);
     REQUIRE(processor.replace_scripted_ui(unsafe));
-    runtime->pump();
     capabilities = request("Runtime.getCapabilities", "{}");
     REQUIRE_FALSE(capabilities.is_error);
     const auto unsafe_caps = choc::json::parse(capabilities.params_json);
@@ -616,7 +615,6 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
                 ->granted_capabilities().has(ReloadCapability::Exec));
 
     REQUIRE(processor.replace_scripted_ui(safe));
-    runtime->pump();
     capabilities = request("Runtime.getCapabilities", "{}");
     REQUIRE(choc::json::parse(capabilities.params_json)
                 ["canEvaluate"].getWithDefault(false));

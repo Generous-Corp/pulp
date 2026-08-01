@@ -62,6 +62,8 @@ flight at a time — a concurrent request returns a `busy` error. A JS exception
 returns an error carrying the thrown message. A hung evaluation times out (~2 s)
 and is interrupted automatically. The result is always valid JSON — a non-finite
 number (`1/0`) is reported as `null` rather than a bare `NaN`/`Infinity` token.
+Decoded code is capped at 64 KiB. Serialized results and complete encoded
+responses are each capped at 1 MiB.
 
 **Opt-in required.** Evaluate is arbitrary code execution in the plugin's JS
 context, so it is **off by default** even when the debug console is wired: a host

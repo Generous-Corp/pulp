@@ -16,12 +16,11 @@
 #include <pulp/render/render_pass.hpp>
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/view/inspector.hpp>
-#include <pulp/view/script_engine.hpp>
-#include <pulp/view/script_inspector_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/live_constant_editor.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/containers/choc_Value.h>
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cctype>
@@ -29,9 +28,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -730,17 +732,49 @@ TEST_CASE("LiveConstant.reset rolls a value back to its default",
                  Catch::Matchers::WithinAbs(2.0, 0.001));
 }
 
-// ── Runtime domain: scripted-UI inspector / debug console ────────────────────
-// These wire a real ScriptEngine through the ScriptInspectorBridge. The test
-// thread is the engine thread, so Runtime.evaluate runs inline (no pump loop).
+// ── Runtime domain: safe router/status around an injected evaluator ──────────
+
+namespace {
+class FakeRuntimeEvaluator final : public RuntimeEvaluator {
+public:
+    RuntimeEvaluatorCapabilities capabilities() const override {
+        return {.engine = "QuickJS",
+                .can_evaluate = true,
+                .can_interrupt = true};
+    }
+    RuntimeEvaluationResult evaluate(std::string_view code) override {
+        ++evaluate_calls;
+        last_code = code;
+        if (next_result) {
+            auto result = std::move(*next_result);
+            next_result.reset();
+            return result;
+        }
+        if (code.find("throw") != std::string_view::npos)
+            return {.error = "boom"};
+        if (code == "40 + 2")
+            return {.ok = true, .json = "42"};
+        if (code == "'ab' + 'cd'")
+            return {.ok = true, .json = R"("abcd")"};
+        return {.ok = true, .json = "null"};
+    }
+    bool interrupt() override { return interrupt_result; }
+    std::string_view binary_marker() const noexcept override {
+        return "test-only-fake";
+    }
+
+    int evaluate_calls = 0;
+    std::string last_code;
+    bool interrupt_result = false;
+    std::optional<RuntimeEvaluationResult> next_result;
+};
+} // namespace
 
 TEST_CASE("DomainHandler: Runtime.getCapabilities reports QuickJS honestly",
           "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);
+    handler.set_runtime_evaluator(&evaluator);
     handler.set_runtime_eval_enabled(true);  // opt in so canEvaluate is true
 
     auto resp = handler.handle(make_request(1, methods::kRuntimeGetCapabilities));
@@ -769,11 +803,9 @@ TEST_CASE("DomainHandler: Runtime.getCapabilities without an engine",
 
 TEST_CASE("DomainHandler: Runtime.evaluate returns a typed result",
           "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);
+    handler.set_runtime_evaluator(&evaluator);
     handler.set_runtime_eval_enabled(true);
 
     auto resp = handler.handle(make_request(1, methods::kRuntimeEvaluate,
@@ -792,11 +824,9 @@ TEST_CASE("DomainHandler: Runtime.evaluate returns a typed result",
 
 TEST_CASE("DomainHandler: Runtime.evaluate surfaces JS errors and bad params",
           "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);
+    handler.set_runtime_evaluator(&evaluator);
     handler.set_runtime_eval_enabled(true);
 
     auto thrown = handler.handle(make_request(1, methods::kRuntimeEvaluate,
@@ -811,15 +841,78 @@ TEST_CASE("DomainHandler: Runtime.evaluate surfaces JS errors and bad params",
     REQUIRE(bad.is_error);
 }
 
+TEST_CASE("DomainHandler: Runtime.evaluate rejects malformed and evasive payloads",
+          "[inspect][domain][runtime][negative][limits]") {
+    FakeRuntimeEvaluator evaluator;
+    DomainHandler handler;
+    handler.set_runtime_evaluator(&evaluator);
+    handler.set_runtime_eval_enabled(true);
+
+    for (const auto& params : {
+             std::string("null"), std::string("[]"), std::string("{}"),
+             std::string(R"({"code":7})"), std::string(R"({"expression":false})"),
+             std::string("{\"code\":")}) {
+        const auto response = handler.handle(
+            make_request(1, methods::kRuntimeEvaluate, params));
+        REQUIRE(response.is_error);
+    }
+    REQUIRE(evaluator.evaluate_calls == 0);
+
+    const std::string at_limit(kRuntimeEvalMaxCodeBytes, 'a');
+    auto accepted = handler.handle(make_request(
+        2, methods::kRuntimeEvaluate, "{\"code\":\"" + at_limit + "\"}"));
+    REQUIRE_FALSE(accepted.is_error);
+    REQUIRE(evaluator.last_code.size() == kRuntimeEvalMaxCodeBytes);
+
+    const std::string over_limit(kRuntimeEvalMaxCodeBytes + 1, 'a');
+    auto oversized = handler.handle(make_request(
+        3, methods::kRuntimeEvaluate, "{\"code\":\"" + over_limit + "\"}"));
+    REQUIRE(oversized.is_error);
+    REQUIRE(oversized.params_json ==
+            "Runtime.evaluate code exceeds the 65536-byte limit");
+
+    std::string escaped = "{\"expression\":\"";
+    escaped.reserve(escaped.size() + (kRuntimeEvalMaxCodeBytes + 1) * 6 + 2);
+    for (std::size_t i = 0; i <= kRuntimeEvalMaxCodeBytes; ++i)
+        escaped += "\\u0061";
+    escaped += "\"}";
+    auto decoded_oversized = handler.handle(
+        make_request(4, methods::kRuntimeEvaluate, escaped));
+    REQUIRE(decoded_oversized.is_error);
+    REQUIRE(decoded_oversized.params_json ==
+            "Runtime.evaluate code exceeds the 65536-byte limit");
+
+    auto nul = handler.handle(make_request(
+        5, methods::kRuntimeEvaluate, R"({"code":"a\u0000b"})"));
+    REQUIRE(nul.is_error);
+    REQUIRE(evaluator.evaluate_calls == 1);
+}
+
+TEST_CASE("DomainHandler: Runtime.evaluate caps the encoded response",
+          "[inspect][domain][runtime][negative][limits]") {
+    FakeRuntimeEvaluator evaluator;
+    evaluator.next_result = RuntimeEvaluationResult{
+        .ok = true,
+        .json = "\"" + std::string(kRuntimeEvalMaxResponseBytes, 'x') + "\""};
+    DomainHandler handler;
+    handler.set_runtime_evaluator(&evaluator);
+    handler.set_runtime_eval_enabled(true);
+
+    const auto response = handler.handle(make_request(
+        1, methods::kRuntimeEvaluate, R"({"code":"large"})"));
+    REQUIRE(response.is_error);
+    REQUIRE(response.params_json ==
+            "Runtime.evaluate response exceeds the 1048576-byte limit");
+    REQUIRE(encode_message(response).size() < kRuntimeEvalMaxResponseBytes);
+}
+
 TEST_CASE("DomainHandler: Runtime.evaluate is disabled by default (security)",
           "[inspect][domain][runtime]") {
     // Even with an engine wired, evaluate must not run until the host opts in —
     // the inspector transport is unauthenticated, and evaluate is RCE.
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);  // wired but NOT enabled
+    handler.set_runtime_evaluator(&evaluator);  // wired but NOT enabled
 
     auto disabled = handler.handle(make_request(1, methods::kRuntimeEvaluate,
                                                 R"({"code":"1+1"})"));
@@ -843,11 +936,9 @@ TEST_CASE("DomainHandler: Runtime.evaluate is disabled by default (security)",
 
 TEST_CASE("DomainHandler: Runtime.evaluate never breaks response framing (NaN/Infinity)",
           "[inspect][domain][runtime]") {
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);
+    handler.set_runtime_evaluator(&evaluator);
     handler.set_runtime_eval_enabled(true);
 
     // 1/0 → Infinity; ({x:0/0}) → nested NaN. Whichever the engine yields, the
@@ -871,11 +962,9 @@ TEST_CASE("DomainHandler: Runtime.interrupt reports whether it armed",
 
     // Engine attached but nothing in flight → interrupt is a no-op (false),
     // which prevents spuriously aborting the next evaluation.
-    ScriptEngine engine;
-    ScriptInspectorBridge bridge;
-    bridge.attach(&engine);
+    FakeRuntimeEvaluator evaluator;
     DomainHandler handler;
-    handler.set_script_inspector(&bridge);
+    handler.set_runtime_evaluator(&evaluator);
     handler.set_runtime_eval_enabled(true);  // reach the idle-guard, not the gate
     auto idle = handler.handle(make_request(2, methods::kRuntimeInterrupt));
     REQUIRE_FALSE(idle.is_error);

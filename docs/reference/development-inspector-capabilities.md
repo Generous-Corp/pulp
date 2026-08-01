@@ -107,6 +107,15 @@ construct `ScriptedUiSession` with an empty
 across hot reloads and checked again whenever the standalone host binds a
 replacement scripted-UI session.
 
+The arbitrary-execution adapter is compiled into the separate
+`pulp-inspect-runtime-eval` archive and injected through the narrow
+`RuntimeEvaluator` interface. The base inspector, protocol, transport, client,
+and ordinary format archives do not depend on that component or contain its
+high-risk binary marker. Requests are limited to 64 KiB of decoded code, use a
+fixed two-second deadline, and reject serialized results or encoded responses
+over 1 MiB. These limits compose with the bridge's single-flight, cooperative
+interrupt, engine-detach, and teardown fences.
+
 ## Typed test input and authoring boundary
 
 `test.input` is deliberately narrow. `Test.injectMidi` accepts only `note_on`

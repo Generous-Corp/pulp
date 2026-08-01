@@ -166,6 +166,22 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-domains
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspect-runtime-eval-component
+        test_runtime_eval_component.cpp)
+    target_link_libraries(pulp-test-inspect-runtime-eval-component PRIVATE
+        pulp::inspect-runtime-eval pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspect-runtime-eval-component)
+
+    add_test(NAME pulp-inspect-runtime-eval-archive-boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DEVAL_ARCHIVE=$<TARGET_FILE:pulp-inspect-runtime-eval>
+            -DBASE_INSPECT=$<TARGET_FILE:pulp-inspect>
+            -DBASE_RUNTIME=$<TARGET_FILE:pulp-inspect-runtime>
+            -DBASE_PROTOCOL=$<TARGET_FILE:pulp-inspect-protocol>
+            -DBASE_CLIENT=$<TARGET_FILE:pulp-inspect-client>
+            -DBASE_FORMAT=$<TARGET_FILE:pulp-format>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/inspect_runtime_eval_archive_check.cmake)
+
     add_executable(pulp-test-inspector-hook-lifecycle
         test_inspector_hook_lifecycle.cpp)
     target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE

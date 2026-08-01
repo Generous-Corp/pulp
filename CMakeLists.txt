@@ -421,6 +421,7 @@ if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
         core/format/src/standalone_inspector.cpp
         core/format/src/standalone_inspector_capture.cpp)
     target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
+    target_link_libraries(pulp-standalone PRIVATE pulp::inspect-runtime-eval)
     target_compile_definitions(pulp-standalone PRIVATE
         PULP_ENABLE_INSPECTOR=1
         PULP_HAS_INSPECT=1)
