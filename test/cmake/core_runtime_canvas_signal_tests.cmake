@@ -339,6 +339,21 @@ else()
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=0)
 endif()
+if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
+    add_executable(pulp-standalone-inspector-process-fixture
+        fixtures/standalone_inspector_process_fixture.cpp)
+    target_link_libraries(pulp-standalone-inspector-process-fixture PRIVATE
+        pulp::standalone)
+
+    pulp_add_test_suite(pulp-test-standalone-inspector-process
+        SOURCES test_standalone_inspector_process.cpp
+        LIBRARIES pulp::standalone pulp::inspect-client pulp::platform pulp::view
+        PROPERTIES RESOURCE_LOCK pulp_gpu PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-inspector-process PRIVATE
+        "PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE=\"$<TARGET_FILE:pulp-standalone-inspector-process-fixture>\"")
+    add_dependencies(pulp-test-standalone-inspector-process
+        pulp-standalone-inspector-process-fixture)
+endif()
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 # Screenshot-only launches skip the audio backend; the device lifecycle is
