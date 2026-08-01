@@ -51,5 +51,8 @@ fragment v4/sequence-before-scenes.json
 payload v1/unknown-content-envelope.json
 
 ignore v1/replay-render.golden
+ignore v1/compile-rate-44100.golden
+ignore v1/compile-rate-48000.golden
+ignore v1/compile-rate-96000.golden
 ignore dawproject/linear_subset.dawproject.xml
 ignore dawproject/out_of_subset.dawproject.xml
