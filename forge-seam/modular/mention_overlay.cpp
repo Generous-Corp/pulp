@@ -132,7 +132,13 @@ void MentionOverlay::choose(std::size_t index) {
     // Choosing a module that is not installed does nothing rather than
     // inserting it: a patch wired to a module the user does not have cannot
     // make sound, and silently producing one is worse than refusing.
-    if (!c.insertable()) return;
+    if (!c.insertable()) {
+        // Refused, and SAID so. Doing nothing was indistinguishable from a
+        // dead list, which is how it was reported: "i cannot select things
+        // with GET next to them, unclear if that's a premium money thing".
+        if (on_refused) on_refused(c);
+        return;
+    }
     if (on_choose) on_choose(c.slug);
     close();
 }
@@ -216,8 +222,12 @@ void MentionOverlay::rebuild_rows() {
         row->add_child(std::move(name));
 
         if (!c.insertable()) {
+            // "GET" said only that you could not pick it. It reads as a
+            // paywall when the module is free, which most are — the library
+            // index this comes from carries open-source plugins. Say which.
             auto state = std::make_unique<Label>(
-                c.state == MentionCandidate::Availability::paid ? "PAID" : "GET");
+                c.state == MentionCandidate::Availability::paid ? "PAID"
+                                                                : "GET · FREE");
             state->set_font_family(forge::design::type::mono);
             state->set_font_size(9);
             state->set_text_color(c.state == MentionCandidate::Availability::paid

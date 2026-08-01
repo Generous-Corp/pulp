@@ -5754,3 +5754,46 @@ TEST_CASE("arrows move the mention list without clicking into it",
     CHECK(top->on_global_key(tab));
     CHECK_FALSE(shell.mentions().is_open());
 }
+
+// Picking a module you do not have says why, instead of doing nothing.
+//
+// Reported from the app: "i cannot select things with GET next to them,
+// unclear if that's a premium money thing". It refused correctly — a patch
+// wired to a module nobody has cannot sound — and refused in silence, which
+// is indistinguishable from a list that does not work.
+TEST_CASE("an uninstallable pick explains itself", "[mention][refusal]") {
+    forge_modular::MentionOverlay overlay;
+    std::string said;
+    forge_modular::MentionCandidate refused;
+    overlay.on_refused = [&](const forge_modular::MentionCandidate& c) {
+        refused = c;
+        said = c.brand + " " + c.name;
+    };
+    bool inserted = false;
+    overlay.on_choose = [&](const std::string&) { inserted = true; };
+
+    overlay.set_source([](const std::string&) {
+        std::vector<forge_modular::MentionCandidate> out;
+        forge_modular::MentionCandidate free_one;
+        free_one.brand = "Fehler Fabrik";
+        free_one.name = "PSI OP";
+        free_one.slug = "FehlerFabrik/PSIOP";
+        free_one.state = forge_modular::MentionCandidate::Availability::available;
+        out.push_back(free_one);
+        return out;
+    });
+    overlay.handle_text("@psi", 4);
+    REQUIRE(overlay.is_open());
+
+    pulp::view::KeyEvent enter;
+    enter.key = pulp::view::KeyCode::enter;
+    enter.is_down = true;
+    CHECK(overlay.handle_key_event(enter));
+
+    // It must not be wired into a patch, and it must not be silent.
+    CHECK_FALSE(inserted);
+    INFO("said: " << said);
+    CHECK(said == "Fehler Fabrik PSI OP");
+    CHECK(refused.state ==
+          forge_modular::MentionCandidate::Availability::available);
+}

@@ -61,6 +61,12 @@ public:
     /// Called with the slug when a row is chosen.
     std::function<void(const std::string& slug)> on_choose;
 
+    /// Why a pick did nothing. A module that is not installed cannot be wired
+    /// into a patch that will sound, so it is refused — and refusing in
+    /// silence reads as a broken list. Reported as: "you cannot pick this, and
+    /// here is what to do about it."
+    std::function<void(const MentionCandidate& what)> on_refused;
+
     /// Feed it the prompt text and the caret. Returns true when the overlay
     /// wants the keystroke -- the composer must not also act on it, or Enter
     /// both inserts a mention and submits the prompt.

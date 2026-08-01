@@ -430,6 +430,22 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
             // partial root.
         }
     }
+    // A pick that cannot be honoured says why, and what to do. "GET" alone
+    // does not distinguish free-and-installable from paid, and a row that
+    // ignores a click reads as broken rather than as refusing.
+    mentions_.on_refused = [this](const MentionCandidate& what) {
+        if (auto* c = chrome()) {
+            const std::string who = what.brand.empty()
+                                        ? what.name
+                                        : what.brand + " " + what.name;
+            c->set_status_note(
+                what.state == MentionCandidate::Availability::paid
+                    ? who + " is a paid module — buy it from the VCV Library "
+                            "(or with VCV+), then rescan to use it here"
+                    : who + " is not installed — get it free from the VCV "
+                            "Library, then rescan to use it here");
+        }
+    };
     mentions_.on_choose = [this](const std::string& slug) {
         if (auto* c = chrome()) {
             if (auto* input = c->prompt_input()) {
