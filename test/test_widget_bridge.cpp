@@ -2313,10 +2313,15 @@ TEST_CASE("WidgetBridge::clear leaves another editor's open dropdown alone",
         return combo;
     };
 
-    ComboBox* combo_a = open_combo(root_a);
+    // Open B's FIRST so A's is the most-recently-opened popup and therefore the
+    // one the process-global mirror names. Without that ordering the mirror
+    // happens to name B's popup and clear() closes the right one by accident —
+    // the assertions below would pass against the bug.
     ComboBox* combo_b = open_combo(root_b);
+    ComboBox* combo_a = open_combo(root_a);
     REQUIRE(combo_a->is_open());
     REQUIRE(combo_b->is_open());
+    REQUIRE(ComboBox::active_popup_ == combo_a);  // the mirror names the OTHER editor
 
     bridge_b.clear();
     CHECK_FALSE(combo_b->is_open());  // its own popup is dismissed
