@@ -793,11 +793,13 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_inspect_context",
         "pulp_inspect_dom",
         "pulp_inspect_evaluate",
+        "pulp_inspect_inject_midi",
         "pulp_inspect_list",
         "pulp_inspect_params",
         "pulp_inspect_performance",
         "pulp_inspect_screenshot",
         "pulp_inspect_set_param",
+        "pulp_inspect_set_transport",
         "pulp_inspect_value_channels",
         "pulp_kit",
         "pulp_kit_apply",
@@ -2464,6 +2466,8 @@ TEST_CASE("MCP live registry is the single method capability and schema inventor
         {"pulp_inspect_params", methods::kStateGetParameters},
         {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
         {"pulp_inspect_set_param", methods::kStateSetParameter},
+        {"pulp_inspect_inject_midi", methods::kTestInjectMidi},
+        {"pulp_inspect_set_transport", methods::kTestSetTransport},
         {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
         {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
         {"pulp_inspect_performance", methods::kPerfGetMetrics},
@@ -2518,6 +2522,7 @@ TEST_CASE("Every live inspector MCP schema accepts an exact publication selector
         "pulp_inspect_capabilities", "pulp_inspect_context",
         "pulp_inspect_dom",          "pulp_inspect_params",
         "pulp_inspect_value_channels", "pulp_inspect_set_param",
+        "pulp_inspect_inject_midi", "pulp_inspect_set_transport",
         "pulp_inspect_screenshot",   "pulp_inspect_evaluate",
         "pulp_inspect_performance",  "pulp_inspect_audio",
         "pulp_motion_start_trace",   "pulp_motion_stop_trace",
@@ -2547,6 +2552,14 @@ TEST_CASE("Every live inspector MCP schema accepts an exact publication selector
         require_contains(required, R"JSON("publication_id")JSON");
         if (std::string_view(tool) == "pulp_inspect_evaluate")
             require_contains(required, R"JSON("expression")JSON");
+        if (std::string_view(tool) == "pulp_inspect_inject_midi") {
+            require_contains(required, R"JSON("kind")JSON");
+            require_contains(required, R"JSON("channel")JSON");
+            require_contains(required, R"JSON("note")JSON");
+            require_contains(schema, R"JSON("additionalProperties":false)JSON");
+        }
+        if (std::string_view(tool) == "pulp_inspect_set_transport")
+            require_contains(schema, R"JSON("additionalProperties":false)JSON");
         require_contains(schema, R"JSON("session_id":{"type":"string")JSON");
         require_contains(schema, R"JSON("instance_id":{"type":"string")JSON");
         require_contains(schema, R"JSON("publication_id":{"type":"string")JSON");
@@ -2833,6 +2846,7 @@ TEST_CASE("Inspector MCP selection failures are structured and source-tree indep
         "pulp_inspect_capabilities", "pulp_inspect_context",
         "pulp_inspect_dom",          "pulp_inspect_params",
         "pulp_inspect_value_channels", "pulp_inspect_set_param",
+        "pulp_inspect_inject_midi", "pulp_inspect_set_transport",
         "pulp_inspect_screenshot",   "pulp_inspect_evaluate",
         "pulp_inspect_performance",  "pulp_inspect_audio",
         "pulp_motion_start_trace",   "pulp_motion_stop_trace",
@@ -2852,6 +2866,48 @@ TEST_CASE("Inspector MCP selection failures are structured and source-tree indep
         require_contains(response, "session_id is required");
         REQUIRE(response.find("session_selection_failed") == std::string::npos);
     }
+}
+
+TEST_CASE("Typed test-input MCP schemas reject malformed and unowned fields",
+          "[mcp][tools][inspect][test-input][arguments]") {
+    const auto selector =
+        R"JSON("session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c")JSON";
+
+    const auto missing_velocity = handle_request(tool_call(
+        "2565", "pulp_inspect_inject_midi",
+        std::string("{") + selector +
+            R"JSON(,"kind":"note_on","channel":1,"note":60})JSON"));
+    require_contains(missing_velocity, "velocity is required for note_on");
+    require_contains(missing_velocity, R"JSON("code":"invalid_arguments")JSON");
+
+    const auto raw_status = handle_request(tool_call(
+        "2566", "pulp_inspect_inject_midi",
+        std::string("{") + selector +
+            R"JSON(,"kind":"note_off","channel":1,"note":60,"status":128})JSON"));
+    require_contains(raw_status, "unknown test-input field: status");
+
+    const auto bad_channel = handle_request(tool_call(
+        "2567", "pulp_inspect_inject_midi",
+        std::string("{") + selector +
+            R"JSON(,"kind":"note_off","channel":17,"note":60})JSON"));
+    require_contains(bad_channel, "channel is outside the supported range");
+
+    const auto empty_transport = handle_request(tool_call(
+        "2568", "pulp_inspect_set_transport",
+        std::string("{") + selector + "}"));
+    require_contains(empty_transport,
+                     "set transport requires playing, position_samples, or tempo_bpm");
+
+    const auto bad_tempo = handle_request(tool_call(
+        "2569", "pulp_inspect_set_transport",
+        std::string("{") + selector + R"JSON(,"tempo_bpm":401})JSON"));
+    require_contains(bad_tempo, "tempo_bpm must be finite and from 20 to 400");
+
+    const auto script = handle_request(tool_call(
+        "2570", "pulp_inspect_set_transport",
+        std::string("{") + selector +
+            R"JSON(,"playing":true,"expression":"process.exit()"})JSON"));
+    require_contains(script, "unknown test-input field: expression");
 }
 
 TEST_CASE("Motion and trace required arguments fail before live dispatch",

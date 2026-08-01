@@ -55,6 +55,13 @@ struct Arguments {
     std::optional<std::string> preset;
     std::optional<std::string> format;
     std::optional<std::string> question;
+    std::optional<std::string> kind;
+    std::optional<std::int64_t> channel;
+    std::optional<std::int64_t> note;
+    std::optional<std::int64_t> velocity;
+    std::optional<bool> playing;
+    std::optional<std::int64_t> position_samples;
+    std::optional<double> tempo_bpm;
 };
 
 std::optional<std::string> read_string(
@@ -123,6 +130,28 @@ std::optional<std::string> parse_arguments(
 
     const auto required = tool.required_fields;
     const auto allowed = tool.allowed_fields;
+    if (tool.kind == ToolKind::inject_midi ||
+        tool.kind == ToolKind::set_transport) {
+        auto field_flag = [] (std::string_view name) -> std::uint32_t {
+            if (name == "kind") return inspector_field_kind;
+            if (name == "channel") return inspector_field_channel;
+            if (name == "note") return inspector_field_note;
+            if (name == "velocity") return inspector_field_velocity;
+            if (name == "playing") return inspector_field_playing;
+            if (name == "position_samples") return inspector_field_position_samples;
+            if (name == "tempo_bpm") return inspector_field_tempo_bpm;
+            return inspector_field_none;
+        };
+        for (std::uint32_t index = 0; index < object.size(); ++index) {
+            const auto name = std::string_view(object.getObjectMemberAt(index).name);
+            if (name == "session_id" || name == "instance_id" ||
+                name == "publication_id")
+                continue;
+            const auto flag = field_flag(name);
+            if (flag == inspector_field_none || (allowed & flag) == 0)
+                return "unknown test-input field: " + std::string(name);
+        }
+    }
     if ((allowed & inspector_field_id) != 0) {
         std::optional<std::int64_t> id;
         if (auto error = read_integer(object, "id", (required & inspector_field_id) != 0,
@@ -224,6 +253,45 @@ std::optional<std::string> parse_arguments(
     }
     if ((allowed & inspector_field_question) != 0)
         if (auto error = read_string(object, "question", (required & inspector_field_question) != 0, output.question)) return error;
+    if ((allowed & inspector_field_kind) != 0) {
+        if (auto error = read_string(object, "kind", (required & inspector_field_kind) != 0,
+                                     output.kind)) return error;
+        if (output.kind && *output.kind != "note_on" && *output.kind != "note_off")
+            return "kind must be note_on or note_off";
+    }
+    if ((allowed & inspector_field_channel) != 0)
+        if (auto error = read_integer(object, "channel", (required & inspector_field_channel) != 0,
+                                      output.channel, 1, 16)) return error;
+    if ((allowed & inspector_field_note) != 0)
+        if (auto error = read_integer(object, "note", (required & inspector_field_note) != 0,
+                                      output.note, 0, 127)) return error;
+    if ((allowed & inspector_field_velocity) != 0)
+        if (auto error = read_integer(object, "velocity", false, output.velocity, 0, 127))
+            return error;
+    if (tool.kind == ToolKind::inject_midi && output.kind &&
+        *output.kind == "note_on" && !output.velocity)
+        return "velocity is required for note_on";
+    if ((allowed & inspector_field_playing) != 0 &&
+        object.hasObjectMember("playing")) {
+        if (!object["playing"].isBool()) return "playing must be a boolean";
+        output.playing = object["playing"].getBool();
+    }
+    if ((allowed & inspector_field_position_samples) != 0)
+        if (auto error = read_integer(object, "position_samples", false,
+                                      output.position_samples, 0)) return error;
+    if ((allowed & inspector_field_tempo_bpm) != 0 &&
+        object.hasObjectMember("tempo_bpm")) {
+        const auto value = object["tempo_bpm"];
+        if (!value.isInt() && !value.isFloat())
+            return "tempo_bpm must be a number";
+        const auto number = value.getFloat64();
+        if (!std::isfinite(number) || number < 20.0 || number > 400.0)
+            return "tempo_bpm must be finite and from 20 to 400";
+        output.tempo_bpm = number;
+    }
+    if (tool.kind == ToolKind::set_transport && !output.playing &&
+        !output.position_samples && !output.tempo_bpm)
+        return "set transport requires playing, position_samples, or tempo_bpm";
     return std::nullopt;
 }
 
@@ -379,6 +447,24 @@ std::string execute(const ToolDefinition& tool, const Arguments& args) {
         return command_payload(typed_response(
             client->set_parameter_typed(*args.parameter_id, *args.value,
                                         args.normalized),
+            client->record()));
+    if (tool.kind == ToolKind::inject_midi) {
+        pulp::inspect::MidiTestInput input;
+        input.kind = *args.kind == "note_on"
+                         ? pulp::inspect::MidiTestInputKind::NoteOn
+                         : pulp::inspect::MidiTestInputKind::NoteOff;
+        input.channel = static_cast<std::uint8_t>(*args.channel - 1);
+        input.note = static_cast<std::uint8_t>(*args.note);
+        input.velocity = static_cast<std::uint8_t>(args.velocity.value_or(0));
+        return command_payload(typed_response(
+            client->inject_midi_typed(input), client->record()));
+    }
+    if (tool.kind == ToolKind::set_transport)
+        return command_payload(typed_response(
+            client->set_transport_typed(
+                {.playing = args.playing,
+                 .position_samples = args.position_samples,
+                 .tempo_bpm = args.tempo_bpm}),
             client->record()));
     return command_payload(raw_response(
         client->request_controlled(std::string(tool.method),

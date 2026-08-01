@@ -99,6 +99,16 @@ bool parse_parameter_id(std::string_view text, std::int64_t& output) {
     return true;
 }
 
+bool parse_nonnegative_int64(std::string_view text, std::int64_t& output) {
+    std::int64_t value = 0;
+    const auto [end, error] =
+        std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value < 0)
+        return false;
+    output = value;
+    return true;
+}
+
 bool parse_parameter_value(std::string_view text, double& output) {
     const std::string owned(text);
     char* end = nullptr;

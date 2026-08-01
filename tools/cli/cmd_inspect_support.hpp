@@ -32,6 +32,7 @@ bool require_arg_value(const std::vector<std::string>& args,
                        bool json);
 bool parse_port(std::string_view text, int& output);
 bool parse_parameter_id(std::string_view text, std::int64_t& output);
+bool parse_nonnegative_int64(std::string_view text, std::int64_t& output);
 bool parse_parameter_value(std::string_view text, double& output);
 void print_error(const inspect::InspectorMessage& response, bool json);
 void print_failure(const inspect::InspectorClientFailure& failure, bool json);

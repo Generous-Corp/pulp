@@ -141,6 +141,7 @@ InspectorPolicyConfig fixture_policy() {
         InspectorCapability::SessionControl,
         InspectorCapability::StateRead,
         InspectorCapability::StateWrite,
+        InspectorCapability::TestInput,
         InspectorCapability::UiRead,
         InspectorCapability::DiagnosticsRead,
         InspectorCapability::LogsRead,
@@ -226,6 +227,10 @@ TEST_CASE("pulp inspect profiles and list provide stable JSON",
     CHECK(help.stdout_output.find(
               "--output FILE     Write a --command response to FILE") !=
           std::string::npos);
+    CHECK(help.stdout_output.find("inject-midi --kind note_on|note_off") !=
+          std::string::npos);
+    CHECK(help.stdout_output.find("set-transport [--playing true|false]") !=
+          std::string::npos);
 
     const auto profiles = run_pulp({"inspect", "profiles", "--json"}, 10000);
     REQUIRE_FALSE(profiles.timed_out);
@@ -258,6 +263,72 @@ TEST_CASE("pulp inspect profiles and list provide stable JSON",
     CHECK(human.stdout_output.find("PUBLICATION") != std::string::npos);
     CHECK(human.stdout_output.find(
               fixture.publisher.record()->publication_id) !=
+          std::string::npos);
+}
+
+TEST_CASE("pulp inspect exposes bounded typed MIDI and transport commands",
+          "[cli][shellout][inspect][test-input]") {
+    REQUIRE(binary_exists());
+
+    InspectServerFixture fixture;
+    fixture.handler = [] (const InspectorMessage& request) {
+        if (request.method == "Test.injectMidi")
+            return make_response(request.id, R"({"accepted":true})");
+        if (request.method == "Test.setTransport")
+            return make_response(request.id, R"({"applied":true})");
+        return make_response(request.id, "{}");
+    };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto publication = fixture.publisher.record()->publication_id;
+    const std::vector<std::string> exact{
+        "--session", fixture.session.info().session_id,
+        "--instance", fixture.session.info().instance_id,
+        "--publication", publication};
+
+    auto run_exact = [&] (std::vector<std::string> args) {
+        args.insert(args.end(), exact.begin(), exact.end());
+        return run_pulp(args, 10000);
+    };
+    const auto note_on = run_exact({"inspect", "inject-midi", "--kind",
+                                    "note_on", "--channel", "1", "--note",
+                                    "60", "--velocity", "100", "--json"});
+    REQUIRE_FALSE(note_on.timed_out);
+    REQUIRE(note_on.exit_code == 0);
+    CHECK(note_on.stdout_output.find("pulp.inspect.inject-midi.v1") !=
+          std::string::npos);
+    CHECK(note_on.stdout_output.find(publication) != std::string::npos);
+    CHECK(note_on.stdout_output.find("\"accepted\": true") !=
+          std::string::npos);
+
+    const auto note_off = run_exact({"inspect", "inject-midi", "--kind",
+                                     "note_off", "--channel", "1", "--note",
+                                     "60", "--json"});
+    REQUIRE_FALSE(note_off.timed_out);
+    REQUIRE(note_off.exit_code == 0);
+
+    const auto transport = run_exact({"inspect", "set-transport", "--playing",
+                                      "true", "--position-samples", "0",
+                                      "--tempo-bpm", "120", "--json"});
+    REQUIRE_FALSE(transport.timed_out);
+    REQUIRE(transport.exit_code == 0);
+    CHECK(transport.stdout_output.find("pulp.inspect.set-transport.v1") !=
+          std::string::npos);
+    CHECK(transport.stdout_output.find("\"applied\": true") !=
+          std::string::npos);
+
+    const auto missing_velocity = run_pulp(
+        {"inspect", "inject-midi", "--kind", "note_on", "--channel", "1",
+         "--note", "60", "--json"},
+        10000);
+    REQUIRE(missing_velocity.exit_code == 2);
+    CHECK(missing_velocity.stdout_output.find("note_on requires --velocity") !=
+          std::string::npos);
+
+    const auto empty_transport = run_pulp(
+        {"inspect", "set-transport", "--json"}, 10000);
+    REQUIRE(empty_transport.exit_code == 2);
+    CHECK(empty_transport.stdout_output.find(
+              "set-transport requires --playing, --position-samples, or --tempo-bpm") !=
           std::string::npos);
 }
 

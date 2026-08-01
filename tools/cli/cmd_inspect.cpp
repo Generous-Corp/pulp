@@ -22,6 +22,13 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string output_file;
     std::string parameter_id_text;
     std::string parameter_value_text;
+    std::string midi_kind;
+    std::string midi_channel_text;
+    std::string midi_note_text;
+    std::string midi_velocity_text;
+    std::string transport_playing_text;
+    std::string transport_position_text;
+    std::string transport_tempo_text;
     bool params_provided = false;
     bool normalized = false;
     bool json = false;
@@ -42,6 +49,12 @@ int cmd_inspect(const std::vector<std::string>& args) {
                    "--instance ID --publication ID [options]\n"
                 << "       pulp inspect set-parameter --id ID --value VALUE "
                    "--session ID --instance ID --publication ID [options]\n"
+                << "       pulp inspect inject-midi --kind note_on|note_off "
+                   "--channel 1..16 --note 0..127 [--velocity 0..127] "
+                   "--session ID --instance ID --publication ID [options]\n"
+                << "       pulp inspect set-transport [--playing true|false] "
+                   "[--position-samples N] [--tempo-bpm 20..400] "
+                   "--session ID --instance ID --publication ID [options]\n"
                 << "       pulp inspect --command METHOD --session ID "
                    "--instance ID --publication ID [options]\n"
                 << "       pulp inspect --session ID --instance ID "
@@ -56,6 +69,13 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "  --id ID           Numeric parameter ID for set-parameter\n"
                 << "  --value VALUE     Finite parameter value for set-parameter\n"
                 << "  --normalized      Interpret --value in normalized [0,1] domain\n"
+                << "  --kind KIND       MIDI kind: note_on or note_off\n"
+                << "  --channel N       MIDI channel in the public 1..16 range\n"
+                << "  --note N          MIDI note number from 0 to 127\n"
+                << "  --velocity N      MIDI velocity from 0 to 127\n"
+                << "  --playing BOOL    Set standalone transport play state\n"
+                << "  --position-samples N  Set nonnegative standalone sample position\n"
+                << "  --tempo-bpm N     Set standalone tempo from 20 to 400 BPM\n"
                 << "  --command METHOD  Send one command and print its result\n"
                 << "  --params JSON     JSON params for --command (default: {})\n"
                 << "  --output FILE     Write a --command response to FILE\n\n"
@@ -68,7 +88,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
         }
         if (arg == "profiles" || arg == "list" ||
             arg == "capabilities" || arg == "doctor" ||
-            arg == "set-parameter") {
+            arg == "set-parameter" || arg == "inject-midi" ||
+            arg == "set-transport") {
             if (!action.empty()) {
                 print_cli_error(json, "invalid_arguments",
                                 "inspect accepts one subcommand");
@@ -113,6 +134,27 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 return 2;
         } else if (arg == "--normalized") {
             normalized = true;
+        } else if (arg == "--kind") {
+            if (!require_arg_value(args, index, "--kind", midi_kind, json))
+                return 2;
+        } else if (arg == "--channel") {
+            if (!require_arg_value(args, index, "--channel", midi_channel_text, json))
+                return 2;
+        } else if (arg == "--note") {
+            if (!require_arg_value(args, index, "--note", midi_note_text, json))
+                return 2;
+        } else if (arg == "--velocity") {
+            if (!require_arg_value(args, index, "--velocity", midi_velocity_text, json))
+                return 2;
+        } else if (arg == "--playing") {
+            if (!require_arg_value(args, index, "--playing", transport_playing_text, json))
+                return 2;
+        } else if (arg == "--position-samples") {
+            if (!require_arg_value(args, index, "--position-samples", transport_position_text, json))
+                return 2;
+        } else if (arg == "--tempo-bpm") {
+            if (!require_arg_value(args, index, "--tempo-bpm", transport_tempo_text, json))
+                return 2;
         } else if (arg == "--command") {
             if (!require_arg_value(
                     args, index, "--command", command, json))
@@ -170,6 +212,23 @@ int cmd_inspect(const std::vector<std::string>& args) {
                         "--id, --value, and --normalized require set-parameter");
         return 2;
     }
+    const bool midi_options_present = !midi_kind.empty() ||
+                                      !midi_channel_text.empty() ||
+                                      !midi_note_text.empty() ||
+                                      !midi_velocity_text.empty();
+    if (midi_options_present && action != "inject-midi") {
+        print_cli_error(json, "invalid_arguments",
+                        "--kind, --channel, --note, and --velocity require inject-midi");
+        return 2;
+    }
+    const bool transport_options_present = !transport_playing_text.empty() ||
+                                           !transport_position_text.empty() ||
+                                           !transport_tempo_text.empty();
+    if (transport_options_present && action != "set-transport") {
+        print_cli_error(json, "invalid_arguments",
+                        "--playing, --position-samples, and --tempo-bpm require set-transport");
+        return 2;
+    }
     std::int64_t parameter_id = 0;
     double parameter_value = 0.0;
     if (action == "set-parameter") {
@@ -192,6 +251,72 @@ int cmd_inspect(const std::vector<std::string>& args) {
             print_cli_error(json, "invalid_arguments",
                             "normalized --value must be from 0 to 1");
             return 2;
+        }
+    }
+    std::int64_t midi_channel = 0;
+    std::int64_t midi_note = 0;
+    std::int64_t midi_velocity = 0;
+    if (action == "inject-midi") {
+        if ((midi_kind != "note_on" && midi_kind != "note_off") ||
+            midi_channel_text.empty() || midi_note_text.empty()) {
+            print_cli_error(json, "invalid_arguments",
+                            "inject-midi requires --kind note_on|note_off, --channel, and --note");
+            return 2;
+        }
+        if (!parse_parameter_id(midi_channel_text, midi_channel) ||
+            midi_channel < 1 || midi_channel > 16) {
+            print_cli_error(json, "invalid_arguments", "--channel must be from 1 to 16");
+            return 2;
+        }
+        if (!parse_parameter_id(midi_note_text, midi_note) || midi_note > 127) {
+            print_cli_error(json, "invalid_arguments", "--note must be from 0 to 127");
+            return 2;
+        }
+        if (midi_kind == "note_on" && midi_velocity_text.empty()) {
+            print_cli_error(json, "invalid_arguments", "note_on requires --velocity");
+            return 2;
+        }
+        if (!midi_velocity_text.empty() &&
+            (!parse_parameter_id(midi_velocity_text, midi_velocity) ||
+             midi_velocity > 127)) {
+            print_cli_error(json, "invalid_arguments", "--velocity must be from 0 to 127");
+            return 2;
+        }
+    }
+    std::optional<bool> transport_playing;
+    std::optional<std::int64_t> transport_position;
+    std::optional<double> transport_tempo;
+    if (action == "set-transport") {
+        if (!transport_options_present) {
+            print_cli_error(json, "invalid_arguments",
+                            "set-transport requires --playing, --position-samples, or --tempo-bpm");
+            return 2;
+        }
+        if (!transport_playing_text.empty()) {
+            if (transport_playing_text == "true") transport_playing = true;
+            else if (transport_playing_text == "false") transport_playing = false;
+            else {
+                print_cli_error(json, "invalid_arguments", "--playing must be true or false");
+                return 2;
+            }
+        }
+        if (!transport_position_text.empty()) {
+            std::int64_t value = 0;
+            if (!parse_nonnegative_int64(transport_position_text, value)) {
+                print_cli_error(json, "invalid_arguments",
+                                "--position-samples must be a nonnegative integer");
+                return 2;
+            }
+            transport_position = value;
+        }
+        if (!transport_tempo_text.empty()) {
+            double value = 0.0;
+            if (!parse_parameter_value(transport_tempo_text, value) ||
+                value < 20.0 || value > 400.0) {
+                print_cli_error(json, "invalid_arguments", "--tempo-bpm must be from 20 to 400");
+                return 2;
+            }
+            transport_tempo = value;
         }
     }
     if (action == "profiles") {
@@ -286,6 +411,58 @@ int cmd_inspect(const std::vector<std::string>& args) {
 
     if (action == "capabilities")
         command = std::string(methods::kSessionGetCapabilities);
+
+    if (action == "inject-midi") {
+        MidiTestInput input;
+        input.kind = midi_kind == "note_on" ? MidiTestInputKind::NoteOn
+                                             : MidiTestInputKind::NoteOff;
+        input.channel = static_cast<std::uint8_t>(midi_channel - 1);
+        input.note = static_cast<std::uint8_t>(midi_note);
+        input.velocity = static_cast<std::uint8_t>(midi_velocity);
+        const auto response = client->inject_midi_typed(input);
+        if (!response) {
+            print_failure(response.failure, json);
+            return 1;
+        }
+        if (json) {
+            auto payload = choc::value::createObject("");
+            payload.addMember(
+                "schemaVersion",
+                choc::value::createString("pulp.inspect.inject-midi.v1"));
+            payload.addMember("session", discovery_json(selected));
+            auto result = choc::value::createObject("");
+            result.addMember("accepted", response.value->accepted);
+            payload.addMember("result", std::move(result));
+            std::cout << choc::json::toString(payload, false) << "\n";
+        } else {
+            std::cout << "Injected MIDI event\n";
+        }
+        return 0;
+    }
+    if (action == "set-transport") {
+        const auto response = client->set_transport_typed(
+            {.playing = transport_playing,
+             .position_samples = transport_position,
+             .tempo_bpm = transport_tempo});
+        if (!response) {
+            print_failure(response.failure, json);
+            return 1;
+        }
+        if (json) {
+            auto payload = choc::value::createObject("");
+            payload.addMember(
+                "schemaVersion",
+                choc::value::createString("pulp.inspect.set-transport.v1"));
+            payload.addMember("session", discovery_json(selected));
+            auto result = choc::value::createObject("");
+            result.addMember("applied", response.value->applied);
+            payload.addMember("result", std::move(result));
+            std::cout << choc::json::toString(payload, false) << "\n";
+        } else {
+            std::cout << "Updated standalone transport\n";
+        }
+        return 0;
+    }
 
     if (action == "set-parameter") {
         const auto response = client->set_parameter_typed(

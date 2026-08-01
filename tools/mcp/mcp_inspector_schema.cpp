@@ -25,6 +25,9 @@ void append_required(std::string& output, const ToolDefinition& tool) {
         {inspector_field_view_name, "view_name"}, {inspector_field_metrics, "metrics"},
         {inspector_field_trace_id, "trace_id"}, {inspector_field_frame, "frame"},
         {inspector_field_question, "question"},
+        {inspector_field_kind, "kind"},
+        {inspector_field_channel, "channel"},
+        {inspector_field_note, "note"},
     };
     for (const auto& [flag, name] : ordered) {
         if ((tool.required_fields & flag) != 0)
@@ -88,10 +91,28 @@ std::string tool_json(const ToolDefinition& tool) {
         append_property(output, first, "format", R"({"type":"string","enum":["json","table","csv"]})");
     if ((allowed & inspector_field_question) != 0)
         append_property(output, first, "question", R"({"type":"string"})");
+    if ((allowed & inspector_field_kind) != 0)
+        append_property(output, first, "kind", R"({"type":"string","enum":["note_on","note_off"]})");
+    if ((allowed & inspector_field_channel) != 0)
+        append_property(output, first, "channel", R"({"type":"integer","minimum":1,"maximum":16})");
+    if ((allowed & inspector_field_note) != 0)
+        append_property(output, first, "note", R"({"type":"integer","minimum":0,"maximum":127})");
+    if ((allowed & inspector_field_velocity) != 0)
+        append_property(output, first, "velocity", R"({"type":"integer","minimum":0,"maximum":127})");
+    if ((allowed & inspector_field_playing) != 0)
+        append_property(output, first, "playing", R"({"type":"boolean"})");
+    if ((allowed & inspector_field_position_samples) != 0)
+        append_property(output, first, "position_samples", R"({"type":"integer","minimum":0})");
+    if ((allowed & inspector_field_tempo_bpm) != 0)
+        append_property(output, first, "tempo_bpm", R"({"type":"number","minimum":20,"maximum":400})");
     append_property(output, first, "session_id", R"({"type":"string"})");
     append_property(output, first, "instance_id", R"({"type":"string"})");
     append_property(output, first, "publication_id", R"({"type":"string"})");
-    output += "}}}";
+    output += "}";
+    if (tool.kind == InspectorMcpToolDescriptor::Kind::inject_midi ||
+        tool.kind == InspectorMcpToolDescriptor::Kind::set_transport)
+        output += R"(,"additionalProperties":false)";
+    output += "}}";
     return output;
 }
 

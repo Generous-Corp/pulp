@@ -45,6 +45,26 @@ pulp inspect --session SESSION_ID --instance INSTANCE_ID \
 Do not guess the example ID. Use the selected target's reported numeric
 parameter ID and verify the matching value with the same three selectors.
 
+When the selected standalone reports effective `test.input`, bounded synth and
+transport controls are available without evaluation:
+
+```bash
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_off --channel 1 --note 60 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The MCP equivalents are `pulp_inspect_inject_midi` and
+`pulp_inspect_set_transport`. Only note-on/off and standalone
+play/position/tempo are in `test.input`; parameters stay under `state.write`,
+transient tweak/highlight/bypass/lock controls stay under
+`authoring.tweaks`, and generic preset/filesystem operations remain
+unavailable. Outstanding injected notes are released on lease loss,
+disconnect, or teardown.
+
 The equivalent MCP flow is `pulp_inspect_list` →
 `pulp_inspect_capabilities` → a typed `pulp_inspect_*` read/mutation →
 `pulp_inspect_screenshot`. MCP uses the installed in-process client library;

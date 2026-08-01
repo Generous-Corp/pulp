@@ -308,7 +308,7 @@ even when the protocol/client SDK components are present.
 - `--inspect=observe|develop` selects a named capability set.
 - `--inspect=custom --inspect-capability <id>...` selects an explicit,
   nonempty capability set; the capability option is repeatable. A custom set
-  containing `state.write` or `authoring.tweaks` must also contain
+  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
   `session.control`, because mutations require a controller lease.
 - `--inspect=off` is the default and starts no listener or discovery artifact.
 
@@ -1296,6 +1296,9 @@ pulp inspect capabilities --session SESSION_ID --instance INSTANCE_ID --publicat
 pulp inspect doctor --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --json
 pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --command State.getParameters
 pulp inspect set-parameter --id 7 --value 0.75 --json --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 --json --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_off --channel 1 --note 60 --json --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
 
 The agent workflow is `list` → select the exact session/instance/publication →
@@ -1310,6 +1313,17 @@ value before sending the request and returns a
 `pulp.inspect.set-parameter.v1` envelope. Replace the example ID and value
 with a parameter reported by `State.getParameters`, then run that same read
 command again using the same exact selectors and verify the matching entry.
+The typed `inject-midi` command accepts only bounded note-on/off events; the
+typed `set-transport` command applies an idempotent partial standalone
+play/position/tempo update. They return `pulp.inspect.inject-midi.v1` and
+`pulp.inspect.set-transport.v1` envelopes. Both require effective `test.input`
+and a same-connection controller lease. Injected notes are controller-session
+scoped and are released on lease loss, disconnect, or teardown.
+
+This is not a preset/filesystem or raw-event API. Parameter writes remain under
+`state.write`; transient tweaks/highlight/bypass/lock remain under
+`authoring.tweaks`; generic preset and filesystem operations remain unavailable.
+None of these typed commands route through `Runtime.evaluate`.
 
 Options:
 
@@ -1323,6 +1337,8 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--kind`, `--channel`, `--note`, `--velocity` - bounded `inject-midi` fields
+- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.

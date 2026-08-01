@@ -27,6 +27,8 @@ struct InspectorMcpToolDescriptor {
         raw,
         parameters,
         set_parameter,
+        inject_midi,
+        set_transport,
         screenshot,
         evaluate,
         motion_start,
@@ -58,6 +60,13 @@ enum InspectorMcpField : std::uint32_t {
     inspector_field_preset = 1u << 12,
     inspector_field_format = 1u << 13,
     inspector_field_question = 1u << 14,
+    inspector_field_kind = 1u << 15,
+    inspector_field_channel = 1u << 16,
+    inspector_field_note = 1u << 17,
+    inspector_field_velocity = 1u << 18,
+    inspector_field_playing = 1u << 19,
+    inspector_field_position_samples = 1u << 20,
+    inspector_field_tempo_bpm = 1u << 21,
 };
 
 std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry();

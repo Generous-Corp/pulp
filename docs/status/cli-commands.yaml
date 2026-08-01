@@ -1110,6 +1110,12 @@ commands:
         summary: Authenticate and return the selected session's effective policy in the pulp.inspect.capabilities.v1 JSON envelope
       - name: doctor
         summary: Prove authentication, capabilities, and live agent context
+      - name: set-parameter
+        summary: Apply one typed numeric parameter mutation under state.write and a controller lease
+      - name: inject-midi
+        summary: Inject one bounded standalone note-on or note-off under test.input and a controller lease
+      - name: set-transport
+        summary: Apply one coherent partial standalone play, position, or tempo update under test.input and a controller lease
     args:
       - name: --json
         kind: flag
@@ -1147,6 +1153,46 @@ commands:
         kind: option
         required: false
         description: File path for the one-shot command response
+      - name: --id
+        kind: option
+        required: false
+        description: Numeric parameter ID for set-parameter
+      - name: --value
+        kind: option
+        required: false
+        description: Finite parameter value for set-parameter
+      - name: --normalized
+        kind: flag
+        required: false
+        description: Interpret set-parameter value in normalized 0 through 1 space
+      - name: --kind
+        kind: option
+        required: false
+        description: MIDI kind note_on or note_off for inject-midi
+      - name: --channel
+        kind: option
+        required: false
+        description: Public MIDI channel 1 through 16 for inject-midi
+      - name: --note
+        kind: option
+        required: false
+        description: MIDI note 0 through 127 for inject-midi
+      - name: --velocity
+        kind: option
+        required: false
+        description: MIDI velocity 0 through 127 for inject-midi
+      - name: --playing
+        kind: option
+        required: false
+        description: Boolean standalone play state for set-transport
+      - name: --position-samples
+        kind: option
+        required: false
+        description: Nonnegative standalone sample position for set-transport
+      - name: --tempo-bpm
+        kind: option
+        required: false
+        description: Finite standalone tempo from 20 through 400 BPM for set-transport
     docs: reference/cli.md#inspect
 
   - name: motion

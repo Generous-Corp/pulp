@@ -153,6 +153,26 @@ Do not guess the example ID. Replace it with a numeric ID reported in
 `parameters-after.json`. These installed CLI commands are also the documented
 fallback when an MCP client has not loaded the project's `.mcp.json`.
 
+For a standalone synth or transport fixture, first confirm that `test.input`
+is effective, then use the bounded typed commands with the same exact selectors:
+
+```bash
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_off --channel 1 --note 60 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The matching MCP tools are `pulp_inspect_inject_midi` and
+`pulp_inspect_set_transport`. MIDI is limited to note-on/off with channels
+1–16 and byte-range note/velocity values. Transport is an idempotent partial
+standalone update. Do not use these surfaces for raw MIDI, SysEx, files,
+presets, generic UI scripting, or `Runtime.evaluate`; those are outside
+`test.input`. Injected notes are released on controller lease loss, disconnect,
+or session teardown.
+
 `pulp inspect --output` saves a screenshot response as JSON; it does not decode
 the image. A fresh agent can turn that response into a verified PNG exactly as
 follows:
