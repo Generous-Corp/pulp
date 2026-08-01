@@ -133,8 +133,36 @@ bool Socket::connect(std::string_view address, uint16_t port,
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     std::string addr_str(address);
-    if (inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr) != 1)
-        return false;
+    if (inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr) != 1) {
+        struct addrinfo hints {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype =
+            type_ == SocketType::TCP ? SOCK_STREAM : SOCK_DGRAM;
+        hints.ai_protocol =
+            type_ == SocketType::TCP ? IPPROTO_TCP : IPPROTO_UDP;
+
+        struct addrinfo* results = nullptr;
+        if (::getaddrinfo(addr_str.c_str(), nullptr, &hints, &results) != 0)
+            return false;
+
+        bool resolved = false;
+        for (auto* candidate = results; candidate != nullptr;
+             candidate = candidate->ai_next) {
+            if (candidate->ai_family != AF_INET ||
+                candidate->ai_addr == nullptr ||
+                candidate->ai_addrlen < sizeof(addr)) {
+                continue;
+            }
+            addr.sin_addr = reinterpret_cast<const struct sockaddr_in*>(
+                                candidate->ai_addr)
+                                ->sin_addr;
+            resolved = true;
+            break;
+        }
+        ::freeaddrinfo(results);
+        if (!resolved)
+            return false;
+    }
 
     if (timeout <= std::chrono::milliseconds(0)) {
         return ::connect(
