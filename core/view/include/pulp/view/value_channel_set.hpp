@@ -33,6 +33,8 @@
 ///   nothing, because nothing displays it.
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -41,6 +43,14 @@
 #include <pulp/view/value_channel_telemetry.hpp>
 
 namespace pulp::view {
+
+class ValueChannelSet;
+
+/// Runs a value-channel operation while the hosting processor guarantees that
+/// the exposed set and all of its sources remain alive. Callers must not retain
+/// either the set or a source obtained from it after the visitor returns.
+using ValueChannelVisitor = std::function<void(ValueChannelSet*)>;
+using ValueChannelAccess = std::function<void(const ValueChannelVisitor&)>;
 
 /// A processor's declared channels.
 ///
@@ -53,6 +63,13 @@ public:
     ValueChannelSet() = default;
     ValueChannelSet(const ValueChannelSet&) = delete;
     ValueChannelSet& operator=(const ValueChannelSet&) = delete;
+    ValueChannelSet(ValueChannelSet&&) = delete;
+    ValueChannelSet& operator=(ValueChannelSet&&) = delete;
+
+    /// Process-local identity assigned with the first declaration in this exact
+    /// set lifetime. Unlike its address, this does not repeat when allocator
+    /// storage is reused after a hot swap. Empty sets report zero.
+    std::uint64_t generation_identity() const noexcept;
 
     /// Why a declaration was refused. Names are a lookup key, so the rules are
     /// strict on purpose: a silently renamed or deduplicated channel is a

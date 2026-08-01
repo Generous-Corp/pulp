@@ -40,7 +40,12 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , asset_roots_(std::move(options.asset_roots))
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
-    , value_channels_(options.value_channels)
+    , value_channel_access_(
+          options.value_channel_access
+              ? std::move(options.value_channel_access)
+              : ValueChannelAccess{
+                    [channels = options.value_channels](
+                        const ValueChannelVisitor& visitor) { visitor(channels); }})
     , log_callback_(default_log_callback())
 {
 }
@@ -260,9 +265,8 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         auto next_engine = make_engine(engine_log_callback());
         auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
                                                           gpu_surface_);
-        // Re-attach on every reload: the bridge is rebuilt, the channel set is
-        // owned by the processor and outlives it.
-        next_bridge->set_value_channels(value_channels_);
+        // Re-attach on every reload without retaining a processor generation.
+        next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(script_path_.parent_path());
         if (repaint_callback_) {

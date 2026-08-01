@@ -123,6 +123,8 @@ private:
 namespace detail {
 
 std::shared_ptr<ValueChannelTelemetryControl> make_value_channel_telemetry_control();
+std::uint64_t value_channel_telemetry_control_identity(
+    const ValueChannelTelemetryControl*) noexcept;
 std::shared_ptr<ValueChannelTelemetryState> make_scalar_telemetry_state();
 std::shared_ptr<ValueChannelTelemetryState> make_meter_telemetry_state();
 std::shared_ptr<ValueChannelTelemetryState> make_vector_telemetry_state();

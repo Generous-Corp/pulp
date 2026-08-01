@@ -4,6 +4,11 @@
 
 namespace pulp::view {
 
+std::uint64_t ValueChannelSet::generation_identity() const noexcept {
+    return detail::value_channel_telemetry_control_identity(
+        telemetry_control_.get());
+}
+
 const char* ValueChannelSet::describe(DeclareError e) noexcept {
     switch (e) {
         case DeclareError::ok: return "declared";

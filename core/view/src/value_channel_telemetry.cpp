@@ -12,6 +12,7 @@ namespace pulp::view::detail {
 namespace {
 
 constexpr std::size_t kEventTapCapacity = 8;
+std::atomic<std::uint64_t> next_value_channel_set_identity{1};
 
 std::int64_t ui_snapshot_time_ns() noexcept {
     const auto elapsed = std::chrono::steady_clock::now().time_since_epoch();
@@ -32,6 +33,8 @@ struct ContinuousSnapshot {
 
 class ValueChannelTelemetryControl {
 public:
+    const std::uint64_t generation_identity =
+        next_value_channel_set_identity.fetch_add(1, std::memory_order_relaxed);
     std::atomic<bool> claimed{false};
 };
 
@@ -167,6 +170,11 @@ private:
 
 std::shared_ptr<ValueChannelTelemetryControl> make_value_channel_telemetry_control() {
     return std::make_shared<ValueChannelTelemetryControl>();
+}
+
+std::uint64_t value_channel_telemetry_control_identity(
+    const ValueChannelTelemetryControl* control) noexcept {
+    return control != nullptr ? control->generation_identity : 0;
 }
 
 std::shared_ptr<ValueChannelTelemetryState> make_scalar_telemetry_state() {

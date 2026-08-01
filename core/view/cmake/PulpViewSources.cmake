@@ -152,6 +152,7 @@ target_sources(pulp-view-script PRIVATE
     src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
+    src/widget_bridge/value_channel_access.cpp
     src/widget_bridge/bridge_dispatch.cpp
     src/widget_bridge/css_color.cpp
     src/widget_bridge/accessibility_api.cpp
