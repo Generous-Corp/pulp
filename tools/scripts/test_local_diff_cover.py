@@ -112,6 +112,14 @@ class DependencyPreflightTests(unittest.TestCase):
             text.index("for tool in clang llvm-profdata llvm-cov"),
             "xcrun path discovery must happen before the dependency loop.",
         )
+        # Reuse the canonical Xcode compiler path so a warm CMake cache does
+        # not interpret the /usr/bin shim and its resolved path as different
+        # toolchains on consecutive coverage runs.
+        self.assertIn('CLANG_C="$(xcrun -f clang)"', text)
+        self.assertIn('CLANG_CXX="$(xcrun -f clang++)"', text)
+        self.assertIn("xcrun -f clang >/dev/null 2>&1", text)
+        self.assertIn("xcrun -f clang++ >/dev/null 2>&1", text)
+        self.assertIn('-DPython3_EXECUTABLE="$(command -v python3)"', text)
 
 
 class WorkflowSourceOfTruthTests(unittest.TestCase):
