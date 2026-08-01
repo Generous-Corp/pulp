@@ -98,6 +98,28 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// The band spans `sweep_turns` of a turn and Skia tiles it the rest of the way:
+// a sub-turn window plus a repeating tile mode IS the repetition, so nothing
+// here expands the stop list or touches the paint path. A band of a full turn
+// or more has nothing to repeat and degrades to the plain sweep.
+void SkiaCanvas::set_fill_gradient_conic_repeating(float cx, float cy, float start_angle,
+                                                    float sweep_turns,
+                                                    const Color* colors,
+                                                    const float* positions, int count) {
+    if (!(sweep_turns > 0.0f) || sweep_turns >= 1.0f) {
+        set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
+        return;
+    }
+    std::vector<SkColor4f> sk_colors;
+    std::vector<float> sk_pos;
+    colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
+    gradient_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, sweep_turns * 360.0f,
+                                                 sk_colors.data(), sk_pos.data(), count,
+                                                 SkTileMode::kRepeat);
+    gradient_shader_ = rotate_sweep(std::move(gradient_shader_), cx, cy, start_angle);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 // Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)` two-circle form.
 // Skia renders the real two-point-conical gradient via
 // SkShaders::TwoPointConicalGradient, honouring an offset / sized inner

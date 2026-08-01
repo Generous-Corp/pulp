@@ -189,3 +189,50 @@ TEST_CASE("repeating-conic-gradient tiles its band around the circle",
         "#00ff00 30deg 60deg)",
         explicit_bands);
 }
+
+// The declaration this cluster was found for, taken verbatim from the panel a
+// design pass actually produced (the VELOUR CS-24 tick ring). It hits all four
+// defects at once, which is why the ring came back as a screenshot instead of
+// as vectors: a `from` rotation that clamped a 135° wedge, angular stop
+// positions that parsed as raw fractions, two positions on every stop, and a
+// `repeating-` prefix that matched no branch at all.
+//
+// `var(--line-strong)` is substituted with the value its pack resolves it to
+// (tokens/semantic.css) because that substitution is Chromium's job, not this
+// parser's — a computed value never contains a var().
+TEST_CASE("the tick ring a design pass authored renders as vectors",
+          "[view][gradient][conic]") {
+    const std::string tick_ring =
+        "repeating-conic-gradient(from 225deg, "
+        "rgba(220,232,250,0.22) 0deg 1.4deg, transparent 1.4deg 15deg)";
+    bool applied = false;
+    const auto png = render_css(tick_ring, &applied);
+    REQUIRE(applied);
+
+    // 360 / 15 = 24 ticks. Written out one band at a time, it is the same ring.
+    std::string explicit_ticks = "conic-gradient(from 225deg";
+    for (int i = 0; i < 24; ++i) {
+        const double a = i * 15.0;
+        explicit_ticks += ", rgba(220,232,250,0.22) " + std::to_string(a) + "deg";
+        explicit_ticks += ", rgba(220,232,250,0.22) " + std::to_string(a + 1.4) + "deg";
+        explicit_ticks += ", transparent " + std::to_string(a + 1.4) + "deg";
+        explicit_ticks += ", transparent " + std::to_string(a + 15.0) + "deg";
+    }
+    explicit_ticks += ")";
+    bool explicit_applied = false;
+    const auto reference = render_css(explicit_ticks, &explicit_applied);
+    REQUIRE(explicit_applied);
+
+    // Ticks this fine are mostly transparent, so luminance spread is the wrong
+    // instrument — assert the ring is actually drawn by requiring some of the
+    // box to be non-background.
+    const auto stats = analyze_screenshot_content(png);
+    INFO("tick coverage " << stats.non_background_coverage);
+    CHECK(stats.non_background_coverage > 0.0);
+
+    const auto cmp = compare_screenshots(png, reference);
+    INFO("similarity " << cmp.similarity << " mean_error " << cmp.mean_error);
+    CHECK(cmp.similarity > 0.999f);
+}
+
+

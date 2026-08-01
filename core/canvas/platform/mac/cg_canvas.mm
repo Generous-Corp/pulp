@@ -1422,11 +1422,14 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
 // supplied bounding rectangle. Each pixel's angle is computed as
 // atan2(y - cy, x - cx) - start_angle (mod 2π) and divided by 2π to give the
 // stop position. Returns nullptr on allocation failure.
+// `sweep_turns` < 1 makes the stop list a BAND that tiles around the circle
+// (CSS repeating-conic-gradient); 1 spans the whole turn once.
 static CGImageRef build_conic_gradient_image(
         float cx, float cy, float start_angle,
         const std::vector<pulp::canvas::Color>& colors,
         const std::vector<float>& positions,
-        CGRect bounds) {
+        CGRect bounds,
+        float sweep_turns = 1.0f) {
     const int width = std::max(1, static_cast<int>(std::ceil(bounds.size.width)));
     const int height = std::max(1, static_cast<int>(std::ceil(bounds.size.height)));
     const size_t bytes_per_row = static_cast<size_t>(width) * 4u;
@@ -1444,7 +1447,13 @@ static CGImageRef build_conic_gradient_image(
             // atan2 returns (-π, π]; subtract start_angle, then wrap to [0, 2π).
             double theta = std::atan2(dy, dx) - static_cast<double>(start_angle);
             theta = theta - kTwoPi * std::floor(theta / kTwoPi);
-            const double t = theta / kTwoPi;
+            double t = theta / kTwoPi;
+            // Tile the band. The stops are normalized across it, so this is
+            // the whole of the repetition on this backend.
+            if (sweep_turns > 0.0f && sweep_turns < 1.0f) {
+                t /= static_cast<double>(sweep_turns);
+                t -= std::floor(t);
+            }
             CGFloat rgba[4];
             sample_conic_stops(colors, positions, t, rgba);
             // Premultiplied RGBA8 (matches kCGImageAlphaPremultipliedLast).
@@ -1567,7 +1576,7 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
             release_conic_image();
             conic_image_ = build_conic_gradient_image(
                 grad_x0_, grad_y0_, grad_x1_, grad_colors_, grad_positions_,
-                clip_bb);
+                clip_bb, grad_y1_);
             conic_image_x_ = static_cast<float>(clip_bb.origin.x);
             conic_image_y_ = static_cast<float>(clip_bb.origin.y);
             conic_image_w_ = static_cast<float>(clip_bb.size.width);

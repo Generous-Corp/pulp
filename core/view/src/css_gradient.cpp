@@ -342,8 +342,15 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
     // conic-gradient([from <angle>] [at <pos>],] stop, stop, ...). CSS measures
     // `from` clockwise from the top (12 o'clock); the canvas sweep starts at +x
     // (3 o'clock), so we offset by -90deg to keep `from 0deg` pointing up.
-    if (gradient.substr(0, 15) == "conic-gradient(") {
-        std::string inner = gradient.substr(15, gradient.size() - 16);
+    // `repeating-conic-gradient` differs from `conic-gradient` only in what
+    // happens past the last stop: the band tiles instead of clamping. Same
+    // prefix grammar, same stops, so the two share this branch and part ways
+    // at the sweep span handed to the View.
+    const bool conic_repeats =
+        gradient.compare(0, 25, "repeating-conic-gradient(") == 0;
+    if (conic_repeats || gradient.substr(0, 15) == "conic-gradient(") {
+        const std::size_t open = conic_repeats ? 25 : 15;
+        std::string inner = gradient.substr(open, gradient.size() - open - 1);
         float cx = 0.5f, cy = 0.5f, from_rad = 0.0f;
         size_t color_start = 0;
         size_t fc = top_level_comma(inner);
@@ -365,11 +372,23 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         // Conic stops are angles, not lengths.
         parse_stops(inner.substr(color_start), color_of, colors, positions,
                     /*angular=*/true);
-        if (!colors.empty()) {
-            v.set_background_gradient_conic(cx, cy, from_rad - 1.57079633f, colors, positions);
-            return true;
+        if (colors.empty()) return false;
+        // The band a repeating conic tiles runs from 0 to its LAST stop, and
+        // the shader wants that band expressed as 0..1. `repeating-conic-
+        // gradient(#fff 0deg 2deg, #000 2deg 12deg)` therefore spans 12/360 of
+        // a turn with its stops rescaled onto it -- which is also why a band
+        // that already covers a full turn simply degrades to a plain conic.
+        float sweep_turns = 1.0f;
+        if (conic_repeats) {
+            const float span = *std::max_element(positions.begin(), positions.end());
+            if (span > 0.0f && span < 1.0f) {
+                sweep_turns = span;
+                for (auto& p : positions) p /= span;
+            }
         }
-        return false;
+        v.set_background_gradient_conic(cx, cy, from_rad - 1.57079633f, colors,
+                                        positions, sweep_turns);
+        return true;
     }
 
     return false;
