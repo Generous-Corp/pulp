@@ -1,5 +1,6 @@
 #include <pulp/timeline_editor/edit_intent.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -12,7 +13,16 @@ namespace {
 bool equal_optional_clip(const std::optional<Clip>& lhs, const std::optional<Clip>& rhs) noexcept {
     if (lhs.has_value() != rhs.has_value())
         return false;
-    return !lhs || equivalent(*lhs, *rhs);
+    if (!lhs || !equivalent(*lhs, *rhs))
+        return !lhs;
+
+    const auto* left_midi = std::get_if<MidiContent>(&lhs->content());
+    if (!left_midi)
+        return true;
+    const auto& right_midi = std::get<MidiContent>(rhs->content());
+    return left_midi->lanes().size() == right_midi.lanes().size() &&
+           std::equal(left_midi->lanes().begin(), left_midi->lanes().end(),
+                      right_midi.lanes().begin());
 }
 
 bool equal_optional_range(const std::optional<ClipTimeRange>& lhs,
@@ -85,6 +95,10 @@ std::optional<ModelError> validate_note_edit_intent(const NoteEditIntent& intent
         return std::optional<ModelError>(
             ModelError{ModelErrorCode::InvalidNote, intent.clip_id, {}});
     };
+    const auto invalid_transform = [&]() {
+        return std::optional<ModelError>(
+            ModelError{ModelErrorCode::InvalidNote, intent.expected->id, {}});
+    };
 
     switch (intent.kind) {
     case NoteEditIntentKind::Insert:
@@ -95,15 +109,48 @@ std::optional<ModelError> validate_note_edit_intent(const NoteEditIntent& intent
         if (intent.replacement)
             return unexpected();
         return intent.expected ? std::nullopt : missing();
-    case NoteEditIntentKind::Move:
-    case NoteEditIntentKind::Resize:
-    case NoteEditIntentKind::SetVelocity:
+    case NoteEditIntentKind::Move: {
         if (!intent.expected || !intent.replacement)
             return missing();
         if (intent.expected->id != intent.replacement->id)
             return ModelError{ModelErrorCode::IdentityConflict, intent.expected->id,
                               intent.replacement->id};
+        const auto& before = *intent.expected;
+        const auto& after = *intent.replacement;
+        if (before.duration != after.duration || before.velocity != after.velocity ||
+            before.channel != after.channel ||
+            (before.start == after.start && before.pitch == after.pitch))
+            return invalid_transform();
         return std::nullopt;
+    }
+    case NoteEditIntentKind::Resize: {
+        if (!intent.expected || !intent.replacement)
+            return missing();
+        if (intent.expected->id != intent.replacement->id)
+            return ModelError{ModelErrorCode::IdentityConflict, intent.expected->id,
+                              intent.replacement->id};
+        const auto& before = *intent.expected;
+        const auto& after = *intent.replacement;
+        if (before.pitch != after.pitch || before.velocity != after.velocity ||
+            before.channel != after.channel ||
+            (before.start == after.start && before.duration == after.duration))
+            return invalid_transform();
+        return std::nullopt;
+    }
+    case NoteEditIntentKind::SetVelocity: {
+        if (!intent.expected || !intent.replacement)
+            return missing();
+        if (intent.expected->id != intent.replacement->id)
+            return ModelError{ModelErrorCode::IdentityConflict, intent.expected->id,
+                              intent.replacement->id};
+        const auto& before = *intent.expected;
+        const auto& after = *intent.replacement;
+        if (before.start != after.start || before.duration != after.duration ||
+            before.pitch != after.pitch || before.channel != after.channel ||
+            before.velocity == after.velocity)
+            return invalid_transform();
+        return std::nullopt;
+    }
     }
     return unexpected();
 }

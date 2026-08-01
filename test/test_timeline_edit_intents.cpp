@@ -73,6 +73,15 @@ NoteEditIntent note_intent(NoteEditIntentKind kind) {
     return intent;
 }
 
+Clip note_clip_with_lane_value(std::uint32_t value) {
+    MidiExpressionLane lane;
+    lane.id = {30};
+    lane.address = {0, 2, 0xb, 0, 1};
+    lane.points.push_back({{31}, {0}, value});
+    auto content = MidiContent::create({note()}, {}, 0, {std::move(lane)});
+    return Clip::create({9}, {0}, {kTicksPerQuarter}, std::move(content).value()).value();
+}
+
 } // namespace
 
 TEST_CASE("Edit intents from a mouse and a touch pointer lower to identical transactions") {
@@ -248,6 +257,11 @@ TEST_CASE("Edit intents compare the complete pointer-neutral value") {
     REQUIRE(draw == same_draw);
     same_draw.clip = make_note_clip({11}, {12}, 0);
     REQUIRE_FALSE(draw == same_draw);
+
+    draw.clip = note_clip_with_lane_value(1);
+    same_draw = draw;
+    same_draw.clip = note_clip_with_lane_value(2);
+    REQUIRE_FALSE(draw == same_draw);
 }
 
 TEST_CASE("Note edit intents validate each payload shape") {
@@ -259,13 +273,24 @@ TEST_CASE("Note edit intents validate each payload shape") {
     erase.expected = note();
     REQUIRE_FALSE(validate_note_edit_intent(erase));
 
-    for (const auto kind :
-         {NoteEditIntentKind::Move, NoteEditIntentKind::Resize, NoteEditIntentKind::SetVelocity}) {
-        auto transform = note_intent(kind);
-        transform.expected = note();
-        transform.replacement = note({20}, kTicksPerQuarter, 2 * kTicksPerQuarter);
-        REQUIRE_FALSE(validate_note_edit_intent(transform));
-    }
+    auto move = note_intent(NoteEditIntentKind::Move);
+    move.expected = note();
+    move.replacement = note();
+    move.replacement->start = {kTicksPerQuarter};
+    move.replacement->pitch = 65;
+    REQUIRE_FALSE(validate_note_edit_intent(move));
+
+    auto resize = note_intent(NoteEditIntentKind::Resize);
+    resize.expected = note();
+    resize.replacement = note();
+    resize.replacement->duration = {2 * kTicksPerQuarter};
+    REQUIRE_FALSE(validate_note_edit_intent(resize));
+
+    auto velocity = note_intent(NoteEditIntentKind::SetVelocity);
+    velocity.expected = note();
+    velocity.replacement = note();
+    velocity.replacement->velocity = 32'000;
+    REQUIRE_FALSE(validate_note_edit_intent(velocity));
 }
 
 TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads") {
@@ -296,6 +321,16 @@ TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads")
     REQUIRE(error);
     REQUIRE(error->code == ModelErrorCode::InvalidNote);
     REQUIRE(error->item == ItemId{20});
+
+    auto contradictory = note_intent(NoteEditIntentKind::SetVelocity);
+    contradictory.expected = note();
+    contradictory.replacement = note();
+    contradictory.replacement->start = {kTicksPerQuarter};
+    contradictory.replacement->velocity = 32'000;
+    error = validate_note_edit_intent(contradictory);
+    REQUIRE(error);
+    REQUIRE(error->code == ModelErrorCode::InvalidNote);
+    REQUIRE(error->item == ItemId{20});
 }
 
 TEST_CASE("A note gesture crosses the host seam as one comparable value") {
@@ -304,7 +339,8 @@ TEST_CASE("A note gesture crosses the host seam as one comparable value") {
     auto submitted = note_intent(NoteEditIntentKind::Move);
     submitted.phase = GesturePhase::Update;
     submitted.expected = note();
-    submitted.replacement = note({20}, kTicksPerQuarter);
+    submitted.replacement = note();
+    submitted.replacement->start = {kTicksPerQuarter};
     REQUIRE_FALSE(validate_note_edit_intent(submitted));
 
     ScriptedUiHost<NoteEditIntent> concrete;
