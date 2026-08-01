@@ -31,6 +31,7 @@
 #include <windows.h>
 #else
 #include <csignal>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -43,13 +44,16 @@ namespace {
 using namespace pulp::project_package;
 namespace fs = std::filesystem;
 
-fs::path g_remove_after_blob_verification;
+fs::path g_swap_after_blob_verification;
+fs::path g_blob_swap_source;
 
-void remove_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
-    if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified)
+void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified &&
+        point != pulp::project_package::detail::PackageFaultPoint::BlobReferenceVerified)
         return;
     std::error_code ignored;
-    fs::remove(g_remove_after_blob_verification, ignored);
+    fs::remove(g_swap_after_blob_verification, ignored);
+    fs::rename(g_blob_swap_source, g_swap_after_blob_verification, ignored);
 }
 
 class TemporaryPackage {
@@ -568,6 +572,35 @@ TEST_CASE("Atomic project-package publisher anchors a relative destination at cr
     REQUIRE_FALSE(fs::exists(second / "published"));
 }
 
+#if !defined(_WIN32)
+TEST_CASE("Atomic project-package publisher creates owner-private staging",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-private-staging");
+    fs::create_directories(temporary.path);
+
+    // A zero umask is the negative control: an ordinary directory creation
+    // would expose 0777, so this test fails if restrictive creation is removed.
+    std::optional<AtomicPublisher> publisher;
+    {
+        struct UmaskRestore {
+            mode_t previous = ::umask(0);
+            ~UmaskRestore() {
+                ::umask(previous);
+            }
+        } restore;
+        auto created = AtomicPublisher::create(temporary.path / "published");
+        REQUIRE(created);
+        publisher.emplace(std::move(created).value());
+    }
+    REQUIRE(publisher);
+    std::error_code error;
+    const auto status = fs::status(publisher->staging_directory(), error);
+    REQUIRE_FALSE(error);
+    REQUIRE(status.type() == fs::file_type::directory);
+    REQUIRE((status.permissions() & fs::perms::all) == fs::perms::owner_all);
+}
+#endif
+
 TEST_CASE("Atomic project-package publisher rejects staged symlinks",
           "[project-package][atomic-publisher]") {
     TemporaryPackage temporary("atomic-symlink");
@@ -607,8 +640,8 @@ TEST_CASE("Atomic project-package publisher rejects symlinked write ancestors",
     REQUIRE_FALSE(fs::exists(external / "escaped.txt"));
 }
 
-TEST_CASE("Package writer fences a verified pre-existing blob before admitting it",
-          "[project-package][durability]") {
+TEST_CASE("Package writer fences the same pre-existing blob handle that it verified",
+          "[project-package][durability][race]") {
     TemporaryPackage temporary("existing-blob-fence");
     const std::vector<std::uint8_t> bytes{'d', 'u', 'r', 'a', 'b', 'l', 'e'};
     const auto hash = hash_bytes(bytes);
@@ -616,14 +649,48 @@ TEST_CASE("Package writer fences a verified pre-existing blob before admitting i
     REQUIRE(writer);
     REQUIRE(writer->stage_blob(BlobStore::Media, hash, bytes));
 
-    g_remove_after_blob_verification = temporary.path / "media" / hash.to_hex();
-    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(remove_verified_blob);
+    g_swap_after_blob_verification = temporary.path / "media" / hash.to_hex();
+    g_blob_swap_source = temporary.path / "media/blob-swap";
+    {
+        std::ofstream replacement(g_blob_swap_source, std::ios::binary);
+        REQUIRE(replacement);
+        replacement << "different bytes";
+    }
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(swap_verified_blob);
     const auto restaged = writer->stage_blob(BlobStore::Media, hash, bytes);
     pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
-    g_remove_after_blob_verification.clear();
+    g_swap_after_blob_verification.clear();
+    g_blob_swap_source.clear();
 
     REQUIRE_FALSE(restaged);
     REQUIRE(restaged.error().code == PackageErrorCode::DurabilityUncertain);
+}
+
+TEST_CASE("Project publication rejects a blob pathname swapped after handle verification",
+          "[project-package][race]") {
+    TemporaryPackage temporary("publish-blob-swap");
+    const std::vector<std::uint8_t> bytes{'v', 'e', 'r', 'i', 'f', 'i', 'e', 'd'};
+    const auto hash = hash_bytes(bytes);
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    REQUIRE(writer->stage_blob(BlobStore::Media, hash, bytes));
+
+    g_swap_after_blob_verification = temporary.path / "media" / hash.to_hex();
+    g_blob_swap_source = temporary.path / "media/blob-swap";
+    {
+        std::ofstream replacement(g_blob_swap_source, std::ios::binary);
+        REQUIRE(replacement);
+        replacement << "different bytes";
+    }
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(swap_verified_blob);
+    const auto published = writer->publish(make_project("swap", "media", hash));
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_swap_after_blob_verification.clear();
+    g_blob_swap_source.clear();
+
+    REQUIRE_FALSE(published);
+    REQUIRE(published.error().code == PackageErrorCode::InvalidGeneration);
+    REQUIRE_FALSE(fs::exists(temporary.path / "project.json"));
 }
 
 TEST_CASE("Project package size limits narrow only when the target size can represent them",

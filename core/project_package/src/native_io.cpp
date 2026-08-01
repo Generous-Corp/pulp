@@ -3,10 +3,13 @@
 #include "project_package_test_access.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <string>
 #include <utility>
+
+#include <mbedtls/sha256.h>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -142,6 +145,176 @@ AnchoredDirectory& AnchoredDirectory::operator=(AnchoredDirectory&& other) noexc
         native_ = std::exchange(other.native_, -1);
     }
     return *this;
+}
+
+PinnedFile::~PinnedFile() {
+    close();
+}
+
+PinnedFile::PinnedFile(PinnedFile&& other) noexcept : native_(std::exchange(other.native_, -1)) {}
+
+PinnedFile& PinnedFile::operator=(PinnedFile&& other) noexcept {
+    if (this != &other) {
+        close();
+        native_ = std::exchange(other.native_, -1);
+    }
+    return *this;
+}
+
+std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
+                                           bool fence_capable) noexcept {
+#if defined(_WIN32)
+    const auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    const auto handle = ::CreateFileW(
+        path.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileInformationByHandle(handle, &info) == 0 ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        info.nNumberOfLinks != 1) {
+        ::CloseHandle(handle);
+        return std::nullopt;
+    }
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
+#else
+    const auto descriptor = ::open(path.c_str(), (fence_capable ? O_RDWR : O_RDONLY) | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                                     | O_NOFOLLOW
+#endif
+    );
+    if (descriptor < 0)
+        return std::nullopt;
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 1) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    return PinnedFile(descriptor);
+#endif
+}
+
+bool PinnedFile::hash_matches(std::string_view expected_hex,
+                              std::uint64_t maximum_bytes) const noexcept {
+    if (native_ == -1)
+        return false;
+    std::uint64_t size = 0;
+#if defined(_WIN32)
+    const auto handle = reinterpret_cast<HANDLE>(native_);
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileInformationByHandle(handle, &info) == 0 ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        info.nNumberOfLinks != 1)
+        return false;
+    size = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32u) | info.nFileSizeLow;
+    if (size > maximum_bytes)
+        return false;
+    LARGE_INTEGER beginning{};
+    if (::SetFilePointerEx(handle, beginning, nullptr, FILE_BEGIN) == 0)
+        return false;
+#else
+    const auto descriptor = static_cast<int>(native_);
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 1)
+        return false;
+    if (status.st_size < 0 || static_cast<std::uint64_t>(status.st_size) > maximum_bytes)
+        return false;
+    size = static_cast<std::uint64_t>(status.st_size);
+    if (::lseek(descriptor, 0, SEEK_SET) < 0)
+        return false;
+#endif
+
+    mbedtls_sha256_context hash;
+    mbedtls_sha256_init(&hash);
+    mbedtls_sha256_starts(&hash, 0);
+    std::array<std::uint8_t, 64 * 1024> buffer{};
+    std::uint64_t offset = 0;
+    while (offset < size) {
+        const auto request = static_cast<std::size_t>(
+            (std::min)(size - offset, static_cast<std::uint64_t>(buffer.size())));
+#if defined(_WIN32)
+        DWORD count = 0;
+        if (!::ReadFile(handle, buffer.data(), static_cast<DWORD>(request), &count, nullptr) ||
+            count == 0) {
+            mbedtls_sha256_free(&hash);
+            return false;
+        }
+#else
+        auto count = ::read(descriptor, buffer.data(), request);
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0) {
+            mbedtls_sha256_free(&hash);
+            return false;
+        }
+#endif
+        mbedtls_sha256_update(&hash, buffer.data(), static_cast<std::size_t>(count));
+        offset += static_cast<std::uint64_t>(count);
+    }
+    std::array<std::uint8_t, 32> digest{};
+    mbedtls_sha256_finish(&hash, digest.data());
+    mbedtls_sha256_free(&hash);
+    static constexpr char digits[] = "0123456789abcdef";
+    std::array<char, 64> encoded{};
+    for (std::size_t index = 0; index < digest.size(); ++index) {
+        encoded[index * 2] = digits[digest[index] >> 4];
+        encoded[index * 2 + 1] = digits[digest[index] & 0x0f];
+    }
+    return expected_hex == std::string_view(encoded.data(), encoded.size());
+}
+
+bool PinnedFile::fence() const noexcept {
+    if (native_ == -1)
+        return false;
+#if defined(_WIN32)
+    return ::FlushFileBuffers(reinterpret_cast<HANDLE>(native_)) != 0;
+#else
+    return fence_descriptor(static_cast<int>(native_));
+#endif
+}
+
+bool PinnedFile::still_named_by(const std::filesystem::path& path) const noexcept {
+    if (native_ == -1)
+        return false;
+#if defined(_WIN32)
+    const auto named = ::CreateFileW(
+        path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (named == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION pinned_info{};
+    BY_HANDLE_FILE_INFORMATION named_info{};
+    const bool matches =
+        ::GetFileInformationByHandle(reinterpret_cast<HANDLE>(native_), &pinned_info) != 0 &&
+        ::GetFileInformationByHandle(named, &named_info) != 0 && pinned_info.nNumberOfLinks == 1 &&
+        named_info.nNumberOfLinks == 1 &&
+        (named_info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ==
+            0 &&
+        pinned_info.dwVolumeSerialNumber == named_info.dwVolumeSerialNumber &&
+        pinned_info.nFileIndexHigh == named_info.nFileIndexHigh &&
+        pinned_info.nFileIndexLow == named_info.nFileIndexLow;
+    ::CloseHandle(named);
+    return matches;
+#else
+    struct stat pinned_status{};
+    struct stat named_status{};
+    return ::fstat(static_cast<int>(native_), &pinned_status) == 0 && pinned_status.st_nlink == 1 &&
+           ::lstat(path.c_str(), &named_status) == 0 && S_ISREG(named_status.st_mode) &&
+           named_status.st_nlink == 1 && pinned_status.st_dev == named_status.st_dev &&
+           pinned_status.st_ino == named_status.st_ino;
+#endif
+}
+
+void PinnedFile::close() noexcept {
+    if (native_ == -1)
+        return;
+#if defined(_WIN32)
+    ::CloseHandle(reinterpret_cast<HANDLE>(native_));
+#else
+    ::close(static_cast<int>(native_));
+#endif
+    native_ = -1;
 }
 
 std::optional<AnchoredDirectory>

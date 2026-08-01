@@ -7,10 +7,30 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <aclapi.h>
+#include <sddl.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#if defined(__APPLE__)
+#include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
+#endif
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace pulp::project_package {
 namespace fs = std::filesystem;
@@ -36,6 +56,131 @@ fs::path path_from_utf8(std::string_view value) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(value.data()), value.size()));
 #else
     return fs::path(value);
+#endif
+}
+
+enum class PrivateDirectoryCreate : std::uint8_t { Created, AlreadyExists, Failed };
+
+#if defined(_WIN32)
+bool private_directory_security_matches(HANDLE directory) noexcept {
+    PSECURITY_DESCRIPTOR expected_descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)", SDDL_REVISION_1,
+            &expected_descriptor, nullptr))
+        return false;
+
+    PACL expected_dacl = nullptr;
+    BOOL expected_present = FALSE;
+    BOOL expected_defaulted = FALSE;
+    if (!GetSecurityDescriptorDacl(expected_descriptor, &expected_present, &expected_dacl,
+                                   &expected_defaulted) ||
+        !expected_present || expected_dacl == nullptr) {
+        LocalFree(expected_descriptor);
+        return false;
+    }
+
+    PSID owner = nullptr;
+    PACL actual_dacl = nullptr;
+    PSECURITY_DESCRIPTOR actual_descriptor = nullptr;
+    const auto security_error = GetSecurityInfo(
+        directory, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner,
+        nullptr, &actual_dacl, nullptr, &actual_descriptor);
+    HANDLE token = nullptr;
+    DWORD token_bytes = 0;
+    bool token_opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token) != 0;
+    if (!token_opened && GetLastError() == ERROR_NO_TOKEN)
+        token_opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0;
+    if (token_opened)
+        GetTokenInformation(token, TokenOwner, nullptr, 0, &token_bytes);
+    std::vector<std::uint8_t> token_storage(token_bytes);
+    const bool token_read = token_opened && token_bytes != 0 &&
+                            GetTokenInformation(token, TokenOwner, token_storage.data(),
+                                                token_bytes, &token_bytes) != 0;
+    if (token != nullptr)
+        CloseHandle(token);
+
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    const bool control_read =
+        actual_descriptor != nullptr &&
+        GetSecurityDescriptorControl(actual_descriptor, &control, &revision) != 0;
+    const auto* token_owner =
+        token_read ? reinterpret_cast<const TOKEN_OWNER*>(token_storage.data()) : nullptr;
+    const bool matches = security_error == ERROR_SUCCESS && owner != nullptr &&
+                         token_owner != nullptr && EqualSid(owner, token_owner->Owner) != 0 &&
+                         control_read && (control & SE_DACL_PROTECTED) != 0 &&
+                         actual_dacl != nullptr && actual_dacl->AclSize == expected_dacl->AclSize &&
+                         std::memcmp(actual_dacl, expected_dacl, expected_dacl->AclSize) == 0;
+    if (actual_descriptor != nullptr)
+        LocalFree(actual_descriptor);
+    LocalFree(expected_descriptor);
+    return matches;
+}
+#endif
+
+PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
+#if defined(_WIN32)
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)", SDDL_REVISION_1, &descriptor,
+            nullptr))
+        return PrivateDirectoryCreate::Failed;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
+    const bool created = CreateDirectoryW(path.c_str(), &attributes) != 0;
+    const auto create_error = created ? ERROR_SUCCESS : GetLastError();
+    LocalFree(descriptor);
+    if (!created)
+        return create_error == ERROR_FILE_EXISTS || create_error == ERROR_ALREADY_EXISTS
+                   ? PrivateDirectoryCreate::AlreadyExists
+                   : PrivateDirectoryCreate::Failed;
+
+    HANDLE directory = CreateFileW(
+        path.c_str(), READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    const bool private_security =
+        directory != INVALID_HANDLE_VALUE && private_directory_security_matches(directory);
+    if (directory != INVALID_HANDLE_VALUE)
+        CloseHandle(directory);
+    if (private_security)
+        return PrivateDirectoryCreate::Created;
+    std::error_code ignored;
+    fs::remove(path, ignored);
+    return PrivateDirectoryCreate::Failed;
+#else
+    if (::mkdir(path.c_str(), 0700) != 0)
+        return errno == EEXIST ? PrivateDirectoryCreate::AlreadyExists
+                               : PrivateDirectoryCreate::Failed;
+    const int directory = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+    if (directory < 0) {
+        std::error_code ignored;
+        fs::remove(path, ignored);
+        return PrivateDirectoryCreate::Failed;
+    }
+    bool private_security = ::fchmod(directory, 0700) == 0;
+#if defined(__APPLE__)
+    acl_t empty = ::acl_init(0);
+    errno = 0;
+    const bool acl_cleared =
+        empty != nullptr && ::acl_set_fd_np(directory, empty, ACL_TYPE_EXTENDED) == 0;
+    const bool acl_unsupported = !acl_cleared && errno == EOPNOTSUPP;
+    private_security = private_security && (acl_cleared || acl_unsupported);
+    if (empty != nullptr)
+        ::acl_free(empty);
+#elif defined(__linux__)
+    for (const char* name : {"system.posix_acl_access", "system.posix_acl_default"})
+        if (::fremovexattr(directory, name) != 0 && errno != ENODATA && errno != ENOTSUP)
+            private_security = false;
+#endif
+    struct stat status{};
+    private_security = private_security && ::fstat(directory, &status) == 0 &&
+                       S_ISDIR(status.st_mode) && (status.st_mode & 0777) == 0700 &&
+                       status.st_uid == ::geteuid();
+    ::close(directory);
+    if (private_security)
+        return PrivateDirectoryCreate::Created;
+    std::error_code ignored;
+    fs::remove(path, ignored);
+    return PrivateDirectoryCreate::Failed;
 #endif
 }
 
@@ -84,7 +229,8 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
     static std::atomic<std::uint64_t> serial{0};
     for (std::size_t attempt = 0; attempt < 128; ++attempt) {
         auto staging = staging_sibling(anchored_destination, serial.fetch_add(1) + attempt);
-        if (fs::create_directory(staging, error)) {
+        const auto created = create_private_directory(staging);
+        if (created == PrivateDirectoryCreate::Created) {
             auto staging_root = detail::AnchoredDirectory::open(staging);
             if (!staging_root) {
                 fs::remove(staging, error);
@@ -97,11 +243,9 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
         }
-        if (!error)
+        if (created == PrivateDirectoryCreate::AlreadyExists)
             continue;
-        if (error != std::errc::file_exists)
-            return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
-        error.clear();
+        return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
     }
     return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict, anchored_destination);
 }

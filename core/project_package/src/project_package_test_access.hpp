@@ -8,6 +8,7 @@ enum class PackageFaultPoint : std::uint8_t {
     StagedFileWritten,
     StagedFileFenced,
     ExistingBlobVerified,
+    BlobReferenceVerified,
     BlobPublished,
     BlobDirectoryFenced,
     GenerationWritten,

@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -40,6 +41,29 @@ class AnchoredDirectory {
 
   private:
     explicit AnchoredDirectory(std::intptr_t native) noexcept : native_(native) {}
+    std::intptr_t native_ = -1;
+};
+
+/// One no-follow file handle used for both content verification and durability fencing.
+class PinnedFile {
+  public:
+    PinnedFile() noexcept = default;
+    ~PinnedFile();
+    PinnedFile(PinnedFile&& other) noexcept;
+    PinnedFile& operator=(PinnedFile&& other) noexcept;
+    PinnedFile(const PinnedFile&) = delete;
+    PinnedFile& operator=(const PinnedFile&) = delete;
+
+    static std::optional<PinnedFile> open(const std::filesystem::path& path,
+                                          bool fence_capable) noexcept;
+    bool hash_matches(std::string_view expected_hex, std::uint64_t maximum_bytes) const noexcept;
+    bool fence() const noexcept;
+    /// Returns true only while `path` still names this single-linked regular file.
+    bool still_named_by(const std::filesystem::path& path) const noexcept;
+    void close() noexcept;
+
+  private:
+    explicit PinnedFile(std::intptr_t native) noexcept : native_(native) {}
     std::intptr_t native_ = -1;
 };
 

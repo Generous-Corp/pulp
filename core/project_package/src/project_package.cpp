@@ -80,10 +80,15 @@ bool is_real_directory(const fs::path& path) {
 
 bool hash_matches(const fs::path& path, const timeline::ContentHash& expected,
                   std::uint64_t maximum) {
-    if (!expected.valid() || !detail::regular_file_no_links(path))
+    if (!expected.valid())
         return false;
-    const auto actual = runtime::sha256_file_hex(path, maximum);
-    return actual && *actual == expected.to_hex();
+    auto file = detail::PinnedFile::open(path, false);
+    if (!file)
+        return false;
+    if (!file->hash_matches(expected.to_hex(), maximum))
+        return false;
+    detail::invoke_fault_hook(detail::PackageFaultPoint::BlobReferenceVerified);
+    return file->still_named_by(path);
 }
 
 std::uint64_t next_serial() noexcept {
@@ -323,10 +328,11 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
     const auto destination = blob_path(impl_->root, reference);
     std::error_code error;
     if (fs::exists(destination, error)) {
-        if (error || !hash_matches(destination, expected, impl_->limits.max_blob_bytes))
+        auto file = detail::PinnedFile::open(destination, true);
+        if (error || !file || !file->hash_matches(expected.to_hex(), impl_->limits.max_blob_bytes))
             return failure<BlobReference>(PackageErrorCode::HashMismatch, destination);
         detail::invoke_fault_hook(detail::PackageFaultPoint::ExistingBlobVerified);
-        if (!detail::fence_file(destination))
+        if (!file->fence() || !file->still_named_by(destination))
             return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
         if (!detail::fence_directory(destination.parent_path()))
             return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
@@ -339,9 +345,10 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
         return failure<BlobReference>(PackageErrorCode::IoError, temporary);
     if (!detail::publish_no_replace(temporary, destination)) {
         fs::remove(temporary, error);
-        if (!hash_matches(destination, expected, impl_->limits.max_blob_bytes))
+        auto file = detail::PinnedFile::open(destination, true);
+        if (!file || !file->hash_matches(expected.to_hex(), impl_->limits.max_blob_bytes))
             return failure<BlobReference>(PackageErrorCode::PublicationConflict, destination);
-        if (!detail::fence_file(destination))
+        if (!file->fence() || !file->still_named_by(destination))
             return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
     }
     detail::invoke_fault_hook(detail::PackageFaultPoint::BlobPublished);

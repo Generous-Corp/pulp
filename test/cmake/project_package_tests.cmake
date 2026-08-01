@@ -22,6 +22,14 @@ target_include_directories(pulp-project-package-test-mutant
 target_link_libraries(pulp-project-package-test-mutant
     PUBLIC pulp::timeline
     PRIVATE pulp::runtime)
+if(TARGET mbedcrypto)
+    target_link_libraries(pulp-project-package-test-mutant PRIVATE mbedcrypto)
+    target_include_directories(pulp-project-package-test-mutant PRIVATE
+        ${mbedtls_SOURCE_DIR}/include)
+endif()
+if(WIN32)
+    target_link_libraries(pulp-project-package-test-mutant PRIVATE Advapi32)
+endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(pulp-project-package-test-mutant PRIVATE
         -fno-exceptions -fno-rtti)
