@@ -61,7 +61,8 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_include_directories(pulp-test-mcp-server PRIVATE
         "${CMAKE_SOURCE_DIR}/inspect/include")
-    catch_discover_tests(pulp-test-mcp-server)
+    catch_discover_tests(pulp-test-mcp-server
+        PROPERTIES LABELS "mcp-server")
 
     if(PULP_ENABLE_PROJECT_PACKAGE)
         # Timeline MCP operations have their own bounded suite so media/render

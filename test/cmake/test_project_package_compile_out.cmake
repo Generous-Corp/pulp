@@ -5,6 +5,7 @@ if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED PULP_BUILD_DIR OR
     message(FATAL_ERROR
         "PULP_SOURCE_DIR, PULP_BUILD_DIR, and PULP_GENERATOR are required")
 endif()
+find_program(PULP_CTEST_COMMAND ctest REQUIRED)
 
 set(_fixture_root "${PULP_BUILD_DIR}/project-package-compile-out")
 set(_compile_out_build "${_fixture_root}/build")
@@ -196,9 +197,45 @@ foreach(_forbidden_source IN ITEMS
     endif()
 endforeach()
 
-# Configuration generates the complete install/export program even though this
-# proof intentionally builds nothing. Inspecting that generated program is a
-# faster and stricter negative check than installing a broad SDK and looking for
+# Build and execute the retained MCP surfaces. Metadata alone cannot prove that
+# the legacy protocol test stopped including generated Timeline headers or that
+# the real server smoke tolerates the intentionally absent Timeline tools.
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" --build "${_compile_out_build}"
+        --target pulp-test-mcp-server pulp-mcp --parallel 8
+    RESULT_VARIABLE _mcp_build_result
+    OUTPUT_VARIABLE _mcp_build_output
+    ERROR_VARIABLE _mcp_build_error)
+if(NOT _mcp_build_result EQUAL 0)
+    message(FATAL_ERROR
+        "package-stripped retained MCP surfaces did not build "
+        "(${_mcp_build_result})\n${_mcp_build_output}\n${_mcp_build_error}")
+endif()
+execute_process(
+    COMMAND "${PULP_CTEST_COMMAND}" --test-dir "${_compile_out_build}"
+        -L "^mcp-server$" --output-on-failure
+    RESULT_VARIABLE _mcp_unit_result
+    OUTPUT_VARIABLE _mcp_unit_output
+    ERROR_VARIABLE _mcp_unit_error)
+if(NOT _mcp_unit_result EQUAL 0)
+    message(FATAL_ERROR
+        "package-stripped MCP protocol tests failed "
+        "(${_mcp_unit_result})\n${_mcp_unit_output}\n${_mcp_unit_error}")
+endif()
+execute_process(
+    COMMAND "${PULP_CTEST_COMMAND}" --test-dir "${_compile_out_build}"
+        -R "^pulp-mcp-binary-smoke$" --output-on-failure
+    RESULT_VARIABLE _mcp_smoke_result
+    OUTPUT_VARIABLE _mcp_smoke_output
+    ERROR_VARIABLE _mcp_smoke_error)
+if(NOT _mcp_smoke_result EQUAL 0)
+    message(FATAL_ERROR
+        "package-stripped pulp-mcp binary smoke failed "
+        "(${_mcp_smoke_result})\n${_mcp_smoke_output}\n${_mcp_smoke_error}")
+endif()
+
+# Configuration generates the complete install/export program. Inspecting that
+# generated program is stricter than installing a broad SDK and looking for
 # leftovers: a stale rule fails before it can ship an archive, target, or header.
 file(GLOB_RECURSE _install_metadata LIST_DIRECTORIES FALSE
     "${_compile_out_build}/*cmake_install.cmake"
