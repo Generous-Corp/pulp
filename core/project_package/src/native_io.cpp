@@ -391,6 +391,37 @@ AnchoredDirectory::open(const std::filesystem::path& path) noexcept {
 #endif
 }
 
+bool AnchoredDirectory::still_named_by(const std::filesystem::path& path) const noexcept {
+    if (native_ == -1)
+        return false;
+#if defined(_WIN32)
+    const auto named = ::CreateFileW(
+        path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (named == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION pinned_info{};
+    BY_HANDLE_FILE_INFORMATION named_info{};
+    const bool matches =
+        ::GetFileInformationByHandle(reinterpret_cast<HANDLE>(native_), &pinned_info) != 0 &&
+        ::GetFileInformationByHandle(named, &named_info) != 0 &&
+        (named_info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        (named_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
+        pinned_info.dwVolumeSerialNumber == named_info.dwVolumeSerialNumber &&
+        pinned_info.nFileIndexHigh == named_info.nFileIndexHigh &&
+        pinned_info.nFileIndexLow == named_info.nFileIndexLow;
+    ::CloseHandle(named);
+    return matches;
+#else
+    struct stat pinned_status{};
+    struct stat named_status{};
+    return ::fstat(static_cast<int>(native_), &pinned_status) == 0 &&
+           ::lstat(path.c_str(), &named_status) == 0 && S_ISDIR(named_status.st_mode) &&
+           pinned_status.st_dev == named_status.st_dev && pinned_status.st_ino == named_status.st_ino;
+#endif
+}
+
 bool AnchoredDirectory::write_exclusive_and_fence(const std::filesystem::path& relative,
                                                   std::span<const std::uint8_t> bytes,
                                                   PackageFaultPoint written_point,

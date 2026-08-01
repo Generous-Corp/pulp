@@ -35,6 +35,8 @@ class AnchoredDirectory {
     AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
 
     static std::optional<AnchoredDirectory> open(const std::filesystem::path& path) noexcept;
+    /// Returns true only while `path` still names this pinned directory.
+    bool still_named_by(const std::filesystem::path& path) const noexcept;
     bool write_exclusive_and_fence(const std::filesystem::path& relative,
                                    std::span<const std::uint8_t> bytes,
                                    PackageFaultPoint written_point,

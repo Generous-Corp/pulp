@@ -269,11 +269,14 @@ PackageWriter::create(const fs::path& root, timeline::SchemaRegistry registry,
     if (root.empty() || limits.max_blob_bytes == 0 || limits.max_project_bytes == 0)
         return failure<PackageWriter>(PackageErrorCode::InvalidPath, root);
     std::error_code error;
-    const bool root_exists = fs::exists(root, error);
+    const auto anchored_root = fs::absolute(root, error).lexically_normal();
     if (error)
-        return failure<PackageWriter>(PackageErrorCode::IoError, root);
+        return failure<PackageWriter>(PackageErrorCode::InvalidPath, root);
+    const bool root_exists = fs::exists(anchored_root, error);
+    if (error)
+        return failure<PackageWriter>(PackageErrorCode::IoError, anchored_root);
     if (!root_exists) {
-        auto publisher_result = AtomicPublisher::create(root);
+        auto publisher_result = AtomicPublisher::create(anchored_root);
         if (!publisher_result)
             return failure<PackageWriter>(publisher_result.error().code,
                                           publisher_result.error().path);
@@ -290,21 +293,22 @@ PackageWriter::create(const fs::path& root, timeline::SchemaRegistry registry,
         if (!committed)
             return failure<PackageWriter>(committed.error().code, committed.error().path);
         if (*committed == AtomicPublishOutcome::NotPublished)
-            return failure<PackageWriter>(PackageErrorCode::PublicationConflict, root);
+            return failure<PackageWriter>(PackageErrorCode::PublicationConflict, anchored_root);
         if (*committed == AtomicPublishOutcome::PublishedDurabilityUncertain)
-            return failure<PackageWriter>(PackageErrorCode::DurabilityUncertain, root);
+            return failure<PackageWriter>(PackageErrorCode::DurabilityUncertain, anchored_root);
         for (const auto marker : markers)
-            fs::remove(root / path_from_utf8(marker), error);
+            fs::remove(anchored_root / path_from_utf8(marker), error);
     }
-    if (!is_real_directory(root))
-        return failure<PackageWriter>(PackageErrorCode::InvalidLayout, root);
-    auto layout = ensure_layout(root);
+    if (!is_real_directory(anchored_root))
+        return failure<PackageWriter>(PackageErrorCode::InvalidLayout, anchored_root);
+    const auto canonical_root = fs::canonical(anchored_root, error);
+    if (error)
+        return failure<PackageWriter>(PackageErrorCode::InvalidPath, anchored_root);
+    auto layout = ensure_layout(canonical_root);
     if (!layout)
         return failure<PackageWriter>(layout.error().code, layout.error().path);
     auto impl = std::make_unique<Impl>();
-    impl->root = fs::weakly_canonical(root, error);
-    if (error)
-        return failure<PackageWriter>(PackageErrorCode::InvalidPath, root);
+    impl->root = canonical_root;
     impl->registry = std::move(registry);
     impl->limits = limits;
     if (!impl->lock.acquire(impl->root / kLockFile))
@@ -420,10 +424,15 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
 runtime::Result<OpenPackageResult, PackageError>
 open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
              const PackageLimits& limits) noexcept {
-    if (!is_real_directory(root))
-        return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, root);
+    if (root.empty())
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
     std::error_code error;
-    const auto canonical_root = fs::canonical(root, error);
+    const auto anchored_root = fs::absolute(root, error).lexically_normal();
+    if (error)
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
+    if (!is_real_directory(anchored_root))
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, root);
+    const auto canonical_root = fs::canonical(anchored_root, error);
     if (error || !is_real_directory(canonical_root))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
     constexpr std::string_view required[] = {"media", "state", "artifacts", "receipts", "journal"};
@@ -458,11 +467,18 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
 runtime::Result<std::vector<std::uint8_t>, PackageError>
 read_blob(const fs::path& root, const BlobReference& reference,
           std::uint64_t maximum_bytes) noexcept {
-    if (!valid_store(reference.store) || !reference.hash.valid())
+    if (root.empty() || !valid_store(reference.store) || !reference.hash.valid())
         return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidPath, root);
-    if (!is_real_directory(root) || !is_real_directory(root / store_name(reference.store)))
-        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, root);
-    const auto path = blob_path(root, reference);
+    std::error_code error;
+    const auto anchored_root = fs::absolute(root, error).lexically_normal();
+    if (error)
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidPath, root);
+    if (!is_real_directory(anchored_root))
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
+    const auto canonical_root = fs::canonical(anchored_root, error);
+    if (error || !is_real_directory(canonical_root / store_name(reference.store)))
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
+    const auto path = blob_path(canonical_root, reference);
     auto bytes = read_file(path, maximum_bytes);
     if (!bytes)
         return bytes;

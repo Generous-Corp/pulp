@@ -61,6 +61,19 @@ fs::path path_from_utf8(std::string_view value) {
 
 enum class PrivateDirectoryCreate : std::uint8_t { Created, AlreadyExists, Failed };
 
+bool parent_allows_private_staging(const fs::path& parent) noexcept {
+#if defined(_WIN32)
+    (void)parent;
+    return true;
+#else
+    struct stat status{};
+    if (::stat(parent.c_str(), &status) != 0 || !S_ISDIR(status.st_mode))
+        return false;
+    const bool writable_by_others = (status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+    return !writable_by_others || (status.st_mode & S_ISVTX) != 0;
+#endif
+}
+
 #if defined(_WIN32)
 bool private_directory_security_matches(HANDLE directory) noexcept {
     PSECURITY_DESCRIPTOR expected_descriptor = nullptr;
@@ -216,7 +229,8 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
 
     const auto parent = fs::canonical(absolute_destination.parent_path(), error);
-    if (error || fs::status(parent, error).type() != fs::file_type::directory)
+    if (error || fs::status(parent, error).type() != fs::file_type::directory ||
+        !parent_allows_private_staging(parent))
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath,
                                         absolute_destination.parent_path());
     const auto anchored_destination = parent / absolute_destination.filename();
@@ -318,6 +332,8 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
 runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_directory() noexcept {
     if (!impl_ || impl_->committed)
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, {});
+    if (!impl_->staging_root.still_named_by(impl_->staging))
+        return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
     std::vector<fs::path> directories;
     std::vector<fs::path> files;
     directories.push_back(impl_->staging);
@@ -347,6 +363,8 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
     for (const auto& directory : directories)
         if (!detail::fence_directory(directory))
             return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, directory);
+    if (!impl_->staging_root.still_named_by(impl_->staging))
+        return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryTreeFenced);
     const auto publication = detail::publish_no_replace(
         impl_->staging, impl_->destination, detail::NoReplaceSourceKind::Directory);
@@ -356,6 +374,9 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
     if (publication != detail::NoReplaceOutcome::Published)
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
+    if (!impl_->staging_root.still_named_by(impl_->destination))
+        return runtime::Result<AtomicPublishOutcome, PackageError>(
+            runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     auto parent = impl_->destination.parent_path();

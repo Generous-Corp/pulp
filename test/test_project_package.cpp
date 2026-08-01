@@ -47,6 +47,7 @@ namespace fs = std::filesystem;
 fs::path g_swap_after_blob_verification;
 fs::path g_blob_swap_source;
 fs::path g_append_during_hash;
+fs::path g_switch_current_path;
 std::atomic<std::uint64_t> g_blob_verifications{0};
 
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
@@ -68,6 +69,14 @@ void append_during_blob_hash(pulp::project_package::detail::PackageFaultPoint po
         return;
     std::ofstream output(g_append_during_hash, std::ios::binary | std::ios::app);
     output << "suffix";
+}
+
+void switch_current_path_after_directory_publish(
+    pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::DirectoryPublished)
+        return;
+    std::error_code ignored;
+    fs::current_path(g_switch_current_path, ignored);
 }
 
 class TemporaryPackage {
@@ -745,6 +754,56 @@ TEST_CASE("Atomic project-package publisher rejects symlinked write ancestors",
 
     REQUIRE_FALSE(publisher->write("redirect/escaped.txt", "escape"));
     REQUIRE_FALSE(fs::exists(external / "escaped.txt"));
+}
+
+TEST_CASE("Atomic project-package directory publication rejects a rebound staging name",
+          "[project-package][atomic-publisher][race]") {
+    TemporaryPackage temporary("atomic-staging-rebind");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    REQUIRE(publisher->write("original.txt", "original"));
+    const auto staging = publisher->staging_directory();
+    const auto displaced = temporary.path / "displaced";
+    fs::rename(staging, displaced);
+    fs::create_directory(staging);
+    std::ofstream(staging / "replacement.txt") << "replacement";
+
+    const auto committed = publisher->commit_directory();
+
+    REQUIRE_FALSE(committed);
+    REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
+    REQUIRE_FALSE(fs::exists(destination));
+}
+
+TEST_CASE("Package writer anchors a relative root before publication callbacks",
+          "[project-package][root][race]") {
+    TemporaryPackage temporary("relative-root-anchor");
+    const auto first = temporary.path / "first";
+    const auto second = temporary.path / "second";
+    fs::create_directories(first);
+    fs::create_directories(second);
+    const auto previous = fs::current_path();
+    struct CurrentPathRestore {
+        fs::path path;
+        ~CurrentPathRestore() {
+            std::error_code ignored;
+            fs::current_path(path, ignored);
+        }
+    } restore{previous};
+    fs::current_path(first);
+    g_switch_current_path = second;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        switch_current_path_after_directory_publish);
+    auto writer = PackageWriter::create("package", registry());
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_switch_current_path.clear();
+
+    REQUIRE(writer);
+    REQUIRE(writer->root() == fs::canonical(first / "package"));
+    REQUIRE(fs::is_directory(first / "package" / "media"));
+    REQUIRE_FALSE(fs::exists(second / "package"));
 }
 
 #if !defined(_WIN32)
