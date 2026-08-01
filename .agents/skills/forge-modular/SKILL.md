@@ -187,6 +187,40 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## Everything here reads a log, and every reader was blind
+
+Four things watch the generator's output and turn it into a verdict: the app's
+`BuildMonitor`, `drive_app.py`, `prove_surfaces.sh` and `prove_idioms.sh`. All
+four were wrong in the same way, and the symptoms differ enough that they look
+like four unrelated bugs:
+
+- **The monitor** knew one of ten ways a generation ends. The rest read as
+  progress, so the outcome stayed `running` and the app watched a dead build
+  forever — no verdict, no artifact, nothing to open.
+- **drive_app** knew two, and the rest fell through to INCONCLUSIVE — "the
+  harness could not tell" when the generator had said exactly what went wrong.
+- **Both prove scripts** reported `tail -2 | head -1`: an arbitrary line. That
+  produced a mid-sentence fragment for a login failure and a bare `^^^^^^` for
+  a crash, and both times somebody opened the log by hand.
+
+Three questions are worth asking of any of them:
+
+1. Can it see a run end **badly**? Every `raise SystemExit` in `patch.py` and
+   `generate.py` is an ending.
+2. Can it see one end **well**? A success it cannot see hangs exactly as badly.
+3. Does every rule still match something a tool **prints**? A rule whose
+   wording changed is a verdict silently no longer made.
+
+`tools/rack/test_generator_endings.py` asks all three across the generators,
+the monitor and drive_app. **But a textual match is only a screen**: it once
+reported an ending as "recognised" that `classify()` returned as *progress*,
+because it had matched a SUCCESS rule — which is worse than matching nothing,
+since a failed run would then report done and offer an artifact nobody wrote.
+The authoritative check runs `classify()` itself.
+
+`reason.sh` is the shared "why did it stop" shim, for the same reason `cap.sh`
+is shared: this rule already existed twice and both copies were wrong.
+
 ## Proving a surface
 
 `prove_surfaces.sh` runs the CLI, the app by clicking Build, and a DAW.
