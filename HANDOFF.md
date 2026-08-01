@@ -51,25 +51,29 @@ and what will bite whoever picks it up.
 
 ## What is left
 
-1. **The M5 CLI still fails, and it is NOT the PATH bug.** That one is fixed:
-   the re-run got past `node: command not found`. It now fails as
+1. **The M5 CLI fails on the login keychain.** Diagnosed; it is not an empty
+   error any more. The generator prints what it actually hit:
 
-       model call failed:
+       the model CLI is not logged in for this session.
+       Over SSH this is usually not a missing login but an unreachable one:
+       the credential sits in the login keychain, and a non-interactive
+       session may not open it.
 
-   with **empty stderr** — the `claude` CLI exiting non-zero and saying
-   nothing. Untouched and undiagnosed; do not assume it is the same problem
-   wearing a new hat.
+   The credential IS there — `security find-generic-password -s "Claude
+   Code-credentials"` finds it in `login.keychain-db` — and an SSH session
+   simply cannot open it. So this surface needs a window on the M5, or
 
-   Worth trying first, in this order: run `claude -p hello` over SSH on the M5
-   by hand and see what it says; check whether it needs an interactive login or
-   a credential this session does not have; compare `claude` version there
-   against the machine where the same command works. Reproduce:
+       security unlock-keychain ~/Library/Keychains/login.keychain-db
 
-       ssh m5 'cd ~/Library/Application\ Support/Forge\ Modular/tools/rack && bash ./prove_surfaces.sh cli'
+   run there first. Reproduce:
 
-   Note the generator swallows the CLI's own stderr into that one line, which
-   is why the message is empty. Fixing the reporting is probably the cheapest
-   route to the cause.
+       FORGE_HOST=m5 bash tools/rack/prove_surfaces.sh cli
+
+   **That command only began meaning anything today.** prove_surfaces.sh
+   promised FORGE_HOST in its header and never read the variable, so naming a
+   remote host ran the proof on the machine you were sitting at and printed
+   PASS. Any earlier "the M5 CLI passes" was a claim about the local machine.
+   It re-execs over SSH now and refuses to fall back.
 
 2. **REAPER on the M5, with a person watching.** Load AU, VST3 and CLAP, open
    each editor, generate from inside one. This is the part `prove_surfaces.sh`
@@ -78,12 +82,15 @@ and what will bite whoever picks it up.
 3. **The app on the M5, by pressing Build.** Needs a live GUI session there.
    `prove_surfaces.sh app` drives it, capped, and quits afterwards.
 
-4. ~~**One of twelve prompts still fails**~~ Done: all twelve hold. Every
-   failure turned out to be the checker rejecting a correct patch, or the
-   model being told nothing about what it got wrong — never patch quality.
-   The run is `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt`,
-   counted from the file rather than remembered, with every failed attempt's
-   patch kept beside it.
+4. ~~**One of twelve prompts still fails**~~ Done, with a caveat worth
+   keeping: twelve of twelve on a clean run, but the rate MOVES. Five runs
+   went 6, 11, 10, 12, 10, 12 with the model unchanged. Every failure was the
+   checker rejecting a correct patch, the generator being told nothing about
+   what it got wrong, or once a crash in the harness — never patch quality.
+   A correct patch can be wired several ways, so a too-narrow rule fails at
+   random: treat a moving rate as a checker problem before a model one.
+   `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt` carries the
+   history, and every failed attempt's patch sits beside it.
 
 5. ~~**Our "Open in Rack" lets Rack restore its autosave.**~~ Done:
    `rack_open_command()` passes the patch positionally on a cold start and as a
