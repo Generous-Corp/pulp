@@ -22,8 +22,8 @@
 #include <thread>
 #include <vector>
 
-#ifndef PULP_INSTALLED_INSPECTOR_WORKFLOW_FIXTURE
-#error "PULP_INSTALLED_INSPECTOR_WORKFLOW_FIXTURE must name the real workflow fixture"
+#ifndef PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE
+#error "PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE must name the real workflow fixture"
 #endif
 
 namespace {
@@ -49,7 +49,7 @@ struct ScratchDir {
     std::filesystem::path path;
     ScratchDir() {
         path = std::filesystem::temp_directory_path()
-            / ("pulp-installed-inspector-workflow-"
+            / ("pulp-standalone-inspector-workflow-"
                + std::to_string(
                    std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(path);
@@ -60,10 +60,40 @@ struct ScratchDir {
     }
 };
 
+std::optional<double> dom_value_for_id(choc::value::ValueView node,
+                                       std::string_view id) {
+    if (!node.isObject()) return std::nullopt;
+    if (node.hasObjectMember("id") && node["id"].isString()
+        && node["id"].getString() == id && node.hasObjectMember("value")) {
+        return node["value"].getWithDefault<double>(-1.0);
+    }
+    if (!node.hasObjectMember("children") || !node["children"].isArray())
+        return std::nullopt;
+    const auto children = node["children"];
+    for (std::uint32_t i = 0; i < children.size(); ++i) {
+        if (auto value = dom_value_for_id(children[i], id)) return value;
+    }
+    return std::nullopt;
+}
+
+bool runtime_contains_only_inert_lock(
+    const std::filesystem::path& runtime_path,
+    const std::filesystem::path& ownership_path) {
+    std::error_code error;
+    for (std::filesystem::directory_iterator iterator(runtime_path, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (iterator->path() != ownership_path
+            || !iterator->is_regular_file(error) || error) {
+            return false;
+        }
+    }
+    return !error;
+}
+
 } // namespace
 
-TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compositor capture",
-          "[standalone][inspect][installed-workflow][gpu]") {
+TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and compositor capture",
+          "[standalone][inspect][process][workflow][gpu]") {
     ScratchDir scratch;
     ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
     ScopedEnv profile_env("PULP_INSPECT_PROFILE");
@@ -89,7 +119,7 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
         startup_log.push_back('\n');
     };
     pulp::platform::ChildProcess child;
-    REQUIRE(child.start(PULP_INSTALLED_INSPECTOR_WORKFLOW_FIXTURE,
+    REQUIRE(child.start(PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE,
                         {"--ready", ready_path.string(),
                          "--stop", stop_path.string()}, options));
 
@@ -124,7 +154,7 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
     REQUIRE(std::filesystem::exists(ready_path));
     REQUIRE(records.size() == 1);
     REQUIRE(records.front().plugin_id
-            == "com.pulp.test.installed-inspector-workflow");
+            == "com.pulp.test.standalone-inspector-workflow");
     std::ifstream ready_input(ready_path);
     const auto ready_json = choc::json::parse(
         std::string(std::istreambuf_iterator<char>(ready_input), {}));
@@ -147,9 +177,12 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
     const auto document = client.request(
         "DOM.getDocument", "{}", std::chrono::seconds(2));
     REQUIRE_FALSE(document.is_error);
-    REQUIRE(document.params_json.find("REAL INSTALLED INSPECTOR WORKFLOW")
+    REQUIRE(document.params_json.find("REAL STANDALONE INSPECTOR WORKFLOW")
             != std::string::npos);
     REQUIRE(document.params_json.find("workflow-gain") != std::string::npos);
+    const auto pre_mutation_dom = dom_value_for_id(
+        choc::json::parse(document.params_json), "workflow-gain");
+    REQUIRE(pre_mutation_dom.has_value());
 
     const auto parameters = client.request(
         "State.getParameters", "{}", std::chrono::seconds(2));
@@ -184,6 +217,30 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
         + std::to_string(target) + "}";
     REQUIRE_FALSE(client.request(
         "State.setParameter", set_json, std::chrono::seconds(2)).is_error);
+
+    const double expected_normalized = (target - minimum) / (maximum - minimum);
+    std::optional<double> post_mutation_dom;
+    const auto dom_mutation_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < dom_mutation_deadline) {
+        const auto response = client.request(
+            "DOM.getDocument", "{}", std::chrono::seconds(2));
+        if (!response.is_error) {
+            post_mutation_dom = dom_value_for_id(
+                choc::json::parse(response.params_json), "workflow-gain");
+            if (post_mutation_dom
+                && *post_mutation_dom
+                    == Catch::Approx(expected_normalized).margin(0.001)) {
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(post_mutation_dom.has_value());
+    REQUIRE(*post_mutation_dom
+            == Catch::Approx(expected_normalized).margin(0.001));
+    REQUIRE(*post_mutation_dom
+            != Catch::Approx(*pre_mutation_dom).margin(0.001));
 
     const auto updated = client.request(
         "State.getParameters", "{}", std::chrono::seconds(2));
@@ -232,6 +289,10 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
     REQUIRE(screenshot_hash.size() == 64);
     REQUIRE(screenshot_hash != std::string(64, '0'));
 
+    const auto record_path = records.front().record_path;
+    const auto credential_path = records.front().credential_path;
+    auto ownership_path = record_path;
+    ownership_path.replace_extension(".lock");
     client.disconnect();
     {
         std::ofstream stop(stop_path);
@@ -242,5 +303,9 @@ TEST_CASE("Installed workflow fixture exposes real scripted UI, state, and compo
     INFO("stderr=" << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(std::filesystem::exists(record_path));
+    REQUIRE_FALSE(std::filesystem::exists(credential_path));
+    REQUIRE(std::filesystem::is_regular_file(ownership_path));
+    REQUIRE(runtime_contains_only_inert_lock(runtime_path, ownership_path));
     REQUIRE(reader.list().empty());
 }

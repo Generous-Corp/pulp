@@ -11,20 +11,22 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
 std::filesystem::path g_script_path;
 
-class InstalledWorkflowProcessor final : public pulp::format::Processor {
+class StandaloneWorkflowProcessor final : public pulp::format::Processor {
 public:
     pulp::format::PluginDescriptor descriptor() const override {
         return {
-            .name = "Installed Inspector Workflow Fixture",
+            .name = "Standalone Inspector Workflow Fixture",
             .manufacturer = "Pulp",
-            .bundle_id = "com.pulp.test.installed-inspector-workflow",
+            .bundle_id = "com.pulp.test.standalone-inspector-workflow",
             .version = "1.0.0",
             .category = pulp::format::PluginCategory::Effect,
             .input_buses = {},
@@ -83,7 +85,7 @@ private:
 };
 
 std::unique_ptr<pulp::format::Processor> create_processor() {
-    return std::make_unique<InstalledWorkflowProcessor>();
+    return std::make_unique<StandaloneWorkflowProcessor>();
 }
 
 void request_native_quit() {
@@ -123,6 +125,29 @@ bool write_ready_file(const std::filesystem::path& ready,
     return !error;
 }
 
+bool teardown_is_complete(
+    const std::filesystem::path& runtime_path,
+    const pulp::inspect::InspectorDiscoveryRecord& record) {
+    std::error_code error;
+    if (std::filesystem::exists(record.record_path, error) || error)
+        return false;
+    if (std::filesystem::exists(record.credential_path, error) || error)
+        return false;
+
+    auto ownership_path = record.record_path;
+    ownership_path.replace_extension(".lock");
+    if (!std::filesystem::is_regular_file(ownership_path, error) || error)
+        return false;
+    for (std::filesystem::directory_iterator iterator(runtime_path, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (iterator->path() != ownership_path
+            || !iterator->is_regular_file(error) || error) {
+            return false;
+        }
+    }
+    return !error;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -142,7 +167,7 @@ int main(int argc, char** argv) {
     const std::filesystem::path runtime_path(runtime_env);
 
     std::filesystem::create_directories(ready_path.parent_path());
-    g_script_path = ready_path.parent_path() / "installed-workflow-ui.js";
+    g_script_path = ready_path.parent_path() / "standalone-workflow-ui.js";
     {
         std::ofstream script(g_script_path, std::ios::trunc);
         script << R"JS(
@@ -151,7 +176,7 @@ setFlex("root", "padding_top", 24);
 setFlex("root", "padding_left", 28);
 setFlex("root", "padding_right", 28);
 setFlex("root", "gap", 18);
-createLabel("workflow-title", "REAL INSTALLED INSPECTOR WORKFLOW", "root");
+createLabel("workflow-title", "REAL STANDALONE INSPECTOR WORKFLOW", "root");
 setFontSize("workflow-title", 19);
 setTextColor("workflow-title", "#f9fafb");
 createRow("workflow-panel", "root");
@@ -173,6 +198,7 @@ setTextColor("workflow-status", "#ffffff");
     }
 
     std::atomic<bool> controller_failed{false};
+    std::optional<pulp::inspect::InspectorDiscoveryRecord> published_record;
     std::jthread controller([&](std::stop_token stop) {
         const auto discovery_deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -191,6 +217,7 @@ setTextColor("workflow-status", "#ffffff");
             request_native_quit();
             return;
         }
+        published_record = records.front();
 
         const auto stop_deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -219,13 +246,7 @@ setTextColor("workflow-status", "#ffffff");
     controller.request_stop();
     controller.join();
 
-    pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
-    const auto cleanup_deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!reader.list().empty()
-           && std::chrono::steady_clock::now() < cleanup_deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    if (!reader.list().empty()) return 5;
+    if (!published_record || !teardown_is_complete(runtime_path, *published_record))
+        return 5;
     return ran && !controller_failed.load(std::memory_order_acquire) ? 0 : 6;
 }
