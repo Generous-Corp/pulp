@@ -398,6 +398,20 @@ remaining-frame count as exact integer arithmetic, the fractional one clamps a
 `long double` that can land past the last frame. Anything that reads the
 authored shape belongs in `fade_gain`, which both call.
 
+The fractional overload narrows progress to `float` before it calls `fade_gain`,
+and that narrowing is load-bearing rather than cosmetic. `fade_gain` is a
+template that deduces its type from the argument, so handing it the `long double`
+position instantiates a double-width sin for `EqualPower` — once per output
+sample on the realtime stretch path — while the gain is narrowed to float on
+return regardless, so the width buys nothing. Nothing guards this: the RT probes
+look for allocation, and a wider sin does not allocate. It is also easy to
+under-read on a Mac, because the lowering is arch-dependent — `long double` is
+`double` on arm64, so the wide call shows up there as `_sin`, where x86_64 gets
+the 80-bit `_sinl`. Verify on the emitted object rather than at the source level,
+since a cast that deduction discards still compiles:
+`nm -u build/core/playback/CMakeFiles/pulp-playback.dir/src/realtime_stretch_renderer.cpp.o | grep -i sin`
+should report `_sinf` and nothing wider.
+
 Fade **progress is measured in frames**, in every shape. The compiler converts
 authored fade endpoints from ticks to frames
 (`audio_renderer.cpp`, the musical branch of the clip lowering); the renderer
