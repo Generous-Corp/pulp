@@ -171,11 +171,15 @@ BrowserHtmlImportResult import_browser_html(
     // import rather than dropping the pointer silently: a declared indicator
     // that produced nothing is exactly the failure that reads as "it works" in
     // every pixel gate.
+    //
+    // Keyed on the error string, not on the count: zero knobs skinned is the
+    // ordinary result for a panel that declared no indicators, so a caller that
+    // reads the count as the verdict swallows every failure as "nothing to do".
     std::string sprite_error;
-    if (apply_browser_capture_knob_sprites(
-            *lowered.design_ir, lowered.reference_png, capture_directory,
-            &sprite_error) == 0 &&
-        !sprite_error.empty()) {
+    apply_browser_capture_knob_sprites(
+        *lowered.design_ir, lowered.reference_png, capture_directory,
+        &sprite_error);
+    if (!sprite_error.empty()) {
         return BrowserHtmlFailure{
             3, std::move(sprite_error), shape, std::move(workspaces)};
     }

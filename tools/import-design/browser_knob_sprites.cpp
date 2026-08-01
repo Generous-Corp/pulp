@@ -240,6 +240,11 @@ int apply_browser_capture_knob_sprites(
         // pipeline uses it: the path is baked into generated JS and must use
         // '/' on every platform.
         node->attributes["asset_path"] = path.lexically_normal().generic_string();
+        // The crop is the control's box at the capture's device scale, and
+        // Knob::paint's no-core sprite branch renders a frame at its natural
+        // size divided by a hardcoded 2. The two agree only because
+        // validate_reference_geometry requires DPR 2; relax that without
+        // teaching the renderer the scale and every imported disc resizes.
         node->attributes["png_natural_w"] = std::to_string(sprite.width);
         node->attributes["png_natural_h"] = std::to_string(sprite.height);
         // One static disc. A multi-frame strip encodes rotation in its frames

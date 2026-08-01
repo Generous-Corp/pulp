@@ -2828,6 +2828,74 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   color from `border_color` → else `background_color` (demoted) → else `color`,
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
+
+### Browser capture: the author DECLARES the indicator (`data-pulp-indicator`)
+
+The renderer half above is source-agnostic — any knob carrying `knob_ind_*` gets
+the design's own pointer swept by value — but the Figma producer cannot be
+reused for a browser capture, and for a structural reason:
+
+- A capture is **one flat picture of the whole panel**. A lowered knob has no
+  `asset_path` at all, and `apply_captured_art_knob_skin` returns immediately on
+  an empty one. So the knob paints no disc, and the design's indicator — which
+  is in the backdrop bitmap — never moves.
+- The indicator is **CSS, not a layer**: a conic-gradient arc, a positioned dot.
+  There is no thinnest-child hairline to find, so the Figma scan finds nothing.
+
+So the browser lane declares it, exactly as it already declares the paint box:
+
+```html
+<div class="pulp-knob" data-pulp-param="cutoff" data-pulp-value="0.55">
+  <div class="dial" data-pulp-paint>
+    <div class="dot" data-pulp-indicator></div>
+  </div>
+</div>
+```
+
+- `semantics.mjs` reports the marked element's **page rectangle** (same frame as
+  `bounds` / `paint_bounds`) plus its browser-resolved colour
+  (`background-color` → border → text). A pointer no single computed colour
+  describes states its own: `data-pulp-indicator="#b8f8c0"`.
+- `lower_semantic_controls` converts that rectangle to the SAME `knob_ind_*`
+  fractions the Figma hoist stamps, by projecting the box's half-extents onto
+  the **radial axis** and its perpendicular. A plain width/height read is wrong
+  for a dot at 7 o'clock, whose diagonal — not its width — spans the radius.
+- `apply_browser_capture_knob_sprites` (`browser_knob_sprites.cpp`, run from
+  `import_browser_html` right after lowering) crops the control out of the panel
+  capture into a per-knob PNG and stamps `asset_path` / `png_natural_*` /
+  `sprite_strip_frame_count=1`. The crop is byte-identical to the capture
+  everywhere except the declared pointer.
+- The baked pointer is **erased by rotational median**: a dial face is
+  rotationally symmetric about its centre except for the pointer, so each erased
+  pixel takes the median of the same radius under 8 rotations (samples landing
+  back inside the pointer are dropped). This is the browser-lane counterpart of
+  `clean_baked_knob_indicator`; without it the live pointer draws beside a stuck
+  one.
+
+Gotchas:
+- **An undeclared control gets nothing.** No sprite, no indicator, no attribute
+  churn. Inferring one would put a live pointer on a design that has none, and
+  nothing in a flat picture says which pixels move.
+- **A declared indicator that cannot be honoured fails the import** (exit 3).
+  A dropped pointer still renders a perfect static panel and passes every pixel
+  gate — that is exactly the failure that must not be silent.
+- **DPR 2 is load-bearing.** `validate_reference_geometry` requires it, and
+  `Knob::paint`'s no-core sprite branch divides the PNG's natural size by a
+  hardcoded `kExportScale = 2.0f`. The crop is `paint_box × dpr`, so the two
+  agree only at 2. Changing either without the other silently resizes the disc.
+- **A/B similarity can move.** The live pointer is drawn on the
+  `[-135°,+135°]` arc at the control's `data-pulp-value`; a design that sweeps
+  differently lands its dot elsewhere, so the score shifts by roughly two dots'
+  worth of pixels. That is the honest cost of a live indicator, not a
+  regression.
+- **A rotated hairline is not covered.** A bounding rectangle describes a dot or
+  an axis-aligned bar exactly; a CSS-rotated hairline's box is much wider than
+  the hairline, so its declared width comes out too large. Declare a dot, or the
+  pointer's own un-rotated box.
+- Tests: `[browser-capture][knob][indicator]` in `test_browser_knob_sprites.cpp`
+  — the load-bearing one is `[movement]`, which renders the pointer at five
+  values and asserts the drawn geometry MOVED. A one-frame similarity score
+  cannot tell a live indicator from a frozen one.
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
   `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
