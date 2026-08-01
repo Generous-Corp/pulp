@@ -439,6 +439,32 @@ private:
     std::streambuf* original_;
 };
 
+static bool inspector_acknowledgements_match(
+    const pulp::cli::inspector_shipping::Report& report,
+    bool ship_inspector, bool ship_inspector_runtime_eval,
+    std::string_view command) {
+    if (report.ships_inspector != ship_inspector) {
+        std::cerr << command
+                  << ": inspector manifest/acknowledgement mismatch; an intentional "
+                     "endpoint requires --ship-inspector and an ordinary artifact must "
+                     "not pass it\n";
+        return false;
+    }
+    if (report.ships_runtime_eval != ship_inspector_runtime_eval) {
+        std::cerr << command
+                  << ": runtime.eval requires the distinct unsafe "
+                     "--ship-inspector-runtime-eval acknowledgement; --ship-inspector "
+                     "does not imply it\n";
+        return false;
+    }
+    if (ship_inspector_runtime_eval && !ship_inspector) {
+        std::cerr << command
+                  << ": --ship-inspector-runtime-eval also requires --ship-inspector\n";
+        return false;
+    }
+    return true;
+}
+
 #if defined(__APPLE__)
 static std::vector<fs::path> find_standalone_apps(
     const fs::path& build_dir, std::string_view product_filter) {
@@ -588,21 +614,9 @@ static int ship_package_impl(const std::vector<std::string>& args,
             std::cerr << "pulp ship package: " << inspector_report.error << "\n";
             return 2;
         }
-        if (inspector_report.ships_inspector != ship_inspector) {
-            std::cerr << "pulp ship package: inspector manifest/acknowledgement mismatch; "
-                         "an intentional endpoint requires --ship-inspector and an ordinary "
-                         "package must not pass it\n";
-            return 2;
-        }
-        if (inspector_report.ships_runtime_eval != ship_inspector_runtime_eval) {
-            std::cerr << "pulp ship package: runtime.eval requires the distinct unsafe "
-                         "--ship-inspector-runtime-eval acknowledgement; --ship-inspector "
-                         "does not imply it\n";
-            return 2;
-        }
-        if (ship_inspector_runtime_eval && !ship_inspector) {
-            std::cerr << "pulp ship package: --ship-inspector-runtime-eval also requires "
-                         "--ship-inspector\n";
+        if (!inspector_acknowledgements_match(
+                inspector_report, ship_inspector, ship_inspector_runtime_eval,
+                "pulp ship package")) {
             return 2;
         }
         const auto capability_evidence =
@@ -978,7 +992,7 @@ static int ship_check(const std::vector<std::string>& args,
 
         const auto inspector_report = target == "android"
             ? pulp::cli::inspector_shipping::empty_report()
-            : pulp::cli::inspector_shipping::load_report(build_dir);
+            : pulp::cli::inspector_shipping::load_artifact_report(build_dir);
         if (!inspector_report.complete) {
             std::cerr << "pulp ship check: " << inspector_report.error << "\n";
             return 2;
@@ -1877,6 +1891,7 @@ static int ship_share(const std::vector<std::string>& args,
         std::string input, identity, version, output_dir, entitlements;
         std::string api_key, api_key_id, api_issuer, apple_id, team_id, password;
         bool dry_run = false;
+        bool ship_inspector = false, ship_inspector_runtime_eval = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
@@ -1900,6 +1915,10 @@ static int ship_share(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], password)) return 2;
             } else if (args[i] == "--dry-run") {
                 dry_run = true;
+            } else if (args[i] == "--ship-inspector") {
+                ship_inspector = true;
+            } else if (args[i] == "--ship-inspector-runtime-eval") {
+                ship_inspector_runtime_eval = true;
             } else if (!args[i].empty() && args[i][0] != '-' && input.empty()) {
                 input = args[i];
             } else {
@@ -1912,6 +1931,8 @@ static int ship_share(const std::vector<std::string>& args,
                 "Usage: pulp ship share <app-or-dmg-or-pkg> [--identity \"...\"]\n"
                 "                       [--version X.Y.Z] [--output <dir>]\n"
                 "                       [--entitlements <plist>] [notarization creds]\n"
+                "                       [--ship-inspector]\n"
+                "                       [--ship-inspector-runtime-eval]\n"
                 "                       [--dry-run]\n"
                 "Signs, notarizes, staples, and Gatekeeper-verifies a single\n"
                 "artifact for sharing. .app inputs are wrapped in a DMG first.\n";
@@ -1926,6 +1947,28 @@ static int ship_share(const std::vector<std::string>& args,
             std::cerr << "pulp ship share: unsupported input '" << ext
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
+        }
+        if (ext == ".app") {
+            const auto executable = fs::path(input) / "Contents/MacOS" /
+                fs::path(input).stem();
+            auto inspector_report =
+                pulp::cli::inspector_shipping::load_report(executable.parent_path());
+            if (!inspector_report.complete || inspector_report.manifests.size() != 1 ||
+                !pulp::cli::inspector_shipping::scan_artifact(
+                    executable, inspector_report.manifests.front(),
+                    inspector_report.error)) {
+                std::cerr << "pulp ship share: "
+                          << (inspector_report.error.empty()
+                                  ? "ambiguous inspector capability manifest"
+                                  : inspector_report.error)
+                          << "\n";
+                return 2;
+            }
+            if (!inspector_acknowledgements_match(
+                    inspector_report, ship_inspector,
+                    ship_inspector_runtime_eval, "pulp ship share")) {
+                return 2;
+            }
         }
 
         if (version.empty()) version = read_project_cmake_version(root);

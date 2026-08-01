@@ -80,6 +80,29 @@ std::string capability_marker(std::string_view capability) {
     return marker;
 }
 
+bool artifact_has_capability_marker(const fs::path& artifact) {
+    std::ifstream input(artifact, std::ios::binary);
+    if (!input) return false;
+    const std::string binary(std::istreambuf_iterator<char>(input), {});
+#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable, publication_bound) \
+    if (binary.find(capability_marker(id)) != std::string::npos) return true;
+#include <pulp/inspect/capability_definitions.inc>
+#undef PULP_INSPECT_CAPABILITY
+    return false;
+}
+
+bool has_inspector_sidecar(const fs::path& directory) {
+    std::error_code error;
+    for (fs::directory_iterator iterator(directory, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (iterator->is_regular_file() &&
+            iterator->path().filename().string().ends_with(
+                ".inspector-capabilities.json"))
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 Report empty_report() {
@@ -227,6 +250,47 @@ Report load_artifact_report(const fs::path& search_root) {
             find_iterator.increment(find_error);
         }
         if (find_error) {
+            Report failed;
+            failed.error = "could not enumerate standalone artifacts in " +
+                search_root.string();
+            return failed;
+        }
+    } else {
+        std::error_code artifact_error;
+        fs::recursive_directory_iterator artifact_iterator(
+            search_root, fs::directory_options::skip_permission_denied,
+            artifact_error);
+        fs::recursive_directory_iterator artifact_end;
+        while (!artifact_error && artifact_iterator != artifact_end) {
+            const auto path = artifact_iterator->path();
+            if (artifact_iterator->is_directory() && path.extension() == ".app") {
+                const auto executable =
+                    path / "Contents/MacOS" / path.stem();
+                if (fs::is_regular_file(executable) &&
+                    !has_inspector_sidecar(executable.parent_path())) {
+                    Report missing;
+                    missing.error =
+                        "standalone artifact is missing inspector capability sidecar: " +
+                        executable.string();
+                    return missing;
+                }
+            } else if (artifact_iterator->is_regular_file()) {
+                const auto permissions = artifact_iterator->status().permissions();
+                const bool executable = path.extension() == ".exe" ||
+                    (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
+                                    fs::perms::others_exec)) != fs::perms::none;
+                if (executable && !has_inspector_sidecar(path.parent_path()) &&
+                    artifact_has_capability_marker(path)) {
+                    Report missing;
+                    missing.error =
+                        "standalone artifact is missing inspector capability sidecar: " +
+                        path.string();
+                    return missing;
+                }
+            }
+            artifact_iterator.increment(artifact_error);
+        }
+        if (artifact_error) {
             Report failed;
             failed.error = "could not enumerate standalone artifacts in " +
                 search_root.string();

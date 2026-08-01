@@ -172,4 +172,11 @@ TEST_CASE("inspector evidence rejects standalone artifacts without copied sideca
     CHECK_FALSE(report.complete);
     CHECK(report.error.find("missing inspector capability sidecar") !=
           std::string::npos);
+
+    fs::remove(temporary.path / "pulp-inspector-manifests" / "Missing.json");
+    const auto unconfigured =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(unconfigured.complete);
+    CHECK(unconfigured.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
 }

@@ -1049,7 +1049,10 @@ and are only notarized + verified.
 
 For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
 instead of `artifacts/`, and `--entitlements <plist>` to override the default
-app-signing entitlements.
+app-signing entitlements. Inspector-capable apps must also pass
+`--ship-inspector`; apps that include `runtime.eval` additionally require the
+distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
+app executable against its adjacent capability sidecar before signing.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.

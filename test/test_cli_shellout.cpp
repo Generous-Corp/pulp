@@ -3193,3 +3193,53 @@ TEST_CASE("pulp ship check android ignores standalone inspector manifests",
     REQUIRE(result.stderr_output.find("inspector capability manifest") ==
             std::string::npos);
 }
+
+TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+#if !defined(__APPLE__)
+    SUCCEED("skipped: ship share is macOS-only");
+#else
+    auto project = unique_temp_dir("pulp-ship-share-inspector");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(Share)\n";
+    }
+    {
+        std::ofstream cache(project / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
+    }
+    const auto executable_dir =
+        project / "build" / "Share.app" / "Contents/MacOS";
+    fs::create_directories(executable_dir);
+    {
+        std::ofstream executable(executable_dir / "Share", std::ios::binary);
+        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+                      "PULP_INSPECT_CAPABILITY_UI_READ_V1";
+    }
+    {
+        std::ofstream sidecar(executable_dir / "Share.inspector-capabilities.json");
+        sidecar << R"({"product_name":"Share","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})";
+    }
+    const auto app = project / "build" / "Share.app";
+    auto refused = run_pulp_in_directory(
+        project, {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(refused.stderr_output.find("requires --ship-inspector") !=
+            std::string::npos);
+
+    auto acknowledged = run_pulp_in_directory(
+        project, {"ship", "share", app.string(), "--dry-run",
+                  "--ship-inspector"});
+    REQUIRE_FALSE(acknowledged.timed_out);
+    REQUIRE(acknowledged.exit_code == 0);
+    REQUIRE(acknowledged.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
+#endif
+}
