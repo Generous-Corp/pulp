@@ -3,9 +3,11 @@
 #include "media_reference_validation.hpp"
 #include "owned_identity_traversal.hpp"
 #include "sequence_graph_validation.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <utility>
+#include <variant>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -161,10 +163,7 @@ reduce_set_reference(const Project& project, const SetClipSequenceRef& set_refer
 } // namespace
 
 bool is_sequence_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertSequence>(command) ||
-           std::holds_alternative<CloneSequence>(command) ||
-           std::holds_alternative<RemoveSequence>(command) ||
-           std::holds_alternative<SetClipSequenceRef>(command);
+    return std::visit([]<typename T>(const T&) { return is_sequence_command_type<T>; }, command);
 }
 
 runtime::Result<SequenceCommandReduction, TransactionError>
