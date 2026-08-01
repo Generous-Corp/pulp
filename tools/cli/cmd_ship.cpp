@@ -5,6 +5,7 @@
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
 #include "ship_tracing_guard.hpp"
+#include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
 #include "shell_redirect.hpp"
@@ -113,6 +114,7 @@ static int print_ship_help() {
     std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
     std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [--output <dir>]\n";
     std::cout << "             [--entitlements <plist>] [creds]\n";
+    std::cout << "             [--ship-inspector] [--ship-inspector-runtime-eval]\n";
     std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url <artifact-or-url> [--download-url https://...] --version 1.0.0\n";
@@ -1948,10 +1950,11 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
+        pulp::cli::inspector_shipping::Report inspector_report;
         if (ext == ".app") {
             const auto executable = fs::path(input) / "Contents/MacOS" /
                 fs::path(input).stem();
-            auto inspector_report =
+            inspector_report =
                 pulp::cli::inspector_shipping::load_report(executable.parent_path());
             if (!inspector_report.complete || inspector_report.manifests.size() != 1 ||
                 !pulp::cli::inspector_shipping::scan_artifact(
@@ -1964,11 +1967,18 @@ static int ship_share(const std::vector<std::string>& args,
                           << "\n";
                 return 2;
             }
-            if (!inspector_acknowledgements_match(
-                    inspector_report, ship_inspector,
-                    ship_inspector_runtime_eval, "pulp ship share")) {
+        } else {
+            std::string inspection_error;
+            if (!pulp::cli::inspector_shipping::load_container_artifact_report(
+                    input, inspector_report, inspection_error)) {
+                std::cerr << "pulp ship share: " << inspection_error << "\n";
                 return 2;
             }
+        }
+        if (!inspector_acknowledgements_match(
+                inspector_report, ship_inspector,
+                ship_inspector_runtime_eval, "pulp ship share")) {
+            return 2;
         }
 
         if (version.empty()) version = read_project_cmake_version(root);

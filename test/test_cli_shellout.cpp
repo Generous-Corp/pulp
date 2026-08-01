@@ -3241,5 +3241,27 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
     REQUIRE(acknowledged.exit_code == 0);
     REQUIRE(acknowledged.stdout_output.find("pulp ship share plan") !=
             std::string::npos);
+
+    const auto dmg_source = project / "build" / "dmg-source";
+    fs::create_directories(dmg_source);
+    fs::copy(app, dmg_source / app.filename(), fs::copy_options::recursive);
+    const auto dmg = project / "build" / "Share.dmg";
+    const auto create_dmg = "hdiutil create -quiet -fs HFS+ -srcfolder \"" +
+        dmg_source.string() + "\" \"" + dmg.string() + "\"";
+    REQUIRE(std::system(create_dmg.c_str()) == 0);
+    auto container_refused = run_pulp_in_directory(
+        project, {"ship", "share", dmg.string(), "--dry-run"});
+    REQUIRE_FALSE(container_refused.timed_out);
+    REQUIRE(container_refused.exit_code != 0);
+    REQUIRE(container_refused.stderr_output.find("requires --ship-inspector") !=
+            std::string::npos);
+
+    auto container_acknowledged = run_pulp_in_directory(
+        project, {"ship", "share", dmg.string(), "--dry-run",
+                  "--ship-inspector"});
+    REQUIRE_FALSE(container_acknowledged.timed_out);
+    REQUIRE(container_acknowledged.exit_code == 0);
+    REQUIRE(container_acknowledged.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
 #endif
 }

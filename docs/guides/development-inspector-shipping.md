@@ -41,7 +41,8 @@ mismatches fail before packaging. `pulp validate --json`, `pulp ship check
 --json`, and `pulp ship package --json` include the capability report; package
 also writes `artifacts/inspector-capability-package-input.json`.
 
-Every standalone build runs a manifest-versus-binary scanner. Ordinary
-artifacts fail if listener/discovery/server or shipping markers appear.
-Intentional artifacts fail if their endpoint or high-risk evaluator marker is
-missing, or if the evaluator appears without its separate acknowledgement.
+Every standalone build runs a manifest-versus-binary scanner using retained,
+Pulp-specific shipping and capability markers. Intentional artifacts fail if
+their endpoint or high-risk evaluator marker is missing, or if the evaluator
+appears without its separate acknowledgement. Generic class or symbol names
+are not treated as proof because unrelated product code may use the same text.

@@ -54,7 +54,8 @@ _scan(developer-eval
     "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
     "${_eval_manifest}" TRUE)
 _scan(missing-marker "ordinary-product" "${_shipping_manifest}" FALSE)
-_scan(undeclared-listener "InspectorServer" "${_ordinary_manifest}" FALSE)
+_scan(unrelated-listener-name "InspectorServer DiscoveryPublisher publish_discovery_record"
+    "${_ordinary_manifest}" TRUE)
 _scan(eval-with-generic-override
     "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
     "${_shipping_manifest}" FALSE)

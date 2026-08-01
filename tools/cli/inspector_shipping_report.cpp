@@ -201,86 +201,62 @@ Report load_artifact_report(const fs::path& search_root) {
             return failed;
         }
     }
+    Report configured;
     if (has_configured_manifests) {
-        auto configured = load_report(search_root);
+        configured = load_report(search_root);
         if (!configured.complete) return configured;
-        std::error_code find_error;
-        fs::recursive_directory_iterator find_iterator(
-            search_root, fs::directory_options::skip_permission_denied,
-            find_error);
-        fs::recursive_directory_iterator find_end;
-        while (!find_error && find_iterator != find_end) {
-            if (find_iterator->is_regular_file()) {
-                const auto candidate = find_iterator->path();
-                const auto name = candidate.filename().string();
-                bool inside_plugin_format = false;
-                for (const auto& component : candidate) {
-                    const auto directory = component.string();
-                    if (directory == "VST3" || directory == "CLAP" ||
-                        directory == "AU" || directory == "AUv3" ||
-                        directory == "AAX" || directory == "LV2") {
-                        inside_plugin_format = true;
-                        break;
-                    }
+    }
+
+    // Search every standalone artifact, even in a mixed tree with configured
+    // manifests. Removed or renamed targets must not disappear merely because
+    // another target still has configure-time evidence.
+    std::error_code artifact_error;
+    fs::recursive_directory_iterator artifact_iterator(
+        search_root, fs::directory_options::skip_permission_denied,
+        artifact_error);
+    fs::recursive_directory_iterator artifact_end;
+    while (!artifact_error && artifact_iterator != artifact_end) {
+        const auto path = artifact_iterator->path();
+        if (artifact_iterator->is_directory() && path.extension() == ".app") {
+            const auto executable = path / "Contents/MacOS" / path.stem();
+            if (fs::is_regular_file(executable) &&
+                !has_inspector_sidecar(executable.parent_path())) {
+                Report missing;
+                missing.error =
+                    "standalone artifact is missing inspector capability sidecar: " +
+                    executable.string();
+                return missing;
+            }
+        } else if (artifact_iterator->is_regular_file()) {
+            bool inside_plugin_format = false;
+            for (const auto& component : path) {
+                const auto directory = component.string();
+                if (directory == "VST3" || directory == "CLAP" ||
+                    directory == "AU" || directory == "AUv3" ||
+                    directory == "AAX" || directory == "LV2") {
+                    inside_plugin_format = true;
+                    break;
                 }
-                if (!inside_plugin_format) {
+            }
+            if (!inside_plugin_format) {
+                const auto permissions = artifact_iterator->status().permissions();
+                const bool executable = path.extension() == ".exe" ||
+                    (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
+                                    fs::perms::others_exec)) != fs::perms::none;
+                bool configured_standalone = false;
+                if (has_configured_manifests) {
+                    const auto name = path.filename().string();
                     for (const auto& manifest : configured.manifests) {
-                        const bool is_standalone =
+                        configured_standalone |=
                             name == manifest.product_name ||
                             name == manifest.product_name + ".exe" ||
                             (!manifest.target.empty() &&
                              (name == manifest.target ||
                               name == manifest.target + ".exe"));
-                        if (!is_standalone) continue;
-                        const auto target = manifest.target.empty()
-                            ? manifest.path.stem().string()
-                            : manifest.target;
-                        const auto sidecar = candidate.parent_path() /
-                            (target + ".inspector-capabilities.json");
-                        if (!fs::is_regular_file(sidecar)) {
-                            Report missing;
-                            missing.error =
-                                "standalone artifact is missing inspector capability "
-                                "sidecar: " + candidate.string();
-                            return missing;
-                        }
                     }
                 }
-            }
-            find_iterator.increment(find_error);
-        }
-        if (find_error) {
-            Report failed;
-            failed.error = "could not enumerate standalone artifacts in " +
-                search_root.string();
-            return failed;
-        }
-    } else {
-        std::error_code artifact_error;
-        fs::recursive_directory_iterator artifact_iterator(
-            search_root, fs::directory_options::skip_permission_denied,
-            artifact_error);
-        fs::recursive_directory_iterator artifact_end;
-        while (!artifact_error && artifact_iterator != artifact_end) {
-            const auto path = artifact_iterator->path();
-            if (artifact_iterator->is_directory() && path.extension() == ".app") {
-                const auto executable =
-                    path / "Contents/MacOS" / path.stem();
-                if (fs::is_regular_file(executable) &&
-                    !has_inspector_sidecar(executable.parent_path())) {
-                    Report missing;
-                    missing.error =
-                        "standalone artifact is missing inspector capability sidecar: " +
-                        executable.string();
-                    return missing;
-                }
-            } else if (artifact_iterator->is_regular_file()) {
-                const auto permissions = artifact_iterator->status().permissions();
-                const bool executable = path.extension() == ".exe" ||
-                    (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
-                                    fs::perms::others_exec)) != fs::perms::none;
                 if (executable && !has_inspector_sidecar(path.parent_path()) &&
-                    artifact_has_capability_marker(path)) {
+                    (configured_standalone || artifact_has_capability_marker(path))) {
                     Report missing;
                     missing.error =
                         "standalone artifact is missing inspector capability sidecar: " +
@@ -288,14 +264,14 @@ Report load_artifact_report(const fs::path& search_root) {
                     return missing;
                 }
             }
-            artifact_iterator.increment(artifact_error);
         }
-        if (artifact_error) {
-            Report failed;
-            failed.error = "could not enumerate standalone artifacts in " +
-                search_root.string();
-            return failed;
-        }
+        artifact_iterator.increment(artifact_error);
+    }
+    if (artifact_error) {
+        Report failed;
+        failed.error = "could not enumerate standalone artifacts in " +
+            search_root.string();
+        return failed;
     }
 
     std::error_code iteration_error;
@@ -423,16 +399,6 @@ bool scan_artifact(const fs::path& artifact, const Manifest& manifest,
         error = "artifact runtime.eval component marker does not match manifest: " +
             artifact.string();
         return false;
-    }
-    if (!manifest.ships_inspector) {
-        for (const auto token : {"InspectorServer", "DiscoveryPublisher",
-                                 "publish_discovery_record"}) {
-            if (contains(token)) {
-                error = "ordinary artifact contains forbidden inspector token '" +
-                    std::string(token) + "': " + artifact.string();
-                return false;
-            }
-        }
     }
     return true;
 }

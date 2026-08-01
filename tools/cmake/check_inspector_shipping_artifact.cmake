@@ -26,16 +26,6 @@ foreach(_cap IN LISTS _PULP_INSPECTOR_SHIPPING_CAPABILITIES)
     endif()
 endforeach()
 
-foreach(_token IN ITEMS
-    "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
-    "InspectorServer" "DiscoveryPublisher" "publish_discovery_record")
-    string(HEX "${_token}" _token_hex)
-    string(FIND "${_binary}" "${_token_hex}" _token_pos)
-    if(_declared_pos LESS 0 AND _token_pos GREATER_EQUAL 0)
-        message(FATAL_ERROR "ordinary artifact contains forbidden inspector token: ${_token}")
-    endif()
-endforeach()
-
 string(FIND "${_manifest}" "\"unsafe_runtime_eval_acknowledged\": true" _eval_declared)
 string(HEX "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1" _eval_hex)
 string(FIND "${_binary}" "${_eval_hex}" _eval_binary)

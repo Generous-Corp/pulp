@@ -81,6 +81,7 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_run_parse.cpp
     cmd_ship.cpp
+    inspector_container_report.cpp
     inspector_shipping_report.cpp
     cmd_bake.cpp
     notary_env.cpp

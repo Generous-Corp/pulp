@@ -128,6 +128,24 @@ TEST_CASE("artifact scan accepts exact declared capability markers") {
         artifact, report.manifests.front(), error));
 }
 
+TEST_CASE("ordinary artifacts may contain unrelated inspector-like names") {
+    TemporaryDirectory temporary;
+    const auto manifest_path =
+        temporary.path / "pulp-inspector-manifests" / "ordinary.json";
+    write_manifest(manifest_path,
+        R"({"product_name":"Ordinary","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    const auto report = pulp::cli::inspector_shipping::load_report(temporary.path);
+    REQUIRE(report.complete);
+    REQUIRE(report.manifests.size() == 1);
+
+    const auto artifact = temporary.path / "Ordinary";
+    write_artifact(artifact,
+        "third-party InspectorServer DiscoveryPublisher publish_discovery_record");
+    std::string error;
+    CHECK(pulp::cli::inspector_shipping::scan_artifact(
+        artifact, report.manifests.front(), error));
+}
+
 TEST_CASE("inspector evidence rejects capability aliases and stale build artifacts") {
     TemporaryDirectory temporary;
     const auto artifacts = temporary.path / "products" / "Alias.app" / "Contents/MacOS";
@@ -178,5 +196,30 @@ TEST_CASE("inspector evidence rejects standalone artifacts without copied sideca
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
     CHECK_FALSE(unconfigured.complete);
     CHECK(unconfigured.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
+}
+
+TEST_CASE("mixed build trees reject unconfigured standalone artifacts") {
+    TemporaryDirectory temporary;
+    write_manifest(temporary.path / "pulp-inspector-manifests" / "Current.json",
+        R"({"target":"Current","product_name":"Current","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    const auto current_dir =
+        temporary.path / "products" / "Current.app" / "Contents/MacOS";
+    fs::create_directories(current_dir);
+    write_artifact(current_dir / "Current", "ordinary current standalone");
+    write_manifest(current_dir / "Current.inspector-capabilities.json",
+        R"({"target":"Current","product_name":"Current","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+
+    const auto stale_dir =
+        temporary.path / "products" / "Removed.app" / "Contents/MacOS";
+    fs::create_directories(stale_dir);
+    write_artifact(stale_dir / "Removed",
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(report.complete);
+    CHECK(report.error.find("Removed") != std::string::npos);
+    CHECK(report.error.find("missing inspector capability sidecar") !=
           std::string::npos);
 }

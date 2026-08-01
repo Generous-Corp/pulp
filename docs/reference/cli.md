@@ -1052,7 +1052,9 @@ instead of `artifacts/`, and `--entitlements <plist>` to override the default
 app-signing entitlements. Inspector-capable apps must also pass
 `--ship-inspector`; apps that include `runtime.eval` additionally require the
 distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
-app executable against its adjacent capability sidecar before signing.
+app executable against its adjacent capability sidecar before signing. For a
+prebuilt `.dmg` or `.pkg`, it mounts or expands the container and applies the
+same scan to every contained standalone app before accepting the flags.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
