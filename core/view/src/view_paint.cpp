@@ -554,9 +554,11 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                 bg_grad_radius_ * std::max(bounds_.width, bounds_.height),
                 grad_c, grad_p, grad_n);
         } else if (bg_gradient_type_ == 3) {  // conic / sweep
-            canvas.set_fill_gradient_conic(
+            // One call for both spellings: a plain conic spans a full turn, so
+            // the repeating entry point resolves to the same shader for it.
+            canvas.set_fill_gradient_conic_repeating(
                 bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_angle_, grad_c, grad_p, grad_n);
+                bg_grad_angle_, bg_grad_sweep_turns_, grad_c, grad_p, grad_n);
         } else {  // linear
             canvas.set_fill_gradient_linear(
                 bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
