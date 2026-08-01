@@ -1820,3 +1820,25 @@ definition. The general rule: if a documented free function is also declared
 `build-api-docs.sh` now prints the local Doxygen version for exactly this
 reason — when CI is red and local is green, check the versions before assuming
 the tree differs.
+
+## A wait for a published route must keep republishing it
+
+`test_timeline_graph_binding_publication.cpp` drives `binding.prepare()` on the
+control thread while an audio thread renders, and asserts the audio thread
+observed **both** routes (`one_blocks > 0` and `two_blocks > 0`). Two traps
+compound here.
+
+First, the reprepare loop is an ordering budget that orders nothing: it can run
+to completion before the audio thread is ever scheduled, leaving both counters
+at zero.
+
+Second — and this is the one a re-poll cannot fix — the loop **alternates**
+routes and ends on `route_one`. A wait that only spins re-reading `two_blocks`
+can never succeed, because `route_two` is never published again. The wait has to
+keep alternating, not just keep looking.
+
+Bound it, and make the pump cheap. Tearing down reprepared bindings costs
+superlinearly in their count: a full-rate 10s wait spent 10s waiting and then
+~30s in teardown (6663 reprepares), long enough to present as a CTest timeout
+rather than the failure it is. A 1ms pump sleep with a 2s deadline holds the
+whole failing run under 3s.
