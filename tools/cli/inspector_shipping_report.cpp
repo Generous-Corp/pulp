@@ -1,0 +1,240 @@
+#include "inspector_shipping_report.hpp"
+
+#include <choc/text/choc_JSON.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <fstream>
+#include <sstream>
+
+namespace pulp::cli::inspector_shipping {
+namespace {
+
+bool read_manifest(const fs::path& path, Manifest& manifest, std::string& error) {
+    std::ifstream input(path);
+    if (!input) {
+        error = "could not read inspector capability manifest: " + path.string();
+        return false;
+    }
+    manifest.path = path;
+    manifest.json.assign(std::istreambuf_iterator<char>(input), {});
+    if (input.bad() || manifest.json.empty()) {
+        error = "could not read inspector capability manifest: " + path.string();
+        return false;
+    }
+
+    try {
+        const auto root = choc::json::parse(manifest.json);
+        if (!root.isObject() || !root["product_name"].isString() ||
+            !root["shipping_override"].isBool() ||
+            !root["unsafe_runtime_eval_acknowledged"].isBool() ||
+            !root["capabilities"].isArray()) {
+            error = "invalid inspector capability manifest: " + path.string();
+            return false;
+        }
+        manifest.product_name = std::string(root["product_name"].getString());
+        manifest.ships_inspector = root["shipping_override"].getBool();
+        manifest.ships_runtime_eval =
+            root["unsafe_runtime_eval_acknowledged"].getBool();
+        const auto capabilities = root["capabilities"];
+        for (std::size_t i = 0; i < capabilities.size(); ++i) {
+            const auto capability = capabilities[static_cast<std::uint32_t>(i)];
+            if (!capability.isString()) {
+                error = "invalid inspector capability manifest: " + path.string();
+                return false;
+            }
+            manifest.capabilities.emplace_back(capability.getString());
+        }
+    } catch (const std::exception&) {
+        error = "invalid inspector capability manifest: " + path.string();
+        return false;
+    }
+    return true;
+}
+
+std::string capability_marker(std::string_view capability) {
+    std::string marker = "PULP_INSPECT_CAPABILITY_";
+    for (const auto character : capability) {
+        marker.push_back(std::isalnum(static_cast<unsigned char>(character))
+            ? static_cast<char>(std::toupper(static_cast<unsigned char>(character)))
+            : '_');
+    }
+    marker += "_V1";
+    return marker;
+}
+
+} // namespace
+
+Report empty_report() {
+    Report report;
+    report.complete = true;
+    return report;
+}
+
+Report load_report(const std::vector<fs::path>& search_roots,
+                   std::optional<std::string_view> product) {
+    Report report;
+    std::vector<fs::path> manifests;
+    for (const auto& search_root : search_roots) {
+        auto dir = search_root / "pulp-inspector-manifests";
+        if (!fs::is_directory(dir)) dir = search_root;
+        if (!fs::is_directory(dir)) {
+            report.error = "inspector capability manifest directory is missing: " +
+                search_root.string();
+            return report;
+        }
+        std::error_code iteration_error;
+        fs::directory_iterator iterator(dir, iteration_error);
+        fs::directory_iterator end;
+        while (!iteration_error && iterator != end) {
+            const auto& entry = *iterator;
+            if (entry.is_regular_file() && entry.path().extension() == ".json" &&
+                (dir != search_root ||
+                 entry.path().filename().string().find(".inspector-capabilities.json") !=
+                     std::string::npos)) {
+                manifests.push_back(entry.path());
+            }
+            iterator.increment(iteration_error);
+        }
+        if (iteration_error) {
+            report.error = "could not enumerate inspector capability manifests in " +
+                dir.string();
+            return report;
+        }
+    }
+    std::sort(manifests.begin(), manifests.end());
+    manifests.erase(std::unique(manifests.begin(), manifests.end()), manifests.end());
+
+    std::ostringstream json;
+    json << "[";
+    for (const auto& manifest_path : manifests) {
+        Manifest manifest;
+        if (!read_manifest(manifest_path, manifest, report.error)) return report;
+        if (product && manifest.product_name != *product) continue;
+        report.ships_inspector |= manifest.ships_inspector;
+        report.ships_runtime_eval |= manifest.ships_runtime_eval;
+        if (!report.manifests.empty()) json << ",";
+        json << "\n" << manifest.json;
+        report.manifests.push_back(std::move(manifest));
+    }
+    if (!report.manifests.empty()) json << "\n";
+    json << "]";
+    report.json = json.str();
+    if (report.manifests.empty()) {
+        report.error = product
+            ? "no inspector capability manifest matches product '" +
+                std::string(*product) + "'"
+            : "no inspector capability manifests found";
+        return report;
+    }
+    report.complete = true;
+    return report;
+}
+
+Report load_report(const fs::path& search_root,
+                   std::optional<std::string_view> product) {
+    return load_report(std::vector<fs::path>{search_root}, product);
+}
+
+Report combine_reports(std::vector<Report> reports) {
+    Report combined = empty_report();
+    std::ostringstream json;
+    json << "[";
+    for (auto& report : reports) {
+        if (!report.complete) return report;
+        for (auto& manifest : report.manifests) {
+            if (!combined.manifests.empty()) json << ",";
+            json << "\n" << manifest.json;
+            combined.ships_inspector |= manifest.ships_inspector;
+            combined.ships_runtime_eval |= manifest.ships_runtime_eval;
+            combined.manifests.push_back(std::move(manifest));
+        }
+    }
+    if (!combined.manifests.empty()) json << "\n";
+    json << "]";
+    combined.json = json.str();
+    return combined;
+}
+
+bool scan_artifact(const fs::path& artifact, const Manifest& manifest,
+                   std::string& error) {
+    std::ifstream input(artifact, std::ios::binary);
+    if (!input) {
+        error = "could not read artifact for inspector capability scan: " +
+            artifact.string();
+        return false;
+    }
+    const std::string binary(std::istreambuf_iterator<char>(input), {});
+    if (input.bad() || binary.empty()) {
+        error = "could not read artifact for inspector capability scan: " +
+            artifact.string();
+        return false;
+    }
+    const auto contains = [&](std::string_view token) {
+        return binary.find(token) != std::string::npos;
+    };
+    const bool has_shipping_marker = contains("PULP_INSPECT_SHIPPING_MANIFEST_V1");
+    if (has_shipping_marker != manifest.ships_inspector) {
+        error = "artifact inspector endpoint marker does not match manifest: " +
+            artifact.string();
+        return false;
+    }
+
+    std::vector<std::string> declared_markers;
+    declared_markers.reserve(manifest.capabilities.size());
+    for (const auto& capability : manifest.capabilities) {
+        declared_markers.push_back(capability_marker(capability));
+        if (!contains(declared_markers.back())) {
+            error = "artifact is missing declared inspector capability marker '" +
+                capability + "': " + artifact.string();
+            return false;
+        }
+    }
+    constexpr std::string_view capability_prefix = "PULP_INSPECT_CAPABILITY_";
+    std::size_t marker_position = 0;
+    while ((marker_position = binary.find(capability_prefix, marker_position)) !=
+           std::string::npos) {
+        const auto marker_end = binary.find("_V1", marker_position);
+        if (marker_end == std::string::npos) break;
+        const auto marker = binary.substr(marker_position, marker_end + 3 - marker_position);
+        if (std::find(declared_markers.begin(), declared_markers.end(), marker) ==
+            declared_markers.end()) {
+            error = "artifact contains an undeclared inspector capability marker: " +
+                artifact.string();
+            return false;
+        }
+        marker_position = marker_end + 3;
+    }
+
+    constexpr std::string_view runtime_eval_marker =
+        "PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1";
+    if (contains(runtime_eval_marker) != manifest.ships_runtime_eval) {
+        error = "artifact runtime.eval component marker does not match manifest: " +
+            artifact.string();
+        return false;
+    }
+    if (!manifest.ships_inspector) {
+        for (const auto token : {"InspectorServer", "DiscoveryPublisher",
+                                 "publish_discovery_record"}) {
+            if (contains(token)) {
+                error = "ordinary artifact contains forbidden inspector token '" +
+                    std::string(token) + "': " + artifact.string();
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool write_evidence(const fs::path& path, const Report& report,
+                    std::string_view operation) {
+    std::ofstream output(path);
+    if (!output) return false;
+    output << "{\n  \"schema_version\": 1,\n  \"operation\": \""
+           << operation << "\",\n  \"inspector_capabilities\": "
+           << report.json << "\n}\n";
+    return output.good();
+}
+
+} // namespace pulp::cli::inspector_shipping

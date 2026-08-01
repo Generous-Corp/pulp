@@ -437,6 +437,31 @@ private:
     std::streambuf* original_;
 };
 
+#if defined(__APPLE__)
+static std::vector<fs::path> find_standalone_apps(
+    const fs::path& build_dir, std::string_view product_filter) {
+    std::vector<fs::path> apps;
+    const auto add_apps_in = [&](const fs::path& dir) {
+        if (!fs::exists(dir)) return;
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.path().extension() != ".app") continue;
+            if (!product_filter.empty() &&
+                entry.path().stem().string() != product_filter) continue;
+            apps.push_back(entry.path());
+        }
+    };
+    add_apps_in(build_dir / "Standalone");
+    if (fs::exists(build_dir / "examples")) {
+        for (const auto& example : fs::directory_iterator(build_dir / "examples")) {
+            if (example.is_directory()) add_apps_in(example.path());
+        }
+    }
+    std::sort(apps.begin(), apps.end());
+    apps.erase(std::unique(apps.begin(), apps.end()), apps.end());
+    return apps;
+}
+#endif
+
 static int ship_package_impl(const std::vector<std::string>& args,
                              const fs::path& root, const fs::path& build_dir,
                              InspectorPackageEvidence& evidence) {
@@ -517,14 +542,46 @@ static int ship_package_impl(const std::vector<std::string>& args,
             return rc;
         }
 
-        auto inspector_manifest_root = build_dir;
-        if (!binary_path.empty())
-            inspector_manifest_root = fs::path(binary_path).parent_path();
-        const auto inspector_report = pulp::cli::inspector_shipping::load_report(
-            inspector_manifest_root,
-            product_filter.empty()
-                ? std::optional<std::string_view>{}
-                : std::optional<std::string_view>{product_filter});
+        std::vector<fs::path> inspector_artifacts;
+#if defined(__linux__)
+        if (format == "appimage" && !binary_path.empty())
+            inspector_artifacts.emplace_back(binary_path);
+#endif
+#if defined(__APPLE__)
+        const auto standalone_apps = find_standalone_apps(build_dir, product_filter);
+        if (target != "android") {
+            for (const auto& app : standalone_apps)
+                inspector_artifacts.push_back(
+                    app / "Contents/MacOS" / app.stem());
+        }
+#endif
+        std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
+        artifact_reports.reserve(inspector_artifacts.size());
+        for (const auto& artifact : inspector_artifacts) {
+            const auto product_name = product_filter.empty()
+                ? artifact.filename().string()
+                : product_filter;
+            auto artifact_report = pulp::cli::inspector_shipping::load_report(
+                artifact.parent_path(), product_name);
+            if (!artifact_report.complete) {
+                std::cerr << "pulp ship package: " << artifact_report.error << "\n";
+                return 2;
+            }
+            if (artifact_report.manifests.size() != 1 ||
+                !pulp::cli::inspector_shipping::scan_artifact(
+                    artifact, artifact_report.manifests.front(), artifact_report.error)) {
+                std::cerr << "pulp ship package: "
+                          << (artifact_report.error.empty()
+                                  ? "ambiguous inspector capability manifest"
+                                  : artifact_report.error)
+                          << "\n";
+                return 2;
+            }
+            artifact_reports.push_back(std::move(artifact_report));
+        }
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::combine_reports(
+                std::move(artifact_reports));
         if (!inspector_report.complete) {
             std::cerr << "pulp ship package: " << inspector_report.error << "\n";
             return 2;
@@ -775,23 +832,6 @@ static int ship_package_impl(const std::vector<std::string>& args,
         // build/Standalone dir AND (there is no enforced convention, and examples
         // build the standalone under their own dir) from build/examples/*/. Dedup
         // by path so an app present in both isn't packaged twice.
-        std::vector<fs::path> standalone_apps;
-        auto add_apps_in = [&](const fs::path& dir) {
-            if (!fs::exists(dir)) return;
-            for (auto& entry : fs::directory_iterator(dir)) {
-                if (entry.path().extension().string() != ".app") continue;
-                if (!product_filter.empty() &&
-                    entry.path().stem().string() != product_filter) continue;
-                standalone_apps.push_back(entry.path());
-            }
-        };
-        add_apps_in(build_dir / "Standalone");
-        if (fs::exists(build_dir / "examples"))
-            for (auto& ex : fs::directory_iterator(build_dir / "examples"))
-                if (ex.is_directory()) add_apps_in(ex.path());
-        std::sort(standalone_apps.begin(), standalone_apps.end());
-        standalone_apps.erase(std::unique(standalone_apps.begin(), standalone_apps.end()),
-                              standalone_apps.end());
         for (auto& app : standalone_apps) {
             auto name = app.stem().string();
             product_name = name;

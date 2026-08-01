@@ -17,6 +17,16 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     telemetry.stream
     runtime.eval)
 
+function(_pulp_inspector_json_escape output value)
+    set(_escaped "${value}")
+    string(REPLACE "\\" "\\\\" _escaped "${_escaped}")
+    string(REPLACE "\"" "\\\"" _escaped "${_escaped}")
+    string(REPLACE "\n" "\\n" _escaped "${_escaped}")
+    string(REPLACE "\r" "\\r" _escaped "${_escaped}")
+    string(REPLACE "\t" "\\t" _escaped "${_escaped}")
+    set(${output} "${_escaped}" PARENT_SCOPE)
+endfunction()
+
 function(_pulp_configure_inspector_shipping target bundle_id product_name)
     set(_caps "${PULP_${target}_INSPECTOR_CAPABILITIES}")
     foreach(_cap IN LISTS _caps)
@@ -61,8 +71,11 @@ function(_pulp_configure_inspector_shipping target bundle_id product_name)
     endif()
     file(MAKE_DIRECTORY "${_manifest_dir}")
     set(_manifest "${_manifest_dir}/${target}.json")
+    _pulp_inspector_json_escape(_json_target "${target}")
+    _pulp_inspector_json_escape(_json_product_name "${product_name}")
+    _pulp_inspector_json_escape(_json_bundle_id "${bundle_id}")
     file(GENERATE OUTPUT "${_manifest}" CONTENT
-        "{\n  \"schema_version\": 1,\n  \"target\": \"${target}\",\n  \"product_name\": \"${product_name}\",\n  \"bundle_id\": \"${bundle_id}\",\n  \"shipping_override\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"activation\": \"product-owned; runtime default off\",\n  \"capabilities\": [${_json_caps}]\n}\n")
+        "{\n  \"schema_version\": 1,\n  \"target\": \"${_json_target}\",\n  \"product_name\": \"${_json_product_name}\",\n  \"bundle_id\": \"${_json_bundle_id}\",\n  \"shipping_override\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"activation\": \"product-owned; runtime default off\",\n  \"capabilities\": [${_json_caps}]\n}\n")
     set(PULP_${target}_INSPECTOR_MANIFEST "${_manifest}" CACHE INTERNAL "")
 
     if(PULP_${target}_SHIP_INSPECTOR)

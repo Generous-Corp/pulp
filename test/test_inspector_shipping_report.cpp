@@ -20,6 +20,11 @@ void write_manifest(const fs::path& path, std::string_view body) {
     std::ofstream output(path);
     output << body;
 }
+
+void write_artifact(const fs::path& path, std::string_view body) {
+    std::ofstream output(path, std::ios::binary);
+    output.write(body.data(), static_cast<std::streamsize>(body.size()));
+}
 } // namespace
 
 TEST_CASE("inspector shipping report preserves ordinary and declared targets") {
@@ -80,4 +85,45 @@ TEST_CASE("inspector shipping report fails closed and scopes one product") {
         temporary.path, "Missing");
     CHECK_FALSE(unknown.complete);
     CHECK_FALSE(unknown.error.empty());
+}
+
+TEST_CASE("artifact scan rejects a stale manifest before packaging") {
+    TemporaryDirectory temporary;
+    const auto manifest_path =
+        temporary.path / "pulp-inspector-manifests" / "ordinary.json";
+    write_manifest(manifest_path,
+        R"({"product_name":"Ordinary","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    const auto report = pulp::cli::inspector_shipping::load_report(temporary.path);
+    REQUIRE(report.complete);
+    REQUIRE(report.manifests.size() == 1);
+
+    const auto artifact = temporary.path / "Ordinary";
+    write_artifact(artifact, "ordinary-product");
+    std::string error;
+    CHECK(pulp::cli::inspector_shipping::scan_artifact(
+        artifact, report.manifests.front(), error));
+
+    write_artifact(artifact, "PULP_INSPECT_SHIPPING_MANIFEST_V1");
+    error.clear();
+    CHECK_FALSE(pulp::cli::inspector_shipping::scan_artifact(
+        artifact, report.manifests.front(), error));
+    CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("artifact scan accepts exact declared capability markers") {
+    TemporaryDirectory temporary;
+    const auto manifest_path =
+        temporary.path / "pulp-inspector-manifests" / "developer.json";
+    write_manifest(manifest_path,
+        R"({"product_name":"Developer","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})");
+    const auto report = pulp::cli::inspector_shipping::load_report(temporary.path);
+    REQUIRE(report.complete);
+    REQUIRE(report.manifests.size() == 1);
+
+    const auto artifact = temporary.path / "Developer";
+    write_artifact(artifact,
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    std::string error;
+    CHECK(pulp::cli::inspector_shipping::scan_artifact(
+        artifact, report.manifests.front(), error));
 }

@@ -127,15 +127,9 @@ int cmd_validate(const std::vector<std::string>& args) {
             if (r.status == "fail") ++fail_count;
             else if (r.status == "skip") ++skip_count;
         }
+        bool inspector_evidence_complete = true;
         if (json_output || !report_path.empty()) {
             std::ostringstream report;
-            const bool tgt_install_ready = (fail_count == 0) && !(strict && skip_count > 0);
-            report << "{\n  \"version\": 1,\n  \"target\": \""
-                   << target_name << "\",\n";
-            report << "  \"summary\": {\"failed\": " << fail_count
-                   << ", \"skipped\": " << skip_count << "},\n";
-            report << "  \"install_ready\": " << (tgt_install_ready ? "true" : "false")
-                   << ",\n";
             auto inspector_evidence_dir = fs::path(positional.front());
             if (inspector_evidence_dir.extension() == ".app")
                 inspector_evidence_dir /= "Contents/MacOS";
@@ -143,6 +137,20 @@ int cmd_validate(const std::vector<std::string>& args) {
                 inspector_evidence_dir = inspector_evidence_dir.parent_path();
             const auto inspector_report =
                 pulp::cli::inspector_shipping::load_report(inspector_evidence_dir);
+            inspector_evidence_complete = inspector_report.complete;
+            if (!inspector_evidence_complete)
+                std::cerr << "Inspector capability evidence incomplete: "
+                          << inspector_report.error << "\n";
+            const bool tgt_install_ready = (fail_count == 0) &&
+                !(strict && skip_count > 0) && inspector_evidence_complete;
+            report << "{\n  \"version\": 1,\n  \"target\": \""
+                   << target_name << "\",\n";
+            report << "  \"summary\": {\"failed\": " << fail_count
+                   << ", \"skipped\": " << skip_count << "},\n";
+            report << "  \"install_ready\": " << (tgt_install_ready ? "true" : "false")
+                   << ",\n";
+            report << "  \"inspector_capability_evidence_complete\": "
+                   << (inspector_evidence_complete ? "true" : "false") << ",\n";
             report << "  \"inspector_capabilities\": "
                    << inspector_report.json << ",\n";
             report << "  \"results\": [\n";
@@ -190,7 +198,8 @@ int cmd_validate(const std::vector<std::string>& args) {
             }
         }
         const bool strict_fail_target = strict && skip_count > 0;
-        return (fail_count > 0 || strict_fail_target) ? 1 : 0;
+        return (fail_count > 0 || strict_fail_target ||
+                !inspector_evidence_complete) ? 1 : 0;
     }
 
     auto root = resolve_active_project_root(nullptr);
@@ -568,6 +577,7 @@ int cmd_validate(const std::vector<std::string>& args) {
     }
 
     const bool strict_fail = strict && skipped_missing_tool > 0;
+    bool inspector_evidence_complete = true;
 
     // JSON report output
 
@@ -588,15 +598,22 @@ int cmd_validate(const std::vector<std::string>& args) {
         // Aggregate evidence + install/package readiness: a bundle is install-safe
         // only when nothing failed (and, under --strict, nothing was skipped),
         // matching `pulp build --install`'s "validation is the gate" policy.
-        const bool install_ready = (failed == 0) && !(strict && skipped > 0);
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::load_report(build_dir);
+        inspector_evidence_complete = inspector_report.complete;
+        if (!inspector_evidence_complete)
+            std::cerr << "Inspector capability evidence incomplete: "
+                      << inspector_report.error << "\n";
+        const bool install_ready = (failed == 0) && !(strict && skipped > 0) &&
+            inspector_evidence_complete;
         report << "  \"summary\": {\"total\": " << total
                << ", \"passed\": " << passed
                << ", \"failed\": " << failed
                << ", \"skipped\": " << skipped
                << ", \"skipped_missing_tool\": " << skipped_missing_tool << "},\n";
         report << "  \"install_ready\": " << (install_ready ? "true" : "false") << ",\n";
-        const auto inspector_report =
-            pulp::cli::inspector_shipping::load_report(build_dir);
+        report << "  \"inspector_capability_evidence_complete\": "
+               << (inspector_evidence_complete ? "true" : "false") << ",\n";
         report << "  \"inspector_capabilities\": " << inspector_report.json << ",\n";
         report << "  \"reports\": [\n";
         for (size_t i = 0; i < report_entries.size(); ++i) {
@@ -687,5 +704,5 @@ int cmd_validate(const std::vector<std::string>& args) {
             std::cout << "No plugin screenshots captured.\n";
     }
 
-    return (failed > 0 || strict_fail) ? 1 : 0;
+    return (failed > 0 || strict_fail || !inspector_evidence_complete) ? 1 : 0;
 }
