@@ -16,10 +16,6 @@ CAPABILITY_ROW_RE = re.compile(
     r"^\|\s*`([^`]+)`\s*\|\s*(yes|no)\s*\|\s*(yes|no)\s*\|",
     re.MULTILINE,
 )
-MCP_TOOL_RE = re.compile(
-    r'"name":"(pulp_(?:inspect|motion|trace)_[^"]+)",'
-    r'"description":"([^"]+)"'
-)
 MIGRATION_GUIDE_GLOB = "coming-from-*.md"
 MIGRATION_GUIDE_FORBIDDEN_CLAIMS = (
     "It also speaks JSON-RPC over a local TCP port",
@@ -75,6 +71,9 @@ FORBIDDEN_CLAIMS = {
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
+        "source-checkout",
+        "delegate to pulp inspect CLI",
+        "delegate to `pulp inspect`",
         "Requires a custom host/test fixture that explicitly constructs an inspector endpoint",
         "Requires a custom inspector fixture; normal launches provide no endpoint",
         "Normal launches provide no endpoint",
@@ -128,11 +127,14 @@ REQUIRED_CLAIMS = {
     ".claude/commands/inspect.md": (
         "GPU-enabled desktop",
         "pulp run --inspect",
-        "explicitly wired custom fixture",
+        "explicitly enabled custom host",
+        "base64.b64decode",
+        "PNG signature",
     ),
     "docs/agent-integrations.md": (
-        "unavailable in normal launches",
-        "explicitly wired custom fixture",
+        "shared in-process authenticated client",
+        "ordinary launches",
+        "explicitly enabled custom host",
     ),
     "docs/reference/cli.md": (
         "unavailable in normal launches",
@@ -149,11 +151,6 @@ REQUIRED_CLAIMS = {
         "owner-private ephemeral record/token files",
         "extended ACLs",
         "Capability dispatch is fail-closed",
-    ),
-    "tools/mcp/pulp_mcp.cpp": (
-        "pulp run --inspect",
-        "exact multi-session selection",
-        "Standalone profiles do not grant runtime.eval",
     ),
     "docs/reference/scripted-ui-inspector.md": (
         "nonce/HMAC",
@@ -201,9 +198,30 @@ REQUIRED_BUILD_CONTRACTS = {
         "src/discovery_publisher.cpp",
         "src/discovery_security_write.cpp",
         "pulp::inspect-publication",
+        "src/client_session.cpp",
+        "pulp::inspect-client",
         "src/trace_inspector.cpp",
     ),
+    "tools/mcp/CMakeLists.txt": (
+        "mcp_inspector_schema.cpp",
+        "mcp_inspector_tools.cpp",
+        "pulp::inspect-client",
+    ),
+    "tools/mcp/mcp_inspect_tools.cpp": (
+        "pulp_inspect_list",
+        "pulp_inspect_capabilities",
+        "pulp_inspect_context",
+        "methods::kStateSetParameter",
+        "methods::kCaptureScreenshot",
+    ),
+    "tools/mcp/mcp_inspector_tools.cpp": (
+        "#include <pulp/inspect/client_session.hpp>",
+        "InspectorClientSession::connect",
+        "client->set_parameter_typed",
+    ),
     "tools/cmake/PulpInstallRules.cmake": (
+        "pulp-inspect-client",
+        "inspect/include/pulp/inspect/client_session.hpp",
         "inspect/include/pulp/inspect/publication_binding.hpp",
         "inspect/include/pulp/inspect/trace_inspector.hpp",
     ),
@@ -442,15 +460,6 @@ def check_root(
         ):
             errors.append(
                 f"{target} publicly regains discovery reader authority"
-            )
-
-    mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")
-    for tool_name, description in MCP_TOOL_RE.findall(mcp_source):
-        if tool_name == "pulp_inspect_pending_requests":
-            continue
-        if "source-checkout" not in description:
-            errors.append(
-                f"{tool_name} must disclose its source-checkout-only client path"
             )
 
     return errors

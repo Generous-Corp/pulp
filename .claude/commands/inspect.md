@@ -3,9 +3,9 @@ name: inspect
 description: Discover and verify an explicitly inspector-enabled standalone session
 ---
 
-Launch the target explicitly with `pulp run --inspect` for the `develop`
-profile, or `pulp run --inspect=observe` for read-only work. Ordinary runs and
-plugin scanning remain off and publish no endpoint.
+Launch a GPU-enabled desktop target explicitly with `pulp run --inspect` for
+the `develop` profile, or `pulp run --inspect=observe` for read-only work.
+Ordinary runs and plugin scanning remain off and publish no endpoint.
 
 ```bash
 pulp inspect profiles --json

@@ -36,7 +36,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "inspect/include/pulp/inspect/discovery_publisher.hpp":
                 "class InspectorDiscoveryPublisher {};\n",
             "tools/mcp/pulp_mcp.cpp":
-                '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
+                '"name":"pulp_inspect_dom","description":"Installed in-process authenticated client"\n',
         }
         canonical_contracts = (
             TEST_REQUIRED_CLAIMS,
@@ -236,7 +236,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
         self.assertIn("stale claim", errors)
         self.assertIn("A normal `pulp run`", errors)
         self.assertIn("Requires a custom host/test fixture", errors)
-        self.assertIn("source-checkout-only", errors)
+        self.assertIn("retains stale claim: source-checkout", errors)
 
     def test_rejects_obsolete_unauthenticated_transport_claims(self) -> None:
         root = self.make_root()
