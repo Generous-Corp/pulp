@@ -204,6 +204,7 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
                               and _module_matches(r, _entry(inv, m), roles)
                               for r in roles["roles"])}
         reached = set(froms)
+        relayed = set()          # reached only by passing through a mult etc.
         changed = True
         while changed:
             changed = False
@@ -211,6 +212,7 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
                 src, dst = c.get("outputModuleId"), c.get("inputModuleId")
                 if src in reached and dst in transparent and dst not in reached:
                     reached.add(dst)
+                    relayed.add(dst)
                     changed = True
         froms = reached
 
@@ -232,7 +234,16 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
             # on it made every idiom unsatisfiable for the vendor modules that
             # make up most of any real rack.
             blind: list[str] = []
-            if not _port_matches(from_port, srole, slabel, roles):
+            # A multiple's own jacks are generic: its outputs are "1 2 3", role
+            # Cv, whatever is fed into them. So the KIND of signal was settled
+            # upstream, at the module the widening started from, and asking a
+            # mult's output to look like a gate rejects the patch for the
+            # relaying it was widened to allow. It did: a kick drum clocked
+            # from an LFO's SQR through a multiple -- the ordinary way to fire
+            # two envelopes from one clock -- was told nothing triggered it.
+            if src_id in relayed:
+                pass
+            elif not _port_matches(from_port, srole, slabel, roles):
                 if not _uncartographed(inv, src, "out"):
                     continue
                 blind.append(f"{src.get('plugin')}/{src.get('model')}")

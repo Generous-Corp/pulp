@@ -84,7 +84,14 @@ rejection will name the connection you left out.
    module the user does not have is dropped silently by Rack, and the patch
    opens as a partly empty rack with no error.
 6. Set `params` for anything that matters musically — a filter cutoff, an LFO
-   rate. Leave the rest out and they take their defaults.
+   rate. Leave the rest out and they take their defaults, which are listed
+   with each module below.
+7. **A level, gain, volume or amount knob MULTIPLIES its CV — it does not add
+   to it.** Setting one to 0 makes that module silent however hard its CV is
+   driven, and no amount of re-triggering will recover it. When an envelope
+   drives a VCA's CV, leave the level alone or set it high; do NOT set it to
+   0 on the reasoning that the envelope now controls the level. It does not:
+   it scales what the knob already lets through.
 
 ## Available modules
 

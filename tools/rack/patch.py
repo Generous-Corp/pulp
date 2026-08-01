@@ -241,6 +241,19 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
                                   for p in m.get("outputs", [])]
                 mod["roles_in"] = [p.get("role", "Cv") for p in m.get("inputs", [])]
                 mod["roles_out"] = [p.get("role", "Cv") for p in m.get("outputs", [])]
+                # Params, for the same reason as ports: a value written
+                # blindly is as wrong as a cable to the wrong jack, and
+                # nothing told the model what a param even was. It set a
+                # VCA's level to 0 -- silence, whatever the envelope does --
+                # and no advice afterwards could fix a patch whose first
+                # attempt had already made that choice.
+                mod["params"] = [
+                    {"id": q.get("id", i),
+                     "name": q.get("name") or q.get("label") or f"p{i}",
+                     "min": q.get("min_value", 0.0),
+                     "max": q.get("max_value", 1.0),
+                     "default": q.get("default_value", 0.0)}
+                    for i, q in enumerate(m.get("params", []))]
 
                 # Panel geometry, in the same shape the cartographer records
                 # for third-party modules, so everything downstream reads one
@@ -1014,6 +1027,16 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                 outs = ", ".join(f"{i}={n}" for i, n in enumerate(m.get("outputs", [])))
                 out.append(f"    in: {ins}")
                 out.append(f"    out: {outs}")
+            # With their defaults, which are the values a person gets when
+            # they place the module. A param left out of a patch keeps its
+            # default; a param written blindly does not, and the difference
+            # between those two is a level knob at 0 and a patch that makes
+            # no sound.
+            if m.get("params"):
+                ps = ", ".join(
+                    f"{q['id']}={q['name']}[{q['min']:g}..{q['max']:g}"
+                    f", default {q['default']:g}]" for q in m["params"])
+                out.append(f"    params: {ps}")
         out.append("")
     return "\n".join(out)
 
@@ -1441,6 +1464,13 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                            f"{idioms[claimed].get('is', '')}\n\n"
                            "It is missing:\n" +
                            "\n".join(f"  - {m}" for m in missing))
+                    # Kept for the same reason a silent one is: "wrong idiom"
+                    # names the requirement and not the wiring that missed it,
+                    # and without the patch the only way to see what was
+                    # actually built is to build it again.
+                    keep_attempt(patch, "not the claimed idiom:\n" +
+                                 "\n".join(f"  - {m}" for m in missing),
+                                 attempt + 1, "wrong-idiom")
                     continue
                 print(f"  idiom holds: {claimed}")
             return patch, why

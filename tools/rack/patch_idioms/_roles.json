@@ -257,6 +257,7 @@
       ]
     },
     "gate_out": {
+      "$comment": "SQR and PLS are here because a square or pulse output IS a gate signal -- driving an envelope's trigger from an LFO's square is how a drum gets fired, and leaving them out made the kick drum unsatisfiable with the only clock modules anybody has.",
       "ports": [
         "Gate",
         "Trigger"
@@ -266,7 +267,9 @@
         "TRIG",
         "EOC",
         "EOR",
-        "STEP"
+        "STEP",
+        "SQR",
+        "PLS"
       ]
     },
     "clock_in": {
@@ -294,8 +297,10 @@
       ]
     },
     "cv_in": {
+      "$comment": "Pitch is here because a V/OCT jack is a control-voltage input -- an envelope sweeping an oscillator's pitch lands on it. Our manifests call that jack Pitch and the vendor inference calls it Cv, so a requirement that named only one of them held for Fundamental's VCO and not for ours.",
       "ports": [
-        "Cv"
+        "Cv",
+        "Pitch"
       ],
       "labels": [
         "CV",
