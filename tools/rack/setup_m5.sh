@@ -203,13 +203,21 @@ ok = True
 r = subprocess.run(["screencapture", "-x", "-R", "0,0,4,4", "/tmp/fm-perm.png"],
                    capture_output=True)
 if r.returncode != 0:
-    print("  Screen Recording: NOT granted to this terminal")
+    # Over SSH it can NEVER be granted -- the permission belongs to the
+    # terminal application, and there is no terminal here. Saying "not granted"
+    # in that case reads as a misconfigured machine, which it is not.
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        print("  Screen Recording: n/a over SSH — this is expected")
+    else:
+        print("  Screen Recording: NOT granted to this terminal")
     ok = False
 else:
     print("  Screen Recording: granted")
     os.remove("/tmp/fm-perm.png")
 if ok:
     print("  run it on this machine with:  forge-modular-prove")
+elif os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+    print("  in a Terminal ON this machine, run:  forge-modular-prove")
 else:
     print("  grant it in System Settings > Privacy & Security, then run:")
     print("      forge-modular-prove")
