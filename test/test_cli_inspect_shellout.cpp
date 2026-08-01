@@ -215,6 +215,339 @@ std::string compact_json_for_assertion(std::string text) {
 
 }  // namespace
 
+TEST_CASE("pulp inspect profiles and list provide stable JSON",
+          "[cli][shellout][inspect][workflow]") {
+    REQUIRE(binary_exists());
+
+    const auto profiles = run_pulp({"inspect", "profiles", "--json"}, 10000);
+    REQUIRE_FALSE(profiles.timed_out);
+    REQUIRE(profiles.exit_code == 0);
+    CHECK(profiles.stdout_output.find("pulp.inspect.profiles.v1") !=
+          std::string::npos);
+    CHECK(profiles.stdout_output.find("\"develop\"") != std::string::npos);
+    CHECK(profiles.stdout_output.find("state.write") != std::string::npos);
+
+    InspectServerFixture fixture;
+    const auto listed = run_pulp(
+        {"inspect", "list", "--json", "--session",
+         fixture.session.info().session_id, "--instance",
+         fixture.session.info().instance_id},
+        10000);
+    REQUIRE_FALSE(listed.timed_out);
+    REQUIRE(listed.exit_code == 0);
+    CHECK(listed.stdout_output.find("pulp.inspect.sessions.v1") !=
+          std::string::npos);
+    CHECK(listed.stdout_output.find(fixture.session.info().session_id) !=
+          std::string::npos);
+    REQUIRE(fixture.publisher.record().has_value());
+    CHECK(listed.stdout_output.find(
+              fixture.publisher.record()->publication_id) !=
+          std::string::npos);
+
+    const auto human = run_pulp({"inspect", "list"}, 10000);
+    REQUIRE_FALSE(human.timed_out);
+    REQUIRE(human.exit_code == 0);
+    CHECK(human.stdout_output.find("PUBLICATION") != std::string::npos);
+    CHECK(human.stdout_output.find(
+              fixture.publisher.record()->publication_id) !=
+          std::string::npos);
+}
+
+TEST_CASE("pulp inspect capabilities and doctor authenticate exact sessions",
+          "[cli][shellout][inspect][workflow]") {
+    REQUIRE(binary_exists());
+
+    InspectServerFixture fixture;
+    fixture.handler = [&](const InspectorMessage& request) {
+        if (request.method == "Inspector.getAgentContext") {
+            return make_response(
+                request.id,
+                "{\"binary\":{\"path\":\"/tmp/fixture\","
+                "\"buildId\":\"fixture-build\",\"mtimeUnixMs\":1},"
+                "\"identity\":{\"pluginId\":\"" +
+                    fixture.session.info().plugin_id +
+                    "\",\"sessionId\":\"" +
+                    fixture.session.info().session_id +
+                    "\",\"instanceId\":\"" +
+                    fixture.session.info().instance_id +
+                    "\"},\"editor\":{\"open\":true,\"windowVisible\":true},"
+                    "\"processing\":{\"active\":true,\"xrunCount\":0},"
+                    "\"hotReload\":{\"available\":true,\"enabled\":false,"
+                    "\"pending\":false},\"unsavedTweakCount\":0,"
+                    "\"actionableIssues\":[]}");
+        }
+        return make_response(request.id, "{}");
+    };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto publication = fixture.publisher.record()->publication_id;
+    const std::vector<std::string> exact{
+        "--session", fixture.session.info().session_id,
+        "--instance", fixture.session.info().instance_id,
+        "--publication", publication};
+
+    auto capability_args = std::vector<std::string>{
+        "inspect", "capabilities", "--json"};
+    capability_args.insert(capability_args.end(), exact.begin(), exact.end());
+    const auto capabilities = run_pulp(capability_args, 10000);
+    REQUIRE_FALSE(capabilities.timed_out);
+    REQUIRE(capabilities.exit_code == 0);
+    CHECK(capabilities.stdout_output.find(
+              "pulp.inspect.capabilities.v1") != std::string::npos);
+    CHECK(capabilities.stdout_output.find(publication) != std::string::npos);
+    CHECK(capabilities.stdout_output.find("state.read") != std::string::npos);
+
+    auto human_capability_args =
+        std::vector<std::string>{"inspect", "capabilities"};
+    human_capability_args.insert(
+        human_capability_args.end(), exact.begin(), exact.end());
+    const auto human_capabilities = run_pulp(human_capability_args, 10000);
+    REQUIRE_FALSE(human_capabilities.timed_out);
+    REQUIRE(human_capabilities.exit_code == 0);
+    CHECK(human_capabilities.stdout_output.find("profile: develop") !=
+          std::string::npos);
+    CHECK(human_capabilities.stdout_output.find(publication) !=
+          std::string::npos);
+    CHECK(human_capabilities.stdout_output.find("state.write") !=
+          std::string::npos);
+
+    auto doctor_args = std::vector<std::string>{"inspect", "doctor", "--json"};
+    doctor_args.insert(doctor_args.end(), exact.begin(), exact.end());
+    const auto doctor = run_pulp(doctor_args, 10000);
+    REQUIRE_FALSE(doctor.timed_out);
+    REQUIRE(doctor.exit_code == 0);
+    CHECK(doctor.stdout_output.find("pulp.inspect.doctor.v1") !=
+          std::string::npos);
+    CHECK(doctor.stdout_output.find("\"ready\": true") !=
+          std::string::npos);
+    CHECK(doctor.stdout_output.find("fixture") != std::string::npos);
+
+    auto human_doctor_args = std::vector<std::string>{"inspect", "doctor"};
+    human_doctor_args.insert(
+        human_doctor_args.end(), exact.begin(), exact.end());
+    const auto human_doctor = run_pulp(human_doctor_args, 10000);
+    REQUIRE_FALSE(human_doctor.timed_out);
+    REQUIRE(human_doctor.exit_code == 0);
+    CHECK(human_doctor.stdout_output.find(
+              "authenticated, capability policy available") !=
+          std::string::npos);
+}
+
+TEST_CASE("pulp inspect JSON failures use the stable error envelope",
+          "[cli][shellout][inspect][workflow][json-error]") {
+    REQUIRE(binary_exists());
+
+    const auto invalid_selector = run_pulp(
+        {"inspect", "list", "--instance", "orphan", "--json"}, 10000);
+    REQUIRE_FALSE(invalid_selector.timed_out);
+    REQUIRE(invalid_selector.exit_code == 2);
+    CHECK(invalid_selector.stdout_output.empty());
+    CHECK(invalid_selector.stderr_output.find("pulp.inspect.error.v1") !=
+          std::string::npos);
+    CHECK(invalid_selector.stderr_output.find("invalid_selector") !=
+          std::string::npos);
+
+    {
+        InspectServerFixture fixture;
+        REQUIRE(fixture.publisher.record().has_value());
+        const auto record = *fixture.publisher.record();
+        {
+            std::ofstream credential(record.credential_path,
+                                     std::ios::binary | std::ios::trunc);
+            REQUIRE(credential.good());
+            credential << std::string(64, '0');
+        }
+        const auto auth = run_pulp(
+            {"inspect", "capabilities", "--json",
+             "--session", record.session_id,
+             "--instance", record.instance_id,
+             "--publication", record.publication_id},
+            10000);
+        REQUIRE_FALSE(auth.timed_out);
+        REQUIRE(auth.exit_code == 1);
+        INFO(auth.stderr_output);
+        CHECK(auth.stderr_output.find("pulp.inspect.error.v1") !=
+              std::string::npos);
+        CHECK(auth.stderr_output.find("authentication_failed") !=
+              std::string::npos);
+    }
+
+    {
+        InspectServerFixture fixture;
+        REQUIRE(fixture.publisher.record().has_value());
+        const auto& record = *fixture.publisher.record();
+        fixture.handler = [](const InspectorMessage& request) {
+            return make_error(request.id, "context probe failed",
+                              "context_failed", R"({"probe":"context"})");
+        };
+        const auto protocol = run_pulp(
+            {"inspect", "doctor", "--json",
+             "--session", record.session_id,
+             "--instance", record.instance_id,
+             "--publication", record.publication_id},
+            10000);
+        REQUIRE_FALSE(protocol.timed_out);
+        REQUIRE(protocol.exit_code == 1);
+        CHECK(protocol.stderr_output.find("pulp.inspect.error.v1") !=
+              std::string::npos);
+        CHECK(protocol.stderr_output.find("context_failed") !=
+              std::string::npos);
+        CHECK(protocol.stderr_output.find("\"probe\": \"context\"") !=
+              std::string::npos);
+    }
+
+    {
+        InspectServerFixture fixture;
+        REQUIRE(fixture.publisher.record().has_value());
+        const auto& record = *fixture.publisher.record();
+        fixture.handler = [](const InspectorMessage& request) {
+            return make_response(request.id, "not-json");
+        };
+        const auto invalid_response = run_pulp(
+            {"inspect", "doctor", "--json",
+             "--session", record.session_id,
+             "--instance", record.instance_id,
+             "--publication", record.publication_id},
+            10000);
+        REQUIRE_FALSE(invalid_response.timed_out);
+        REQUIRE(invalid_response.exit_code == 1);
+        CHECK(invalid_response.stderr_output.find("pulp.inspect.error.v1") !=
+              std::string::npos);
+        CHECK(invalid_response.stderr_output.find("invalid_response") !=
+              std::string::npos);
+    }
+
+    {
+        InspectServerFixture fixture;
+        REQUIRE(fixture.publisher.record().has_value());
+        const auto& record = *fixture.publisher.record();
+        fixture.handler = [](const InspectorMessage& request) {
+            return make_response(request.id, "not-json");
+        };
+        const auto invalid_response = run_pulp(
+            {"inspect", "--command", "DOM.getDocument", "--json",
+             "--session", record.session_id,
+             "--instance", record.instance_id,
+             "--publication", record.publication_id},
+            10000);
+        REQUIRE_FALSE(invalid_response.timed_out);
+        REQUIRE(invalid_response.exit_code == 1);
+        CHECK(invalid_response.stdout_output.empty());
+        CHECK(invalid_response.stderr_output.find("pulp.inspect.error.v1") !=
+              std::string::npos);
+        CHECK(invalid_response.stderr_output.find("invalid_response") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("pulp inspect live operations require exact selectors",
+          "[cli][shellout][inspect][identity]") {
+    REQUIRE(binary_exists());
+
+    InspectServerFixture fixture;
+    fixture.handler = [&](const InspectorMessage& request) {
+        return make_response(request.id, R"({"discovered":true})");
+    };
+
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
+
+    const std::vector<std::vector<std::string>> incomplete_selectors = {
+        {},
+        {"--session", record.session_id},
+        {"--session", record.session_id,
+         "--instance", record.instance_id},
+        {"--session", record.session_id,
+         "--publication", record.publication_id},
+        {"--instance", record.instance_id,
+         "--publication", record.publication_id},
+    };
+    for (const auto& selectors : incomplete_selectors) {
+        auto args = std::vector<std::string>{
+            "inspect", "set-parameter", "--id", "7", "--value", "0.25",
+            "--json"};
+        args.insert(args.end(), selectors.begin(), selectors.end());
+        const auto rejected = run_pulp(args, 10000);
+
+        REQUIRE_FALSE(rejected.timed_out);
+        REQUIRE(rejected.exit_code == 2);
+        CHECK(rejected.stdout_output.empty());
+        CHECK(rejected.stderr_output.find("pulp.inspect.error.v1") !=
+              std::string::npos);
+        CHECK(rejected.stderr_output.find("invalid_arguments") !=
+              std::string::npos);
+        CHECK(rejected.stderr_output.find(
+                  "live inspect operations require --session, --instance, and --publication") !=
+              std::string::npos);
+        CHECK(fixture.seen.empty());
+    }
+
+    const auto wrong_identity = run_pulp(
+        {"inspect", "set-parameter", "--id", "7", "--value", "0.25",
+         "--json", "--session", record.session_id,
+         "--instance", record.instance_id,
+         "--publication", "wrong-publication"},
+        10000);
+    REQUIRE_FALSE(wrong_identity.timed_out);
+    REQUIRE(wrong_identity.exit_code == 1);
+    CHECK(wrong_identity.stdout_output.empty());
+    CHECK(wrong_identity.stderr_output.find("pulp.inspect.error.v1") !=
+          std::string::npos);
+    CHECK(wrong_identity.stderr_output.find("session_selection_failed") !=
+          std::string::npos);
+    CHECK(fixture.seen.empty());
+
+    auto result = run_pulp(
+        {"inspect", "--command", "DOM.getDocument",
+         "--session", record.session_id,
+         "--instance", record.instance_id,
+         "--publication", record.publication_id},
+        10000);
+
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stderr_output.find("Connected to inspector session " +
+                                      fixture.session.info().session_id) !=
+            std::string::npos);
+    REQUIRE(result.stdout_output == R"({"discovered": true})"
+                                    "\n");
+    REQUIRE(fixture.seen.size() == 1);
+    REQUIRE(fixture.seen[0].method == "DOM.getDocument");
+    REQUIRE((fixture.seen[0].params_json.empty() ||
+             fixture.seen[0].params_json == "{}"));
+}
+
+TEST_CASE("pulp inspect JSON output-file success uses a stable envelope",
+          "[cli][shellout][inspect][json][output]") {
+    REQUIRE(binary_exists());
+
+    InspectServerFixture fixture;
+    fixture.handler = [](const InspectorMessage& request) {
+        return make_response(request.id, R"({"written":true})");
+    };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
+    const auto out = fixture.temp / "inspect-json-response.json";
+    const auto result = run_pulp(
+        {"inspect", "--json",
+         "--session", record.session_id,
+         "--instance", record.instance_id,
+         "--publication", record.publication_id,
+         "--command", "State.getParameters",
+         "--output", out.string()},
+        10000);
+
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    CHECK(result.stderr_output.empty());
+    CHECK(result.stdout_output.find("pulp.inspect.output.v1") !=
+          std::string::npos);
+    CHECK(result.stdout_output.find(out.string()) != std::string::npos);
+    CHECK(result.stdout_output.find("Written to") == std::string::npos);
+    REQUIRE(fs::exists(out));
+    CHECK(compact_json_for_assertion(read_text_file(out)) ==
+          R"({"written":true})");
+}
+
 TEST_CASE("pulp inspect one-shot prints a server response",
           "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -224,10 +557,15 @@ TEST_CASE("pulp inspect one-shot prints a server response",
         return make_response(request.id,
                              R"({"ok":true,"source":"inspect-test"})");
     };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
 
     auto result = run_pulp({"inspect",
                             "--host", "localhost",
                             "--port", fixture.port_string(),
+                            "--session", record.session_id,
+                            "--instance", record.instance_id,
+                            "--publication", record.publication_id,
                             "--command", "DOM.getDocument",
                             "--params", R"({"depth":2})"},
                            10000);
@@ -236,10 +574,7 @@ TEST_CASE("pulp inspect one-shot prints a server response",
     INFO("stderr: " << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" +
-                                      fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(result.stderr_output.find("Connected to inspector") !=
+    REQUIRE(result.stderr_output.find("Connected to inspector session") !=
             std::string::npos);
     REQUIRE(result.stdout_output == R"({"ok": true, "source": "inspect-test"})"
                                     "\n");
@@ -248,35 +583,6 @@ TEST_CASE("pulp inspect one-shot prints a server response",
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE(compact_json_for_assertion(fixture.seen[0].params_json) ==
             R"({"depth":2})");
-}
-
-TEST_CASE("pulp inspect one-shot can discover the advertised server port",
-          "[cli][shellout][inspect]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    InspectServerFixture fixture;
-    fixture.handler = [&](const InspectorMessage& request) {
-        return make_response(request.id, R"({"discovered":true})");
-    };
-
-    auto result = run_pulp({"inspect", "--command", "DOM.getDocument"}, 10000);
-
-    INFO("stdout: " << result.stdout_output);
-    INFO("stderr: " << result.stderr_output);
-    REQUIRE_FALSE(result.timed_out);
-    REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.find("Found inspector session " +
-                                      fixture.session.info().session_id) !=
-            std::string::npos);
-    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" +
-                                      fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(result.stdout_output == R"({"discovered": true})"
-                                    "\n");
-    REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].method == "DOM.getDocument");
-    REQUIRE((fixture.seen[0].params_json.empty() ||
-             fixture.seen[0].params_json == "{}"));
 }
 
 TEST_CASE("pulp inspect selects an exact instance within a shared session",
@@ -315,11 +621,13 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
     second_config.token = *token;
     second_config.main_thread_rpc = second_rpc;
     REQUIRE(second_server.start_authenticated(std::move(second_config)));
+    REQUIRE(second_publisher.record().has_value());
 
     const auto result = run_pulp(
         {"inspect",
          "--session", first.session.info().session_id,
          "--instance", second_session.info().instance_id,
+         "--publication", second_publisher.record()->publication_id,
          "--command", "DOM.getDocument"},
         10000);
 
@@ -403,8 +711,13 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
     fixture.handler = [&](const InspectorMessage& request) {
         return make_response(request.id, R"({"applied":true})");
     };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
 
-    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+    auto result = run_pulp({"inspect", "--port", fixture.port_string(),
+                            "--session", record.session_id,
+                            "--instance", record.instance_id,
+                            "--publication", record.publication_id, "--command",
                             "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
                            10000);
 
@@ -419,7 +732,10 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
           R"({"id":7,"value":0.75})");
 
-    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+    result = run_pulp({"inspect", "--port", fixture.port_string(),
+                       "--session", record.session_id,
+                       "--instance", record.instance_id,
+                       "--publication", record.publication_id, "--command",
                        "State.setParameter", "--params", R"({"id":7,"value":0.5})"},
                       10000);
     REQUIRE_FALSE(result.timed_out);
@@ -447,8 +763,13 @@ TEST_CASE("pulp inspect applies a typed parameter mutation through the productio
     domains.set_state_inspector(&state_inspector);
     InspectServerFixture fixture;
     fixture.handler = [&](const InspectorMessage& request) { return domains.handle(request); };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
 
-    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+    auto result = run_pulp({"inspect", "--port", fixture.port_string(),
+                            "--session", record.session_id,
+                            "--instance", record.instance_id,
+                            "--publication", record.publication_id, "--command",
                             "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
                            10000);
 
@@ -464,7 +785,10 @@ TEST_CASE("pulp inspect applies a typed parameter mutation through the productio
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
           R"({"id":7,"value":0.75})");
 
-    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+    result = run_pulp({"inspect", "--port", fixture.port_string(),
+                       "--session", record.session_id,
+                       "--instance", record.instance_id,
+                       "--publication", record.publication_id, "--command",
                        "State.setParameter", "--params", R"({"id":"gain","value":0.5})"},
                       10000);
     REQUIRE_FALSE(result.timed_out);
@@ -487,9 +811,14 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
             return make_error(request.id, "server rejected request");
         return make_response(request.id, R"({"file":true,"value":42})");
     };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
 
     auto written = run_pulp({"inspect",
                              "--port", fixture.port_string(),
+                             "--session", record.session_id,
+                             "--instance", record.instance_id,
+                             "--publication", record.publication_id,
                              "--command", "State.getParameters",
                              "--output", out.string()},
                             10000);
@@ -498,10 +827,7 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
     INFO("stderr: " << written.stderr_output);
     REQUIRE_FALSE(written.timed_out);
     REQUIRE(written.exit_code == 0);
-    REQUIRE(written.stderr_output.find("Connecting to 127.0.0.1:" +
-                                       fixture.port_string()) !=
-            std::string::npos);
-    REQUIRE(written.stderr_output.find("Connected to inspector") !=
+    REQUIRE(written.stderr_output.find("Connected to inspector session") !=
             std::string::npos);
     REQUIRE(written.stdout_output.find("Written to " + out.string()) !=
             std::string::npos);
@@ -513,6 +839,9 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
 
     auto failed = run_pulp({"inspect",
                             "--port", fixture.port_string(),
+                            "--session", record.session_id,
+                            "--instance", record.instance_id,
+                            "--publication", record.publication_id,
                             "--command", "Inspector.getInfo",
                             "--output", (fixture.temp / "failed.json").string()},
                            10000);
@@ -568,8 +897,8 @@ TEST_CASE("pulp inspect validates missing values before connecting",
         run_pulp({"inspect", "--port", "1", "--command", "Motion.snapshot"},
                  10000);
     REQUIRE_FALSE(unmatched_port.timed_out);
-    REQUIRE(unmatched_port.exit_code == 1);
-    REQUIRE(unmatched_port.stderr_output.find("requested port 1") !=
+    REQUIRE(unmatched_port.exit_code == 2);
+    REQUIRE(unmatched_port.stderr_output.find("invalid_arguments") !=
             std::string::npos);
     REQUIRE(unmatched_port.stdout_output.empty());
 
@@ -578,6 +907,6 @@ TEST_CASE("pulp inspect validates missing values before connecting",
     REQUIRE_FALSE(unpaired_publication.timed_out);
     REQUIRE(unpaired_publication.exit_code == 2);
     REQUIRE(unpaired_publication.stderr_output.find(
-                "--publication requires --session and --instance") !=
+                "live inspect operations require --session, --instance, and --publication") !=
             std::string::npos);
 }

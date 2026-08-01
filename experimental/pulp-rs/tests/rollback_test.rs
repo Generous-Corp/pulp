@@ -154,6 +154,44 @@ fn unknown_subcommand_falls_through_to_pulp_cpp_when_on_path() {
     );
 }
 
+/// Model the release archive after extraction: `pulp` and `pulp-cpp` are
+/// siblings, the invocation starts outside every Pulp checkout, and PATH does
+/// not contain either binary. Inspector delegation must still resolve from the
+/// running Rust executable rather than cwd or an inherited developer PATH.
+#[cfg(unix)]
+#[test]
+fn installed_inspect_falls_through_to_sibling_from_a_scratch_cwd() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let install = tempfile::tempdir().expect("install tempdir");
+    let scratch = tempfile::tempdir().expect("scratch tempdir");
+    let source_pulp = assert_cmd::cargo::cargo_bin(BIN_NAME);
+    let installed_pulp = install.path().join(BIN_NAME);
+    fs::copy(source_pulp, &installed_pulp).expect("copy installed pulp");
+
+    let sibling = install.path().join("pulp-cpp");
+    fs::write(&sibling, stub_script_body()).expect("write sibling pulp-cpp");
+    let mut perms = fs::metadata(&sibling).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&sibling, perms).unwrap();
+
+    let output = std::process::Command::new(&installed_pulp)
+        .args(["inspect", "profiles", "--json"])
+        .current_dir(scratch.path())
+        .env("PATH", scratch.path())
+        .env_remove("PULP_USE_CPP")
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .output()
+        .expect("run installed pulp");
+
+    assert_eq!(output.status.code(), Some(42));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("utf8").trim(),
+        "inspect profiles --json"
+    );
+}
+
 #[test]
 fn kit_and_content_help_flags_fall_through_to_pulp_cpp() {
     let td = tempfile::tempdir().expect("tempdir");

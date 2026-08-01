@@ -55,6 +55,8 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
 target_link_libraries(pulp-test-mcp-server PRIVATE
     pulp-mcp-core
+    pulp::inspect-runtime
+    pulp::inspect-publication
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-mcp-server PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

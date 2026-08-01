@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use crate::error::{CliError, Result};
+use crate::fallthrough::{BinaryResolver, SystemResolver, DEFAULT_CPP_BINARY};
 
 pub(crate) const PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 
@@ -228,8 +229,9 @@ pub(crate) fn call_selected(
 ) -> Result<String> {
     let bin = resolve_binary().ok_or_else(|| {
         CliError::Other(format!(
-            "pulp {command_name}: could not find `pulp-cpp` or `pulp` binary \
-             on PATH (needed to talk to the inspector). Install / build the CLI first."
+            "pulp {command_name}: could not find the sibling `pulp-cpp` binary \
+             or resolve it on PATH (needed to talk to the inspector). \
+             Repair or reinstall the Pulp CLI."
         ))
     })?;
     let mut command = Command::new(&bin);
@@ -295,20 +297,11 @@ pub(crate) fn resolve_port_from_env(explicit: Option<u16>) -> Result<u16> {
 }
 
 fn resolve_binary() -> Option<PathBuf> {
-    if let Some(path) = crate::proc::which("pulp-cpp") {
-        return Some(path);
-    }
-    for candidate in [
-        "build/tools/cli/pulp-cpp",
-        "build/tools/cli/pulp",
-        "build/pulp",
-    ] {
-        let path = PathBuf::from(candidate);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    crate::proc::which("pulp")
+    let program = std::env::var("PULP_RS_CPP_BINARY")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_CPP_BINARY.to_owned());
+    SystemResolver.resolve(&program)
 }
 
 #[cfg(test)]

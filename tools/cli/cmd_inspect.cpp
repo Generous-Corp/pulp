@@ -1,130 +1,57 @@
-// cmd_inspect.cpp — authenticated client for explicitly enabled inspector sessions
+// cmd_inspect.cpp — CLI orchestration for authenticated inspector sessions
 
-#include <pulp/inspect/client.hpp>
-#include <pulp/inspect/discovery.hpp>
+#include "cmd_inspect_support.hpp"
 
-#include <choc/text/choc_JSON.h>
-
-#include <algorithm>
-#include <charconv>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <system_error>
 #include <vector>
 
-static std::string inspect_trim(const std::string& value) {
-    const auto start = value.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return {};
-    const auto end = value.find_last_not_of(" \t\r\n");
-    return value.substr(start, end - start + 1);
-}
-
-static bool g_inspect_color = true;
-static std::string ic_bold()  { return g_inspect_color ? "\033[1m"  : ""; }
-static std::string ic_cyan()  { return g_inspect_color ? "\033[36m" : ""; }
-static std::string ic_green() { return g_inspect_color ? "\033[32m" : ""; }
-static std::string ic_red()   { return g_inspect_color ? "\033[31m" : ""; }
-static std::string ic_reset() { return g_inspect_color ? "\033[0m"  : ""; }
-
-namespace {
-
 using namespace pulp::inspect;
-
-bool require_arg_value(const std::vector<std::string>& args,
-                       std::size_t& index,
-                       const char* flag,
-                       std::string& output) {
-    if (index + 1 >= args.size()) {
-        std::cerr << "Error: " << flag << " requires a value\n";
-        return false;
-    }
-    output = args[++index];
-    if (output.empty()) {
-        std::cerr << "Error: " << flag << " requires a non-empty value\n";
-        return false;
-    }
-    return true;
-}
-
-bool parse_port(std::string_view text, int& output) {
-    int value = 0;
-    const auto [end, error] =
-        std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() ||
-        value <= 0 || value > 65535)
-        return false;
-    output = value;
-    return true;
-}
-
-std::string endpoint_host(std::string_view endpoint) {
-    const auto separator = endpoint.rfind(':');
-    return separator == std::string_view::npos
-               ? std::string(endpoint)
-               : std::string(endpoint.substr(0, separator));
-}
-
-int endpoint_port(std::string_view endpoint) {
-    const auto separator = endpoint.rfind(':');
-    int value = 0;
-    if (separator == std::string_view::npos ||
-        !parse_port(endpoint.substr(separator + 1), value))
-        return 0;
-    return value;
-}
-
-void print_error(const InspectorMessage& response) {
-    std::cerr << "Error";
-    if (!response.error_code.empty())
-        std::cerr << " [" << response.error_code << "]";
-    std::cerr << ": " << response.params_json << "\n";
-    if (!response.error_data_json.empty() &&
-        response.error_data_json != "{}")
-        std::cerr << response.error_data_json << "\n";
-}
-
-std::string attach_publication_id(
-    std::string response_json,
-    std::string_view publication_id) {
-    try {
-        auto value = choc::json::parse(response_json);
-        if (!value.isObject())
-            return response_json;
-        value.addMember(
-            "publicationId",
-            choc::value::createString(publication_id));
-        return choc::json::toString(value, false);
-    } catch (...) {
-        return response_json;
-    }
-}
-
-} // namespace
+using namespace pulp::cli::inspect_detail;
 
 int cmd_inspect(const std::vector<std::string>& args) {
-    std::string host;
-    int port = 0;
-    std::string session_id;
-    std::string instance_id;
-    std::string publication_id;
+    std::string action;
+    InspectorClientSelection selection;
     std::string command;
     std::string params = "{}";
     std::string output_file;
+    std::string parameter_id_text;
+    std::string parameter_value_text;
     bool params_provided = false;
+    bool normalized = false;
+    bool json = false;
+    for (const auto& arg : args) {
+        if (arg == "--json") {
+            json = true;
+            break;
+        }
+    }
 
     for (std::size_t index = 0; index < args.size(); ++index) {
         const auto& arg = args[index];
         if (arg == "--help" || arg == "-h") {
             std::cout
                 << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
-                << "Usage: pulp inspect [options]\n\n"
+                << "Usage: pulp inspect [profiles|list] [options]\n"
+                << "       pulp inspect [capabilities|doctor] --session ID "
+                   "--instance ID --publication ID [options]\n"
+                << "       pulp inspect set-parameter --id ID --value VALUE "
+                   "--session ID --instance ID --publication ID [options]\n"
+                << "       pulp inspect --command METHOD --session ID "
+                   "--instance ID --publication ID [options]\n"
+                << "       pulp inspect --session ID --instance ID "
+                   "--publication ID [options]\n\n"
                 << "Options:\n"
+                << "  --json            Emit stable machine-readable JSON\n"
                 << "  --session ID      Select the exact live session\n"
                 << "  --instance ID     Select the exact instance within a session\n"
                 << "  --publication ID  Pin one non-reusable publication generation\n"
                 << "  --host HOST       Filter discovery by host (loopback only)\n"
                 << "  --port PORT       Filter discovery by port; never bypasses auth\n"
+                << "  --id ID           Numeric parameter ID for set-parameter\n"
+                << "  --value VALUE     Finite parameter value for set-parameter\n"
+                << "  --normalized      Interpret --value in normalized [0,1] domain\n"
                 << "  --command METHOD  Send one command and print its result\n"
                 << "  --params JSON     JSON params for --command (default: {})\n"
                 << "  --output FILE     Write the one-shot result to FILE\n\n"
@@ -135,153 +62,359 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "separate build and runtime opt-in.\n";
             return 0;
         }
-        if (arg == "--host") {
-            if (!require_arg_value(args, index, "--host", host)) return 2;
+        if (arg == "profiles" || arg == "list" ||
+            arg == "capabilities" || arg == "doctor" ||
+            arg == "set-parameter") {
+            if (!action.empty()) {
+                print_cli_error(json, "invalid_arguments",
+                                "inspect accepts one subcommand");
+                return 2;
+            }
+            action = arg;
+        } else if (arg == "--json") {
+            continue;
+        } else if (arg == "--host") {
+            if (!require_arg_value(
+                    args, index, "--host", selection.host, json))
+                return 2;
         } else if (arg == "--port") {
             std::string text;
-            if (!require_arg_value(args, index, "--port", text)) return 2;
-            if (!parse_port(text, port)) {
-                std::cerr << "Error: invalid --port value: " << text << "\n";
+            if (!require_arg_value(args, index, "--port", text, json))
+                return 2;
+            if (!parse_port(text, selection.port)) {
+                print_cli_error(json, "invalid_arguments",
+                                "invalid --port value: " + text);
                 return 2;
             }
         } else if (arg == "--session") {
-            if (!require_arg_value(args, index, "--session", session_id))
+            if (!require_arg_value(args, index, "--session",
+                                   selection.session_id, json))
                 return 2;
         } else if (arg == "--instance") {
-            if (!require_arg_value(args, index, "--instance", instance_id))
+            if (!require_arg_value(args, index, "--instance",
+                                   selection.instance_id, json))
                 return 2;
         } else if (arg == "--publication") {
             if (!require_arg_value(
-                    args, index, "--publication", publication_id))
+                    args, index, "--publication", selection.publication_id,
+                    json))
                 return 2;
+        } else if (arg == "--id") {
+            if (!require_arg_value(
+                    args, index, "--id", parameter_id_text, json))
+                return 2;
+        } else if (arg == "--value") {
+            if (!require_arg_value(
+                    args, index, "--value", parameter_value_text, json))
+                return 2;
+        } else if (arg == "--normalized") {
+            normalized = true;
         } else if (arg == "--command") {
-            if (!require_arg_value(args, index, "--command", command)) return 2;
+            if (!require_arg_value(
+                    args, index, "--command", command, json))
+                return 2;
         } else if (arg == "--params") {
-            if (!require_arg_value(args, index, "--params", params)) return 2;
+            if (!require_arg_value(args, index, "--params", params, json))
+                return 2;
             params_provided = true;
         } else if (arg == "--output") {
-            if (!require_arg_value(args, index, "--output", output_file))
+            if (!require_arg_value(
+                    args, index, "--output", output_file, json))
                 return 2;
         } else {
-            std::cerr << "Error: unknown inspect argument: " << arg << "\n"
-                      << "Run `pulp inspect --help` for usage.\n";
+            print_cli_error(json, "invalid_arguments",
+                            "unknown inspect argument: " + arg);
             return 2;
         }
     }
 
+    if (!action.empty() && !command.empty()) {
+        print_cli_error(
+            json, "invalid_arguments",
+            "inspect subcommands cannot be combined with --command");
+        return 2;
+    }
     if (!output_file.empty() && command.empty()) {
-        std::cerr << "Error: --output requires --command\n";
+        print_cli_error(json, "invalid_arguments",
+                        "--output requires --command");
         return 2;
     }
     if (params_provided && command.empty()) {
-        std::cerr << "Error: --params requires --command\n";
+        print_cli_error(json, "invalid_arguments",
+                        "--params requires --command");
         return 2;
     }
-    if (!publication_id.empty() &&
-        (session_id.empty() || instance_id.empty())) {
-        std::cerr << "Error: --publication requires --session and --instance\n";
+    if (json && action.empty() && command.empty()) {
+        print_cli_error(
+            json, "invalid_arguments",
+            "--json requires a workflow subcommand or --command");
         return 2;
     }
-    if (!host.empty() && host != "127.0.0.1" && host != "localhost") {
-        std::cerr << "Error: inspector sessions are loopback-only\n";
+    if (action == "profiles" &&
+        (!selection.host.empty() || selection.port != 0 ||
+         !selection.session_id.empty() || !selection.instance_id.empty() ||
+         !selection.publication_id.empty())) {
+        print_cli_error(json, "invalid_arguments",
+                        "profiles does not accept live-session selectors");
         return 2;
     }
-    if (host == "localhost")
-        host = "127.0.0.1";
-
-    InspectorDiscoveryReader discovery;
-    auto records = discovery.list();
-    records.erase(
-        std::remove_if(records.begin(), records.end(), [&](const auto& record) {
-            return (!host.empty() && endpoint_host(record.endpoint) != host) ||
-                   (port != 0 && endpoint_port(record.endpoint) != port);
-        }),
-        records.end());
-    std::string selection_error;
-    const auto selected = select_inspector_session(
-        records, session_id, instance_id, publication_id, &selection_error);
-    if (!selected) {
-        std::cerr << "Error: " << selection_error;
-        if (!host.empty() || port != 0 || !session_id.empty() ||
-            !instance_id.empty() || !publication_id.empty()) {
-            std::cerr << " (requested";
-            if (!host.empty()) std::cerr << " host " << host;
-            if (port != 0) std::cerr << " port " << port;
-            if (!session_id.empty()) std::cerr << " session " << session_id;
-            if (!instance_id.empty())
-                std::cerr << " instance " << instance_id;
-            if (!publication_id.empty())
-                std::cerr << " publication " << publication_id;
-            std::cerr << ")";
+    const bool parameter_options_present = !parameter_id_text.empty() ||
+                                           !parameter_value_text.empty() ||
+                                           normalized;
+    if (parameter_options_present && action != "set-parameter") {
+        print_cli_error(json, "invalid_arguments",
+                        "--id, --value, and --normalized require set-parameter");
+        return 2;
+    }
+    std::int64_t parameter_id = 0;
+    double parameter_value = 0.0;
+    if (action == "set-parameter") {
+        if (parameter_id_text.empty() || parameter_value_text.empty()) {
+            print_cli_error(json, "invalid_arguments",
+                            "set-parameter requires --id and --value");
+            return 2;
         }
-        std::cerr << "\n";
-        return 1;
+        if (!parse_parameter_id(parameter_id_text, parameter_id)) {
+            print_cli_error(json, "invalid_arguments",
+                            "invalid --id value: " + parameter_id_text);
+            return 2;
+        }
+        if (!parse_parameter_value(parameter_value_text, parameter_value)) {
+            print_cli_error(json, "invalid_arguments",
+                            "invalid --value: " + parameter_value_text);
+            return 2;
+        }
+        if (normalized && (parameter_value < 0.0 || parameter_value > 1.0)) {
+            print_cli_error(json, "invalid_arguments",
+                            "normalized --value must be from 0 to 1");
+            return 2;
+        }
+    }
+    if (action == "profiles") {
+        const auto payload = profiles_json();
+        if (json) {
+            std::cout << payload << "\n";
+        } else {
+            std::cout << "Inspector profiles:\n";
+            for (const auto profile : {InspectorProfile::Off,
+                                       InspectorProfile::Observe,
+                                       InspectorProfile::Develop,
+                                       InspectorProfile::Custom}) {
+                std::cout << "  " << profile_id(profile);
+                const auto capabilities = profile_capabilities(profile);
+                if (profile == InspectorProfile::Custom)
+                    std::cout << " (explicit capability list)";
+                else
+                    std::cout << " (" << capabilities.size()
+                              << " capabilities)";
+                std::cout << "\n";
+            }
+        }
+        return 0;
     }
 
+    InspectorClientFailure failure;
+    if (action == "list") {
+        const auto records = discover_inspector_sessions(selection, &failure);
+        if (!failure.code.empty()) {
+            print_failure(failure, json);
+            return 2;
+        }
+        if (json) {
+            auto payload = choc::value::createObject("");
+            payload.addMember(
+                "schemaVersion",
+                choc::value::createString("pulp.inspect.sessions.v1"));
+            auto sessions = choc::value::createArray(
+                static_cast<std::uint32_t>(records.size()),
+                [&records] (std::uint32_t index) {
+                    return discovery_json(records[index]);
+                });
+            payload.addMember("sessions", std::move(sessions));
+            std::cout << choc::json::toString(payload, false) << "\n";
+        } else if (records.empty()) {
+            std::cout << "No live inspector sessions.\n";
+        } else {
+            std::cout << "SESSION  INSTANCE  PUBLICATION  PLUGIN  PROFILE  ENDPOINT\n";
+            for (const auto& record : records) {
+                std::cout << record.session_id << "  " << record.instance_id
+                          << "  " << record.publication_id << "  "
+                          << record.plugin_id << "  "
+                          << profile_id(record.profile) << "  "
+                          << record.endpoint << "\n";
+            }
+        }
+        return 0;
+    }
+
+    if (selection.session_id.empty() || selection.instance_id.empty() ||
+        selection.publication_id.empty()) {
+        print_cli_error(
+            json, "invalid_arguments",
+            "live inspect operations require --session, --instance, and "
+            "--publication");
+        return 2;
+    }
+
+    auto client = InspectorClientSession::connect(selection, &failure);
+    if (!client) {
+        print_failure(failure, json);
+        return failure.code == "invalid_selector" ? 2 : 1;
+    }
+    const auto& selected = client->record();
     auto& status = command.empty() ? std::cout : std::cerr;
-    status << "Found inspector session " << selected->session_id << "\n"
-           << "Connecting to " << selected->endpoint << "...\n";
-    InspectorClient client;
-    if (command.empty()) {
-        client.set_event_handler([](const InspectorMessage& event) {
-            std::cout << ic_cyan() << "← " << event.method << ic_reset()
+    if (!json)
+        status << "Connected to inspector session " << selected.session_id
+               << " (instance " << selected.instance_id << ")\n";
+
+    if (action == "capabilities")
+        command = std::string(methods::kSessionGetCapabilities);
+
+    if (action == "set-parameter") {
+        const auto response = client->set_parameter_typed(
+            parameter_id, parameter_value, normalized);
+        if (!response) {
+            print_failure(response.failure, json);
+            return 1;
+        }
+        const auto result = parse_json_object(
+            response.response_json, methods::kStateSetParameter, json);
+        if (!result)
+            return 1;
+        if (json) {
+            auto payload = choc::value::createObject("");
+            payload.addMember(
+                "schemaVersion",
+                choc::value::createString(
+                    "pulp.inspect.set-parameter.v1"));
+            payload.addMember("session", discovery_json(selected));
+            payload.addMember("parameterId", parameter_id);
+            payload.addMember("value", parameter_value);
+            payload.addMember("normalized", normalized);
+            payload.addMember("result", *result);
+            std::cout << choc::json::toString(payload, false) << "\n";
+        } else {
+            std::cout << "Set parameter " << parameter_id << " to "
+                      << parameter_value
+                      << (normalized ? " (normalized)" : " (plain)")
                       << "\n";
-            if (!event.params_json.empty() && event.params_json != "{}")
-                std::cout << "  " << event.params_json << "\n";
-        });
+        }
+        return 0;
     }
-    if (!client.connect(*selected, discovery)) {
-        std::cerr << "Error: authentication or connection failed for session "
-                  << selected->session_id << "\n";
-        return 1;
+
+    if (action == "doctor") {
+        const auto capabilities = client->read_capabilities();
+        if (!capabilities) {
+            print_failure(capabilities.failure, json);
+            return 1;
+        }
+        const auto context = client->read_agent_context();
+        if (!context) {
+            print_failure(context.failure, json);
+            return 1;
+        }
+        const auto capability_policy = parse_json_object(
+            capabilities.response_json, methods::kSessionGetCapabilities,
+            json);
+        const auto agent_context = parse_json_object(
+            context.response_json, methods::kInspectorGetAgentContext, json);
+        if (!capability_policy || !agent_context)
+            return 1;
+        if (json) {
+            auto payload = choc::value::createObject("");
+            payload.addMember(
+                "schemaVersion",
+                choc::value::createString("pulp.inspect.doctor.v1"));
+            payload.addMember("ready", true);
+            payload.addMember("session", discovery_json(selected));
+            payload.addMember("capabilities", *capability_policy);
+            payload.addMember("agentContext", *agent_context);
+            std::cout << choc::json::toString(payload, false) << "\n";
+        } else {
+            std::cout << color_green() << "✓" << color_reset()
+                      << " authenticated, capability policy available, "
+                         "agent context available\n";
+        }
+        return 0;
     }
-    status << "  " << ic_green() << "✓" << ic_reset()
-           << " Connected to inspector\n";
 
     if (!command.empty()) {
-        const auto* descriptor = find_inspector_method(command);
-        const bool needs_controller =
-            descriptor &&
-            descriptor->kind == InspectorMethodKind::Request &&
-            capability_requires_controller_lease(descriptor->capability) &&
-            command != methods::kSessionAcquireController &&
-            command != methods::kSessionRenewController &&
-            command != methods::kSessionReleaseController;
-        bool controller_acquired = false;
-        if (needs_controller) {
-            const auto lease =
-                client.request(std::string(methods::kSessionAcquireController));
-            if (lease.is_error) {
-                print_error(lease);
+        if (action == "capabilities") {
+            const auto response = client->read_capabilities();
+            if (!response) {
+                print_failure(response.failure, json);
                 return 1;
             }
-            controller_acquired = true;
+            auto response_json = response.response_json;
+            const auto policy = parse_json_object(
+                response_json, methods::kSessionGetCapabilities, json);
+            if (!policy)
+                return 1;
+            if (json) {
+                auto payload = choc::value::createObject("");
+                payload.addMember(
+                    "schemaVersion",
+                    choc::value::createString(
+                        "pulp.inspect.capabilities.v1"));
+                payload.addMember("session", discovery_json(selected));
+                payload.addMember("policy", *policy);
+                response_json = choc::json::toString(payload, false);
+            } else {
+                std::cout << "Inspector capabilities for "
+                          << selected.session_id << "/"
+                          << selected.instance_id << "\n"
+                          << "  publication: "
+                          << selected.publication_id << "\n"
+                          << "  profile: "
+                          << profile_id(response.value->profile)
+                          << "\n";
+                print_capability_list(
+                    response.value->available, "available");
+                print_capability_list(
+                    response.value->effective, "effective");
+                return 0;
+            }
+            std::cout << response_json << "\n";
+            return 0;
         }
-        const auto response = client.request(command, params);
-        if (controller_acquired) {
-            // Release explicitly before this one-shot connection exits. EOF is
-            // still the fallback if the transport is already broken, but a
-            // following CLI/MCP mutation must not race asynchronous EOF
-            // processing for controller ownership.
-            (void)client.request(
-                std::string(methods::kSessionReleaseController));
-        }
+
+        const auto response = client->request_controlled(command, params);
         if (response.is_error) {
-            print_error(response);
+            print_error(response, json);
             return 1;
         }
         auto response_json = response.params_json;
         if (command == methods::kSessionGetCapabilities) {
             response_json = attach_publication_id(
-                std::move(response_json), selected->publication_id);
+                std::move(response_json), selected.publication_id);
+        }
+        if (json && action.empty()) {
+            try {
+                (void)choc::json::parse(response_json);
+            } catch (...) {
+                print_cli_error(json, "invalid_response",
+                                command + " returned invalid JSON");
+                return 1;
+            }
         }
         if (!output_file.empty()) {
             std::ofstream output(output_file, std::ios::trunc);
             if (!output || !(output << response_json)) {
-                std::cerr << "Error: could not write " << output_file << "\n";
+                print_cli_error(json, "output_write_failed",
+                                "could not write " + output_file);
                 return 1;
             }
-            std::cout << "Written to " << output_file << "\n";
+            if (json) {
+                auto payload = choc::value::createObject("");
+                payload.addMember(
+                    "schemaVersion",
+                    choc::value::createString("pulp.inspect.output.v1"));
+                payload.addMember(
+                    "outputFile", choc::value::createString(output_file));
+                std::cout << choc::json::toString(payload, false) << "\n";
+            } else {
+                std::cout << "Written to " << output_file << "\n";
+            }
         } else {
             std::cout << response_json << "\n";
         }
@@ -289,13 +422,20 @@ int cmd_inspect(const std::vector<std::string>& args) {
     }
 
     std::cout << "Inspector REPL. Enter METHOD [JSON_PARAMS], or 'quit'.\n\n";
+    client->set_event_handler([](const InspectorMessage& event) {
+        std::cout << color_cyan() << "\xe2\x86\x90" << color_reset() << " "
+                  << event.method << "\n";
+        if (!event.params_json.empty() && event.params_json != "{}")
+            std::cout << "  " << event.params_json << "\n";
+        std::cout.flush();
+    });
     std::string line;
     while (true) {
-        std::cout << ic_bold() << "inspect> " << ic_reset();
+        std::cout << color_bold() << "inspect> " << color_reset();
         std::cout.flush();
         if (!std::getline(std::cin, line))
             break;
-        line = inspect_trim(line);
+        line = trim(line);
         if (line.empty())
             continue;
         if (line == "quit" || line == "exit" || line == "q")
@@ -305,14 +445,15 @@ int cmd_inspect(const std::vector<std::string>& args) {
         if (const auto separator = line.find(' ');
             separator != std::string::npos) {
             method = line.substr(0, separator);
-            request_params = inspect_trim(line.substr(separator + 1));
+            request_params = trim(line.substr(separator + 1));
         }
-        const auto response = client.request(method, request_params);
+        const auto response = client->request_controlled(
+            method, request_params);
         if (response.is_error) {
-            std::cout << ic_red() << "✗ [" << response.error_code << "] "
-                      << response.params_json << ic_reset() << "\n";
+            std::cout << color_red() << "✗ [" << response.error_code << "] "
+                      << response.params_json << color_reset() << "\n";
         } else {
-            std::cout << ic_green() << "✓" << ic_reset() << " "
+            std::cout << color_green() << "✓" << color_reset() << " "
                       << response.params_json << "\n";
         }
     }

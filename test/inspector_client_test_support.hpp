@@ -48,6 +48,10 @@ using pulp::inspect::InspectorDiscoveryRecord;
 using pulp::inspect::InspectorMessage;
 using pulp::inspect::InspectorPolicyConfig;
 using pulp::inspect::InspectorProfile;
+using pulp::inspect::InspectorDomainPublicationBindings;
+using pulp::inspect::InspectorPublicationBinding;
+using pulp::inspect::InspectorPublicationBindingRegistration;
+using pulp::inspect::InspectorPublicationLease;
 using pulp::inspect::InspectorServer;
 using pulp::inspect::InspectorServerConfig;
 using pulp::inspect::InspectorSession;
@@ -199,6 +203,23 @@ public:
 };
 
 struct AuthenticatedFixture {
+    struct TestPublicationLease final : InspectorPublicationLease {};
+    struct TestPublicationBinding final : InspectorPublicationBinding {
+        std::unique_ptr<InspectorPublicationLease> bind_publication(
+            const InspectorDiscoveryRecord&) override {
+            return std::make_unique<TestPublicationLease>();
+        }
+    };
+    struct TestDomainBindings final : InspectorDomainPublicationBindings {
+        std::shared_ptr<InspectorPublicationBinding> trace =
+            std::make_shared<TestPublicationBinding>();
+
+        std::vector<InspectorPublicationBindingRegistration>
+        publication_bindings() const override {
+            return {{InspectorCapability::TraceSessionControl, trace}};
+        }
+    } domain_bindings;
+
     TemporaryDirectory temporary;
     InspectorDiscoveryPublisher publisher{temporary.path};
     InspectorDiscoveryReader reader{temporary.path};
@@ -217,6 +238,9 @@ struct AuthenticatedFixture {
                   InspectorCapability::StateRead,
                   InspectorCapability::StateWrite,
                   InspectorCapability::CaptureImage,
+                  InspectorCapability::DiagnosticsRead,
+                  InspectorCapability::TraceControl,
+                  InspectorCapability::TraceSessionControl,
               };
               return result;
           }()),
@@ -257,6 +281,7 @@ struct AuthenticatedFixture {
         record.plugin_id = session.info().plugin_id;
         InspectorServerConfig config{
             &session, &publisher, record, *token};
+        config.domain_bindings = &domain_bindings;
         config.main_thread_rpc = make_inline_test_main_thread_rpc();
         REQUIRE(start_test_inspector_server(server, std::move(config)));
     }

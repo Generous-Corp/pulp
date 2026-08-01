@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -18,6 +19,45 @@ namespace pulp_mcp {
 struct InspectorMcpToolDescriptor {
     std::string_view name;
     std::string_view method;
+    std::string_view description;
+    enum class Kind {
+        list,
+        capabilities,
+        context,
+        raw,
+        parameters,
+        set_parameter,
+        screenshot,
+        evaluate,
+        motion_start,
+        motion_stop,
+        motion_scrub,
+        trace_start,
+        trace_query,
+        trace_explain,
+    } kind = Kind::raw;
+    std::uint32_t allowed_fields = 0;
+    std::uint32_t required_fields = 0;
+    bool exact_selector = true;
+};
+
+enum InspectorMcpField : std::uint32_t {
+    inspector_field_none = 0,
+    inspector_field_id = 1u << 0,
+    inspector_field_value = 1u << 1,
+    inspector_field_normalized = 1u << 2,
+    inspector_field_expression = 1u << 3,
+    inspector_field_view_name = 1u << 4,
+    inspector_field_metrics = 1u << 5,
+    inspector_field_fps = 1u << 6,
+    inspector_field_trace_id = 1u << 7,
+    inspector_field_frame = 1u << 8,
+    inspector_field_categories = 1u << 9,
+    inspector_field_ring_mb = 1u << 10,
+    inspector_field_sql = 1u << 11,
+    inspector_field_preset = 1u << 12,
+    inspector_field_format = 1u << 13,
+    inspector_field_question = 1u << 14,
 };
 
 std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry();

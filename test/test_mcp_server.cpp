@@ -918,7 +918,7 @@ TEST_CASE("pulp_inspect_set_param uses live discovery instead of a CLI delegate"
         "60", "pulp_inspect_set_param",
         R"({"id":0,"value":1.0,"normalized":true,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(response, "invalid_selector");
+    require_contains(response, "session_selection_failed");
     require_contains(response, R"JSON("structuredContent")JSON");
     REQUIRE(response.find("fake-inspector") == std::string::npos);
 #endif
@@ -2451,6 +2451,63 @@ TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
     require_contains(response, R"JSON("ok": false)JSON");
     require_contains(response, "bundle path does not exist");
     REQUIRE(response.find(R"JSON("code":-32601)JSON") == std::string::npos);
+}
+
+TEST_CASE("MCP live registry is the single method capability and schema inventory",
+          "[mcp][tools][inspect][registry]") {
+    using namespace pulp::inspect;
+    const std::pair<std::string_view, std::string_view> expected[] = {
+        {"pulp_inspect_list", ""},
+        {"pulp_inspect_capabilities", methods::kSessionGetCapabilities},
+        {"pulp_inspect_context", methods::kInspectorGetAgentContext},
+        {"pulp_inspect_dom", methods::kDOMGetDocument},
+        {"pulp_inspect_params", methods::kStateGetParameters},
+        {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
+        {"pulp_inspect_set_param", methods::kStateSetParameter},
+        {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
+        {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
+        {"pulp_inspect_performance", methods::kPerfGetMetrics},
+        {"pulp_inspect_audio", methods::kAudioGetConfig},
+        {"pulp_motion_start_trace", methods::kMotionStartTrace},
+        {"pulp_motion_stop_trace", methods::kMotionStopTrace},
+        {"pulp_motion_snapshot", methods::kMotionSnapshot},
+        {"pulp_motion_list_traces", methods::kMotionListTraces},
+        {"pulp_motion_scrub_to", methods::kMotionScrubTo},
+        {"pulp_motion_play", methods::kMotionPlay},
+        {"pulp_motion_pause", methods::kMotionPause},
+        {"pulp_motion_enable_cost", methods::kMotionEnableCost},
+        {"pulp_motion_disable_cost", methods::kMotionDisableCost},
+        {"pulp_trace_start", methods::kTraceStartSession},
+        {"pulp_trace_stop", methods::kTraceStopSession},
+        {"pulp_trace_snapshot", methods::kTraceSnapshot},
+        {"pulp_trace_query", methods::kTraceQuery},
+        {"pulp_trace_explain", methods::kTraceExplain},
+    };
+    const auto registry = inspector_mcp_tool_registry();
+    REQUIRE(registry.size() == std::size(expected));
+    const auto tools = tools_list_json();
+    for (std::size_t index = 0; index < registry.size(); ++index) {
+        const auto& descriptor = registry[index];
+        CAPTURE(index, descriptor.name, descriptor.method);
+        REQUIRE(descriptor.name == expected[index].first);
+        REQUIRE(descriptor.method == expected[index].second);
+        REQUIRE(find_inspector_mcp_tool(descriptor.name) == &descriptor);
+        require_contains(tools, "\"name\":\"" + std::string(descriptor.name) + "\"");
+        if (descriptor.method.empty())
+            continue;
+        const auto* method = find_inspector_method(descriptor.method);
+        REQUIRE(method != nullptr);
+        REQUIRE(method->kind == InspectorMethodKind::Request);
+        const auto capability = capability_id(method->capability);
+        REQUIRE(inspector_mcp_tool_capability(descriptor) == capability);
+        require_contains(tools, "\"description\":\"Inspector method " +
+                                    std::string(descriptor.method) +
+                                    " (capability " + std::string(capability) + "). ");
+    }
+    REQUIRE(find_inspector_mcp_tool("pulp_inspect_missing") == nullptr);
+    auto unregistered = tools +
+        R"JSON({"name":"pulp_inspect_unregistered","description":""})JSON";
+    REQUIRE_FALSE(decorate_inspector_mcp_tool_descriptions(unregistered));
 }
 
 TEST_CASE("Every live inspector MCP schema accepts an exact publication selector",

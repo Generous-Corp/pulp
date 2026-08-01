@@ -40,7 +40,7 @@ fn expected_installed_banner() -> String {
     expected
         .replace(
             "  inspect        Connect to an explicitly hosted inspector fixture\n",
-            "  inspect        Connect to an explicitly hosted inspector fixture\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
+            "  inspect        Discover and control an enabled inspector session\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
         )
         .replace(
             "  import         Detect a framework project and emit a Pulp migration scaffold\n",

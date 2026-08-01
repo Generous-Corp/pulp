@@ -137,7 +137,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "inspect",
-        summary: "Connect to an explicitly hosted inspector fixture",
+        summary: "Discover and control an enabled inspector session",
     },
     Entry {
         name: "motion",

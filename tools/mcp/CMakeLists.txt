@@ -64,6 +64,7 @@ add_library(pulp-mcp-core STATIC
     mcp_kit_content_tools.cpp
     mcp_audio_tools.cpp
     mcp_inspect_tools.cpp
+    mcp_inspector_schema.cpp
     mcp_inspector_tools.cpp
     mcp_timeline_tools.cpp
     timeline_session_store.cpp)
