@@ -27,6 +27,14 @@ const char* validate_capture_backend_name(pulp::view::ScreenshotBackend backend)
     return "unknown";
 }
 
+fs::path inspector_evidence_root(fs::path artifact) {
+    if (artifact.extension() == ".app")
+        return artifact / "Contents/MacOS";
+    if (!fs::is_directory(artifact))
+        return artifact.parent_path();
+    return artifact;
+}
+
 } // namespace
 
 int cmd_validate(const std::vector<std::string>& args) {
@@ -130,13 +138,19 @@ int cmd_validate(const std::vector<std::string>& args) {
         bool inspector_evidence_complete = true;
         if (json_output || !report_path.empty()) {
             std::ostringstream report;
-            auto inspector_evidence_dir = fs::path(positional.front());
-            if (inspector_evidence_dir.extension() == ".app")
-                inspector_evidence_dir /= "Contents/MacOS";
-            else if (!fs::is_directory(inspector_evidence_dir))
-                inspector_evidence_dir = inspector_evidence_dir.parent_path();
-            const auto inspector_report =
-                pulp::cli::inspector_shipping::load_report(inspector_evidence_dir);
+            auto inspector_report = pulp::cli::inspector_shipping::empty_report();
+            if (std::find(targets.begin(), targets.end(), "standalone") !=
+                targets.end()) {
+                std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
+                artifact_reports.reserve(positional.size());
+                for (const auto& artifact : positional) {
+                    artifact_reports.push_back(
+                        pulp::cli::inspector_shipping::load_report(
+                            inspector_evidence_root(artifact)));
+                }
+                inspector_report = pulp::cli::inspector_shipping::combine_reports(
+                    std::move(artifact_reports));
+            }
             inspector_evidence_complete = inspector_report.complete;
             if (!inspector_evidence_complete)
                 std::cerr << "Inspector capability evidence incomplete: "

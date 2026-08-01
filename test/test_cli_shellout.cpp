@@ -3050,3 +3050,38 @@ TEST_CASE("pulp validate --json reports install_ready and a summary", "[cli][she
     REQUIRE(r.stdout_output.find("\"install_ready\":") != std::string::npos);
     REQUIRE(r.stdout_output.find("\"summary\":") != std::string::npos);
 }
+
+TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
+          "[cli][shellout][validate][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto dir = unique_temp_dir("pulp-validate-inspector-scope");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    auto auv3 = run_pulp({"validate", "--target", "auv3", "--json",
+                          (dir / "Missing.appex").string()});
+    REQUIRE_FALSE(auv3.timed_out);
+    REQUIRE(auv3.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
+    REQUIRE(auv3.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
+
+    const auto first = dir / "First.app" / "Contents/MacOS";
+    const auto second = dir / "Second.app" / "Contents/MacOS";
+    fs::create_directories(first);
+    fs::create_directories(second);
+    {
+        std::ofstream manifest(first / "First.inspector-capabilities.json");
+        manifest << R"({"product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    auto multiple = run_pulp({"validate", "--target", "standalone", "--json",
+                              (dir / "First.app").string(),
+                              (dir / "Second.app").string()});
+    REQUIRE_FALSE(multiple.timed_out);
+    REQUIRE(multiple.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(multiple.exit_code != 0);
+}
