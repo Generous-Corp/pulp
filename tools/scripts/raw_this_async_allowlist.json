@@ -48,8 +48,8 @@
     },
     {
       "path": "core/events/src/interprocess_connection.cpp",
-      "needle": "read_thread([this, impl, lifecycle, start_gate]",
-      "reason": "InterprocessConnection destruction interrupts IO and waits for every registered detached reader before member teardown; the self-destruction path returns immediately after each callback through AliveToken guards while shared implementation and lifecycle state keep final worker cleanup valid"
+      "needle": "read_thread([this, impl, lifecycle, start_gate",
+      "reason": "InterprocessConnection registers each detached reader in shared lifecycle state before releasing its start gate; destruction interrupts IO and waits for every registered reader before member teardown, while callback self-destruction exits through AliveToken guards and the captured shared implementation and lifecycle keep final worker cleanup valid"
     },
     {
       "path": "core/events/src/interprocess_connection.cpp",
