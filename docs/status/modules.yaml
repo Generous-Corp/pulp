@@ -21,7 +21,7 @@ modules:
     docs: reference/modules.md#timeline
 
   - name: timeline_editor
-    summary: The editor rung's interfaces starting with SequencerUiHost the whole coupling a timeline view has toward playback carrying value-copied playhead readings audition requests and emitted intents in document vocabulary only plus the pointer-neutral EditIntent verbs and their lowering onto ordinary transactions
+    summary: The editor rung's interfaces starting with SequencerUiHost the whole coupling a timeline view has toward playback carrying value-copied playhead readings audition requests and emitted intents in document vocabulary only plus the pointer-neutral EditIntent verbs and their lowering onto ordinary transactions plus a separate TrackEditIntent channel for arranging tracks
     status: experimental
     dependencies: [timeline, timebase]
     docs: reference/modules.md#timeline_editor
