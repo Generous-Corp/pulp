@@ -1787,16 +1787,25 @@ public:
     }
     /// Conic (CSS conic-gradient / Figma angular). cx/cy are fractions of the
     /// box; start_angle is in radians (0 = +x axis, matching the canvas API).
+    /// `sweep_turns` is how much of a full turn the stop list spans, with the
+    /// positions normalized to 0..1 across it. 1.0 is a plain conic-gradient;
+    /// anything smaller is a repeating-conic-gradient and tiles its band around
+    /// the circle.
     void set_background_gradient_conic(float cx, float cy, float start_angle,
                                         const std::vector<Color>& colors,
-                                        const std::vector<float>& positions) {
+                                        const std::vector<float>& positions,
+                                        float sweep_turns = 1.0f) {
         bg_gradient_colors_ = colors;
         bg_gradient_positions_ = positions;
         bg_gradient_type_ = 3;  // conic / sweep
         bg_grad_x0_ = cx; bg_grad_y0_ = cy;
         bg_grad_angle_ = start_angle;
+        bg_grad_sweep_turns_ = sweep_turns;
         invalidate_subtree_caches_up();
     }
+    /// Turns of the circle the conic stop list spans; < 1 means it repeats.
+    /// Exposed for tests/inspection.
+    float background_gradient_sweep_turns() const { return bg_grad_sweep_turns_; }
     void clear_background_gradient() { bg_gradient_type_ = 0; invalidate_subtree_caches_up(); }
     bool has_background_gradient() const { return bg_gradient_type_ > 0; }
     /// 0=none, 1=linear, 2=radial, 3=conic. Exposed for tests/inspection.
@@ -2204,6 +2213,7 @@ private:
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
     float bg_grad_radius_ = 0.7071f;  // radial: fraction of max(w,h)
     float bg_grad_angle_ = 0.0f;      // conic: start angle in radians
+    float bg_grad_sweep_turns_ = 1.0f;  // conic: turns the stop list spans
     std::vector<Color> bg_gradient_colors_;
     std::vector<float> bg_gradient_positions_;
     std::string background_repeat_;  ///< CSS background-repeat keyword (storage-only)
