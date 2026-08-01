@@ -7,7 +7,6 @@
 
 #include "inspector_connected_client.hpp"
 #include "inspector_publication.hpp"
-#include "inspector_server_test_access.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -19,11 +18,52 @@
 #include <utility>
 
 namespace pulp::inspect {
+
+struct InspectorServerShutdownFence::State {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::thread::id worker_thread;
+    std::atomic<bool> exited{false};
+};
+
+bool InspectorServerShutdownFence::ready() const noexcept {
+    if (!state_)
+        return true;
+    return state_->exited.load(std::memory_order_acquire);
+}
+
+bool InspectorServerShutdownFence::wait() const {
+    if (!state_)
+        return true;
+    std::unique_lock lock(state_->mutex);
+    if (!state_->exited.load(std::memory_order_acquire) &&
+        state_->worker_thread == std::this_thread::get_id()) {
+        return false;
+    }
+    state_->cv.wait(lock, [&] {
+        return state_->exited.load(std::memory_order_acquire);
+    });
+    return true;
+}
+
+bool InspectorServerShutdownFence::wait_for(
+    std::chrono::milliseconds timeout) const {
+    if (!state_)
+        return true;
+    std::unique_lock lock(state_->mutex);
+    if (!state_->exited.load(std::memory_order_acquire) &&
+        state_->worker_thread == std::this_thread::get_id()) {
+        return false;
+    }
+    return state_->cv.wait_for(lock, timeout, [&] {
+        return state_->exited.load(std::memory_order_acquire);
+    });
+}
+
 namespace {
 
 constexpr std::size_t kMaxJsonNestingDepth = 64;
 constexpr std::size_t kMinimumMessageBytes = 1024;
-std::atomic<std::size_t> active_cleanup_workers{0};
 
 class SensitiveTokenWiper {
 public:
@@ -76,14 +116,6 @@ bool json_nesting_is_bounded(std::string_view text) {
 
 } // namespace
 
-namespace detail {
-
-std::size_t active_inspector_cleanup_workers_for_testing() noexcept {
-    return active_cleanup_workers.load(std::memory_order_acquire);
-}
-
-} // namespace detail
-
 // ── Server implementation using InterprocessConnectionServer ────────────
 
 class InspectorServer::Impl
@@ -98,6 +130,8 @@ public:
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
     std::atomic<bool> cleanup_thread_claimed{false};
+    std::shared_ptr<InspectorServerShutdownFence::State> cleanup_fence =
+        std::make_shared<InspectorServerShutdownFence::State>();
     bool stopping_cleanup = false;
     bool stopping_callbacks = true;
     std::size_t active_callbacks = 0;
@@ -307,9 +341,9 @@ public:
             cannot_join = rpc && rpc->executing_on_current_thread();
         }
         if (cannot_join) {
-            // The worker closure retains Impl until cleanup_loop exits. This is
-            // an object-lifetime fence, not permission to unload a dynamic
-            // module containing this code before the worker count reaches zero.
+            // The worker closure retains Impl until cleanup_loop exits. Hosts
+            // use shutdown_fence(), not wrapper destruction alone, as the
+            // dynamic-module unload and attached-source teardown boundary.
             cleanup_thread.detach();
         } else {
             cleanup_thread.join();
@@ -317,13 +351,22 @@ public:
     }
 
     void cleanup_loop() {
-        active_cleanup_workers.fetch_add(1, std::memory_order_acq_rel);
+        const auto fence = cleanup_fence;
+        {
+            std::lock_guard lock(fence->mutex);
+            fence->worker_thread = std::this_thread::get_id();
+        }
         struct WorkerGuard {
+            std::shared_ptr<InspectorServerShutdownFence::State> fence;
             ~WorkerGuard() {
-                active_cleanup_workers.fetch_sub(
-                    1, std::memory_order_acq_rel);
+                {
+                    std::lock_guard lock(fence->mutex);
+                    fence->worker_thread = {};
+                    fence->exited.store(true, std::memory_order_release);
+                }
+                fence->cv.notify_all();
             }
-        } worker_guard;
+        } worker_guard{fence};
         std::unique_lock lock(clients_mutex);
         while (true) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
@@ -392,6 +435,10 @@ bool InspectorServer::start_authenticated(InspectorServerConfig config) {
 
 void InspectorServer::stop() {
     impl_->stop();
+}
+
+InspectorServerShutdownFence InspectorServer::shutdown_fence() const {
+    return InspectorServerShutdownFence(impl_->cleanup_fence);
 }
 
 void InspectorServer::broadcast(const InspectorMessage& event) {

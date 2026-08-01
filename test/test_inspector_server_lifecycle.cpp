@@ -1,11 +1,11 @@
 #include "inspector_client_test_support.hpp"
-#include "../inspect/src/inspector_server_test_access.hpp"
 
 #include <stdexcept>
 #include <vector>
 
 using pulp::inspect::InspectorPublicationBinding;
 using pulp::inspect::InspectorPublicationLease;
+using pulp::inspect::InspectorServerShutdownFence;
 
 namespace {
 
@@ -120,8 +120,10 @@ class ServerDestroyingPublicationBinding final
 public:
     std::unique_ptr<InspectorServer>* server = nullptr;
     std::thread::id test_thread;
+    InspectorServerShutdownFence shutdown_fence;
     std::atomic<bool> released{false};
     std::atomic<bool> released_off_test_thread{false};
+    std::atomic<bool> self_wait_refused{false};
 
     class Lease final : public InspectorPublicationLease {
     public:
@@ -131,6 +133,10 @@ public:
         ~Lease() override {
             owner_->released_off_test_thread.store(
                 std::this_thread::get_id() != owner_->test_thread,
+                std::memory_order_release);
+            owner_->self_wait_refused.store(
+                !owner_->shutdown_fence.wait_for(
+                    std::chrono::milliseconds(1)),
                 std::memory_order_release);
             if (owner_->server)
                 owner_->server->reset();
@@ -972,8 +978,6 @@ TEST_CASE("cleanup-worker publication loss can destroy the server owner",
 #ifdef _WIN32
     WARN("SKIPPED cleanup-worker ownership loss: lock-file corruption is POSIX-only");
 #else
-    const auto initial_workers =
-        pulp::inspect::detail::active_inspector_cleanup_workers_for_testing();
     TemporaryDirectory temporary;
     InspectorDiscoveryPublisher publisher(temporary.path);
     InspectorPolicyConfig policy;
@@ -998,17 +1002,9 @@ TEST_CASE("cleanup-worker publication loss can destroy the server owner",
         binding,
     }});
     auto server = std::make_unique<InspectorServer>();
-    const auto worker_start_deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    while (pulp::inspect::detail::
-               active_inspector_cleanup_workers_for_testing() ==
-               initial_workers &&
-           std::chrono::steady_clock::now() < worker_start_deadline) {
-        std::this_thread::yield();
-    }
-    REQUIRE(pulp::inspect::detail::
-                active_inspector_cleanup_workers_for_testing() ==
-            initial_workers + 1);
+    const auto shutdown_fence = server->shutdown_fence();
+    binding->shutdown_fence = shutdown_fence;
+    CHECK_FALSE(shutdown_fence.ready());
     binding->server = &server;
     InspectorServerConfig config{
         &session, &publisher, record, *token};
@@ -1032,25 +1028,15 @@ TEST_CASE("cleanup-worker publication loss can destroy the server owner",
     }
     REQUIRE(binding->released.load(std::memory_order_acquire));
     CHECK(binding->released_off_test_thread.load(std::memory_order_acquire));
+    CHECK(binding->self_wait_refused.load(std::memory_order_acquire));
     CHECK_FALSE(server);
-    const auto worker_exit_deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    while (pulp::inspect::detail::
-               active_inspector_cleanup_workers_for_testing() !=
-               initial_workers &&
-           std::chrono::steady_clock::now() < worker_exit_deadline) {
-        std::this_thread::yield();
-    }
-    CHECK(pulp::inspect::detail::
-              active_inspector_cleanup_workers_for_testing() ==
-          initial_workers);
+    REQUIRE(shutdown_fence.wait_for(std::chrono::seconds(1)));
+    CHECK(shutdown_fence.ready());
 #endif
 }
 
 TEST_CASE("external server destruction joins its cleanup worker",
           "[inspect][publication][cleanup][external-join]") {
-    const auto initial_workers =
-        pulp::inspect::detail::active_inspector_cleanup_workers_for_testing();
     TemporaryDirectory temporary;
     InspectorDiscoveryPublisher publisher(temporary.path);
     InspectorPolicyConfig policy;
@@ -1075,17 +1061,8 @@ TEST_CASE("external server destruction joins its cleanup worker",
         binding,
     }});
     auto server = std::make_unique<InspectorServer>();
-    const auto worker_start_deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    while (pulp::inspect::detail::
-               active_inspector_cleanup_workers_for_testing() ==
-               initial_workers &&
-           std::chrono::steady_clock::now() < worker_start_deadline) {
-        std::this_thread::yield();
-    }
-    REQUIRE(pulp::inspect::detail::
-                active_inspector_cleanup_workers_for_testing() ==
-            initial_workers + 1);
+    const auto shutdown_fence = server->shutdown_fence();
+    CHECK_FALSE(shutdown_fence.ready());
     InspectorServerConfig config{
         &session, &publisher, record, *token};
     config.domain_bindings = &bindings;
@@ -1095,9 +1072,8 @@ TEST_CASE("external server destruction joins its cleanup worker",
     CHECK(binding->released.load(std::memory_order_acquire));
     CHECK_FALSE(
         binding->released_off_test_thread.load(std::memory_order_acquire));
-    CHECK(pulp::inspect::detail::
-              active_inspector_cleanup_workers_for_testing() ==
-          initial_workers);
+    CHECK(shutdown_fence.ready());
+    CHECK(shutdown_fence.wait());
 }
 
 TEST_CASE("publication retirement hides visibility before releasing its binding",
