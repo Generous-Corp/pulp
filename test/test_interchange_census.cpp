@@ -413,3 +413,94 @@ TEST_CASE("a census names a zero velocity that cannot be a sounding SMF Note On"
     REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized).size() == 1);
     REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized)[0] == ItemId{7});
 }
+
+TEST_CASE("a per-instrument tuning is recorded beside the project's, not folded into it",
+          "[interchange]") {
+    TuningReference project_tuning;
+    project_tuning.system = TuningSystem::Scala;
+    project_tuning.scale_content = content_hash('c');
+
+    TuningReference instrument_tuning;
+    instrument_tuning.system = TuningSystem::MtsEsp;
+
+    TrackInput tuned;
+    tuned.id = {3};
+    tuned.name = "tuned";
+    tuned.tuning = instrument_tuning;
+    TrackInput plain;
+    plain.id = {4};
+    plain.name = "follows the project";
+
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{100},
+        .tracks = {take_value(Track::create(std::move(tuned))),
+                   take_value(Track::create(std::move(plain)))},
+        .regions = {SequenceRegion{{5}, "A", {0}, {50}, std::nullopt, SectionRole::Verse},
+                    SequenceRegion{{6}, "B", {50}, {50}, std::nullopt}},
+    }));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "project";
+    input.next_item_id = 7;
+    input.root_sequence_id = {2};
+    input.sequences = {sequence};
+    input.tuning = project_tuning;
+    const ConceptCensus counted = census(take_value(Project::create(std::move(input))));
+
+    // A format carrying one document-wide tuning satisfies tuning.project
+    // honestly. Recording the override separately is what stops an export from
+    // claiming full fidelity while flattening two tunings into one.
+    REQUIRE(counted.count(Concept::TuningProject) == 1);
+    REQUIRE(counted.count(Concept::TuningInstrument) == 1);
+    REQUIRE(counted.owners(Concept::TuningInstrument).size() == 1);
+    REQUIRE(counted.owners(Concept::TuningInstrument)[0] == ItemId{3});
+
+    // Both regions are named locations; only the typed one claims a part.
+    REQUIRE(counted.count(Concept::Marker) == 2);
+    REQUIRE(counted.count(Concept::SequenceSectionRole) == 1);
+    REQUIRE(counted.owners(Concept::SequenceSectionRole)[0] == ItemId{5});
+}
+
+TEST_CASE("richer chord spelling is recorded beside the base chord concept", "[interchange]") {
+    ChordScaleEvent bare{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0};
+    ChordScaleEvent slash{{100}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9};
+    slash.chord_bass = 4;
+    ChordScaleEvent extended{{200}, ChordQuality::Dominant7, 7, ScaleMode::Mixolydian, 0};
+    extended.chord_extensions = kChordExtensionFlatNinth;
+    extended.voicing = ChordVoicing::Shell;
+
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({3}, "track", {}))},
+        .chord_scale_lane = take_value(ChordScaleLane::create({bare, slash, extended})),
+    }));
+    const ConceptCensus counted = census(take_value(
+        Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {sequence}})));
+
+    // The base concept still fires once for the lane; the detail is additive,
+    // so an export that carries quality and root but drops the rest has to say
+    // so separately rather than reporting nothing lost.
+    REQUIRE(counted.count(Concept::ContextChordScale) == 1);
+    REQUIRE(counted.count(Concept::ContextChordBass) == 1);
+    REQUIRE(counted.count(Concept::ContextChordExtension) == 1);
+    REQUIRE(counted.count(Concept::ContextChordVoicing) == 1);
+
+    // A lane of plain statements records only the base concept.
+    auto plain_sequence = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {take_value(Track::create({3}, "track", {}))},
+        .chord_scale_lane = take_value(ChordScaleLane::create({bare})),
+    }));
+    const ConceptCensus plain = census(
+        take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {plain_sequence}})));
+    REQUIRE(plain.contains(Concept::ContextChordScale));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordBass));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordExtension));
+    REQUIRE_FALSE(plain.contains(Concept::ContextChordVoicing));
+}

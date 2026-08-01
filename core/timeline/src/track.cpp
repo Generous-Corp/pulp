@@ -367,6 +367,7 @@ struct Track::Data {
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
     TrackMixer mixer;
+    std::optional<TuningReference> tuning;
 };
 
 std::optional<ModelErrorCode> track_freeze_error(const TrackFreeze& freeze) noexcept {
@@ -471,6 +472,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
     }
     if (const auto error = track_mixer_error(input.mixer))
         return fail<Track>(*error, input.id, input.id);
+    if (input.tuning && !valid_tuning_reference(*input.tuning))
+        return fail<Track>(ModelErrorCode::InvalidTuningReference, input.id, input.id);
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
@@ -488,7 +491,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
              .record_armed = input.record_armed,
              .active_take_lane_id = input.active_take_lane_id,
              .freeze = std::move(input.freeze),
-             .mixer = input.mixer}))));
+             .mixer = input.mixer,
+             .tuning = std::move(input.tuning)}))));
 }
 
 namespace detail {
@@ -513,6 +517,7 @@ TrackInput track_input_of(const Track& track) {
         .active_take_lane_id = track.active_take_lane_id(),
         .freeze = track.freeze(),
         .mixer = track.mixer(),
+        .tuning = track.tuning(),
     };
 }
 
@@ -855,6 +860,9 @@ const std::optional<TrackFreeze>& Track::freeze() const noexcept {
 }
 const TrackMixer& Track::mixer() const noexcept {
     return data_->mixer;
+}
+const std::optional<TuningReference>& Track::tuning() const noexcept {
+    return data_->tuning;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

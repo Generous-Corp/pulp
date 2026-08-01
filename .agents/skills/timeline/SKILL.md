@@ -841,6 +841,97 @@ The downgrade refuses on anything but the field's default, for the reason in
 *Downgrade refusals* above: a shape a v(N-1) reader cannot express is not an
 annotation it can drop, it changes what the document sounds like.
 
+### Drop-vs-refuse is decided per field, not per version
+
+Two fields introduced by the *same* schema version can land on opposite sides of
+the refusal rule, and the version number tells you nothing about which. Ask what
+an older reader that silently discarded the field would then believe:
+
+- If it would believe something **different about the music**, refuse. A chord
+  event's bass turns `C/E` into `C`; the older reader states a different chord,
+  not a less annotated one.
+- If it would believe the **same thing, less precisely**, drop. A region's
+  section role sits beside a free-text name the older reader still sees at the
+  same position over the same span; the information is degraded, not falsified.
+
+So one migration pair can refuse over one member and drop another in the same
+pass. Say which and why in the migration's own comment — the next reader cannot
+recover the reasoning from the code, and "it entered at the same version" is the
+wrong reason to make them match.
+
+### A member on an array element migrates per element, not by splicing `data`
+
+Every earlier sequence migration inserts or erases one member of the top-level
+`data` object, so the recipe reads as "find the neighbouring member's span and
+splice". A member that lives on a **chord event** or inside a **region
+envelope's `data`** is not reachable that way: each element needs its own edit,
+and the count varies with the document.
+
+`apply_edits` already takes a sorted `span<RawEdit>`, so a `std::vector<RawEdit>`
+built by walking the array works — sort order is established inside
+`apply_edits`, and overlapping or out-of-order edits fail closed there. Two
+details bite:
+
+- An object's `begin`/`end` bracket its braces, so an insert at the head goes at
+  `begin + 1` and at the tail at `end - 1`. Check `end > begin + 1` first, or an
+  empty object produces an inverted edit.
+- Erasing a member needs the **key** offset, which `JsonValue` does not store —
+  only value spans. Locate it with `source.find("\"<key>\"", <previous value>.end)`
+  for a leading member, or `source.find(',', <previous value>.end)` for a
+  trailing one, and assert the offset lands before the value's span before
+  trusting it.
+
+Prove the pair round-trips by asserting `upgrade(downgrade(x)) == x` on the raw
+bytes, not just that both calls succeeded.
+
+### Marker, region, scene, and slot envelopes carry a version they do not own
+
+These nested types are written with `write_envelope(..., 1, ...)` and appear in
+the registry with `current_version` 1, which reads like an independent version
+axis. It is not one: they only ever exist inside a sequence, and the **sequence**
+version is what decides their shape. Gate a new member on
+`sequence_schema_policy`, leave the nested envelope's version alone, and say so
+in a comment — bumping it instead makes "sequence v7 with region v1" a
+representable state that means nothing, and forces two numbers to be kept in
+agreement forever.
+
+### Commands are not version-gated, so a shared decoder needs three states, not two
+
+A document's schema version decides exactly whether a member is present, so the
+decoder's natural parameter is a `bool requires_x`. But some entity decoders are
+shared with the **command** path (`decode_region` via `insert_region`,
+`decode_chord_scale_lane` via `set_chord_scale_lane`), and a command payload is
+authored input with no migration path of its own. Forcing the member there
+breaks every hand-written and previously-journalled command; forbidding it drops
+the data silently.
+
+The shape that works is a tri-state (`MemberPolicy { Forbidden, Required,
+Optional }`): documents pass `member_policy_for(requires_x)`, commands pass
+`Optional`. When a version introduces **several** members together, `Optional`
+must still reject a payload carrying only some of them — half the detail is
+neither spelling, and filling in the rest invents data.
+
+### A "one field" document feature is often several schema bumps
+
+Fields land on entities, and entities have their own schemas. A tuning reference
+at project scope plus an override at instrument scope is `pulp.timeline.project`
+**and** `pulp.timeline.track`, each with its own policy header, both migration
+directions, and its own registry entry — plus a shared nested type if the value
+is a struct. Size the work by the entities touched, not by the number of fields.
+
+Two consequences downstream:
+
+- **Content-address a payload reference rather than pointing at an `ItemId`.** A
+  `ContentHash` needs no remapping, so a copy, paste, or import carries it with
+  no `id_remap.cpp` change; an identity reference would need one.
+- **Every suite that pins a current schema version breaks at once.** The literal
+  `"type_name":"pulp.timeline.sequence","version":N` appears in several suites,
+  in both raw-string and escaped-quote spellings — grep for both. Worse is the
+  `migrate(domain, type, N, N - 1, saved, ...)` idiom, where `saved` is a fresh
+  serialization: after a bump it starts from a version the payload no longer has
+  and fails for a reason unrelated to what the test is about. A refusal test
+  written that way passes for the wrong reason and stays green.
+
 ### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
 `Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through

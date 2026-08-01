@@ -519,9 +519,11 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             replacement.value()->kind != JsonValue::Kind::Array)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         auto decoded_expected =
-            decode_chord_scale_lane(expected.value(), context, data_path + "/expected");
+            decode_chord_scale_lane(expected.value(), MemberPolicy::Optional, context,
+                                    data_path + "/expected");
         auto decoded_replacement =
-            decode_chord_scale_lane(replacement.value(), context, data_path + "/replacement");
+            decode_chord_scale_lane(replacement.value(), MemberPolicy::Optional, context,
+                                    data_path + "/replacement");
         if (!decoded_expected)
             return runtime::Err(decoded_expected.error());
         if (!decoded_replacement)
@@ -552,7 +554,8 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         auto region = required(command, "region", data_path);
         if (!sequence || !region)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
-        auto decoded = decode_region(*region.value(), context, data_path + "/region");
+        auto decoded = decode_region(*region.value(), MemberPolicy::Optional, context,
+                                     data_path + "/region");
         if (!decoded)
             return runtime::Err(decoded.error());
         return runtime::Ok(Command(InsertRegion{sequence.value(), std::move(decoded).value()}));
