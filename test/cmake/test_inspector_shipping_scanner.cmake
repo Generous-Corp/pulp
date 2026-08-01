@@ -12,6 +12,20 @@ if(NOT _escaped_metadata STREQUAL
 endif()
 file(MAKE_DIRECTORY "${FIXTURE_DIR}")
 
+set(_unsupported_trace_script "${FIXTURE_DIR}/unsupported-trace.cmake")
+file(WRITE "${_unsupported_trace_script}"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake\")\n"
+    "set(PULP_TraceFixture_INSPECTOR_CAPABILITIES trace.control)\n"
+    "set(PULP_TraceFixture_SHIP_INSPECTOR TRUE)\n"
+    "set(PULP_TraceFixture_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)\n"
+    "_pulp_configure_inspector_shipping(TraceFixture com.pulp.trace TraceFixture)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -P "${_unsupported_trace_script}"
+    RESULT_VARIABLE _unsupported_trace_result
+    OUTPUT_QUIET ERROR_QUIET)
+if(_unsupported_trace_result EQUAL 0)
+    message(FATAL_ERROR "unsupported standalone trace capability was accepted")
+endif()
+
 function(_scan name binary manifest expect_success)
     set(_binary_path "${FIXTURE_DIR}/${name}.bin")
     set(_manifest_path "${FIXTURE_DIR}/${name}.json")

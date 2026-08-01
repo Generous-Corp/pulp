@@ -9,8 +9,6 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     diagnostics.read
     logs.read
     capture.image
-    trace.control
-    trace.session.control
     state.write
     test.input
     authoring.tweaks

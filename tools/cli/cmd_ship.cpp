@@ -974,6 +974,10 @@ static int ship_check(const std::vector<std::string>& args,
 
         const auto inspector_report =
             pulp::cli::inspector_shipping::load_report(build_dir);
+        if (!inspector_report.complete) {
+            std::cerr << "pulp ship check: " << inspector_report.error << "\n";
+            return 2;
+        }
         std::vector<std::pair<std::string, bool>> checked_artifacts;
         const auto emit_json = [&] {
             std::cout << "{\"inspector_capabilities\": "

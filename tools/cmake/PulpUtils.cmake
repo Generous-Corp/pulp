@@ -693,8 +693,7 @@ function(pulp_add_plugin target)
             "pulp_add_plugin(${target}): SHIP_INSPECTOR_RUNTIME_EVAL does not imply runtime.eval; declare that capability explicitly")
     endif()
     set(_inspector_controller_capabilities
-        trace.control trace.session.control state.write test.input
-        authoring.tweaks runtime.eval)
+        state.write test.input authoring.tweaks runtime.eval)
     foreach(_inspector_capability IN LISTS PLUGIN_INSPECTOR_CAPABILITIES)
         if(_inspector_capability IN_LIST _inspector_controller_capabilities AND
            NOT "session.control" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES)

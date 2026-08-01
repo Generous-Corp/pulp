@@ -20,8 +20,9 @@ pulp_add_plugin(MyDeveloperEdition
 This declaration links the inspector-capable standalone component and embeds a
 retained capability marker plus `<target>.inspector-capabilities.json`. It does
 not activate the endpoint: the product still owns runtime profile selection,
-and the default remains off. Once activated, the manifest is the exact runtime
-grant set; selecting a broader runtime profile cannot exceed it.
+and the default remains off. Once activated, the manifest is the maximum runtime
+grant set. The effective grants are its intersection with the selected runtime
+profile, so neither a broader profile nor a broader manifest widens the other.
 
 `runtime.eval` is arbitrary execution in the product process. The generic
 shipping override never implies it. A target that truly needs it must declare

@@ -100,7 +100,7 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
-    configure_real_window_environment(scratch, "develop");
+    configure_real_window_environment(scratch, "observe");
 
     const auto exit_png = scratch.path / "exit.png";
     pulp::platform::ProcessOptions options;
@@ -161,6 +161,7 @@ TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer f
     CHECK(effective.find("\"ui.read\"") != std::string::npos);
     CHECK(effective.find("\"test.input\"") == std::string::npos);
     CHECK(effective.find("\"state.write\"") == std::string::npos);
+    CHECK(effective.find("\"telemetry.stream\"") == std::string::npos);
     CHECK(effective.find("\"runtime.eval\"") == std::string::npos);
     std::vector<std::uint8_t> captured_png;
     const auto capture_deadline =

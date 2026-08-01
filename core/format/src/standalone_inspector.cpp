@@ -867,8 +867,24 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
                 "Standalone: runtime.eval exceeds this product's shipping capability manifest");
             return nullptr;
         }
+        std::vector<std::string> requested_capabilities;
+        if (effective_profile == inspect::InspectorProfile::Custom) {
+            requested_capabilities = custom_capabilities;
+        } else {
+            for (const auto capability : inspect::profile_capabilities(effective_profile))
+                requested_capabilities.emplace_back(inspect::capability_id(capability));
+            if (runtime_eval_enabled &&
+                effective_profile == inspect::InspectorProfile::Develop)
+                requested_capabilities.emplace_back("runtime.eval");
+        }
+        std::vector<std::string> bounded_capabilities;
+        for (const auto& capability : requested_capabilities) {
+            if (std::find(shipping_capabilities.begin(), shipping_capabilities.end(),
+                          capability) != shipping_capabilities.end())
+                bounded_capabilities.push_back(capability);
+        }
         effective_profile = inspect::InspectorProfile::Custom;
-        custom_capabilities = shipping_capabilities;
+        custom_capabilities = std::move(bounded_capabilities);
     }
     if (runtime_eval_enabled &&
         effective_profile != inspect::InspectorProfile::Develop &&
