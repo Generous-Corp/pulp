@@ -57,24 +57,18 @@ fi
 # A stale bundle with a DIFFERENT AU subtype is not overwritten by copying the
 # new one -- both register, and the DAW may scan either. Removing first is the
 # only way the machine ends up with exactly what was built.
-# ~/Applications is removed TOO, and it is not paranoia.
-#
-# macOS searches both /Applications and ~/Applications, and a copy in the home
-# one shadows the installed copy for Spotlight and the Dock without saying so.
-# This machine carried an UNSIGNED build there, two days older than the one in
-# /Applications, and there is no way to tell from the running window which of
-# them answered. It cost a session on each of two machines: a fix was tested
-# against a binary that did not contain it, and reported as not working.
 step "3. removing stale artifacts"
+# The litter sweep is clean_installs.sh, sent over and run there rather than
+# reimplemented inline. Two copies of a removal rule is two chances to differ
+# about what is safe to delete, and this one deletes.
+scp -q "$REPO/tools/rack/clean_installs.sh" "$HOST:/tmp/forge-clean-installs.sh" \
+    && remote 'bash /tmp/forge-clean-installs.sh --yes; rm -f /tmp/forge-clean-installs.sh' \
+    || say "could not send the cleaner — stale copies may remain"
 remote '
-for p in ~/Applications/"Forge Modular.app"; do
-    [ -e "$p" ] && echo "  removing a shadowing copy: $p"
-done
 rm -rf ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
        ~/Library/Audio/Plug-Ins/VST3/"Forge Modular.vst3" \
        ~/Library/Audio/Plug-Ins/CLAP/"Forge Modular.clap" \
-       /Applications/"Forge Modular.app" \
-       ~/Applications/"Forge Modular.app"
+       /Applications/"Forge Modular.app"
 killall -9 AudioComponentRegistrar 2>/dev/null
 echo "  removed, and the AU registrar restarted"
 '
@@ -148,7 +142,31 @@ print(\"  vocabulary:\", len(V.render().splitlines()), \"lines\")
 "
 '
 
-step "7. signature and quarantine"
+# Spotlight does not notice a bundle that arrives by rsync. The app was
+# installed, correct, signed and openable by LaunchServices -- and Cmd-Space
+# found nothing, which is indistinguishable from "it did not install". mdimport
+# is what puts it in the index.
+step "7. making it findable"
+# Indexing is asynchronous, so the check waits for it. Asking immediately after
+# mdimport reported CANNOT FIND IT for an app that was indexed a second later --
+# a false alarm is as bad as a missed one here, because the next person spends
+# their time on Spotlight instead of on the app.
+remote 'mdimport /Applications/"Forge Modular.app" >/dev/null 2>&1
+found=0
+for i in $(seq 1 10); do
+    if mdfind '"'"'kMDItemContentType == "com.apple.application-bundle" && kMDItemDisplayName == "Forge Modular"'"'"' 2>/dev/null | grep -q .; then
+        found=1; break
+    fi
+    sleep 1
+done
+if [ "$found" = 1 ]; then
+    echo "  Spotlight can find it (after ${i}s)"
+else
+    echo "  SPOTLIGHT CANNOT FIND IT after 10s — open it from /Applications in Finder,"
+    echo "  or run: mdimport -r /Applications/\"Forge Modular.app\""
+fi'
+
+step "8. signature and quarantine"
 # A bundle that arrives without a valid signature will be refused by Gatekeeper
 # on a machine that did not build it, which reads as "the plugin is broken".
 remote '
@@ -166,4 +184,4 @@ for p in ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
 done
 '
 
-step "done. Step 7 proves it: CLI, the app by clicking Build, and REAPER."
+step "done. Step 8 proves it: CLI, the app by clicking Build, and REAPER."
