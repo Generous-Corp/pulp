@@ -176,6 +176,8 @@ bool InterprocessConnection::connect(
     IpcTransport transport,
     std::chrono::milliseconds timeout) {
     disconnect();
+    const auto connection_generation =
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
     write_poisoned_.store(false, std::memory_order_release);
     impl_->transport = transport;
     state_.store(IpcState::Connecting);
@@ -200,15 +202,23 @@ bool InterprocessConnection::connect(
     }
 
     if (ok) {
+        const auto alive = alive_.capture();
         state_.store(IpcState::Connected);
         connection_made();
+        if (!runtime::AliveToken::is_alive(alive) ||
+            connection_generation_.load(std::memory_order_acquire) != connection_generation ||
+            state_.load(std::memory_order_acquire) != IpcState::Connected) {
+            return ok;
+        }
         std::function<void()> connected_callback;
         {
             std::lock_guard lock(callback_mutex_);
             connected_callback = on_connected;
         }
         if (connected_callback) connected_callback();
-        start_read_thread();
+        if (!runtime::AliveToken::is_alive(alive))
+            return ok;
+        start_read_thread(false, connection_generation);
     } else {
         IpcState expected = IpcState::Connecting;
         state_.compare_exchange_strong(expected, IpcState::Error);
@@ -219,6 +229,8 @@ bool InterprocessConnection::connect(
 bool InterprocessConnection::create_server(std::string_view name, IpcTransport transport,
                                             int /*timeout_ms*/) {
     disconnect();
+    const auto connection_generation =
+        connection_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
     write_poisoned_.store(false, std::memory_order_release);
     impl_->transport = transport;
     state_.store(IpcState::Connecting);
@@ -251,15 +263,23 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     }
 
     if (ok) {
+        const auto alive = alive_.capture();
         state_.store(IpcState::Connected);
         connection_made();
+        if (!runtime::AliveToken::is_alive(alive) ||
+            connection_generation_.load(std::memory_order_acquire) != connection_generation ||
+            state_.load(std::memory_order_acquire) != IpcState::Connected) {
+            return ok;
+        }
         std::function<void()> connected_callback;
         {
             std::lock_guard lock(callback_mutex_);
             connected_callback = on_connected;
         }
         if (connected_callback) connected_callback();
-        start_read_thread();
+        if (!runtime::AliveToken::is_alive(alive))
+            return ok;
+        start_read_thread(false, connection_generation);
     } else {
         IpcState expected = IpcState::Connecting;
         state_.compare_exchange_strong(expected, IpcState::Error);
@@ -314,6 +334,7 @@ void InterprocessConnection::disconnect_impl(bool destroying) {
     };
 
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
+    connection_generation_.fetch_add(1, std::memory_order_acq_rel);
     running_.store(false);
     impl->interrupt_blocking_io();
     {
@@ -475,8 +496,8 @@ void InterprocessConnection::set_frame_read_timeout(
         std::memory_order_relaxed);
 }
 
-void InterprocessConnection::start_read_thread(
-    bool allow_active_disconnect_owner) {
+void InterprocessConnection::start_read_thread(bool allow_active_disconnect_owner,
+                                               std::uint64_t expected_connection_generation) {
     const auto start_gate = std::make_shared<std::atomic<bool>>(false);
     const auto impl = impl_;
     const auto lifecycle = impl->lifecycle;
@@ -484,16 +505,19 @@ void InterprocessConnection::start_read_thread(
     const bool owned_disconnect =
         lifecycle->active &&
         lifecycle->owner == std::this_thread::get_id();
-    if ((lifecycle->active &&
-         !(allow_active_disconnect_owner && owned_disconnect)) ||
+    if ((lifecycle->active && !(allow_active_disconnect_owner && owned_disconnect)) ||
+        (expected_connection_generation != 0 &&
+         connection_generation_.load(std::memory_order_acquire) !=
+             expected_connection_generation) ||
         state_.load(std::memory_order_acquire) != IpcState::Connected) {
         return;
     }
     running_.store(true);
-    std::thread read_thread([this, impl, lifecycle, start_gate]() {
+    const auto generation = read_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    std::thread read_thread([this, impl, lifecycle, start_gate, generation]() {
         while (!start_gate->load(std::memory_order_acquire))
             std::this_thread::yield();
-        read_loop();
+        read_loop(generation);
         {
             std::lock_guard lifecycle_lock(lifecycle->mutex);
             lifecycle->read_thread_ids.erase(std::this_thread::get_id());
@@ -505,20 +529,37 @@ void InterprocessConnection::start_read_thread(
     start_gate->store(true, std::memory_order_release);
 }
 
-void InterprocessConnection::read_loop() {
+void InterprocessConnection::read_loop(std::uint64_t generation) {
     const auto alive = alive_.capture();
+    const auto lifecycle = impl_->lifecycle;
     std::vector<uint8_t> buffer;
-    auto notify_lost = [this, alive]() {
-        running_.store(false);
-        if (state_.exchange(IpcState::Disconnected) == IpcState::Connected) {
+    auto is_current = [this, generation] {
+        return running_.load(std::memory_order_acquire) &&
+               read_generation_.load(std::memory_order_acquire) == generation;
+    };
+    auto notify_lost = [this, alive, lifecycle, &is_current]() {
+        bool was_connected = false;
+        {
+            // Serialize the generation check with start_read_thread(). An old
+            // reader must never clear running_ after a replacement reader has
+            // made a newer generation current.
+            std::lock_guard lifecycle_lock(lifecycle->mutex);
+            if (!is_current())
+                return;
+            running_.store(false, std::memory_order_release);
+            was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
+        }
+        if (was_connected) {
             connection_lost();
-            if (!runtime::AliveToken::is_alive(alive)) return;
+            if (!runtime::AliveToken::is_alive(alive))
+                return;
             std::function<void()> disconnected_callback;
             {
                 std::lock_guard lock(callback_mutex_);
                 disconnected_callback = on_disconnected;
             }
-            if (disconnected_callback) disconnected_callback();
+            if (disconnected_callback)
+                disconnected_callback();
         }
     };
 
@@ -528,9 +569,9 @@ void InterprocessConnection::read_loop() {
         if (impl_->transport == IpcTransport::Socket)
             (void)impl_->socket.set_read_timeout(std::chrono::milliseconds(0));
     };
-    auto read_exact = [this, &frame_deadline](uint8_t* dst, size_t size) {
+    auto read_exact = [this, &frame_deadline, &is_current](uint8_t* dst, size_t size) {
         size_t read_so_far = 0;
-        while (read_so_far < size && running_.load()) {
+        while (read_so_far < size && is_current()) {
             if (frame_deadline && impl_->transport == IpcTransport::Socket) {
                 const auto remaining = std::chrono::duration_cast<
                     std::chrono::milliseconds>(*frame_deadline - Clock::now());
@@ -554,11 +595,11 @@ void InterprocessConnection::read_loop() {
         return read_so_far == size;
     };
 
-    while (running_.load()) {
+    while (is_current()) {
         // Read 4-byte length header
         uint8_t header[4];
         if (!read_exact(header, 4)) {
-            if (running_.load())
+            if (is_current())
                 notify_lost();
             return;
         }
@@ -579,7 +620,7 @@ void InterprocessConnection::read_loop() {
         // Read payload
         buffer.resize(msg_len);
         if (!read_exact(buffer.data(), msg_len)) {
-            if (running_.load())
+            if (is_current())
                 notify_lost();
             return;
         }
@@ -592,10 +633,11 @@ void InterprocessConnection::read_loop() {
             defer_first_dispatch_until_callback_.exchange(false);
         if (wait_for_first_callback) {
             auto gate = first_dispatch_gate_;
-            while (running_.load() && gate &&
-                   !gate->load(std::memory_order_acquire)) {
+            while (is_current() && gate && !gate->load(std::memory_order_acquire)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            if (!is_current())
+                return;
         }
         {
             std::lock_guard lock(callback_mutex_);
@@ -605,15 +647,19 @@ void InterprocessConnection::read_loop() {
 
         // Dispatch message
         message_received(buffer.data(), msg_len);
-        if (!runtime::AliveToken::is_alive(alive)) return;
+        if (!runtime::AliveToken::is_alive(alive) || !is_current())
+            return;
         if (message_callback) message_callback(buffer.data(), msg_len);
-        if (!runtime::AliveToken::is_alive(alive)) return;
+        if (!runtime::AliveToken::is_alive(alive) || !is_current())
+            return;
 
         std::string_view text_view(reinterpret_cast<const char*>(buffer.data()), msg_len);
         message_received(text_view);
-        if (!runtime::AliveToken::is_alive(alive)) return;
+        if (!runtime::AliveToken::is_alive(alive) || !is_current())
+            return;
         if (text_callback) text_callback(text_view);
-        if (!runtime::AliveToken::is_alive(alive)) return;
+        if (!runtime::AliveToken::is_alive(alive) || !is_current())
+            return;
     }
 }
 
