@@ -744,6 +744,84 @@ void RackPreview::paint(Canvas& canvas) {
             canvas.stroke_circle(p.x, p.y, r + 3.0f * L.scale);
         }
     }
+
+    // A module's own name, for the labels below. The id is what the patch
+    // calls it; the name is what its panel says.
+    auto name_of = [this](const std::string& id) {
+        const auto* m = find(id);
+        return m && !m->name.empty() ? m->name : id;
+    };
+    // A jack's own label, not the id the patch keys it by. "LFO · Square" is
+    // what the panel says and what somebody can go and find; "LFO · out0" is
+    // an index they would have to count to.
+    auto port_label = [this](const std::string& module_id,
+                             const std::string& port_id) {
+        if (const auto* m = find(module_id)) {
+            for (const auto& p : m->ports)
+                if (p.id == port_id) return p.name.empty() ? port_id : p.name;
+        }
+        return port_id;
+    };
+
+    // The hovered cable says what it joins, and to what.
+    //
+    // Dimming the other cables tells you WHICH wire you are on and nothing
+    // about where it goes: the ends are jacks among other jacks on panels
+    // whose labels are two points tall. The prototype named both ends and
+    // outlined the modules, and that is the part that reads.
+    if (highlight_ && *highlight_ < connections_.size()) {
+        const auto& c = connections_[*highlight_];
+        const auto from = port_point(L, modules_, c.from_module, c.from_port,
+                                     c.to_module);
+        const auto to = port_point(L, modules_, c.to_module, c.to_port,
+                                   c.from_module);
+
+        // Outline both panels. A cable has two ends and naming one of them is
+        // half an answer.
+        for (const auto& id : {c.from_module, c.to_module}) {
+            for (const auto& panel : L.panels) {
+                if (panel.id != id) continue;
+                canvas.set_stroke_color(forge::design::color::accent);
+                canvas.set_line_width(std::max(1.5f, 2.0f * L.scale));
+                canvas.stroke_rounded_rect(panel.x - 1.0f, panel.y - 1.0f,
+                                           panel.width + 2.0f,
+                                           panel.height + 2.0f,
+                                           4.0f * L.scale);
+            }
+        }
+
+        // A pill at each end, naming the module and the jack. Drawn last so it
+        // sits over the cables rather than under the next one along.
+        const std::pair<const JackPoint&, std::pair<std::string, std::string>> tips[] = {
+            {from, {name_of(c.from_module),
+                    port_label(c.from_module, c.from_port)}},
+            {to,   {name_of(c.to_module),
+                    port_label(c.to_module, c.to_port)}},
+        };
+        const float fs = std::max(8.0f, 9.5f * L.scale);
+        for (const auto& [p, who] : tips) {
+            const std::string text =
+                who.second.empty() ? who.first : who.first + " \u00b7 " + who.second;
+            canvas.set_font(forge::design::type::mono, fs);
+            const float w = canvas.measure_text(text) + 10.0f;
+            const float h = fs + 7.0f;
+            // Above the jack, nudged inside the view so a label on the top row
+            // is not clipped away by the edge it sits against.
+            float bx = p.x - w / 2.0f;
+            float by = p.y - h - 8.0f * L.scale;
+            bx = std::max(2.0f, std::min(bx, bounds().width - w - 2.0f));
+            if (by < 2.0f) by = p.y + 8.0f * L.scale;
+            canvas.set_fill_color(pulp::canvas::Color::rgba8(16, 18, 26, 240));
+            canvas.fill_rounded_rect(bx, by, w, h, 3.0f);
+            canvas.set_stroke_color(forge::design::color::accent);
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(bx, by, w, h, 3.0f);
+            canvas.set_fill_color(pulp::canvas::Color::rgba8(0xF2, 0xF5, 0xFA));
+            canvas.set_text_align(pulp::canvas::TextAlign::center);
+            canvas.fill_text(text, bx + w / 2.0f, by + h - 5.0f);
+            canvas.set_text_align(pulp::canvas::TextAlign::left);
+        }
+    }
 }
 
 }  // namespace forge_modular

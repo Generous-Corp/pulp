@@ -5850,3 +5850,56 @@ TEST_CASE("the audio interface is placed like any other module",
     CHECK(audio->placed);
     CHECK(audio->ports.size() >= 2);
 }
+
+// Hovering a cable names both ends and outlines both modules.
+//
+// Dimming the other cables says WHICH wire you are on and nothing about where
+// it goes — the ends are jacks among other jacks, and the panel labels are two
+// points tall. The prototype named both ends and outlined the modules; this
+// draws that, and proves it by rendering with and without a hover.
+TEST_CASE("a hovered cable names what it joins", "[rack][hover][render]") {
+    auto preview = std::make_shared<forge_modular::RackPreview>();
+    preview->set_bounds(pulp::view::Rect{0, 0, 900, 460});
+
+    std::vector<forge_modular::RackModule> mods;
+    for (const char* n : {"LFO", "MULT", "VCA"}) {
+        forge_modular::RackModule m;
+        m.id = n; m.brand = "ForgeModular"; m.name = n; m.hp = 8;
+        m.placed = true;
+        m.ports.push_back({"out0", "SQR", 0.5f, 300.0f, false});
+        m.ports.push_back({"in0", "IN", 0.5f, 120.0f, true});
+        mods.push_back(std::move(m));
+    }
+    std::vector<forge_modular::Connection> cables{
+        {"LFO", "out0", "MULT", "in0", forge_modular::SignalRole::clock, ""},
+        {"MULT", "out0", "VCA", "in0", forge_modular::SignalRole::audio, ""},
+    };
+    preview->set_rack(mods, cables);
+
+    auto shot = [&](const char* tag) {
+        const auto path = std::filesystem::temp_directory_path() /
+                          (std::string("hover-") + tag + ".png");
+        REQUIRE(pulp::view::render_to_file(*preview, 900, 460, path.string(),
+                                           1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        auto bytes = read_all(path);
+        REQUIRE(bytes.size() > 2000);
+        return decode_rgba(bytes);
+    };
+
+    const auto plain = shot("plain");
+    preview->set_highlight(0);
+    const auto hovered = shot("hovered");
+    REQUIRE(plain.width == hovered.width);
+
+    int differing = 0;
+    for (std::size_t at = 0; at + 3 < plain.pixels.size(); at += 4)
+        if (plain.pixels[at] != hovered.pixels[at] ||
+            plain.pixels[at + 1] != hovered.pixels[at + 1] ||
+            plain.pixels[at + 2] != hovered.pixels[at + 2])
+            ++differing;
+    INFO("differing pixels: " << differing);
+    // A dim pass alone changes a few hundred; a label and two outlines are
+    // thousands. Enough to tell "something was drawn" from "the cables faded".
+    CHECK(differing > 3000);
+}
