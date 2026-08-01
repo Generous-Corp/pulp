@@ -95,7 +95,7 @@ bool param_parse_display_text(const ParamInfo& info, const std::string& text, fl
 
 choc::value::Value param_metadata_to_value(const ParamInfo& info) {
     auto obj = choc::value::createObject("");
-    obj.addMember("id", choc::value::createInt32(static_cast<int32_t>(info.id)));
+    obj.addMember("id", choc::value::createInt64(static_cast<int64_t>(info.id)));
     obj.addMember("name", choc::value::createString(info.name));
     obj.addMember("unit", choc::value::createString(info.unit));
     obj.addMember("min", choc::value::createFloat64(info.range.min));
@@ -123,7 +123,7 @@ choc::value::Value param_snapshot_to_value(const StateStore& store, const ParamI
     const float value = store.get_value(info.id);
 
     auto obj = choc::value::createObject("");
-    obj.addMember("id", choc::value::createInt32(static_cast<int32_t>(info.id)));
+    obj.addMember("id", choc::value::createInt64(static_cast<int64_t>(info.id)));
     obj.addMember("name", choc::value::createString(info.name));
     obj.addMember("unit", choc::value::createString(info.unit));
     obj.addMember("value", choc::value::createFloat64(value));

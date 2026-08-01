@@ -89,6 +89,8 @@ catch_discover_tests(pulp-test-inspector-discovery)
 add_executable(
     pulp-test-inspector-client
     test_inspector_client.cpp
+    test_inspector_client_session.cpp
+    test_inspector_client_control.cpp
     test_inspector_server_lifecycle.cpp
     test_inspector_client_limits.cpp
 )

@@ -16,6 +16,7 @@
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -58,6 +59,23 @@ TEST_CASE("the inspector snapshot keeps its established wire field set",
     CHECK(snapshot["min"].getFloat64() == Catch::Approx(20.0));
     CHECK(snapshot["max"].getFloat64() == Catch::Approx(20000.0));
     CHECK(snapshot["default"].getFloat64() == Catch::Approx(1000.0));
+}
+
+TEST_CASE("parameter JSON preserves the complete uint32 identifier domain",
+          "[state][param-json][boundary]") {
+    StateStore store;
+    constexpr ParamID high_id = std::numeric_limits<ParamID>::max();
+    store.add_parameter({.id = high_id, .name = "High ID",
+                         .range = {.min = 0.0f, .max = 1.0f}});
+
+    const auto& info = info_for(store, high_id);
+    const auto metadata = param_metadata_to_value(info);
+    const auto snapshot = param_snapshot_to_value(store, info);
+
+    REQUIRE(metadata["id"].isInt());
+    REQUIRE(snapshot["id"].isInt());
+    CHECK(metadata["id"].getInt64() == static_cast<std::int64_t>(high_id));
+    CHECK(snapshot["id"].getInt64() == static_cast<std::int64_t>(high_id));
 }
 
 TEST_CASE("display stays conditional, exactly as the inspector always sent it",

@@ -55,7 +55,10 @@ if(WIN32)
     target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
 endif()
 
-add_library(pulp-inspect-client src/client.cpp)
+add_library(pulp-inspect-client
+    src/client.cpp
+    src/client_session.cpp
+    src/client_session_decode.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
     PUBLIC

@@ -61,7 +61,7 @@ public:
     };
 
     events::InterprocessConnection connection;
-    std::mutex send_mutex;
+    std::timed_mutex send_mutex;
     std::mutex mutex;
     std::condition_variable cv;
     std::map<std::int64_t, InspectorMessage> responses;
@@ -478,13 +478,40 @@ InspectorMessage InspectorClient::request(
                                 "Inspector client is not connected",
                                 "not_connected");
     }
+    if (timeout <= std::chrono::milliseconds(0)) {
+        return connection_error(id,
+                                "Inspector request deadline expired before send",
+                                "request_timeout",
+                                R"({"mayHaveApplied":false})");
+    }
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const auto remaining = [&] {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+            return std::chrono::milliseconds(0);
+        return std::max(
+            std::chrono::milliseconds(1),
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now));
+    };
     const auto message =
         make_request(id, std::move(method), std::move(params_json));
     bool sent = false;
     {
-        std::lock_guard send_lock(impl_->send_mutex);
-        impl_->connection.set_write_timeout(
-            std::max(timeout, std::chrono::milliseconds(1)));
+        std::unique_lock send_lock(impl_->send_mutex, std::defer_lock);
+        if (!send_lock.try_lock_until(deadline)) {
+            return connection_error(id,
+                                    "Inspector request deadline expired before send",
+                                    "request_timeout",
+                                    R"({"mayHaveApplied":false})");
+        }
+        const auto send_timeout = remaining();
+        if (send_timeout <= std::chrono::milliseconds(0)) {
+            return connection_error(id,
+                                    "Inspector request deadline expired before send",
+                                    "request_timeout",
+                                    R"({"mayHaveApplied":false})");
+        }
+        impl_->connection.set_write_timeout(send_timeout);
         {
             std::lock_guard lock(impl_->mutex);
             if (impl_->disconnected) {
@@ -503,7 +530,7 @@ InspectorMessage InspectorClient::request(
                                 "Inspector request could not be sent",
                                 "send_failed");
     }
-    return impl_->wait_for_response(id, timeout);
+    return impl_->wait_for_response(id, remaining());
 }
 
 void InspectorClient::set_event_handler(EventHandler handler) {

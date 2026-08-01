@@ -4,6 +4,7 @@
 
 #include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/client.hpp>
+#include <pulp/inspect/client_session.hpp>
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/runtime/socket.hpp>
@@ -17,12 +18,16 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <thread>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -34,9 +39,13 @@
 
 using pulp::inspect::InspectorCapability;
 using pulp::inspect::InspectorClient;
+using pulp::inspect::InspectorClientFailure;
+using pulp::inspect::InspectorClientSelection;
+using pulp::inspect::InspectorClientSession;
 using pulp::inspect::InspectorDiscoveryPublisher;
 using pulp::inspect::InspectorDiscoveryReader;
 using pulp::inspect::InspectorDiscoveryRecord;
+using pulp::inspect::InspectorMessage;
 using pulp::inspect::InspectorPolicyConfig;
 using pulp::inspect::InspectorProfile;
 using pulp::inspect::InspectorServer;
@@ -194,6 +203,7 @@ struct AuthenticatedFixture {
     InspectorDiscoveryPublisher publisher{temporary.path};
     InspectorDiscoveryReader reader{temporary.path};
     InspectorPolicyConfig policy;
+    std::function<void(const InspectorMessage&)> observe_request;
     InspectorSession session;
     InspectorServer server;
 
@@ -206,6 +216,7 @@ struct AuthenticatedFixture {
                   InspectorCapability::SessionControl,
                   InspectorCapability::StateRead,
                   InspectorCapability::StateWrite,
+                  InspectorCapability::CaptureImage,
               };
               return result;
           }()),
@@ -216,12 +227,27 @@ struct AuthenticatedFixture {
                   "com.pulp.client-test",
                   "1"},
               policy,
-              [](const auto& request) {
-                  return make_response(
-                      request.id,
-                      request.method == "State.getParameters"
-                          ? R"({"parameters":[{"id":"gain","value":0.5}]})"
-                          : R"({"applied":true})");
+              [this](const auto& request) {
+                  if (observe_request)
+                      observe_request(request);
+                  if (request.method == "State.getParameters") {
+                      return make_response(
+                          request.id,
+                          R"([{"id":7,"name":"gain","unit":"dB","value":-6.0,"normalized":0.25,"modulated":-5.5,"default":0.0,"min":-60.0,"max":12.0,"display":"-6 dB"}])");
+                  }
+                  if (request.method == "Inspector.getAgentContext") {
+                      return make_response(
+                          request.id,
+                          R"({"binary":{"path":"/tmp/client-test","buildId":"test-build","mtimeUnixMs":1234},"identity":{"pluginId":"com.pulp.client-test","sessionId":"session-client-test","instanceId":"instance-client-test"},"editor":{"open":true,"windowVisible":true},"processing":{"active":true,"xrunCount":2},"hotReload":{"available":true,"enabled":true,"pending":false},"unsavedTweakCount":3,"actionableIssues":["test issue"]})");
+                  }
+                  if (request.method == "Capture.screenshot") {
+                      return make_response(
+                          request.id,
+                          R"({"mimeType":"image/png","width":4,"height":3,"data":"iVBORw0KGgo="})");
+                  }
+                  if (request.method == "State.setParameter")
+                      return make_response(request.id, R"({"ok":true})");
+                  return make_response(request.id, R"({"applied":true})");
               }) {
         const auto token = generate_inspector_secret();
         REQUIRE(token.has_value());

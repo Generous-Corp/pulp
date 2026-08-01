@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -223,6 +224,53 @@ TEST_CASE("DomainHandler: State.getParameters") {
     auto resp = handler.handle(make_request(1, "State.getParameters"));
     REQUIRE_FALSE(resp.is_error);
     REQUIRE(resp.params_json.find("Volume") != std::string::npos);
+}
+
+TEST_CASE("DomainHandler: State parameter IDs preserve uint32 boundaries",
+          "[inspect][domain][state][boundary]") {
+    constexpr ParamID above_int32 =
+        static_cast<ParamID>(std::numeric_limits<std::int32_t>::max()) + 1u;
+    constexpr ParamID max_id = std::numeric_limits<ParamID>::max();
+    StateStore store;
+    store.add_parameter({.id = above_int32, .name = "Above int32",
+                         .range = {.min = 0.0f, .max = 1.0f, .default_value = 0.0f}});
+    store.add_parameter({.id = max_id, .name = "Maximum",
+                         .range = {.min = 0.0f, .max = 1.0f, .default_value = 0.0f}});
+    StateInspector state_inspector(store);
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+
+    const auto listed = handler.handle(make_request(1, methods::kStateGetParameters));
+    REQUIRE_FALSE(listed.is_error);
+    const auto parameters = choc::json::parse(listed.params_json);
+    REQUIRE(parameters.isArray());
+    REQUIRE(parameters.size() == 2);
+    CHECK(parameters[0]["id"].getInt64() == static_cast<std::int64_t>(above_int32));
+    CHECK(parameters[1]["id"].getInt64() == static_cast<std::int64_t>(max_id));
+
+    const auto set_above_int32 = handler.handle(make_request(
+        2, methods::kStateSetParameter,
+        R"({"id":2147483648,"value":0.25})"));
+    REQUIRE_FALSE(set_above_int32.is_error);
+    CHECK(store.get_value(above_int32) == Catch::Approx(0.25f));
+
+    const auto set_max = handler.handle(make_request(
+        3, methods::kStateSetParameter,
+        R"({"id":4294967295,"value":0.75})"));
+    REQUIRE_FALSE(set_max.is_error);
+    CHECK(store.get_value(max_id) == Catch::Approx(0.75f));
+
+    for (const auto params : {
+             R"({"id":-1,"value":0.5})",
+             R"({"id":4294967296,"value":0.5})",
+             R"({"id":1.5,"value":0.5})"}) {
+        const auto rejected = handler.handle(
+            make_request(4, methods::kStateSetParameter, params));
+        REQUIRE(rejected.is_error);
+        CHECK(rejected.params_json == "Invalid params for State.setParameter");
+    }
+    CHECK(store.get_value(above_int32) == Catch::Approx(0.25f));
+    CHECK(store.get_value(max_id) == Catch::Approx(0.75f));
 }
 
 TEST_CASE("StateInspector::set_param validates, gestures, and supports normalized", "[inspect][state][mcp-set-param]") {
