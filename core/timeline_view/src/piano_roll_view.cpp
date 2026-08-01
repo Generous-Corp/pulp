@@ -156,7 +156,11 @@ timebase::TickPosition PianoRollView::snapped(timebase::TickPosition tick) const
 }
 
 bool PianoRollView::admissible(const NoteEvent& note) {
-    if (note.duration.value <= 0 || note.pitch > 127 || note.channel > 15 || !note.id.valid()) {
+    // The overflow test comes first because note_end() below would perform the
+    // very addition it guards. Everything after this line may add start and
+    // duration freely.
+    if (note.duration.value <= 0 || note.pitch > 127 || note.channel > 15 || !note.id.valid() ||
+        note.start.value > std::numeric_limits<std::int64_t>::max() - note.duration.value) {
         refusals_.push_back(PianoRollRefusal::InvalidNote);
         return false;
     }
@@ -190,8 +194,12 @@ void PianoRollView::emit(timeline_editor::NoteEditIntentKind kind,
     intent.expected = std::move(expected);
     intent.replacement = std::move(replacement);
 
-    // The validated wrapper is the only way into the host, so a gesture that
-    // built a malformed edit is refused here rather than at the reducer.
+    // The validated wrapper is the only way into the host, and its factory is
+    // fallible, so this branch is mandatory error handling rather than a
+    // refusal a gesture reaches: every path that gets here has already passed
+    // `admissible`, which is a superset of the note-domain checks validation
+    // repeats. Recording the refusal rather than dropping the result silently
+    // is what keeps a future gesture that DOES reach it visible instead of mute.
     auto validated = timeline_editor::ValidatedNoteEditIntent::create(std::move(intent));
     if (!validated) {
         refusals_.push_back(PianoRollRefusal::InvalidNote);
@@ -312,13 +320,12 @@ void PianoRollView::on_mouse_up(view::Point position) {
         if (replacement.start == drag.grabbed->start && replacement.pitch == drag.grabbed->pitch)
             return;
     } else {
+        // A trailing edge dragged back past its own note start yields a
+        // non-positive duration. That is not tested for here: `admissible`
+        // below already rejects it, and a second check would be a branch no
+        // gesture can be shown to reach independently of that one.
         const auto end = snapped(release_tick);
-        const auto duration = end.value - drag.grabbed->start.value;
-        if (duration <= 0) {
-            refusals_.push_back(PianoRollRefusal::InvalidNote);
-            return;
-        }
-        replacement.duration = timebase::TickDuration{duration};
+        replacement.duration = timebase::TickDuration{end.value - drag.grabbed->start.value};
         if (replacement.duration == drag.grabbed->duration)
             return;
     }
