@@ -6552,3 +6552,35 @@ TEST_CASE("a run that recovered reads as done", "[buildlog][join]") {
                            << "  outcome: " << static_cast<int>(outcome));
     CHECK(outcome == forge_modular::BuildOutcome::done);
 }
+
+// Every generator ending classifies as terminal — and as the RIGHT terminal.
+//
+// A textual check that an ending matches "some rule" is not enough: matching a
+// SUCCESS rule would be worse than matching nothing, because a failed run
+// would report done and the app would offer an artifact that was never
+// written. These are the exact strings both generators raise.
+TEST_CASE("every generator ending is classified as a failure",
+          "[buildlog][join]") {
+    using forge_modular::BuildMonitor;
+    using forge_modular::BuildLine;
+    const std::vector<std::string> endings = {
+        "gave up after 5 attempts",
+        "model call failed (1): boom",
+        "could not fetch the library catalog: timeout",
+        "could not fetch the module index: timeout",
+        "the patch contract is not sound: marker missing",
+        "model reply did not contain both a json and a cpp block:",
+        "duplicate addModel for ['VCO'] — Rack would abort at load",
+        "Rack SDK not found at /nope. Set RACK_SDK_DIR, or download",
+        "two manifests claim the model 'VCO': a.json and b.json.",
+        "another generation is already running against this module pack.",
+    };
+    for (const auto& text : endings) {
+        const auto kind = BuildMonitor::classify(text);
+        INFO("ending: " << text << "  kind: " << static_cast<int>(kind));
+        // Not progress — the app must stop waiting.
+        CHECK(kind != BuildLine::Kind::progress);
+        // And NOT success, which would offer an artifact that does not exist.
+        CHECK(kind != BuildLine::Kind::success);
+    }
+}

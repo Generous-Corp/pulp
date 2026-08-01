@@ -107,7 +107,10 @@ CASES = [
      "module", False, FAIL),
 
     ("a generator that gave up fails",
-     "  thinking\n  gave up: could not satisfy the request\n",
+     # The generators' REAL wording. This said "gave up: could not satisfy
+     # the request", which neither of them prints — a fixture agreeing with
+     # nothing, which passed until the marker it relied on was narrowed.
+     "  thinking\n  gave up after 5 attempts\n",
      "patch", True, FAIL),
 
     # The one that made the M5 proof lie. Build HAD landed, the model call was

@@ -261,6 +261,32 @@ def log_state(expect: str = "") -> dict:
     return out
 
 
+# Every way the generators stop without an artifact, lower-cased.
+#
+# This knew two of them — "gave up" and a traceback — and the other eight fell
+# through to INCONCLUSIVE, which reads as "the harness could not tell" when the
+# generator had said exactly what went wrong. "model call failed" is the one
+# that matters most: it is what a machine whose model CLI cannot reach its
+# credential prints, so every proof run on a locked keychain reported no
+# verdict rather than the real reason.
+#
+# Kept in step with the generators by tools/rack/test_generator_endings.py.
+GENERATOR_ENDED_BADLY = (
+    "gave up",          # both generators; "gave up after N attempts"
+    "traceback (most recent call last)",
+    "model call failed",
+    "model cli is not logged in",
+    "could not fetch the library catalog",
+    "could not fetch the module index",
+    "is not sound",
+    "did not contain both a json",
+    "duplicate addmodel",
+    "sdk not found",
+    "two manifests claim",
+    "already running against this module pack",
+)
+
+
 def verdict(expect: str = "") -> int:
     st = log_state(expect)
     print(json.dumps(st, indent=2))
@@ -305,8 +331,10 @@ def verdict(expect: str = "") -> int:
             return 1
         print("PASS: a module was built and installed into Rack")
         return 0
-    if "gave up" in text or "Traceback" in text:
-        print("FAIL: the generator ran and did not produce an artifact")
+    if any(marker in text.lower() for marker in GENERATOR_ENDED_BADLY):
+        first = next(m for m in GENERATOR_ENDED_BADLY if m in text.lower())
+        print(f"FAIL: the generator ran and did not produce an artifact "
+              f"({first})")
         return 1
     if st["generating"]:
         print("RUNNING: the generator is still working")

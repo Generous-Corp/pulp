@@ -74,7 +74,8 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         contains(lower, "is not sound") ||
         contains(lower, "did not contain both a json") ||
         contains(lower, "duplicate addmodel") ||
-        contains(lower, "sdk not found")) {
+        contains(lower, "sdk not found") ||
+        contains(lower, "two manifests claim")) {
         return BuildLine::Kind::error;
     }
 

@@ -75,6 +75,14 @@ def main():
         print("  WRONG  no contains() rules found in build_monitor.cpp")
         return 1
 
+    # NOTE: this counts a match against any rule in build_monitor.cpp,
+    # including the success ones — and matching a SUCCESS rule is worse than
+    # matching nothing, because a failed run would report done and the app
+    # would offer an artifact that was never written. It caught exactly that
+    # once ("two manifests claim the model" matched something and still
+    # classified as progress), so the authoritative check on the monitor is
+    # the C++ one, "every generator ending is classified as a failure", which
+    # runs classify() itself. This stays as a cheap screen.
     unseen = []
     for msg, where in sorted(msgs.items()):
         if not any(rule in msg for rule in rs):
@@ -161,6 +169,35 @@ def main():
         bad += 1
     else:
         print(f"  ok     every rule matches something a generator still says")
+
+    # drive_app has the same job and the same blindness. It knew two of the
+    # ten endings; the other eight fell through to INCONCLUSIVE, which reads
+    # as "the harness could not tell" when the generator had said exactly what
+    # went wrong. Its list has to cover them too.
+    drv_src = open(os.path.join(HERE, "drive_app.py")).read()
+    # To the closing paren on its OWN LINE. A non-greedy match to the first
+    # ")" stops inside the marker "traceback (most recent call last)", sees two
+    # markers, and reports the other eight as missing — nine invented failures
+    # that would have sent somebody to fix code that was already right.
+    block = re.search(r"GENERATOR_ENDED_BADLY = \((.*?)\n\)", drv_src, re.S)
+    if not block:
+        print("  WRONG  drive_app has no GENERATOR_ENDED_BADLY list")
+        bad += 1
+    else:
+        drv_markers = {m.lower()
+                       for m in re.findall(r'"([^"]+)"', block.group(1))}
+        missed = [f"{where}: {msg!r}"
+                  for msg, where in sorted(msgs.items())
+                  if not any(mk in msg for mk in drv_markers)]
+        if missed:
+            print(f"  WRONG  drive_app cannot recognise {len(missed)} "
+                  f"ending(s); each reports INCONCLUSIVE instead of the "
+                  f"reason the generator gave:")
+            for m in missed:
+                print(f"           {m}")
+            bad += 1
+        else:
+            print(f"  ok     drive_app recognises all {len(msgs)} endings too")
 
     print("\n" + ("all good" if bad == 0 else "FAILED"))
     return 1 if bad else 0
