@@ -88,6 +88,40 @@ def main():
     else:
         print(f"  ok     all {len(msgs)} generator endings are recognised")
 
+    def decoded(rule):
+        try:
+            raw = rule.encode("latin-1").decode("unicode_escape")
+            return raw.encode("latin-1").decode("utf-8")
+        except Exception:                                   # noqa: BLE001
+            return rule
+
+    # The other ending: SUCCESS. A generation the app cannot see finish hangs
+    # exactly as badly as one it cannot see fail — the stage never resolves and
+    # the artifact it just produced is never offered.
+    success_rules = set()
+    mon = open(MONITOR).read()
+    block = mon[:mon.find("Kind::success")]
+    for m in re.finditer(r'contains\(lower,\s*"([^"]+)"\)', block[-900:]):
+        success_rules.add(m.group(1).lower())
+
+    produced = {
+        "patch.py":    "  built 8 modules, 9 cables \u2192 /tmp/p.vcv",
+        "generate.py": "installed \u2192 /tmp/pack.vcvplugin",
+    }
+    unseen_success = []
+    for who, line in sorted(produced.items()):
+        low = line.lower()
+        if not any(r in low or decoded(r) in low for r in success_rules):
+            unseen_success.append(f"{who}: {line!r}")
+    if unseen_success:
+        print(f"  WRONG  the app cannot see these builds SUCCEED — the stage "
+              f"never resolves and the artifact is never offered:")
+        for u in unseen_success:
+            print(f"           {u}")
+        bad += 1
+    else:
+        print(f"  ok     both generators' success lines are recognised")
+
     # And the reverse: a rule matching wording nobody prints any more is a
     # refusal or an error the app can no longer see. The rules are substrings
     # of the generators' own sentences, so a reworded message leaves the rule
@@ -95,16 +129,6 @@ def main():
     # Decoded, because a rule is written in C++ with \xNN escapes for the
     # arrow while the Python prints the character itself — comparing the raw
     # spellings reports a match as missing.
-    def decoded(rule):
-        # A C++ literal spells the arrow \xe2\x86\x92 — the UTF-8 BYTES of
-        # it — while the Python prints the character. Unescaping alone gives
-        # mojibake and reports a rule that matches as missing, which is a
-        # false alarm sending somebody hunting for nothing.
-        try:
-            raw = rule.encode("latin-1").decode("unicode_escape")
-            return raw.encode("latin-1").decode("utf-8")
-        except Exception:                                   # noqa: BLE001
-            return rule
     generator_text = "\n".join(
         open(g, encoding="utf-8", errors="replace").read()
         for g in LOG_WRITERS if os.path.exists(g)).lower()
