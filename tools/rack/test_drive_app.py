@@ -258,6 +258,29 @@ def check_success_line_agrees() -> int:
                   f"build reports INCONCLUSIVE.")
             bad += 1
 
+    # The two prove scripts each carry their OWN sed for the same line, so the
+    # format has four readers: drive_app's regex, the app's scan, and these.
+    # Pinning one of four is pinning nothing — a reword leaves the others
+    # finding no path and reporting a pass with an empty artifact.
+    for script in ("prove_idioms.sh", "prove_surfaces.sh"):
+        text = open(os.path.join(HERE, script)).read()
+        pat = re.search(r"sed -n 's/([^']*cables[^']*)/p'", text)
+        if not pat:
+            print(f"  WRONG  {script} no longer extracts the artifact path "
+                  f"where this expects it")
+            bad += 1
+            continue
+        # Turn the sed expression into something testable: the literal text it
+        # requires around the path.
+        literal = pat.group(1).split(r"\(")[0].replace(".*", "")
+        if literal and literal.strip() in line:
+            print(f"  ok     {script} matches the line patch.py prints")
+        else:
+            print(f"  WRONG  {script} looks for {literal.strip()!r}, which is "
+                  f"not in {line!r} — it will find no artifact path and "
+                  f"report a pass with nothing to open")
+            bad += 1
+
     # And the app's looser rule: it scans for a line naming a .vcv.
     if ".vcv" in line:
         print("  ok     the line names a .vcv, which is what the app scans for")
