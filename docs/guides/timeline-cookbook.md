@@ -29,6 +29,7 @@ Start with the smallest installed target set that owns the work:
 | --- | --- |
 | Musical/sample time and tempo or meter maps | `timebase`, `Pulp::timebase` |
 | Immutable projects, commands, sessions, and native persistence | `timeline`, `Pulp::timeline` |
+| Kill-atomic no-replace project publication with unreachable unpublished staging | `project-package`, `Pulp::project-package` |
 | Compilation, transport, rendering, launch timing, and capture | `playback`, `Pulp::playback` |
 | Plugin-format-facing playback processor | `sequence`, `Pulp::sequence` |
 | DAWproject `project.xml` import | `dawproject-import`, `Pulp::dawproject-import` |

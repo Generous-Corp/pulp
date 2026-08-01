@@ -1,8 +1,7 @@
 #include "bounded_zip_archive.hpp"
 
-#include "atomic_publisher.hpp"
-
 #include <pulp/interchange/export_plan.hpp>
+#include <pulp/project_package/atomic_publisher.hpp>
 #include <pulp/timeline/asset_path.hpp>
 
 #include <miniz.h>
@@ -270,7 +269,8 @@ struct BoundedZipArchive::Impl {
     using Paths = std::pmr::unordered_set<String>;
 
     explicit Impl(std::uint64_t limit)
-        : ledger(limit), resource(ledger), entries(&resource), media_paths(std::in_place, &resource) {
+        : ledger(limit), resource(ledger), entries(&resource),
+          media_paths(std::in_place, &resource) {
         if (!ledger.acquire(kZipControlAndApiReserveBytes))
             throw std::bad_alloc();
     }
@@ -319,11 +319,13 @@ bool BoundedZipArchive::retain_media_path(std::string_view name) noexcept {
         return false;
     }
 }
-bool BoundedZipArchive::publish_retained_media(AtomicPublisher& publisher) const {
+bool BoundedZipArchive::publish_retained_media(project_package::AtomicPublisher& publisher) const {
     for (const auto& path : *impl_->media_paths) {
         const auto entry = impl_->entries.find(path);
-        if (entry == impl_->entries.end() ||
-            !publisher.write(path, std::span<const std::uint8_t>(entry->second)))
+        if (entry == impl_->entries.end())
+            return false;
+        auto staged = publisher.write(path, std::span<const std::uint8_t>(entry->second));
+        if (!staged || !staged.value())
             return false;
     }
     return true;
@@ -465,7 +467,7 @@ write_dawproject_archive_no_replace(const pulp::interchange::ExportArtifacts& ar
     if (!artifacts_reserve || !io || !control)
         return runtime::Err(DawProjectArchiveError{
             DawProjectArchiveErrorCode::Export, "DAWproject export exceeds the working-set limit"});
-    auto publisher = AtomicPublisher::create(destination);
+    auto publisher = project_package::AtomicPublisher::create(destination);
     if (!publisher)
         return runtime::Err(
             DawProjectArchiveError{DawProjectArchiveErrorCode::Publish,
@@ -502,9 +504,14 @@ write_dawproject_archive_no_replace(const pulp::interchange::ExportArtifacts& ar
             DawProjectArchiveError{DawProjectArchiveErrorCode::Export,
                                    "could not build bounded DAWproject ZIP container"});
     const auto peak = ledger.peak();
-    if (!publisher->commit_file(staging))
+    auto publication = publisher->commit_file(staging);
+    if (!publication || publication.value() == project_package::AtomicPublishOutcome::NotPublished)
         return runtime::Err(DawProjectArchiveError{
             DawProjectArchiveErrorCode::Publish, "output file appeared before atomic publication"});
+    if (publication.value() == project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
+        return runtime::Err(
+            DawProjectArchiveError{DawProjectArchiveErrorCode::Publish,
+                                   "output file publication durability is uncertain"});
     return runtime::Ok(peak);
 }
 

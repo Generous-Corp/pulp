@@ -20,6 +20,12 @@ modules:
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline
 
+  - name: project_package
+    summary: Kill-atomic no-replace publication for durable project files and directories with fenced bytes metadata and bounded package-owned stage cleanup
+    status: experimental
+    dependencies: [timeline, runtime]
+    docs: reference/modules.md#project_package
+
   - name: timeline_editor
     summary: The editor rung's interfaces starting with SequencerUiHost the whole coupling a timeline view has toward playback carrying value-copied playhead readings audition requests and emitted intents in document vocabulary only plus the pointer-neutral EditIntent verbs and their lowering onto ordinary transactions
     status: experimental
