@@ -211,20 +211,21 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
     if (destination.empty())
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
     std::error_code error;
-    auto anchored_destination = fs::absolute(destination, error);
+    const auto absolute_destination = fs::absolute(destination, error);
     if (error)
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
-    anchored_destination = anchored_destination.lexically_normal();
+
+    const auto parent = fs::canonical(absolute_destination.parent_path(), error);
+    if (error || fs::status(parent, error).type() != fs::file_type::directory)
+        return failure<AtomicPublisher>(PackageErrorCode::InvalidPath,
+                                        absolute_destination.parent_path());
+    const auto anchored_destination = parent / absolute_destination.filename();
     const auto status = fs::symlink_status(anchored_destination, error);
     if ((!error && status.type() != fs::file_type::not_found) ||
         (error && error != std::errc::no_such_file_or_directory))
         return failure<AtomicPublisher>(PackageErrorCode::PublicationConflict,
                                         anchored_destination);
     error.clear();
-    const auto parent = anchored_destination.parent_path();
-    const auto parent_status = fs::symlink_status(parent, error);
-    if (error || parent_status.type() != fs::file_type::directory)
-        return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, parent);
 
     static std::atomic<std::uint64_t> serial{0};
     for (std::size_t attempt = 0; attempt < 128; ++attempt) {

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <set>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -101,36 +102,46 @@ fs::path stage_path(const fs::path& directory) {
     return directory / (std::string(kStagePrefix) + std::to_string(next_serial()));
 }
 
+bool validate_canonical_blob(const fs::path& root, const timeline::ContentHash& expected,
+                             std::uint64_t maximum, std::set<timeline::ContentHash>& verified) {
+    if (verified.contains(expected))
+        return true;
+    if (!hash_matches(blob_path(root, {BlobStore::Media, expected}), expected, maximum))
+        return false;
+    verified.insert(expected);
+    return true;
+}
+
 bool validate_locator(const fs::path& root, const timeline::AssetLocator& locator,
-                      const timeline::ContentHash& expected, std::uint64_t maximum) {
+                      const timeline::ContentHash& expected, std::uint64_t maximum,
+                      std::set<timeline::ContentHash>& verified) {
     if (locator.kind != timeline::AssetLocatorKind::PackageRelative)
         return true;
     if (!timeline::package_relative_path_is_lexically_safe(locator.hint))
         return false;
     const auto canonical = std::string("media/") + expected.to_hex();
-    return locator.hint == canonical &&
-           hash_matches(root / path_from_utf8(locator.hint), expected, maximum);
+    return locator.hint == canonical && validate_canonical_blob(root, expected, maximum, verified);
 }
 
 bool validate_project_references(const fs::path& root, const timeline::Project& project,
                                  std::uint64_t maximum) {
+    std::set<timeline::ContentHash> verified;
     for (const auto& asset : project.assets()) {
         const bool embedded = asset.storage_policy == timeline::AssetStoragePolicy::Embedded;
-        if (embedded && !hash_matches(blob_path(root, {BlobStore::Media, asset.content_hash}),
-                                      asset.content_hash, maximum))
+        if (embedded && !validate_canonical_blob(root, asset.content_hash, maximum, verified))
             return false;
         for (const auto& locator : asset.locators)
-            if (!validate_locator(root, locator, asset.content_hash, maximum))
+            if (!validate_locator(root, locator, asset.content_hash, maximum, verified))
                 return false;
         for (const auto& representation : asset.representations) {
             const bool representation_embedded =
                 representation.storage_policy == timeline::AssetStoragePolicy::Embedded;
             if (representation_embedded &&
-                !hash_matches(blob_path(root, {BlobStore::Media, representation.content_hash}),
-                              representation.content_hash, maximum))
+                !validate_canonical_blob(root, representation.content_hash, maximum, verified))
                 return false;
             for (const auto& locator : representation.locators)
-                if (!validate_locator(root, locator, representation.content_hash, maximum))
+                if (!validate_locator(root, locator, representation.content_hash, maximum,
+                                      verified))
                     return false;
         }
     }

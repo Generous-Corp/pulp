@@ -46,6 +46,7 @@ namespace fs = std::filesystem;
 
 fs::path g_swap_after_blob_verification;
 fs::path g_blob_swap_source;
+std::atomic<std::uint64_t> g_blob_verifications{0};
 
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified &&
@@ -54,6 +55,11 @@ void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) 
     std::error_code ignored;
     fs::remove(g_swap_after_blob_verification, ignored);
     fs::rename(g_blob_swap_source, g_swap_after_blob_verification, ignored);
+}
+
+void count_blob_verification(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point == pulp::project_package::detail::PackageFaultPoint::BlobReferenceVerified)
+        g_blob_verifications.fetch_add(1, std::memory_order_relaxed);
 }
 
 class TemporaryPackage {
@@ -105,6 +111,46 @@ pulp::timeline::Project make_project(std::string project_name, std::string asset
                                                 .next_item_id = 4,
                                                 .root_sequence_id = {3},
                                                 .assets = {std::move(asset)},
+                                                .sequences = {std::move(sequence).value()},
+                                                .tempo_map = {},
+                                                .meter_map = {},
+                                                .session_start = std::nullopt});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+pulp::timeline::Project
+make_repeated_reference_project(const pulp::timeline::ContentHash& first_hash,
+                                const pulp::timeline::ContentHash& second_hash) {
+    using namespace pulp::timeline;
+    const auto canonical_locator = [](const ContentHash& hash) {
+        return AssetLocator{AssetLocatorKind::PackageRelative, "media/" + hash.to_hex()};
+    };
+    MediaAsset first{{2},
+                     "first",
+                     4,
+                     {48'000, 1},
+                     first_hash,
+                     AssetStoragePolicy::Embedded,
+                     {canonical_locator(first_hash), canonical_locator(first_hash)},
+                     {},
+                     {}};
+    MediaAsset second{{4},
+                      "second",
+                      4,
+                      {48'000, 1},
+                      second_hash,
+                      AssetStoragePolicy::Embedded,
+                      {canonical_locator(second_hash)},
+                      {},
+                      {}};
+    auto sequence = Sequence::create({3}, "sequence", pulp::timebase::TickDuration{0}, {});
+    REQUIRE(sequence);
+    auto project = Project::create(ProjectInput{.id = {1},
+                                                .name = "repeated references",
+                                                .next_item_id = 5,
+                                                .root_sequence_id = {3},
+                                                .assets = {std::move(first), std::move(second)},
                                                 .sequences = {std::move(sequence).value()},
                                                 .tempo_map = {},
                                                 .meter_map = {},
@@ -572,6 +618,38 @@ TEST_CASE("Atomic project-package publisher anchors a relative destination at cr
     REQUIRE_FALSE(fs::exists(second / "published"));
 }
 
+TEST_CASE("Atomic project-package publisher anchors a symlinked destination parent",
+          "[project-package][atomic-publisher][symlink]") {
+    TemporaryPackage temporary("atomic-parent-symlink");
+    const auto first = temporary.path / "first";
+    const auto second = temporary.path / "second";
+    const auto parent_link = temporary.path / "parent";
+    fs::create_directories(first);
+    fs::create_directories(second);
+
+    std::error_code error;
+    fs::create_directory_symlink(first, parent_link, error);
+    if (error)
+        SKIP("directory symlink creation is unavailable: " << error.message());
+
+    auto publisher = AtomicPublisher::create(parent_link / "published");
+    REQUIRE(publisher);
+    REQUIRE(publisher->staging_directory().parent_path() == fs::canonical(first));
+    const auto written = publisher->write("value.txt", "anchored");
+    REQUIRE(written);
+    REQUIRE(written.value());
+
+    fs::remove(parent_link);
+    fs::create_directory_symlink(second, parent_link, error);
+    REQUIRE_FALSE(error);
+
+    const auto committed = publisher->commit_directory();
+    REQUIRE(committed);
+    REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
+    REQUIRE(read_text(first / "published" / "value.txt") == "anchored");
+    REQUIRE_FALSE(fs::exists(second / "published"));
+}
+
 #if !defined(_WIN32)
 TEST_CASE("Atomic project-package publisher creates owner-private staging",
           "[project-package][atomic-publisher][permissions]") {
@@ -691,6 +769,42 @@ TEST_CASE("Project publication rejects a blob pathname swapped after handle veri
     REQUIRE_FALSE(published);
     REQUIRE(published.error().code == PackageErrorCode::InvalidGeneration);
     REQUIRE_FALSE(fs::exists(temporary.path / "project.json"));
+}
+
+TEST_CASE("Project reference validation hashes each canonical blob once per pass",
+          "[project-package][hash-amplification]") {
+    TemporaryPackage temporary("reference-deduplication");
+    const std::vector<std::uint8_t> first_bytes{'f', 'i', 'r', 's', 't'};
+    const std::vector<std::uint8_t> second_bytes{'s', 'e', 'c', 'o', 'n', 'd'};
+    const auto first_hash = hash_bytes(first_bytes);
+    const auto second_hash = hash_bytes(second_bytes);
+    const auto project = make_repeated_reference_project(first_hash, second_hash);
+
+    {
+        auto writer = PackageWriter::create(temporary.path, registry());
+        REQUIRE(writer);
+        REQUIRE(writer->stage_blob(BlobStore::Media, first_hash, first_bytes));
+        REQUIRE(writer->stage_blob(BlobStore::Media, second_hash, second_bytes));
+
+        g_blob_verifications.store(0, std::memory_order_relaxed);
+        pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+            count_blob_verification);
+        const auto published = writer->publish(project);
+        pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+
+        REQUIRE(published);
+        REQUIRE(published.value() == AtomicPublishOutcome::PublishedDurably);
+        REQUIRE(g_blob_verifications.load(std::memory_order_relaxed) == 2);
+    }
+
+    g_blob_verifications.store(0, std::memory_order_relaxed);
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        count_blob_verification);
+    const auto opened = open_package(temporary.path, registry());
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+
+    REQUIRE(opened);
+    REQUIRE(g_blob_verifications.load(std::memory_order_relaxed) == 2);
 }
 
 TEST_CASE("Project package size limits narrow only when the target size can represent them",
