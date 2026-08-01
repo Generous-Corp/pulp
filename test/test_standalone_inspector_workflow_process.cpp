@@ -109,6 +109,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
 
     const auto ready_path = scratch.path / "ready.json";
     const auto stop_path = scratch.path / "stop";
+    const auto observation_path = scratch.path / "test-input-observation.json";
     std::mutex startup_log_mutex;
     std::string startup_log;
     pulp::platform::ProcessOptions options;
@@ -123,6 +124,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
                         {"--ready", ready_path.string(),
                          "--stop", stop_path.string(),
                          "--runtime-dir", runtime_path.string(),
+                         "--observation", observation_path.string(),
                          "--wait-until-stop"}, options));
 
     pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
@@ -219,6 +221,31 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
         + std::to_string(target) + "}";
     REQUIRE_FALSE(client.request(
         "State.setParameter", set_json, std::chrono::seconds(2)).is_error);
+
+    REQUIRE_FALSE(client.request(
+        "Test.setTransport",
+        R"({"playing":false,"position_samples":96000,"tempo_bpm":90})",
+        std::chrono::seconds(2)).is_error);
+    REQUIRE_FALSE(client.request(
+        "Test.injectMidi",
+        R"({"kind":"note_on","channel":3,"note":64,"velocity":99})",
+        std::chrono::seconds(2)).is_error);
+    REQUIRE_FALSE(client.request(
+        "Session.releaseController", "{}", std::chrono::seconds(2)).is_error);
+
+    const auto observation_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!std::filesystem::exists(observation_path) &&
+           std::chrono::steady_clock::now() < observation_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(std::filesystem::exists(observation_path));
+    std::ifstream observation_input(observation_path);
+    const auto observation_json = choc::json::parse(
+        std::string(std::istreambuf_iterator<char>(observation_input), {}));
+    REQUIRE(observation_json["note_on_count"].getInt64() > 0);
+    REQUIRE(observation_json["note_off_count"].getInt64() > 0);
+    REQUIRE(observation_json["transport_match"].getBool());
 
     const double expected_normalized = (target - minimum) / (maximum - minimum);
     std::optional<double> post_mutation_dom;

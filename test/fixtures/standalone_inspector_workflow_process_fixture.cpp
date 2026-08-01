@@ -19,6 +19,9 @@
 namespace {
 
 std::filesystem::path g_script_path;
+std::atomic<std::uint32_t> g_note_on_count{0};
+std::atomic<std::uint32_t> g_note_off_count{0};
+std::atomic<bool> g_transport_match{false};
 
 class StandaloneWorkflowProcessor final : public pulp::format::Processor {
 public:
@@ -31,6 +34,7 @@ public:
             .category = pulp::format::PluginCategory::Effect,
             .input_buses = {},
             .output_buses = {{"Output", 2}},
+            .accepts_midi = true,
         };
     }
 
@@ -48,8 +52,18 @@ public:
 
     void process(pulp::audio::BufferView<float>& output,
                  const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext& context) override {
+        for (const auto& event : midi_in) {
+            if (event.is_note_on() && event.channel() == 2 && event.note() == 64)
+                g_note_on_count.fetch_add(1, std::memory_order_relaxed);
+            if (event.is_note_off() && event.channel() == 2 && event.note() == 64)
+                g_note_off_count.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!context.is_playing && context.position_samples == 96'000 &&
+            context.tempo_bpm == 90.0) {
+            g_transport_match.store(true, std::memory_order_release);
+        }
         output.clear();
     }
 
@@ -125,6 +139,27 @@ bool write_ready_file(const std::filesystem::path& ready,
     return !error;
 }
 
+bool write_observation_file(const std::filesystem::path& path) {
+    if (path.empty()) return true;
+    const auto temporary = path.string() + ".tmp";
+    std::ofstream output(temporary, std::ios::trunc);
+    if (!output) return false;
+    output << "{\n"
+           << "  \"note_on_count\": "
+           << g_note_on_count.load(std::memory_order_acquire) << ",\n"
+           << "  \"note_off_count\": "
+           << g_note_off_count.load(std::memory_order_acquire) << ",\n"
+           << "  \"transport_match\": "
+           << (g_transport_match.load(std::memory_order_acquire)
+                   ? "true" : "false")
+           << "\n}\n";
+    output.close();
+    if (!output) return false;
+    std::error_code error;
+    std::filesystem::rename(temporary, path, error);
+    return !error;
+}
+
 bool teardown_is_complete(
     const std::filesystem::path& runtime_path,
     const pulp::inspect::InspectorDiscoveryRecord& record) {
@@ -153,6 +188,7 @@ bool teardown_is_complete(
 int main(int argc, char** argv) {
     std::filesystem::path ready_path;
     std::filesystem::path stop_path;
+    std::filesystem::path observation_path;
     std::filesystem::path runtime_path =
         pulp::inspect::default_inspector_runtime_directory();
     bool wait_until_stop = false;
@@ -164,6 +200,8 @@ int main(int argc, char** argv) {
             stop_path = argv[++i];
         else if (argument == "--runtime-dir" && i + 1 < argc)
             runtime_path = argv[++i];
+        else if (argument == "--observation" && i + 1 < argc)
+            observation_path = argv[++i];
         else if (argument == "--wait-until-stop")
             wait_until_stop = true;
     }
@@ -233,6 +271,15 @@ setTextColor("workflow-status", "#ffffff");
                    || std::chrono::steady_clock::now() < stop_deadline)
                && !std::filesystem::exists(stop_path)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if (!observation_path.empty() &&
+                g_note_on_count.load(std::memory_order_acquire) > 0 &&
+                g_note_off_count.load(std::memory_order_acquire) > 0 &&
+                g_transport_match.load(std::memory_order_acquire) &&
+                !write_observation_file(observation_path)) {
+                controller_failed.store(true, std::memory_order_release);
+                request_native_quit();
+                return;
+            }
         }
         if (stop.stop_requested()) return;
         if (!std::filesystem::exists(stop_path))
