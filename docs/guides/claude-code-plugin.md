@@ -118,13 +118,13 @@ identifiers into subsequent calls, check
 `pulp_inspect_capabilities` before acting, and verify mutations with a typed
 reread or `pulp_inspect_screenshot`. Ordinary launches publish no endpoint.
 
-When using the CLI's raw generic command, pass `State.setParameter` an integer
-parameter ID and numeric value, then reread with the same exact selectors:
+Use the CLI's typed parameter command with an integer parameter ID and numeric
+value, then reread with the same exact selectors:
 
 ```bash
-pulp inspect --session SESSION_ID --instance INSTANCE_ID \
-  --publication PUBLICATION_ID --command State.setParameter \
-  --params '{"id":7,"value":0.75}'
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID
 ```
 
 `pulp inspect --output` saves a screenshot response as JSON; it does not decode

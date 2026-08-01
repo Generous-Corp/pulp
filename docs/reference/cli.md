@@ -1295,7 +1295,7 @@ pulp inspect list --json
 pulp inspect capabilities --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --json
 pulp inspect doctor --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --json
 pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --command State.getParameters
-pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --command State.setParameter --params '{"id":7,"value":0.75}'
+pulp inspect set-parameter --id 7 --value 0.75 --json --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
 
 The agent workflow is `list` → select the exact session/instance/publication →
@@ -1304,9 +1304,10 @@ the exact identity and evidence. `doctor` combines authenticated capability and
 agent-context probes into one readiness result. The stable JSON envelopes are
 `pulp.inspect.profiles.v1`, `pulp.inspect.sessions.v1`,
 `pulp.inspect.capabilities.v1`, and `pulp.inspect.doctor.v1`.
-The raw `State.setParameter` params object is
-`{"id":7,"value":0.75}`: replace the example ID and value with a parameter
-reported by `State.getParameters`, then reread using the same exact selectors.
+The typed `set-parameter` command validates the numeric ID and finite value
+before sending the request and returns a `pulp.inspect.set-parameter.v1`
+envelope. Replace the example ID and value with a parameter reported by
+`State.getParameters`, then reread using the same exact selectors.
 
 Options:
 

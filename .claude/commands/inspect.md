@@ -27,13 +27,12 @@ Use this sequence for agent work:
 4. Reread the state or request `Capture.screenshot` with the same selectors.
 5. Report the exact identity, request, response, and saved evidence path.
 
-For the raw generic command, `State.setParameter` takes an integer parameter
-ID and a numeric value:
+Use the typed parameter command with an integer parameter ID and numeric value:
 
 ```bash
-pulp inspect --session SESSION_ID --instance INSTANCE_ID \
-  --publication PUBLICATION_ID --command State.setParameter \
-  --params '{"id":7,"value":0.75}'
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID
 ```
 
 Use the selected target's reported parameter ID and reread
