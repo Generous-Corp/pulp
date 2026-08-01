@@ -150,26 +150,14 @@ int cmd_validate(const std::vector<std::string>& args) {
                 } else {
                     continue;
                 }
-                auto artifact_report =
-                    pulp::cli::inspector_shipping::load_report(
-                        inspector_evidence_root(artifact));
-                if (artifact_report.complete) {
-                    if (executable.empty()) {
-                        artifact_report.complete = false;
-                        artifact_report.error =
-                            "could not resolve standalone executable for inspector "
-                            "capability scan: " + artifact.string();
-                    } else if (artifact_report.manifests.size() != 1) {
-                        artifact_report.complete = false;
-                        artifact_report.error =
-                            "expected exactly one inspector capability manifest for " +
-                            artifact.string();
-                    } else if (!pulp::cli::inspector_shipping::scan_artifact(
-                                   executable, artifact_report.manifests.front(),
-                                   artifact_report.error)) {
-                        artifact_report.complete = false;
-                    }
-                }
+                auto artifact_report = executable.empty()
+                    ? pulp::cli::inspector_shipping::Report{}
+                    : pulp::cli::inspector_shipping::load_exact_artifact_report(
+                          executable, inspector_evidence_root(artifact));
+                if (executable.empty())
+                    artifact_report.error =
+                        "could not resolve standalone executable for inspector "
+                        "capability scan: " + artifact.string();
                 artifact_reports.push_back(std::move(artifact_report));
             }
             inspector_report = pulp::cli::inspector_shipping::combine_reports(

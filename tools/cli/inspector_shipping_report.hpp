@@ -36,6 +36,9 @@ Report load_report(
     const fs::path& search_root,
     std::optional<std::string_view> product = std::nullopt);
 Report load_artifact_report(const fs::path& search_root);
+Report load_exact_artifact_report(
+    const fs::path& artifact, const fs::path& manifest_root,
+    std::optional<std::string_view> product = std::nullopt);
 Report combine_reports(std::vector<Report> reports);
 bool scan_artifact(const fs::path& artifact, const Manifest& manifest,
                    std::string& error);

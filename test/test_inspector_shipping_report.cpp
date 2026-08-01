@@ -223,3 +223,36 @@ TEST_CASE("mixed build trees reject unconfigured standalone artifacts") {
     CHECK(report.error.find("missing inspector capability sidecar") !=
           std::string::npos);
 }
+
+TEST_CASE("one sidecar cannot mask a sibling standalone executable") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto products = temporary.path / "products";
+    fs::create_directories(products);
+    write_artifact(products / "First.exe", "ordinary first standalone");
+    write_manifest(products / "First.inspector-capabilities.json",
+        R"({"target":"First","product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    write_artifact(products / "Second.exe",
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK_FALSE(report.complete);
+    CHECK(report.error.find("Second.exe") != std::string::npos);
+    CHECK(report.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
+}
+
+TEST_CASE("AUv3 container apps are not standalone inspector artifacts") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto executable = temporary.path / "AUv3" / "PluginHost.app" /
+        "Contents" / "MacOS" / "PluginHost";
+    fs::create_directories(executable.parent_path());
+    write_artifact(executable, "ordinary AUv3 host app");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK(report.complete);
+    CHECK(report.manifests.empty());
+}

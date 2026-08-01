@@ -591,20 +591,11 @@ static int ship_package_impl(const std::vector<std::string>& args,
             const auto product_name = product_filter.empty()
                 ? artifact.filename().string()
                 : product_filter;
-            auto artifact_report = pulp::cli::inspector_shipping::load_report(
-                artifact.parent_path(), product_name);
+            auto artifact_report =
+                pulp::cli::inspector_shipping::load_exact_artifact_report(
+                    artifact, artifact.parent_path(), product_name);
             if (!artifact_report.complete) {
                 std::cerr << "pulp ship package: " << artifact_report.error << "\n";
-                return 2;
-            }
-            if (artifact_report.manifests.size() != 1 ||
-                !pulp::cli::inspector_shipping::scan_artifact(
-                    artifact, artifact_report.manifests.front(), artifact_report.error)) {
-                std::cerr << "pulp ship package: "
-                          << (artifact_report.error.empty()
-                                  ? "ambiguous inspector capability manifest"
-                                  : artifact_report.error)
-                          << "\n";
                 return 2;
             }
             artifact_reports.push_back(std::move(artifact_report));
@@ -1955,16 +1946,10 @@ static int ship_share(const std::vector<std::string>& args,
             const auto executable = fs::path(input) / "Contents/MacOS" /
                 fs::path(input).stem();
             inspector_report =
-                pulp::cli::inspector_shipping::load_report(executable.parent_path());
-            if (!inspector_report.complete || inspector_report.manifests.size() != 1 ||
-                !pulp::cli::inspector_shipping::scan_artifact(
-                    executable, inspector_report.manifests.front(),
-                    inspector_report.error)) {
-                std::cerr << "pulp ship share: "
-                          << (inspector_report.error.empty()
-                                  ? "ambiguous inspector capability manifest"
-                                  : inspector_report.error)
-                          << "\n";
+                pulp::cli::inspector_shipping::load_exact_artifact_report(
+                    executable, executable.parent_path());
+            if (!inspector_report.complete) {
+                std::cerr << "pulp ship share: " << inspector_report.error << "\n";
                 return 2;
             }
         } else {

@@ -91,13 +91,40 @@ bool artifact_has_capability_marker(const fs::path& artifact) {
     return false;
 }
 
-bool has_inspector_sidecar(const fs::path& directory) {
+bool has_matching_inspector_sidecar(const fs::path& executable) {
+    const auto directory = executable.parent_path();
+    const auto executable_name = executable.filename().string();
     std::error_code error;
     for (fs::directory_iterator iterator(directory, error), end;
          !error && iterator != end; iterator.increment(error)) {
-        if (iterator->is_regular_file() &&
-            iterator->path().filename().string().ends_with(
-                ".inspector-capabilities.json"))
+        const auto path = iterator->path();
+        const auto filename = path.filename().string();
+        if (!iterator->is_regular_file() ||
+            !filename.ends_with(".inspector-capabilities.json"))
+            continue;
+        constexpr std::string_view suffix = ".inspector-capabilities.json";
+        const auto sidecar_target =
+            filename.substr(0, filename.size() - suffix.size());
+        if (sidecar_target == executable_name ||
+            sidecar_target + ".exe" == executable_name)
+            return true;
+        Manifest manifest;
+        std::string ignored_error;
+        if (!read_manifest(path, manifest, ignored_error)) continue;
+        if (manifest.product_name == executable_name ||
+            manifest.product_name + ".exe" == executable_name ||
+            manifest.target == executable_name ||
+            manifest.target + ".exe" == executable_name)
+            return true;
+    }
+    return false;
+}
+
+bool inside_plugin_format(const fs::path& path) {
+    for (const auto& component : path) {
+        const auto directory = component.string();
+        if (directory == "VST3" || directory == "CLAP" || directory == "AU" ||
+            directory == "AUv3" || directory == "AAX" || directory == "LV2")
             return true;
     }
     return false;
@@ -217,10 +244,11 @@ Report load_artifact_report(const fs::path& search_root) {
     fs::recursive_directory_iterator artifact_end;
     while (!artifact_error && artifact_iterator != artifact_end) {
         const auto path = artifact_iterator->path();
-        if (artifact_iterator->is_directory() && path.extension() == ".app") {
+        if (artifact_iterator->is_directory() && path.extension() == ".app" &&
+            !inside_plugin_format(path)) {
             const auto executable = path / "Contents/MacOS" / path.stem();
             if (fs::is_regular_file(executable) &&
-                !has_inspector_sidecar(executable.parent_path())) {
+                !has_matching_inspector_sidecar(executable)) {
                 Report missing;
                 missing.error =
                     "standalone artifact is missing inspector capability sidecar: " +
@@ -228,17 +256,7 @@ Report load_artifact_report(const fs::path& search_root) {
                 return missing;
             }
         } else if (artifact_iterator->is_regular_file()) {
-            bool inside_plugin_format = false;
-            for (const auto& component : path) {
-                const auto directory = component.string();
-                if (directory == "VST3" || directory == "CLAP" ||
-                    directory == "AU" || directory == "AUv3" ||
-                    directory == "AAX" || directory == "LV2") {
-                    inside_plugin_format = true;
-                    break;
-                }
-            }
-            if (!inside_plugin_format) {
+            if (!inside_plugin_format(path)) {
                 const auto permissions = artifact_iterator->status().permissions();
                 const bool executable = path.extension() == ".exe" ||
                     (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
@@ -255,7 +273,7 @@ Report load_artifact_report(const fs::path& search_root) {
                               name == manifest.target + ".exe"));
                     }
                 }
-                if (executable && !has_inspector_sidecar(path.parent_path()) &&
+                if (executable && !has_matching_inspector_sidecar(path) &&
                     (configured_standalone || artifact_has_capability_marker(path))) {
                     Report missing;
                     missing.error =
@@ -321,6 +339,22 @@ Report load_artifact_report(const fs::path& search_root) {
         return report;
     }
     return combine_reports(std::move(reports));
+}
+
+Report load_exact_artifact_report(
+    const fs::path& artifact, const fs::path& manifest_root,
+    std::optional<std::string_view> product) {
+    auto report = load_report(manifest_root, product);
+    if (!report.complete) return report;
+    if (report.manifests.size() != 1) {
+        report.complete = false;
+        report.error = "expected exactly one inspector capability manifest for " +
+            artifact.string();
+        return report;
+    }
+    if (!scan_artifact(artifact, report.manifests.front(), report.error))
+        report.complete = false;
+    return report;
 }
 
 Report combine_reports(std::vector<Report> reports) {
