@@ -59,6 +59,7 @@
     "pulp-state",
     "pulp-timebase",
     "pulp-timeline",
+    "pulp-timeline-editor",
     "pulp-view",
     "pulp-view-core",
     "pulp-view-script"

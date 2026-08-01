@@ -68,7 +68,8 @@ def runners(specs=None):
 def lane(**kw):
     base = dict(variable="PULP_TEST_RUNS_ON_JSON", purpose="test lane",
                 expect=STUDIO_LANE, provisioning="persistent",
-                severity="required", hosts=[], unset_fallback=None)
+                severity="required", hosts=[], unset_fallback=None,
+                require_explicit_value=False)
     base.update(kw)
     return gate.Lane(**base)
 
@@ -80,9 +81,86 @@ def contract(lanes, unset=(), hosted=("macos-15",), sentinels=("local-only",)):
         sentinels=set(sentinels),
         must_remain_unset=list(unset),
         must_remain_unset_why="paid overflow, off for cost",
+        routing_controls={},
         lookback_hours=720,
         runs_per_workflow=20,
     )
+
+
+class TestRoutingControls(unittest.TestCase):
+    def test_exact_control_value_is_enforced(self):
+        c = contract([])
+        c.routing_controls = {
+            "PULP_LOCAL_MAC_RUNNER_LABEL":
+                gate.RoutingControl(expect="pulp-gate-fast",
+                                    unset_fallback="pulp-gate-fast")
+        }
+        findings = gate.check(
+            c, runners(), {"PULP_LOCAL_MAC_RUNNER_LABEL": "pulp-build-vm"}, [])
+        self.assertEqual(kinds(findings), ["control-drift"])
+
+    def test_exact_control_value_passes(self):
+        c = contract([])
+        c.routing_controls = {
+            "PULP_LOCAL_MAC_RUNNER_LABEL":
+                gate.RoutingControl(expect="pulp-gate-fast",
+                                    unset_fallback="pulp-gate-fast")
+        }
+        findings = gate.check(
+            c, runners(), {"PULP_LOCAL_MAC_RUNNER_LABEL": "pulp-gate-fast"}, [])
+        self.assertEqual(findings, [])
+
+    def test_unset_control_uses_the_workflow_fallback(self):
+        c = contract([])
+        c.routing_controls = {
+            "PULP_LOCAL_MAC_RUNNER_LABEL":
+                gate.RoutingControl(expect="pulp-gate-fast",
+                                    unset_fallback="pulp-gate-fast")
+        }
+        self.assertEqual(gate.check(c, runners(), {}, []), [])
+
+
+class TestExplicitLaneValues(unittest.TestCase):
+    def test_unset_off_switch_fails_even_with_a_workflow_fallback(self):
+        guarded = lane(
+            variable="PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
+            expect="local-only",
+            unset_fallback=["macos-15"],
+            require_explicit_value=True,
+        )
+        findings = gate.check(contract([guarded]), runners(), {}, [])
+        self.assertEqual(kinds(findings), ["unset"])
+
+    def test_json_quoted_off_switch_is_rejected(self):
+        guarded = lane(
+            variable="PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
+            expect="local-only",
+            unset_fallback=["macos-15"],
+            require_explicit_value=True,
+        )
+        findings = gate.check(
+            contract([guarded]),
+            runners(),
+            {"PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON": '"local-only"'},
+            [],
+        )
+        self.assertEqual(kinds(findings), ["sentinel-encoding"])
+
+    def test_reenabled_selector_is_still_checked_for_black_holes(self):
+        guarded = lane(
+            variable="PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
+            expect="local-only",
+            unset_fallback=["macos-15"],
+            require_explicit_value=True,
+        )
+        typo = ["self-hosted", "macOS", "ARM64", "pulp-gate-fasr"]
+        findings = gate.check(
+            contract([guarded]),
+            runners(),
+            {"PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON": json.dumps(typo)},
+            [],
+        )
+        self.assertEqual(kinds(findings, gate.ERROR), ["black-hole", "drift"])
 
 
 def kinds(findings, level=None):
@@ -183,6 +261,17 @@ class TestRunnerStates(unittest.TestCase):
 
 
 class TestServiceEvidence(unittest.TestCase):
+    def test_dispatch_only_fetch_filters_for_manual_runs(self):
+        with mock.patch.object(gate, "_api", return_value={"workflow_runs": []}) as api:
+            gate.fetch_served_label_sets(
+                "owner/repo", 720, ["build.yml"], 20, manual_only=True)
+        self.assertIn("event=workflow_dispatch", api.call_args.args[0][0])
+
+    def test_automatic_fetch_does_not_filter_event(self):
+        with mock.patch.object(gate, "_api", return_value={"workflow_runs": []}) as api:
+            gate.fetch_served_label_sets("owner/repo", 720, ["build.yml"], 20)
+        self.assertNotIn("event=", api.call_args.args[0][0])
+
     def test_evidence_is_not_fetched_when_a_live_runner_exists(self):
         # The scan costs API calls. A healthy fleet must not pay for them on
         # every sweep, so the provider is only consulted when a lane has no
@@ -291,9 +380,16 @@ class TestDrift(unittest.TestCase):
         # `fromJSON()` would fail at dispatch. A standing error for an intended
         # state is worse than no check: it teaches readers to skim the report,
         # which is where the real drift hides.
-        c = contract([lane(variable="PULP_X_RUNS_ON_JSON")])
+        c = contract([
+            lane(variable="PULP_X_RUNS_ON_JSON", expect="local-only")
+        ])
         f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "local-only"}, [])
         self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_sentinel_must_match_the_lane_contract(self):
+        c = contract([lane(variable="PULP_X_RUNS_ON_JSON")])
+        f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "local-only"}, [])
+        self.assertEqual(kinds(f, gate.ERROR), ["drift"])
 
     def test_an_undeclared_bare_word_is_still_malformed(self):
         # The escape must be the contract's declared vocabulary, not "any
@@ -371,7 +467,7 @@ class TestUnsetFallback(unittest.TestCase):
     def test_off_switch_sentinel_is_not_a_routing_target(self):
         # `local-only` disables overflow; it is not a label to match runners on.
         c = contract([lane(variable="PULP_X_RUNS_ON_JSON", expect="local-only")])
-        f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": '"local-only"'}, [])
+        f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "local-only"}, [])
         self.assertEqual(f, [])
 
 
@@ -421,6 +517,42 @@ class TestShippedContract(unittest.TestCase):
             self.assertIn(ln.severity, {"required", "advisory"},
                           f"{ln.variable} has an unknown severity")
 
+    def test_dispatch_only_lane_without_recent_service_is_unverified(self):
+        lane = gate.Lane(
+            variable="TEST_DISPATCH_ONLY",
+            purpose="manual test lane",
+            expect=["self-hosted", "Linux", "X64", "manual"],
+            provisioning="ephemeral",
+            severity="advisory",
+            dispatch_only=True,
+        )
+        findings = gate.check(
+            contract([lane]),
+            [],
+            {"TEST_DISPATCH_ONLY": json.dumps(lane.expect)},
+            [],
+        )
+        self.assertEqual([f.kind for f in findings], ["dispatch-only-unverified"])
+        self.assertEqual([f.level for f in findings], [gate.WARN])
+
+    def test_dispatch_only_lane_accepts_matching_manual_service(self):
+        lane = gate.Lane(
+            variable="TEST_DISPATCH_ONLY",
+            purpose="manual test lane",
+            expect=["self-hosted", "Linux", "X64", "manual"],
+            provisioning="ephemeral",
+            severity="advisory",
+            dispatch_only=True,
+        )
+        findings = gate.check(
+            contract([lane]),
+            [],
+            {"TEST_DISPATCH_ONLY": json.dumps(lane.expect)},
+            [set(lane.expect)],
+        )
+        self.assertEqual([f.kind for f in findings], ["dispatch-only-idle"])
+        self.assertEqual([f.level for f in findings], [gate.OK])
+
     def test_self_hosted_lanes_are_not_declared_github_hosted(self):
         for ln in self.c.lanes:
             if ln.is_self_hosted:
@@ -446,6 +578,7 @@ class TestShippedContract(unittest.TestCase):
         # it happened to be provisioned by when this test was written.
         self.assertEqual(gate_lane.provisioning, "ephemeral")
         self.assertIn("pulp-build-vm", gate_lane.expect)
+        self.assertIn("pulp-gate-fast", gate_lane.expect)
         self.assertNotIn("pulp-build-studio", gate_lane.expect)
 
     def test_namespace_paid_overflow_is_contracted_unset(self):

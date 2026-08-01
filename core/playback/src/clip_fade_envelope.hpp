@@ -52,15 +52,25 @@ inline float clip_envelope(const AudioClipRendererProgram& clip,
 /// fractionally past the last frame, so the remaining-frame count is clamped
 /// rather than wrapped.
 inline float clip_envelope(const AudioClipRendererProgram& clip, long double relative) noexcept {
+    // `relative` is long double because a fractional position needs the
+    // precision; the gain does not. Narrowing progress before the shape lookup
+    // pins EqualPower to `sinf`, which matters because this runs once per
+    // output sample on the realtime stretch path. Left unnarrowed the shape
+    // deduces the position type instead: `sin` on arm64, where long double is
+    // double, and on x86_64 the 80-bit `sinl`, which is far dearer still. The
+    // gain is narrowed to float on return either way, so the wider sin buys
+    // nothing.
     auto value = static_cast<long double>(clip.gain_linear);
     if (clip.fade_in_frames != 0 && relative < clip.fade_in_frames)
         value *= fade_gain(clip.fade_shape,
-                           relative / static_cast<long double>(clip.fade_in_frames));
+                           static_cast<float>(relative / static_cast<long double>(
+                                                             clip.fade_in_frames)));
     const auto remaining =
         std::max(0.0L, static_cast<long double>(clip.timeline_frame_count - 1u) - relative);
     if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
         value *= fade_gain(clip.fade_shape,
-                           remaining / static_cast<long double>(clip.fade_out_frames));
+                           static_cast<float>(remaining / static_cast<long double>(
+                                                              clip.fade_out_frames)));
     return static_cast<float>(value);
 }
 

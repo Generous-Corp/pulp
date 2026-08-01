@@ -5,6 +5,7 @@
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timebase/loop_region.hpp>
 
 #include <array>
 #include <cstdint>
@@ -36,13 +37,10 @@ TransportError advance_playback_epoch(std::uint64_t& epoch) noexcept;
 }
 
 using MeterSignature = timebase::MeterSignature;
-
-struct LoopRegion {
-    bool enabled = false;
-    timebase::TickPosition start{};
-    timebase::TickPosition end{};
-    constexpr auto operator<=>(const LoopRegion&) const = default;
-};
+/// The loop is a pair of document positions, so the timebase owns it and every
+/// rung that describes a loop names the same type. The transport adds meaning —
+/// what wrapping does, and when it is suspended — never a second struct.
+using LoopRegion = timebase::LoopRegion;
 
 struct TransportRange {
     std::uint32_t sample_offset = 0;

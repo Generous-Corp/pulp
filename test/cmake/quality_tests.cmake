@@ -59,6 +59,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fork_pr_runner_routing.py")
     set_tests_properties(fork-pr-runner-routing PROPERTIES TIMEOUT 120)
+    # Workflow-lint installs PyYAML and owns the YAML-dependent throughput
+    # contracts. Do not register that script here: required macOS CTest hosts
+    # lack PyYAML, and a skipped unittest suite would report a false green.
+    add_test(NAME example-validation-paths COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_example_validation_paths.py")
+    set_tests_properties(example-validation-paths PROPERTIES TIMEOUT 120)
     # Both Vellum gates post or gate a required check and grew a manual
     # dispatch path. Runs the resolve step the workflow actually embeds.
     add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}

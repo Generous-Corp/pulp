@@ -51,16 +51,18 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
 
     ScriptedProgram compiled;
     compiled.position = timebase::TickPosition{quarters(4)};
-    compiled.loop = UiLoopRegion{true, timebase::TickPosition{0},
-                                 timebase::TickPosition{quarters(8)}};
+    compiled.loop = timebase::LoopRegion{true, timebase::TickPosition{0},
+                                         timebase::TickPosition{quarters(8)}};
     compiled.state = UiTransportState::Playing;
     compiled.tempo_bpm = 128.0;
+    compiled.continuity_epoch = 3;
     host->set_program(compiled);
 
     const UiPlayhead before = host->playhead();
     REQUIRE(before.position.value == quarters(4));
     REQUIRE(before.tempo_bpm == 128.0);
     REQUIRE(before.state == UiTransportState::Playing);
+    REQUIRE(before.continuity_epoch == 3);
     REQUIRE(before.loop.enabled);
     REQUIRE(before.loop.end.value == quarters(8));
     REQUIRE(before.moving());
@@ -70,10 +72,11 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
     // reading freed bytes rather than merely disagreeing.
     ScriptedProgram recompiled;
     recompiled.position = timebase::TickPosition{quarters(1)};
-    recompiled.loop = UiLoopRegion{false, timebase::TickPosition{quarters(2)},
-                                   timebase::TickPosition{quarters(3)}};
+    recompiled.loop = timebase::LoopRegion{false, timebase::TickPosition{quarters(2)},
+                                           timebase::TickPosition{quarters(3)}};
     recompiled.state = UiTransportState::Stopped;
     recompiled.tempo_bpm = 90.0;
+    recompiled.continuity_epoch = 9;
     host->swap_program(recompiled);
 
     // Every field of the pre-swap reading still describes the world it was
@@ -84,6 +87,7 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
     REQUIRE(before.loop.enabled);
     REQUIRE(before.loop.start.value == 0);
     REQUIRE(before.loop.end.value == quarters(8));
+    REQUIRE(before.continuity_epoch == 3);
 
     // A view can tell the stale reading from the live one without having held
     // anything the swap invalidated.
@@ -92,6 +96,8 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
     REQUIRE(after.sequence > before.sequence);
     REQUIRE(after.position.value == quarters(1));
     REQUIRE(after.tempo_bpm == 90.0);
+    REQUIRE(after.continuity_epoch == 9);
+    REQUIRE(after.state == UiTransportState::Stopped);
     REQUIRE_FALSE(after.moving());
 
     // Copying the retained reading needs nothing the host still owns, and the
@@ -102,6 +108,56 @@ TEST_CASE("Ui host snapshot is value copied and stable across program swap",
     REQUIRE(retained.position.value == quarters(4));
     REQUIRE(retained.tempo_bpm == 128.0);
     REQUIRE(retained.loop.end.value == quarters(8));
+    REQUIRE(retained.continuity_epoch == 3);
+}
+
+TEST_CASE("Ui playhead reports the continuity break a loop wrap makes",
+          "[timeline-editor][ui-host]") {
+    TestHost host;
+
+    ScriptedProgram running;
+    running.loop = timebase::LoopRegion{true, timebase::TickPosition{0},
+                                        timebase::TickPosition{quarters(8)}};
+    running.state = UiTransportState::Playing;
+    running.position = timebase::TickPosition{quarters(6)};
+    running.continuity_epoch = 4;
+    host.set_program(running);
+    const UiPlayhead first = host.playhead();
+
+    // An ordinary advance inside the loop. Continuity holds, which is what
+    // permits a view to interpolate between these two positions at all.
+    ScriptedProgram advanced = running;
+    advanced.position = timebase::TickPosition{quarters(7)};
+    host.set_program(advanced);
+    const UiPlayhead second = host.playhead();
+
+    REQUIRE(second.sequence > first.sequence);
+    REQUIRE(second.position.value > first.position.value);
+    REQUIRE(second.continuity_epoch == first.continuity_epoch);
+
+    // The loop wraps. The position jumps back by nearly the whole loop, so a
+    // view that interpolated across this pair would draw the playhead sliding
+    // backwards through ground it never covered.
+    ScriptedProgram wrapped = running;
+    wrapped.position = timebase::TickPosition{quarters(1)};
+    wrapped.continuity_epoch = 5;
+    host.set_program(wrapped);
+    const UiPlayhead third = host.playhead();
+
+    REQUIRE(third.position.value < second.position.value);
+    REQUIRE(third.continuity_epoch != second.continuity_epoch);
+
+    // Nothing else in the reading reports it, which is why the field exists.
+    // Looping does not recompile, so the program generation is unchanged;
+    // publishing is per block, so the sequence advances for an ordinary
+    // advance exactly as it does for a wrap; and the transport was playing on
+    // both sides of the wrap. Only continuity_epoch separates the two cases.
+    REQUIRE(third.program_generation == second.program_generation);
+    REQUIRE(third.sequence > second.sequence);
+    REQUIRE(second.state == UiTransportState::Playing);
+    REQUIRE(third.state == UiTransportState::Playing);
+    REQUIRE(third.loop == second.loop);
+    REQUIRE(third.tempo_bpm == second.tempo_bpm);
 }
 
 TEST_CASE("Audition request carries no playback types",
