@@ -436,6 +436,7 @@ static std::string handle_request_raw(const std::string& json) {
         }
 
         std::string result;
+        const auto* inspector_tool = find_inspector_mcp_tool(name);
         if (name == "pulp_compat")         result = handle_compat();
         else if (name == "pulp_build")          result = handle_build(args_json);
         else if (name == "pulp_test")      result = handle_test(args_json);
@@ -553,12 +554,7 @@ static std::string handle_request_raw(const std::string& json) {
         // pulp_motion_start_trace flips Coordinator::tracing_enabled
         // on attach (matches motion_inspector.cpp:~265), so callers
         // don't need to pre-arm tracing.
-        else if (name == "pulp_motion_start_trace" || name == "pulp_motion_stop_trace" ||
-                 name == "pulp_motion_snapshot" || name == "pulp_motion_list_traces" ||
-                 name == "pulp_motion_scrub_to" ||
-                 name == "pulp_motion_play" || name == "pulp_motion_pause" ||
-                 name == "pulp_motion_enable_cost" || name == "pulp_motion_disable_cost") {
-            const auto* inspector_tool = find_inspector_mcp_tool(name);
+        else if (inspector_tool != nullptr && name.starts_with("pulp_motion_")) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
@@ -652,10 +648,7 @@ static std::string handle_request_raw(const std::string& json) {
         // inspector RPC and therefore no MCP tool. query/explain forward their
         // argument objects; start rebuilds only its protocol fields so MCP-only
         // exact selectors are not exposed to the inspector domain.
-        else if (name == "pulp_trace_start" || name == "pulp_trace_stop" ||
-                 name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
-                 name == "pulp_trace_explain") {
-            const auto* inspector_tool = find_inspector_mcp_tool(name);
+        else if (inspector_tool != nullptr && name.starts_with("pulp_trace_")) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
@@ -762,7 +755,7 @@ static std::string handle_request_raw(const std::string& json) {
         // Inspector parameter mutation — delegate to `pulp inspect` with a
         // typed `--params` payload. Kept separate from the read-only inspector
         // tools below because those pass no arguments; this one carries id/value.
-        else if (name == "pulp_inspect_set_param") {
+        else if (inspector_tool != nullptr && name == "pulp_inspect_set_param") {
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
@@ -784,20 +777,16 @@ static std::string handle_request_raw(const std::string& json) {
                         "Error: session_id, instance_id, and publication_id "
                         "must be supplied together as exact safe identities");
                 } else {
-                    auto command = run_inspector_command(
-                        root, std::string(find_inspector_mcp_tool(name)->method), params_json,
-                        session_id, instance_id, publication_id);
+                    auto command =
+                        run_inspector_command(root, std::string(inspector_tool->method),
+                                              params_json, session_id, instance_id, publication_id);
                     result = inspector_tool_payload(std::move(command));
                 }
             }
         }
         // Inspector tools — delegate to pulp inspect CLI for now
         // (in the future these could connect directly via TCP)
-        else if (name == "pulp_inspect_dom" || name == "pulp_inspect_params" ||
-                 name == "pulp_inspect_value_channels" ||
-                 name == "pulp_inspect_screenshot" || name == "pulp_inspect_evaluate" ||
-                 name == "pulp_inspect_performance" || name == "pulp_inspect_audio") {
-            const auto* inspector_tool = find_inspector_mcp_tool(name);
+        else if (inspector_tool != nullptr) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_inspect_evaluate") {
@@ -828,8 +817,8 @@ static std::string handle_request_raw(const std::string& json) {
                     result = inspector_tool_payload(std::move(command));
                 }
             }
-        }
-        else return json_error(id, -32601, "Unknown tool: " + name);
+        } else
+            return json_error(id, -32601, "Unknown tool: " + name);
 
         return json_result(id, result);
     }
