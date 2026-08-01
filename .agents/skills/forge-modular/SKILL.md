@@ -54,6 +54,27 @@ back with its VCA level at zero. If you add a field to a manifest that the
 model should reason about, it has to reach `render_inventory` or it may as well
 not exist.
 
+## Rendering a view in a test, when the view places itself
+
+Two of these cost three attempts each, and both produce an EMPTY frame that
+passes every assertion around it:
+
+- **The overlay needs a parent.** `MentionOverlay::build()` returns a view that
+  positions itself absolutely, which resolves against a containing view. Render
+  it as a root and nothing is placed. Wrap it in a `View`, size the wrapper,
+  `layout_children()`, render the wrapper.
+- **`build()` comes before the content.** Rows are made into the view `build()`
+  returns, so filling the list first leaves them nowhere to go.
+- **Size the frame to what you want to see.** The list sits ~448 points below
+  the composer; a 300-point frame renders it off the bottom.
+
+So any render test here needs a floor — `REQUIRE(read_all(path).size() > N)` —
+or "it rendered" and "it rendered nothing" are the same result. The same trap
+in the key path: a test that CALLS `on_global_key` passes while the window
+never reaches it, because the host dispatches to its own root and the shell's
+view is a child of an outer chrome. Wrap the shell's view in a parent, or the
+broken arrangement is indistinguishable from the working one.
+
 ## The idiom checker rejects correct patches, and it fails intermittently
 
 `idiom_check.py` asserts a patch against a claimed idiom. Its failure mode is
