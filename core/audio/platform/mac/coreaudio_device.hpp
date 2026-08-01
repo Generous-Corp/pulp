@@ -1,12 +1,16 @@
 #pragma once
 
+#include "coreaudio_io_timing.hpp"
 #include <pulp/audio/device.hpp>
 #include <pulp/audio/workgroup.hpp>
 #include <AudioToolbox/AudioToolbox.h>
 
+#include <array>
 #include <atomic>
-#include <mutex>
 #include <cstdint>
+#include <mutex>
+#include <memory>
+#include <optional>
 
 #if defined(__APPLE__)
 #include <os/workgroup.h>
@@ -87,6 +91,15 @@ public:
     DeviceInfo info() const override;
     double sample_rate() const override { return config_.sample_rate; }
     int buffer_size() const override { return config_.buffer_size; }
+    std::optional<AudioIoTiming> audio_io_timing() const;
+
+    /// Read CoreAudio's device latency and safety-offset properties without
+    /// opening or re-clocking the device. Public only on this backend-internal
+    /// type so its platform smoke can prove the production property path.
+    static std::optional<AudioIoTiming> query_audio_io_timing(
+        AudioDeviceID device_id,
+        std::uint64_t route_instance_token,
+        std::uint64_t calibration_generation);
 
     /// Returns the device's I/O thread workgroup (`os_workgroup_t`)
     /// queried via `kAudioDevicePropertyIOThreadOSWorkgroup` on
@@ -137,6 +150,17 @@ private:
     /// retained result into `workgroup_reference_`. No-op on older OS / when the device does
     /// not publish one.
     void query_callback_workgroup();
+    void mark_audio_io_timing_stale() noexcept;
+    void refresh_audio_io_timing_locked() const;
+    void install_audio_io_timing_listeners_locked();
+    void remove_audio_io_timing_listeners_locked();
+    void retire_audio_io_timing_listener_context();
+
+    static OSStatus audio_io_timing_changed_listener(
+        AudioObjectID inObjectID,
+        UInt32 inNumberAddresses,
+        const AudioObjectPropertyAddress* inAddresses,
+        void* inClientData);
 
     AudioDeviceID device_id_;
     AudioComponentInstance audio_unit_ = nullptr;
@@ -172,6 +196,16 @@ private:
     mutable std::mutex switch_mutex_;
     WorkgroupChangeCallback workgroup_change_callback_;
     bool workgroup_changes_quiesced_ = false;
+    static constexpr std::size_t kTimingPropertyCount = 6;
+    std::array<AudioObjectPropertyAddress, kTimingPropertyCount>
+        timing_property_addresses_{};
+    std::array<bool, kTimingPropertyCount> timing_listener_installed_{};
+    std::unique_ptr<CoreAudioTimingListenerContext> timing_listener_context_;
+    mutable std::optional<AudioIoTiming> audio_io_timing_;
+    const std::uint64_t route_instance_token_;
+    mutable std::atomic<std::uint64_t> calibration_generation_{0};
+    mutable std::atomic<bool> calibration_generation_exhausted_{false};
+    mutable std::atomic<bool> audio_io_timing_dirty_{true};
 
     // Buffers for the callback
     std::vector<float*> output_ptrs_;

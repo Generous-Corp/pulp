@@ -98,6 +98,9 @@ pulp_add_test_suite(pulp-test-buffering-reader LIBRARIES pulp::audio)
 # AudioWorkgroup tests
 pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 
+# Public route-timing contract and control-thread latency composition.
+pulp_add_test_suite(pulp-test-audio-io-timing LIBRARIES pulp::audio)
+
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp

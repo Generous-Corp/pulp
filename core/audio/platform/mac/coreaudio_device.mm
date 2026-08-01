@@ -17,19 +17,19 @@ namespace {
 constexpr AudioObjectPropertySelector kIOThreadWorkgroupSelector =
     kAudioDevicePropertyIOThreadOSWorkgroup;
 
-bool read_nominal_sample_rate(AudioDeviceID device_id, double& sample_rate) {
-    AudioObjectPropertyAddress prop{};
-    prop.mSelector = kAudioDevicePropertyNominalSampleRate;
-    prop.mScope    = kAudioObjectPropertyScopeGlobal;
-    prop.mElement  = kAudioObjectPropertyElementMain;
-
-    Float64 rate = 0.0;
-    UInt32 size = sizeof(rate);
-    OSStatus status = AudioObjectGetPropertyData(device_id, &prop, 0, nullptr, &size, &rate);
-    if (status != noErr) return false;
-
-    sample_rate = static_cast<double>(rate);
-    return sample_rate > 0.0;
+std::uint64_t mint_route_instance_token() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    auto token = next.load(std::memory_order_relaxed);
+    while (token != 0) {
+        constexpr auto max = std::numeric_limits<std::uint64_t>::max();
+        const auto successor = token == max ? 0 : token + 1;
+        if (next.compare_exchange_weak(
+                token, successor, std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+            return token;
+        }
+    }
+    return 0;
 }
 
 OSStatus set_nominal_sample_rate(AudioDeviceID device_id, double sample_rate) {
@@ -64,14 +64,6 @@ OSStatus set_buffer_frame_size(AudioDeviceID device_id, UInt32 frames) {
     return AudioObjectSetPropertyData(device_id, &prop, 0, nullptr, size, &frames);
 }
 
-bool device_exists(AudioDeviceID device_id) {
-    AudioObjectPropertyAddress prop{};
-    prop.mSelector = kAudioObjectPropertyName;
-    prop.mScope    = kAudioObjectPropertyScopeGlobal;
-    prop.mElement  = kAudioObjectPropertyElementMain;
-    return AudioObjectHasProperty(device_id, &prop);
-}
-
 void add_unique_sample_rate(std::vector<double>& rates, double rate) {
     if (rate <= 0.0) return;
     auto matches = [rate](double existing) { return std::abs(existing - rate) < 1.0; };
@@ -91,13 +83,15 @@ void CoreAudioWorkgroupReference::release_os_workgroup(
 #endif
 
 CoreAudioDevice::CoreAudioDevice(AudioDeviceID device_id)
-    : device_id_(device_id)
+    : device_id_(device_id),
+      route_instance_token_(mint_route_instance_token())
 {
 }
 
 CoreAudioDevice::~CoreAudioDevice() {
     if (is_running_) stop();
     if (is_open_) close();
+    retire_audio_io_timing_listener_context();
 }
 
 void CoreAudioDevice::query_callback_workgroup() {
@@ -301,14 +295,14 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
     }
 
     double actual_rate = 0.0;
-    if (read_nominal_sample_rate(device_id_, actual_rate)) {
+    if (read_coreaudio_nominal_sample_rate(device_id_, actual_rate)) {
         if (config_.sample_rate > 0.0 && std::abs(actual_rate - config_.sample_rate) >= 1.0) {
             OSStatus rate_status = set_nominal_sample_rate(device_id_, config_.sample_rate);
             if (rate_status != noErr) {
                 runtime::log_warn("CoreAudio: could not set nominal sample rate to {} Hz ({})",
                     config_.sample_rate, static_cast<int>(rate_status));
             }
-            if (!read_nominal_sample_rate(device_id_, actual_rate))
+            if (!read_coreaudio_nominal_sample_rate(device_id_, actual_rate))
                 actual_rate = config_.sample_rate;
         }
         config_.sample_rate = actual_rate;
@@ -434,6 +428,13 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
+    {
+        std::lock_guard<std::mutex> timing_lock(switch_mutex_);
+        install_audio_io_timing_listeners_locked();
+        mark_audio_io_timing_stale();
+        refresh_audio_io_timing_locked();
+    }
+
     // Query and retain the IO-thread workgroup before callbacks start firing.
     // The CoreAudio I/O thread is already a member; the cached reference is
     // published only to auxiliary clients and remains valid until they drain.
@@ -516,7 +517,11 @@ void CoreAudioDevice::switch_to_default_output() {
         kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
         &new_default, sizeof(new_default));
     if (st == noErr) {
+        remove_audio_io_timing_listeners_locked();
         device_id_ = new_default;
+        install_audio_io_timing_listeners_locked();
+        mark_audio_io_timing_stale();
+        refresh_audio_io_timing_locked();
         runtime::log_info("CoreAudio: default output changed -> following to device {}",
             static_cast<unsigned>(new_default));
     } else {
@@ -601,6 +606,7 @@ void CoreAudioDevice::close() {
     // standalone helper. This is idempotent when the helper already quiesced it.
     quiesce_workgroup_changes();
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
+    remove_audio_io_timing_listeners_locked();
 
     // Tear the callback path down first. AudioUnitUninitialize blocks
     // until any in-flight render_callback returns — combined with
@@ -635,6 +641,8 @@ void CoreAudioDevice::close() {
     input_ptrs_.clear();
     input_enabled_ = false;
     output_enabled_ = true;
+    audio_io_timing_.reset();
+    audio_io_timing_dirty_.store(true, std::memory_order_release);
     is_open_ = false;
 }
 
@@ -976,7 +984,7 @@ DeviceInfo CoreAudioSystem::query_device_info(AudioDeviceID device_id) {
         }
     }
     double current_rate = 0.0;
-    if (read_nominal_sample_rate(device_id, current_rate))
+    if (read_coreaudio_nominal_sample_rate(device_id, current_rate))
         add_unique_sample_rate(info.sample_rates, current_rate);
     std::sort(info.sample_rates.begin(), info.sample_rates.end());
 
@@ -1014,7 +1022,7 @@ std::unique_ptr<AudioDevice> CoreAudioSystem::create_device(const std::string& d
     if (!device_id.empty()) {
         try {
             auto parsed = static_cast<AudioDeviceID>(std::stoul(device_id));
-            if (device_exists(parsed)) {
+            if (coreaudio_device_exists(parsed)) {
                 id = parsed;  // explicit, valid pin
             } else {
                 runtime::log_warn("CoreAudio: saved device '{}' is unavailable; following the default output",

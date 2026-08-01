@@ -96,6 +96,12 @@ add_executable(PulpSDKSmokeWavDecoderProbe
     "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
 
+# Public AudioDevice timing capability probe. The unsupported dummy forces the
+# installed Pulp::audio archive to resolve the non-inline free-function symbol
+# while also proving an unknown backend fails closed at runtime.
+add_executable(PulpSDKSmokeAudioIoTimingProbe audio_io_timing_probe.cpp)
+target_link_libraries(PulpSDKSmokeAudioIoTimingProbe PRIVATE Pulp::audio)
+
 if(NOT TARGET Pulp::playback)
     message(FATAL_ERROR
         "Pulp SDK smoke: installed SDK does not expose Pulp::playback")

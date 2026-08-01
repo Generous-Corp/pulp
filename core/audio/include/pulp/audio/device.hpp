@@ -1,13 +1,15 @@
 #pragma once
 
+#include <pulp/audio/audio_io_timing.hpp>
 #include <pulp/audio/buffer.hpp>
-#include <string>
-#include <vector>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <cstdint>
+#include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace pulp::audio {
 
@@ -134,6 +136,14 @@ public:
     /// Called only off the render thread before close() invalidates the handle.
     virtual void quiesce_workgroup_changes() {}
 };
+
+/// Current route timing, or no value when the concrete backend has not
+/// implemented timing publication. This is deliberately a non-virtual free
+/// function so adding the optional capability does not change AudioDevice's
+/// installed C++ vtable. Query only from a control thread, never the real-time
+/// callback.
+std::optional<AudioIoTiming> query_audio_io_timing(
+    const AudioDevice& device) noexcept;
 
 // Audio system — enumerates devices and creates device instances
 class AudioSystem {

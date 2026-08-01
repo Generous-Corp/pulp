@@ -300,6 +300,14 @@ config.buffer_size = 256;
 
 auto device = system->create_device(devices[0].id);
 device->open(config);
+if (auto timing = query_audio_io_timing(*device)) {
+    // Consume the graph's already-computed PDC total; this does not recompute it.
+    auto latency = make_latency_snapshot(
+        *timing, graph.latency_samples(), device->sample_rate());
+    if (latency && latency->output_scheduling_offset_frames) {
+        schedule_output_early_by(*latency->output_scheduling_offset_frames);
+    }
+}
 device->start([](const auto& input, auto& output, const auto& ctx) {
     // Real-time audio callback — no allocation, no locks
     process(input, output, ctx.buffer_size);
@@ -307,6 +315,25 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 ```
 
 **Device backends:** CoreAudio (macOS), WASAPI (Windows), ALSA + JACK (Linux), Web Audio (browser)
+
+`AudioIoTiming` reports present input/output latency, safety-offset, and I/O
+buffer properties in device-rate sample frames, together with the exact sample rate, timestamp
+provenance, confidence, and a calibration generation. `LatencySnapshot` is a
+control-thread value that composes this with the graph's reported total latency
+for input placement, monitoring, and output scheduling. Each directional result
+is optional: an output-only route still supports output scheduling, while live
+monitoring requires complete input and output properties. Composition refuses a
+graph/device rate mismatch. CoreAudio publishes this contract today; other
+desktop and mobile backends currently return no timing value rather than guessed
+magnitudes.
+
+Snapshot composition fails closed when timestamp domain/source is unspecified
+or confidence is unavailable; provenance-free values are not scheduling data.
+
+For CoreAudio, a complete directional presentation path is device latency plus
+the directional safety offset plus one I/O buffer. Input placement and output
+scheduling each count that buffer once; live monitoring composes both paths and
+therefore counts it twice.
 
 ### Audio file format support
 
