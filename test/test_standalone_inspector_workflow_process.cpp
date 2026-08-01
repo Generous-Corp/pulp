@@ -101,7 +101,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     ScopedEnv test_mode_env("PULP_TEST_MODE");
     ScopedEnv ci_env("CI");
     const auto runtime_path = scratch.path / "runtime";
-    ::setenv("PULP_INSPECTOR_RUNTIME_DIR", runtime_path.string().c_str(), 1);
+    ::unsetenv("PULP_INSPECTOR_RUNTIME_DIR");
     ::unsetenv("PULP_INSPECT_PROFILE");
     ::unsetenv("PULP_HEADLESS");
     ::unsetenv("PULP_TEST_MODE");
@@ -121,7 +121,9 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     pulp::platform::ChildProcess child;
     REQUIRE(child.start(PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE,
                         {"--ready", ready_path.string(),
-                         "--stop", stop_path.string()}, options));
+                         "--stop", stop_path.string(),
+                         "--runtime-dir", runtime_path.string(),
+                         "--wait-until-stop"}, options));
 
     pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
     std::vector<pulp::inspect::InspectorDiscoveryRecord> records;

@@ -153,18 +153,25 @@ bool teardown_is_complete(
 int main(int argc, char** argv) {
     std::filesystem::path ready_path;
     std::filesystem::path stop_path;
+    std::filesystem::path runtime_path =
+        pulp::inspect::default_inspector_runtime_directory();
+    bool wait_until_stop = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--ready" && i + 1 < argc)
             ready_path = argv[++i];
         else if (argument == "--stop" && i + 1 < argc)
             stop_path = argv[++i];
+        else if (argument == "--runtime-dir" && i + 1 < argc)
+            runtime_path = argv[++i];
+        else if (argument == "--wait-until-stop")
+            wait_until_stop = true;
     }
-    if (ready_path.empty() || stop_path.empty()) return 2;
-
-    const char* runtime_env = std::getenv("PULP_INSPECTOR_RUNTIME_DIR");
-    if (runtime_env == nullptr || *runtime_env == '\0') return 3;
-    const std::filesystem::path runtime_path(runtime_env);
+    if (ready_path.empty() || stop_path.empty() || runtime_path.empty()) return 2;
+    if (::setenv("PULP_INSPECTOR_RUNTIME_DIR",
+                 runtime_path.string().c_str(), 1) != 0) {
+        return 3;
+    }
 
     std::filesystem::create_directories(ready_path.parent_path());
     g_script_path = ready_path.parent_path() / "standalone-workflow-ui.js";
@@ -222,7 +229,8 @@ setTextColor("workflow-status", "#ffffff");
         const auto stop_deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (!stop.stop_requested()
-               && std::chrono::steady_clock::now() < stop_deadline
+               && (wait_until_stop
+                   || std::chrono::steady_clock::now() < stop_deadline)
                && !std::filesystem::exists(stop_path)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
