@@ -49,21 +49,23 @@ and what will bite whoever picks it up.
 
 ---
 
-## What the M5 carries, and what is waiting
+## What the M5 carries
 
-The M5 has the **21:57 build**: the four things reported from using it —
-arrows/Tab in the mention list, GET rows explaining themselves, the audio
-interface's jacks, and hover naming both ends of a cable.
+Everything, as of the 22:41 build — app and all three plugin formats, Developer
+ID signed, notarized, stapled, assessing as *Notarized Developer ID*; the
+generator toolchain; the module pack; and the port map (19 modules), without
+which every VENDOR module draws with no jacks and its cables stop at the panel
+edge.
 
-Built, signed, notarized and NOT yet pushed (the M5 slept mid-transfer): the
-mention list ranked by what was typed, slug matches showing their alias
-("Macro Oscillator · Braids"), the brand column aligned, and long names cut so
-they stop running under their badge. `tools/rack/setup_m5.sh` pushes it.
+Verified ON the M5 rather than inferred: `@ForgeModular/VCO` resolves to one
+hit there, and a bare `VCO` finds ours first. Before tonight it resolved to
+nothing — the app inserts a qualified slug and the resolver only understood
+bare names, so every mention ever inserted was unusable by the thing that
+consumes it.
 
-Four of those eight were found by RENDERING and looking, not by a failing
-test. Three had shipped green while being invisible or unreachable: a key hook
-the window never called, a badge asking the wrong question, a list that
-rendered blank. The `forge-modular` skill carries the rules that catch them.
+Eight app fixes and six pinned joins are in it. Four of the eight were found by
+rendering a frame and looking at it rather than by a test failing, and three
+had shipped green while being invisible or unreachable.
 
 ## What is left
 
