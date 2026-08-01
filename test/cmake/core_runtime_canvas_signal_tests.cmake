@@ -402,6 +402,7 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
                     --mcp "$<TARGET_FILE:pulp-mcp>"
                     --fixture "$<TARGET_FILE:pulp-standalone-inspector-workflow-process-fixture>"
                     --packager "${PROJECT_SOURCE_DIR}/tools/scripts/package_cli.py"
+                    --mcp-config "${PROJECT_SOURCE_DIR}/.mcp.json"
                     --build-dir "${CMAKE_BINARY_DIR}")
             set_tests_properties(
                 packaged-inspector-clients-reach-real-standalone-workflow
