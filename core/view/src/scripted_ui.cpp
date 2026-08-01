@@ -10,11 +10,15 @@ namespace pulp::view {
 
 namespace {
 
-std::unique_ptr<ScriptEngine> make_engine() {
-    auto engine = std::make_unique<ScriptEngine>();
-    engine->set_log_callback([](std::string_view level, std::string_view msg) {
+LogCallback default_log_callback() {
+    return [](std::string_view level, std::string_view msg) {
         runtime::log_info("script-ui[{}] {}", std::string(level), std::string(msg));
-    });
+    };
+}
+
+std::unique_ptr<ScriptEngine> make_engine(LogCallback callback = {}) {
+    auto engine = std::make_unique<ScriptEngine>();
+    engine->set_log_callback(callback ? std::move(callback) : default_log_callback());
     return engine;
 }
 
@@ -37,7 +41,49 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
     , value_channels_(options.value_channels)
+    , log_callback_(default_log_callback())
 {
+}
+
+void ScriptedUiSession::set_log_callback(LogCallback callback) {
+    log_callback_ = callback ? std::move(callback) : default_log_callback();
+}
+
+std::uint64_t ScriptedUiSession::add_log_callback(LogCallback callback) {
+    if (!callback)
+        return 0;
+    const auto token = ++next_log_subscription_;
+    log_subscribers_.emplace(token, std::move(callback));
+    return token;
+}
+
+void ScriptedUiSession::remove_log_callback(std::uint64_t token) {
+    if (token != 0)
+        log_subscribers_.erase(token);
+}
+
+void ScriptedUiSession::dispatch_log(std::string_view level,
+                                     std::string_view message) {
+    auto primary = log_callback_;
+    std::vector<LogCallback> subscribers;
+    subscribers.reserve(log_subscribers_.size());
+    for (const auto& [token, callback] : log_subscribers_) {
+        (void)token;
+        subscribers.push_back(callback);
+    }
+    if (primary)
+        primary(level, message);
+    for (const auto& subscriber : subscribers)
+        subscriber(level, message);
+}
+
+LogCallback ScriptedUiSession::engine_log_callback() {
+    // The engine keeps this trampoline stable for its lifetime. Dispatch takes
+    // a callback snapshot, so a subscriber may add/remove/replace sinks without
+    // destroying the closure currently executing inside ScriptEngine.
+    return [this](std::string_view level, std::string_view message) {
+        dispatch_log(level, message);
+    };
 }
 
 ScriptedUiSession::~ScriptedUiSession() {
@@ -211,7 +257,7 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         const auto t_snapshot = clock::now();
 
         root_.set_theme(theme_for_reload);
-        auto next_engine = make_engine();
+        auto next_engine = make_engine(engine_log_callback());
         auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
                                                           gpu_surface_);
         // Re-attach on every reload: the bridge is rebuilt, the channel set is

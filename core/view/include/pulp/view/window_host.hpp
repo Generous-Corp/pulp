@@ -309,6 +309,7 @@ public:
     // direct GPU-backbuffer readback. Suitable for live screenshots of a
     // visible window.
     virtual std::vector<uint8_t> capture_png() { return {}; }
+    virtual bool supports_compositor_capture() const { return false; }
 
     // Capture the host's own back-buffer as a PNG image (issue #2001).
     //
@@ -354,6 +355,10 @@ public:
 
     // Run the event loop (blocks until the window is closed)
     // Call this for standalone UI preview mode
+    // Browser hosts override this query because their page-owned loop must
+    // return immediately. Callers that keep stack-owned runtime state across
+    // the loop may use it to fail closed on such hosts.
+    virtual bool event_loop_blocks_until_close() const { return true; }
     virtual void run_event_loop() = 0;
 
     // ── D.1 Client-side window decoration ───────────────────────────────

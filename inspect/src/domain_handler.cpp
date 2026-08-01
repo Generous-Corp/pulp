@@ -18,12 +18,14 @@
 #include <pulp/view/view.hpp>
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <pulp/view/live_constant_editor.hpp>
 
 #include <choc/text/choc_JSON.h>
 
 #include <sstream>
 #include <iomanip>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace pulp::inspect {
@@ -131,6 +133,45 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             obj.addMember("tweak_count", choc::value::createInt64(
                 static_cast<int64_t>(tweak_store_->count())));
         }
+        return make_response(req.id, choc::json::toString(obj, false));
+    }
+    if (req.method == methods::kInspectorGetAgentContext) {
+        if (!agent_context_)
+            return make_error(req.id, "No agent context source attached",
+                              "context_unavailable");
+        const auto context = agent_context_->snapshot();
+        auto obj = choc::value::createObject("");
+        auto binary = choc::value::createObject("");
+        binary.addMember("path", choc::value::createString(context.binary_path));
+        binary.addMember("buildId", choc::value::createString(context.binary_build_id));
+        binary.addMember("mtimeUnixMs",
+                         choc::value::createInt64(context.binary_mtime_unix_ms));
+        obj.addMember("binary", binary);
+        auto identity = choc::value::createObject("");
+        identity.addMember("pluginId", choc::value::createString(context.plugin_id));
+        identity.addMember("sessionId", choc::value::createString(context.session_id));
+        identity.addMember("instanceId", choc::value::createString(context.instance_id));
+        obj.addMember("identity", identity);
+        auto editor = choc::value::createObject("");
+        editor.addMember("open", choc::value::createBool(context.editor_open));
+        editor.addMember("windowVisible", choc::value::createBool(context.window_visible));
+        obj.addMember("editor", editor);
+        auto processing = choc::value::createObject("");
+        processing.addMember("active", choc::value::createBool(context.processing));
+        processing.addMember("xrunCount", choc::value::createInt64(
+            static_cast<std::int64_t>(context.xrun_count)));
+        obj.addMember("processing", processing);
+        auto reload = choc::value::createObject("");
+        reload.addMember("available", choc::value::createBool(context.hot_reload_available));
+        reload.addMember("enabled", choc::value::createBool(context.hot_reload_enabled));
+        reload.addMember("pending", choc::value::createBool(context.hot_reload_pending));
+        obj.addMember("hotReload", reload);
+        obj.addMember("unsavedTweakCount", choc::value::createInt64(
+            static_cast<std::int64_t>(context.unsaved_tweak_count)));
+        auto issues = choc::value::createEmptyArray();
+        for (const auto& issue : context.actionable_issues)
+            issues.addArrayElement(choc::value::createString(issue));
+        obj.addMember("actionableIssues", issues);
         return make_response(req.id, choc::json::toString(obj, false));
     }
 
@@ -737,7 +778,10 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
         try {
             auto params = choc::json::parse(req.params_json);
             auto pid = static_cast<uint32_t>(params["id"].getInt64());
-            auto value = static_cast<float>(params["value"].getFloat64());
+            const auto& value_json = params["value"];
+            if (!value_json.isInt() && !value_json.isFloat())
+                throw std::runtime_error("State.setParameter value is not numeric");
+            auto value = static_cast<float>(value_json.getWithDefault(0.0));
             // Optional: interpret value as a 0..1 normalized position.
             bool normalized = params.isObject() && params.hasObjectMember("normalized")
                                   ? params["normalized"].getWithDefault(false)
@@ -817,11 +861,26 @@ InspectorMessage DomainHandler::handle_audio(const InspectorMessage& req) {
 
 InspectorMessage DomainHandler::handle_capture(const InspectorMessage& req) {
     if (req.method == methods::kCaptureScreenshot) {
-        // Would need WindowHost reference for capture_png()
-        return make_error(req.id, "Capture.screenshot not yet wired (needs WindowHost reference)");
+        if (!capture_)
+            return make_error(req.id, "No capture source attached",
+                              "capture_unavailable");
+        auto captured = capture_->capture_png();
+        if (!captured.error.empty())
+            return make_error(req.id, captured.error, "capture_failed");
+        if (captured.png.empty())
+            return make_error(req.id, "Capture source returned no PNG bytes",
+                              "capture_failed");
+        auto obj = choc::value::createObject("");
+        obj.addMember("mimeType", choc::value::createString("image/png"));
+        obj.addMember("width", choc::value::createInt64(captured.width));
+        obj.addMember("height", choc::value::createInt64(captured.height));
+        obj.addMember("data", choc::value::createString(
+            runtime::base64_encode(captured.png.data(), captured.png.size())));
+        return make_response(req.id, choc::json::toString(obj, false));
     }
     if (req.method == methods::kCaptureScreenshotNode) {
-        return make_error(req.id, "Capture.screenshotNode not yet implemented");
+        return make_error(req.id, "Capture.screenshotNode is unavailable",
+                          "method_unavailable");
     }
     return make_error(req.id, "Unknown Capture method: " + req.method);
 }

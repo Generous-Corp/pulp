@@ -790,6 +790,81 @@ TEST_CASE("ScriptedUiSession reload latency baseline", "[view][scripted-ui][.ben
     fs::remove_all(temp_dir);
 }
 
+TEST_CASE("ScriptedUiSession retains an inspector console sink across reload",
+          "[view][scripted-ui][console]") {
+    const auto dir = make_temp_dir("pulp-scripted-console");
+    const auto script = dir / "ui.js";
+    write_text(script, "console.log('first'); createLabel('v', 'one', '');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script});
+    std::vector<std::string> messages;
+    std::vector<std::string> observed;
+    session.set_log_callback(
+        [&](std::string_view, std::string_view message) {
+            messages.emplace_back(message);
+        });
+    const auto subscription = session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            observed.emplace_back(message);
+        });
+    REQUIRE(subscription != 0);
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(messages == std::vector<std::string>{"first"});
+    REQUIRE(observed == std::vector<std::string>{"first"});
+
+    write_text(script, "console.warn('second'); createLabel('v', 'two', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(messages == std::vector<std::string>{"first", "second"});
+    REQUIRE(observed == std::vector<std::string>{"first", "second"});
+
+    session.remove_log_callback(subscription);
+    write_text(script, "console.error('third'); createLabel('v', 'three', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(messages == std::vector<std::string>{"first", "second", "third"});
+    REQUIRE(observed == std::vector<std::string>{"first", "second"});
+    fs::remove_all(dir);
+}
+
+TEST_CASE("ScriptedUiSession log observers may remove themselves during dispatch",
+          "[view][scripted-ui][console][reentrant]") {
+    const auto dir = make_temp_dir("pulp-scripted-console-reentrant");
+    const auto script = dir / "ui.js";
+    write_text(script, "console.log('first'); createLabel('v', 'one', '');");
+
+    View root;
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script});
+    std::vector<std::string> self_messages;
+    std::vector<std::string> following_messages;
+    std::uint64_t self_subscription = 0;
+    self_subscription = session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            self_messages.emplace_back(message);
+            session.remove_log_callback(self_subscription);
+        });
+    session.add_log_callback(
+        [&](std::string_view, std::string_view message) {
+            following_messages.emplace_back(message);
+        });
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(self_messages == std::vector<std::string>{"first"});
+    REQUIRE(following_messages == std::vector<std::string>{"first"});
+
+    write_text(script, "console.warn('second'); createLabel('v', 'two', '');");
+    REQUIRE(session.reload(&error));
+    REQUIRE(self_messages == std::vector<std::string>{"first"});
+    REQUIRE(following_messages ==
+            std::vector<std::string>{"first", "second"});
+    fs::remove_all(dir);
+}
+
 // ── UX SwapUnit adapter (live-swap item 1.8b/2.5b) ────────────────────────────
 TEST_CASE("ScriptedUiSwapUnit applies + rolls back a UI swap via apply_live_swap",
           "[view][scripted-ui][swap-unit][1.8]") {
