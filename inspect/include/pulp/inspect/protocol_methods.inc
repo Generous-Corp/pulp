@@ -52,6 +52,9 @@ PULP_INSPECT_METHOD(kStateSetParameter, "State.setParameter", StateWrite, Reques
 PULP_INSPECT_METHOD(kStateGetValueChannels, "State.getValueChannels", UiRead, Request)
 PULP_INSPECT_METHOD(kStateParameterChanged, "State.parameterChanged", StateRead, Event)
 
+PULP_INSPECT_METHOD(kTestInjectMidi, "Test.injectMidi", TestInput, Request)
+PULP_INSPECT_METHOD(kTestSetTransport, "Test.setTransport", TestInput, Request)
+
 PULP_INSPECT_METHOD(kConsoleEnable, "Console.enable", LogsRead, Request)
 PULP_INSPECT_METHOD(kConsoleGetMessages, "Console.getMessages", LogsRead, Request)
 PULP_INSPECT_METHOD(kConsoleMessageAdded, "Console.messageAdded", LogsRead, Event)

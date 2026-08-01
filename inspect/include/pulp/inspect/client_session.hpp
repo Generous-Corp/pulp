@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/client.hpp>
+#include <pulp/inspect/test_input.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -87,6 +88,14 @@ struct InspectorSetParameterResult {
     bool applied = false;
 };
 
+struct InspectorInjectMidiResult {
+    bool accepted = false;
+};
+
+struct InspectorSetTransportResult {
+    bool applied = false;
+};
+
 struct InspectorScreenshotResult {
     std::string mime_type;
     std::uint32_t width = 0;
@@ -127,6 +136,10 @@ class InspectorClientSession {
     InspectorMessage set_parameter(std::int64_t parameter_id, double value, bool normalized = false,
                                    std::chrono::milliseconds timeout = std::chrono::seconds(3));
     InspectorMessage screenshot(std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    InspectorMessage inject_midi(const MidiTestInput& input,
+                                 std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    InspectorMessage set_transport(const StandaloneTransportTestInput& input,
+                                   std::chrono::milliseconds timeout = std::chrono::seconds(3));
 
     InspectorClientResult<InspectorCapabilitiesResult>
     read_capabilities(std::chrono::milliseconds timeout = std::chrono::seconds(3));
@@ -139,6 +152,12 @@ class InspectorClientSession {
                         std::chrono::milliseconds timeout = std::chrono::seconds(3));
     InspectorClientResult<InspectorScreenshotResult>
     capture_screenshot(std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    InspectorClientResult<InspectorInjectMidiResult>
+    inject_midi_typed(const MidiTestInput& input,
+                      std::chrono::milliseconds timeout = std::chrono::seconds(3));
+    InspectorClientResult<InspectorSetTransportResult>
+    set_transport_typed(const StandaloneTransportTestInput& input,
+                        std::chrono::milliseconds timeout = std::chrono::seconds(3));
 
     /// Acquire and release the controller lease around one typed mutation.
     InspectorMessage

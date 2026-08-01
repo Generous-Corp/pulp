@@ -227,6 +227,43 @@ InspectorMessage InspectorClientSession::screenshot(std::chrono::milliseconds ti
                                    methods::kCaptureScreenshot, ResponseShape::Object);
 }
 
+InspectorMessage InspectorClientSession::inject_midi(const MidiTestInput& input,
+                                                     std::chrono::milliseconds timeout) {
+    if ((input.kind != MidiTestInputKind::NoteOn && input.kind != MidiTestInputKind::NoteOff) ||
+        input.channel > 15 || input.note > 127 || input.velocity > 127) {
+        return make_error(0, "Invalid bounded MIDI note input", "invalid_params");
+    }
+    auto params = choc::value::createObject("");
+    params.addMember("kind", choc::value::createString(
+                                 input.kind == MidiTestInputKind::NoteOn ? "note_on" : "note_off"));
+    params.addMember("channel",
+                     choc::value::createInt32(static_cast<std::int32_t>(input.channel) + 1));
+    params.addMember("note", choc::value::createInt32(input.note));
+    params.addMember("velocity", choc::value::createInt32(input.velocity));
+    return request_controlled(std::string(methods::kTestInjectMidi),
+                              choc::json::toString(params, false), timeout);
+}
+
+InspectorMessage InspectorClientSession::set_transport(const StandaloneTransportTestInput& input,
+                                                       std::chrono::milliseconds timeout) {
+    if ((!input.playing && !input.position_samples && !input.tempo_bpm) ||
+        (input.position_samples && *input.position_samples < 0) ||
+        (input.tempo_bpm && (!std::isfinite(*input.tempo_bpm) || *input.tempo_bpm < 20.0 ||
+                             *input.tempo_bpm > 400.0))) {
+        return make_error(0, "Invalid standalone transport input", "invalid_params");
+    }
+    auto params = choc::value::createObject("");
+    if (input.playing)
+        params.addMember("playing", choc::value::createBool(*input.playing));
+    if (input.position_samples) {
+        params.addMember("position_samples", choc::value::createInt64(*input.position_samples));
+    }
+    if (input.tempo_bpm)
+        params.addMember("tempo_bpm", choc::value::createFloat64(*input.tempo_bpm));
+    return request_controlled(std::string(methods::kTestSetTransport),
+                              choc::json::toString(params, false), timeout);
+}
+
 InspectorMessage InspectorClientSession::request_controlled(std::string method,
                                                             std::string params_json,
                                                             std::chrono::milliseconds timeout) {

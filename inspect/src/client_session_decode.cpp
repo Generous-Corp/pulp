@@ -295,4 +295,44 @@ InspectorClientSession::capture_screenshot(std::chrono::milliseconds timeout) {
     }
 }
 
+InspectorClientResult<InspectorInjectMidiResult>
+InspectorClientSession::inject_midi_typed(const MidiTestInput& input,
+                                          std::chrono::milliseconds timeout) {
+    const auto response = inject_midi(input, timeout);
+    if (response.is_error)
+        return failed_result<InspectorInjectMidiResult>(response);
+    try {
+        const auto value = choc::json::parse(response.params_json);
+        if (!value.isObject() || value.size() != 1 || !value["accepted"].isBool() ||
+            !value["accepted"].getBool()) {
+            return invalid_result<InspectorInjectMidiResult>(response, methods::kTestInjectMidi,
+                                                             "accepted");
+        }
+        return successful_result(response, InspectorInjectMidiResult{true});
+    } catch (...) {
+        return invalid_result<InspectorInjectMidiResult>(response, methods::kTestInjectMidi,
+                                                         "payload");
+    }
+}
+
+InspectorClientResult<InspectorSetTransportResult>
+InspectorClientSession::set_transport_typed(const StandaloneTransportTestInput& input,
+                                            std::chrono::milliseconds timeout) {
+    const auto response = set_transport(input, timeout);
+    if (response.is_error)
+        return failed_result<InspectorSetTransportResult>(response);
+    try {
+        const auto value = choc::json::parse(response.params_json);
+        if (!value.isObject() || value.size() != 1 || !value["applied"].isBool() ||
+            !value["applied"].getBool()) {
+            return invalid_result<InspectorSetTransportResult>(response, methods::kTestSetTransport,
+                                                               "applied");
+        }
+        return successful_result(response, InspectorSetTransportResult{true});
+    } catch (...) {
+        return invalid_result<InspectorSetTransportResult>(response, methods::kTestSetTransport,
+                                                           "payload");
+    }
+}
+
 } // namespace pulp::inspect
