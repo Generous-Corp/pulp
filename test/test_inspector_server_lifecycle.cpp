@@ -172,8 +172,8 @@ TEST_CASE("server stop is reentrant from a request callback",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient client;
@@ -219,8 +219,8 @@ TEST_CASE("server can be released from a request callback",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server->start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        *server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient client;
@@ -275,8 +275,8 @@ TEST_CASE("server can be destroyed by a callback while another thread stops it",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server->start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        *server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient client;
@@ -336,8 +336,8 @@ TEST_CASE("serialized callback stop and concurrent request do not deadlock",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient first;
@@ -398,8 +398,8 @@ TEST_CASE("callback stop cancels a concurrent authenticated restart",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient client;

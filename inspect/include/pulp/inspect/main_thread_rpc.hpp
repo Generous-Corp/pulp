@@ -19,6 +19,7 @@ namespace pulp::inspect {
 class InspectorMainThreadRpc {
 public:
     using Operation = std::function<InspectorMessage()>;
+    using Completion = std::function<void()>;
     using Post = std::function<bool(std::function<void()>)>;
     using IsMainThread = std::function<bool()>;
 
@@ -36,6 +37,13 @@ public:
     InspectorMainThreadRpc& operator=(const InspectorMainThreadRpc&) = delete;
 
     InspectorMessage call(std::int64_t request_id, Operation operation);
+    /// As call(), with a callback that runs exactly once when the operation is
+    /// no longer capable of applying: immediately for work cancelled before it
+    /// starts, or after a started operation actually returns. This distinction
+    /// lets owners retain mutation leases across a fenced started timeout.
+    InspectorMessage call(std::int64_t request_id,
+                          Operation operation,
+                          Completion completion);
 
     /// Stop accepting requests and cancel every queued operation that has not
     /// started. Running operations retain their own state and are not waited

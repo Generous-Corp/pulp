@@ -35,8 +35,18 @@ InspectorMessage run_operation(std::int64_t request_id,
     }
 }
 
+void run_completion(InspectorMainThreadRpc::Completion completion) noexcept {
+    if (!completion)
+        return;
+    try {
+        completion();
+    } catch (...) {
+    }
+}
+
 struct PendingCall {
-    explicit PendingCall(std::int64_t id) : request_id(id) {}
+    PendingCall(std::int64_t id, InspectorMainThreadRpc::Completion done)
+        : request_id(id), completion(std::move(done)) {}
 
     std::int64_t request_id = 0;
     std::mutex mutex;
@@ -45,7 +55,9 @@ struct PendingCall {
     bool response_ready = false;
     bool cancelled_before_start = false;
     bool slot_held = true;
+    bool completion_called = false;
     InspectorMessage response;
+    InspectorMainThreadRpc::Completion completion;
 };
 
 } // namespace
@@ -79,6 +91,7 @@ public:
                        InspectorMessage response) {
         bool notify = false;
         bool release_slot = false;
+        InspectorMainThreadRpc::Completion completion;
         {
             std::lock_guard lock(call->mutex);
             if (!call->response_ready) {
@@ -88,9 +101,14 @@ public:
             }
             release_slot = call->slot_held;
             call->slot_held = false;
+            if (!call->completion_called) {
+                call->completion_called = true;
+                completion = std::move(call->completion);
+            }
         }
         if (notify)
             call->cv.notify_all();
+        run_completion(std::move(completion));
 
         if (!release_slot)
             return;
@@ -137,28 +155,49 @@ InspectorMainThreadRpc::~InspectorMainThreadRpc() {
 InspectorMessage InspectorMainThreadRpc::call(
     std::int64_t request_id,
     Operation operation) {
+    return call(request_id, std::move(operation), {});
+}
+
+InspectorMessage InspectorMainThreadRpc::call(
+    std::int64_t request_id,
+    Operation operation,
+    Completion completion) {
     const auto impl = impl_;
     if (!operation) {
+        run_completion(std::move(completion));
         return make_error(request_id,
                           "Inspector dispatch operation is empty",
                           "invalid_dispatch");
     }
     if (impl->is_main_thread && impl->is_main_thread()) {
         std::lock_guard operation_lock(impl->operation_mutex);
-        if (!impl->accepting.load(std::memory_order_acquire))
+        if (!impl->accepting.load(std::memory_order_acquire)) {
+            run_completion(std::move(completion));
             return cancelled(request_id);
-        return run_operation(request_id, operation);
+        }
+        auto response = run_operation(request_id, operation);
+        run_completion(std::move(completion));
+        return response;
     }
-    if (!impl->accepting.load(std::memory_order_acquire))
+    if (!impl->accepting.load(std::memory_order_acquire)) {
+        run_completion(std::move(completion));
         return cancelled(request_id);
+    }
 
-    auto pending = std::make_shared<PendingCall>(request_id);
+    auto pending =
+        std::make_shared<PendingCall>(request_id, std::move(completion));
     if (!impl->register_call(pending)) {
-        if (!impl->accepting.load(std::memory_order_acquire))
-            return cancelled(request_id);
-        return make_error(request_id,
-                          "Inspector main-thread queue is full",
-                          "dispatch_queue_full");
+        auto response = !impl->accepting.load(std::memory_order_acquire)
+            ? cancelled(request_id)
+            : make_error(request_id,
+                         "Inspector main-thread queue is full",
+                         "dispatch_queue_full");
+        {
+            std::lock_guard lock(pending->mutex);
+            pending->slot_held = false;
+        }
+        impl->complete_call(pending, response);
+        return response;
     }
 
     const bool posted = impl->post && impl->post(
@@ -195,6 +234,12 @@ InspectorMessage InspectorMainThreadRpc::call(
     if (!pending->cv.wait_for(lock, impl->config.timeout,
                               [&] { return pending->response_ready; })) {
         const bool may_have_applied = pending->started;
+        auto timeout_response = make_error(
+            request_id,
+            "Inspector main-thread dispatch timed out",
+            "main_thread_timeout",
+            std::string(R"({"mayHaveApplied":)") +
+                (may_have_applied ? "true}" : "false}"));
         if (may_have_applied) {
             // The posted task owns the pending state and operation capture.
             // Fence this caller at the deadline; complete_call() will release
@@ -202,22 +247,11 @@ InspectorMessage InspectorMainThreadRpc::call(
             pending->response_ready = true;
         } else {
             pending->cancelled_before_start = true;
-            pending->response_ready = true;
-            pending->slot_held = false;
         }
         lock.unlock();
-        if (!may_have_applied) {
-            std::lock_guard pending_lock(impl->pending_mutex);
-            if (impl->pending_count > 0)
-                --impl->pending_count;
-        }
-
-        auto data = std::string(R"({"mayHaveApplied":)") +
-                    (may_have_applied ? "true}" : "false}");
-        return make_error(request_id,
-                          "Inspector main-thread dispatch timed out",
-                          "main_thread_timeout",
-                          std::move(data));
+        if (!may_have_applied)
+            impl->complete_call(pending, timeout_response);
+        return timeout_response;
     }
     return pending->response;
 }

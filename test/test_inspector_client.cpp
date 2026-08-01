@@ -92,6 +92,91 @@ TEST_CASE("authenticated client completes read and controlled mutation",
             .is_error);
 }
 
+TEST_CASE("authenticated domain mutation applies on main before response",
+          "[inspect][client][main-thread][mutation]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateWrite,
+    };
+
+    const auto main_thread = std::this_thread::get_id();
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    std::atomic<bool> applied{false};
+    std::atomic<bool> handler_ran_off_main{false};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 4},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+            }
+            cv.notify_all();
+            return true;
+        },
+        [main_thread] { return std::this_thread::get_id() == main_thread; });
+    InspectorSession session(
+        {"session-main-thread", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            handler_ran_off_main.store(
+                std::this_thread::get_id() != main_thread,
+                std::memory_order_release);
+            applied.store(true, std::memory_order_release);
+            return make_response(request.id, R"({"applied":true})");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.main_thread_rpc = rpc;
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    REQUIRE_FALSE(client.request("Session.acquireController").is_error);
+
+    pulp::inspect::InspectorMessage response;
+    std::atomic<bool> request_returned{false};
+    std::thread requester([&] {
+        response = client.request(
+            "State.setParameter", R"({"id":"gain","value":0.75})");
+        request_returned.store(true, std::memory_order_release);
+    });
+    std::function<void()> main_task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return static_cast<bool>(queued);
+        }));
+        main_task = std::move(queued);
+    }
+    CHECK_FALSE(applied.load(std::memory_order_acquire));
+    CHECK_FALSE(request_returned.load(std::memory_order_acquire));
+
+    main_task();
+    requester.join();
+
+    CHECK_FALSE(handler_ran_off_main.load(std::memory_order_acquire));
+    CHECK(applied.load(std::memory_order_acquire));
+    CHECK(request_returned.load(std::memory_order_acquire));
+    CHECK_FALSE(response.is_error);
+}
+
 TEST_CASE("oversized inspector responses return a bounded protocol error",
           "[inspect][client][resource-limit]") {
     TemporaryDirectory temporary;
@@ -122,7 +207,7 @@ TEST_CASE("oversized inspector responses return a bounded protocol error",
     InspectorServerConfig config{
         &session, &publisher, record, *token};
     config.max_message_bytes = 1024;
-    REQUIRE(server.start_authenticated(std::move(config)));
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
 
@@ -519,8 +604,8 @@ TEST_CASE("response timeout fences may-have-applied requests",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
 

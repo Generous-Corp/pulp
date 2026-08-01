@@ -43,6 +43,7 @@ using pulp::inspect::InspectorServer;
 using pulp::inspect::InspectorServerConfig;
 using pulp::inspect::InspectorSession;
 using pulp::inspect::InspectorSessionInfo;
+using pulp::inspect::InspectorMainThreadRpc;
 using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::make_response;
 using pulp::runtime::Socket;
@@ -54,6 +55,23 @@ static_assert(!std::is_move_constructible_v<InspectorServer>);
 static_assert(!std::is_move_assignable_v<InspectorServer>);
 
 namespace {
+
+std::shared_ptr<InspectorMainThreadRpc> make_inline_test_main_thread_rpc() {
+    return std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{},
+        [](auto task) {
+            task();
+            return true;
+        },
+        [] { return false; });
+}
+
+bool start_test_inspector_server(
+    InspectorServer& server, InspectorServerConfig config) {
+    if (!config.main_thread_rpc)
+        config.main_thread_rpc = make_inline_test_main_thread_rpc();
+    return server.start_authenticated(std::move(config));
+}
 
 [[maybe_unused]] bool send_all(
     Socket& socket, std::span<const std::uint8_t> bytes) {
@@ -211,8 +229,10 @@ struct AuthenticatedFixture {
         record.session_id = session.info().session_id;
         record.instance_id = session.info().instance_id;
         record.plugin_id = session.info().plugin_id;
-        REQUIRE(server.start_authenticated(InspectorServerConfig{
-            &session, &publisher, record, *token}));
+        InspectorServerConfig config{
+            &session, &publisher, record, *token};
+        config.main_thread_rpc = make_inline_test_main_thread_rpc();
+        REQUIRE(start_test_inspector_server(server, std::move(config)));
     }
 
     ~AuthenticatedFixture() {

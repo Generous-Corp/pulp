@@ -1,4 +1,5 @@
 #include <pulp/inspect/session.hpp>
+#include <pulp/inspect/main_thread_rpc.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -234,6 +235,60 @@ void InspectorControllerLease::end_operation(std::string_view owner) {
     }
 }
 
+class InspectorSession::State {
+public:
+    State(RequestHandler request_handler,
+          std::chrono::milliseconds lease_ttl,
+          InspectorControllerLease::Clock clock)
+        : handler(std::move(request_handler)),
+          lease(lease_ttl, std::move(clock)) {}
+
+    bool begin_dispatch() {
+        const auto caller = std::this_thread::get_id();
+        std::unique_lock lock(dispatch_mutex);
+        if (!dispatch_accepting)
+            return false;
+        if (dispatch_active && dispatch_owner == caller) {
+            ++dispatch_recursion;
+            return true;
+        }
+        dispatch_cv.wait(lock, [this] {
+            return !dispatch_accepting || !dispatch_active;
+        });
+        if (!dispatch_accepting)
+            return false;
+        dispatch_active = true;
+        dispatch_owner = caller;
+        dispatch_recursion = 1;
+        return true;
+    }
+
+    void end_dispatch() {
+        std::lock_guard lock(dispatch_mutex);
+        if (!dispatch_active ||
+            dispatch_owner != std::this_thread::get_id() ||
+            dispatch_recursion == 0) {
+            return;
+        }
+        if (--dispatch_recursion != 0)
+            return;
+        dispatch_active = false;
+        dispatch_owner = {};
+        dispatch_cv.notify_all();
+    }
+
+    RequestHandler handler;
+    InspectorControllerLease lease;
+    std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
+    std::mutex mutex;
+    std::mutex dispatch_mutex;
+    std::condition_variable dispatch_cv;
+    bool dispatch_accepting = true;
+    bool dispatch_active = false;
+    std::thread::id dispatch_owner;
+    std::size_t dispatch_recursion = 0;
+};
+
 InspectorSession::InspectorSession(InspectorSessionInfo info,
                                    InspectorPolicyConfig policy,
                                    RequestHandler handler,
@@ -241,15 +296,16 @@ InspectorSession::InspectorSession(InspectorSessionInfo info,
                                    InspectorControllerLease::Clock clock)
     : info_(std::move(info)),
       policy_(std::move(policy)),
-      handler_(std::move(handler)),
-      lease_(lease_ttl, std::move(clock)) {}
+      state_(std::make_shared<State>(
+          std::move(handler), lease_ttl, std::move(clock))) {}
 
 InspectorMessage InspectorSession::handle(std::string_view client_id,
                                           const InspectorMessage& request) {
-    RequestHandler handler;
+    const auto state = state_;
+    std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
     bool controller_operation = false;
     {
-        std::lock_guard lock(mutex_);
+        std::lock_guard lock(state->mutex);
         if (auto invalid = validate_request_shape(request))
             return std::move(*invalid);
         if (request.method.rfind("Session.", 0) == 0)
@@ -260,111 +316,97 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
             method &&
             capability_requires_controller_lease(method->capability);
         if (auto denied =
-                policy_.authorize(request, lease_.owns(client_id))) {
+                policy_.authorize(request, state->lease.owns(client_id))) {
             return std::move(*denied);
         }
         if (requires_controller) {
-            if (!lease_.begin_operation(client_id)) {
+            if (!state->lease.begin_operation(client_id)) {
                 return make_error(request.id,
                                   "A controller lease is required",
                                   "controller_lease_required");
             }
             controller_operation = true;
         }
-        handler = handler_;
+        main_thread_rpc = state->main_thread_rpc;
     }
-    const auto finish_controller_operation = [&] {
+    const auto owned_client_id = std::string(client_id);
+    const auto finish_controller_operation =
+        [state, owned_client_id, controller_operation] {
         if (!controller_operation)
             return;
-        std::lock_guard lock(mutex_);
-        lease_.end_operation(client_id);
+        std::lock_guard lock(state->mutex);
+        state->lease.end_operation(owned_client_id);
     };
-    if (!handler) {
+    if (!state->handler) {
         finish_controller_operation();
         return make_error(request.id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
-    if (!begin_dispatch()) {
-        finish_controller_operation();
-        return make_error(request.id,
-                          "Inspector dispatch was cancelled during teardown",
-                          "dispatch_cancelled");
-    }
-    try {
-        auto response = handler(request);
-        end_dispatch();
+    const auto owned_request = request;
+    auto operation = [state, owned_request] {
+        if (!state->begin_dispatch()) {
+            return make_error(
+                owned_request.id,
+                "Inspector dispatch was cancelled during teardown",
+                "dispatch_cancelled");
+        }
+        struct DispatchGuard {
+            std::shared_ptr<State> state;
+            ~DispatchGuard() { state->end_dispatch(); }
+        } guard{state};
+        return state->handler(owned_request);
+    };
+
+    if (!main_thread_rpc) {
+        auto response = [&] {
+            try {
+                return operation();
+            } catch (const std::exception& error) {
+                return make_error(
+                    request.id,
+                    std::string("Inspector dispatch failed: ") + error.what(),
+                    "dispatch_failed");
+            } catch (...) {
+                return make_error(request.id,
+                                  "Inspector dispatch failed",
+                                  "dispatch_failed");
+            }
+        }();
         finish_controller_operation();
         return response;
-    } catch (const std::exception& error) {
-        end_dispatch();
-        finish_controller_operation();
-        return make_error(request.id,
-                          std::string("Inspector dispatch failed: ") +
-                              error.what(),
-                          "dispatch_failed");
-    } catch (...) {
-        end_dispatch();
-        finish_controller_operation();
-        return make_error(request.id,
-                          "Inspector dispatch failed",
-                          "dispatch_failed");
     }
-}
-
-bool InspectorSession::begin_dispatch() {
-    const auto caller = std::this_thread::get_id();
-    std::unique_lock lock(dispatch_mutex_);
-    if (!dispatch_accepting_)
-        return false;
-    if (dispatch_active_ && dispatch_owner_ == caller) {
-        ++dispatch_recursion_;
-        return true;
-    }
-    dispatch_cv_.wait(lock, [this] {
-        return !dispatch_accepting_ || !dispatch_active_;
-    });
-    if (!dispatch_accepting_)
-        return false;
-    dispatch_active_ = true;
-    dispatch_owner_ = caller;
-    dispatch_recursion_ = 1;
-    return true;
-}
-
-void InspectorSession::end_dispatch() {
-    std::lock_guard lock(dispatch_mutex_);
-    if (!dispatch_active_ ||
-        dispatch_owner_ != std::this_thread::get_id() ||
-        dispatch_recursion_ == 0) {
-        return;
-    }
-    if (--dispatch_recursion_ != 0)
-        return;
-    dispatch_active_ = false;
-    dispatch_owner_ = {};
-    dispatch_cv_.notify_all();
+    return main_thread_rpc->call(
+        request.id, std::move(operation), finish_controller_operation);
 }
 
 void InspectorSession::suspend_dispatches() {
+    const auto state = state_;
     {
-        std::lock_guard lock(dispatch_mutex_);
-        dispatch_accepting_ = false;
+        std::lock_guard lock(state->dispatch_mutex);
+        state->dispatch_accepting = false;
     }
-    dispatch_cv_.notify_all();
+    state->dispatch_cv.notify_all();
 }
 
 void InspectorSession::resume_dispatches() {
+    const auto state = state_;
     {
-        std::lock_guard lock(dispatch_mutex_);
-        dispatch_accepting_ = true;
+        std::lock_guard lock(state->dispatch_mutex);
+        state->dispatch_accepting = true;
     }
-    dispatch_cv_.notify_all();
+    state->dispatch_cv.notify_all();
+}
+
+void InspectorSession::set_main_thread_rpc(
+    std::shared_ptr<InspectorMainThreadRpc> rpc) {
+    std::lock_guard lock(state_->mutex);
+    state_->main_thread_rpc = std::move(rpc);
 }
 
 void InspectorSession::disconnect(std::string_view client_id) {
-    std::lock_guard lock(mutex_);
-    lease_.disconnect(client_id);
+    std::lock_guard lock(state_->mutex);
+    state_->lease.disconnect(client_id);
 }
 
 InspectorMessage InspectorSession::handle_session_method(
@@ -396,7 +438,7 @@ InspectorMessage InspectorSession::handle_session_method(
                          choc::value::createString(profile_id(policy_.profile())));
         result.addMember("available", available);
         result.addMember("effective", effective);
-        if (const auto owner = lease_.owner())
+        if (const auto owner = state_->lease.owner())
             result.addMember("controller",
                              choc::value::createString(*owner));
         return make_response(request.id,
@@ -436,7 +478,7 @@ InspectorMessage InspectorSession::handle_session_method(
     }
 
     if (request.method == methods::kSessionReleaseController) {
-        if (!lease_.release(client_id)) {
+        if (!state_->lease.release(client_id)) {
             return make_error(request.id,
                               "The caller does not own the controller lease",
                               "controller_lease_not_owned");
@@ -445,8 +487,8 @@ InspectorMessage InspectorSession::handle_session_method(
     }
 
     const auto result = request.method == methods::kSessionAcquireController
-        ? lease_.acquire(client_id)
-        : lease_.renew(client_id);
+        ? state_->lease.acquire(client_id)
+        : state_->lease.renew(client_id);
     if (result == ControllerLeaseResult::HeldByOther) {
         return make_error(request.id,
                           "The controller lease is held by another client",
@@ -462,7 +504,8 @@ InspectorMessage InspectorSession::handle_session_method(
     response.addMember("status",
                        choc::value::createString(lease_result_id(result)));
     response.addMember("ttlMs",
-                       choc::value::createInt64(lease_.remaining().count()));
+                       choc::value::createInt64(
+                           state_->lease.remaining().count()));
     return make_response(request.id,
                          choc::json::toString(response, false));
 }
