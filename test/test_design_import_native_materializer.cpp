@@ -87,6 +87,19 @@ private:
     fs::path original_;
 };
 
+// Real bytes on disk for a manifest asset. The materializer only emits a
+// `file://` image source for a file that exists — a synthetic path resolves to
+// nothing and materializes the unresolved-asset placeholder instead — so a test
+// that asserts on a resolved image has to put a file where the manifest says.
+fs::path write_asset_file(const fs::path& path) {
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    REQUIRE(out.is_open());
+    out << "pulp-test-asset-bytes";
+    REQUIRE(out.good());
+    return path;
+}
+
 // [[maybe_unused]]: only the codegen-compile test cases use these helpers, and
 // those compile legs are skipped on Windows (see the SKIP guards below), so the
 // helpers are unreferenced in a Windows build.
@@ -687,10 +700,13 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     ir.root.style.width = 64.0f;
     ir.root.style.height = 32.0f;
 
+    TempDir cache("pulp-materializer-asset-manifest");
+    const auto logo = write_asset_file(cache.path / "cache" / "logo.png");
+
     IRAssetRef asset;
     asset.asset_id = "asset-logo";
     asset.original_uri = "/raw/source-logo.png";
-    asset.local_path = "/resolved/cache/logo.png";
+    asset.local_path = logo.string();
     asset.content_hash = "sha256:test";
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
@@ -700,7 +716,8 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     REQUIRE(root != nullptr);
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
-    REQUIRE(image->image_source() == "file:///resolved/cache/logo.png");
+    REQUIRE(image->image_source() ==
+            "file://" + logo.lexically_normal().generic_string());
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
@@ -715,10 +732,13 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     ir.root.style.width = 64.0f;
     ir.root.style.height = 32.0f;
 
+    TempDir imported("pulp-materializer-figma-asset-ref");
+    const auto sprite = write_asset_file(imported.path / "assets" / "3_43.png");
+
     IRAssetRef asset;
     asset.asset_id = "3:43";
     asset.original_uri = "figma://KCKIyZoWXjde6qVNCm4qPa/3:43";
-    asset.local_path = "/resolved/import/assets/3_43.png";
+    asset.local_path = sprite.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 
@@ -727,7 +747,8 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     REQUIRE(root != nullptr);
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
-    REQUIRE(image->image_source() == "file:///resolved/import/assets/3_43.png");
+    REQUIRE(image->image_source() ==
+            "file://" + sprite.lexically_normal().generic_string());
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
@@ -1309,7 +1330,10 @@ TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
     // shape_fill_gradient; the materializer forwards it to ImageView so a later
     // opt-in fill reveals the shape's real colors. Storing it is inert (no fill
     // value), so the image still renders plainly — the capability stays opt-in.
-    auto make = [](const char* grad) {
+    TempDir resolved("pulp-materializer-shape-fill");
+    const auto shape = write_asset_file(resolved.path / "shape.png");
+
+    auto make = [&](const char* grad) {
         DesignIR ir;
         ir.source = DesignSource::figma_plugin;
         ir.root.type = "image";
@@ -1319,7 +1343,7 @@ TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
         if (grad) ir.root.attributes["shape_fill_gradient"] = grad;
         IRAssetRef asset;
         asset.asset_id = "shape";
-        asset.local_path = "/resolved/shape.png";
+        asset.local_path = shape.string();
         asset.mime = "image/png";
         ir.asset_manifest.assets.push_back(asset);
         std::vector<ImportDiagnostic> diag;
@@ -1363,10 +1387,13 @@ TEST_CASE("baked native materializer preserves figma-plugin bleed sprite geometr
     ir.root.style.top = 30.0f;
     ir.root.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
 
+    TempDir bleed("pulp-materializer-bleed-sprite");
+    const auto sprite_file = write_asset_file(bleed.path / "assets" / "sprite.png");
+
     IRAssetRef asset;
     asset.asset_id = "sprite";
     asset.original_uri = "figma://fixture/sprite";
-    asset.local_path = "/resolved/import/assets/sprite.png";
+    asset.local_path = sprite_file.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 
@@ -1528,10 +1555,14 @@ TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box bor
     ir.root.style.border_color = "#7e6aff";
     ir.root.style.border_width = 1.0f;
 
+    TempDir rasterized("pulp-materializer-rasterized-vector");
+    const auto rasterized_file =
+        write_asset_file(rasterized.path / "assets" / "3_188.png");
+
     IRAssetRef asset;
     asset.asset_id = "3:188";
     asset.original_uri = "figma://fixture/3:188";
-    asset.local_path = "/resolved/assets/3_188.png";
+    asset.local_path = rasterized_file.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 

@@ -1249,6 +1249,39 @@ diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
 from IR attributes.
 
+**A manifest `local_path` is a HINT, not an address — resolve it, don't trust
+it.** Runtime lanes must go through `resolved_asset_uri()` /
+`resolve_asset_file()` (`core/view/src/design_ir_helpers.hpp`), never
+`"file://" + *asset.local_path`. A writer can persist a bare
+`<content_hash>.<ext>` filename, which then resolves against the DesignIR
+document's own directory while the bytes actually sit in a shared
+`design-assets/` folder BESIDE that directory (Forge's project store does
+exactly this). Because the same node also carries an absolute `asset_path`, the
+web-compat lane reads the node and renders correctly while the native lane
+reads the manifest and drops the image — the two lanes disagree, and the native
+one is silently wrong. Diagnosing that from a screenshot costs hours.
+
+The resolver tries: the recorded `local_path`, then a `file://` `original_uri`,
+then `<content_hash><ext>` under the document directory, a `design-assets/`
+inside it, and a `design-assets/` beside it. Recovery-by-hash logs a warning,
+and an asset that resolves to nothing returns `""` plus a logged line — the
+materializer then emits `native-materialize-unresolved-asset` and a placeholder
+instead of an ImageView pointed at nothing.
+
+Two consequences when writing code or tests here:
+
+- Pass a search root. `NativeMaterializeOptions::asset_base_directory` must be
+  the directory the DesignIR was loaded from (`pulp-design-ir-observe` and the
+  standalone import example do this). Without it, relative paths fall back to
+  process CWD and hash recovery has nowhere to look.
+- A test that asserts on a resolved image must write real bytes where the
+  manifest points. A synthetic path (`/resolved/cache/logo.png`) now
+  materializes the placeholder, so `dynamic_cast<ImageView*>` returns null.
+
+`asset_uri()` in the same header is deliberately NOT existence-checked: it is
+the codegen lowering, naming where bytes are supposed to be for a generated
+program that runs elsewhere. Do not "fix" it to check the filesystem.
+
 **Self-contained JS export (relative asset paths).** The emitted `ui.js`
 never references decode-time locations: after `resolve_sprite_skins` stamps
 absolute paths, `localize_ir_assets` (`sprite_skins.cpp`) copies every
