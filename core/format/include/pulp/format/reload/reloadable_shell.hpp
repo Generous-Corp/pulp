@@ -117,13 +117,11 @@ public:
         return slot_.with_active([](Processor& p) { return p.create_view(); });
     }
 
-    // Value channels belong to the active logic processor, just like its view.
-    // Resolve them through the slot so a successful swap exposes the replacement
-    // set. The pointer remains non-owning: editor consumers observe
-    // editor_reload_generation() on their UI tick and rebuild before their next
-    // channel read.
+    // A raw pointer cannot carry the hot-swap slot's lifetime lease beyond this
+    // call. Fail closed for legacy callers; reload-aware consumers use the
+    // visitor below, which keeps the active generation alive through the work.
     view::ValueChannelSet* value_channels() override {
-        return slot_.with_active([](Processor& p) { return p.value_channels(); });
+        return nullptr;
     }
 
     void visit_value_channels(
