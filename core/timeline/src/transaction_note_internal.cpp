@@ -110,25 +110,43 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
         return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
                                                       transaction, command, replace.clip_id);
 
-    // The command's payload is notes, so the clip's controller and expression
-    // lanes carry across unchanged. Rebuilding from the notes alone would let a
-    // command that predates lanes silently delete them.
+    // Canonicalization reorders notes and never adds or removes one — a
+    // duplicate identity fails `create` outright — so the payload's identities
+    // are already the identities the rebuilt content will own.
+    std::vector<ItemId> replacement_ids;
+    replacement_ids.reserve(replace.replacement.size());
+    for (const auto& note : replace.replacement)
+        replacement_ids.push_back(note.id);
+    std::sort(replacement_ids.begin(), replacement_ids.end());
+
+    // A modifier keys on a note identity, so one whose note the replacement
+    // drops has nothing left to key to and goes with it; `create` rejects a
+    // modifier naming a note the content does not carry. An expression lane
+    // keys on a MidiLaneAddress — a channel-voice stream address that names no
+    // note — so lanes pass through whole. Filtering them by the surviving note
+    // ids as well would look consistent and would delete a clip's controller
+    // streams the moment an edit removes a note.
+    std::vector<NoteModifier> surviving_modifiers;
+    surviving_modifiers.reserve(notes->modifiers().size());
+    for (const auto& modifier : notes->modifiers())
+        if (std::binary_search(replacement_ids.begin(), replacement_ids.end(), modifier.note_id))
+            surviving_modifiers.push_back(modifier);
+
+    // The command's payload is notes, so everything else the clip authors
+    // carries across: the surviving modifiers, the seed their probability draws
+    // are derived from, and the controller and expression lanes. Rebuilding
+    // from the notes alone would silently erase all three.
     auto next_notes = MidiContent::create(
-        replace.replacement, {}, 0,
+        replace.replacement, std::move(surviving_modifiers), notes->modifier_seed(),
         std::vector<MidiExpressionLane>(notes->lanes().begin(), notes->lanes().end()));
     if (!next_notes)
         return runtime::Err(model_failure(transaction, command, next_notes.error()));
 
     std::vector<ItemId> expected_ids;
-    std::vector<ItemId> replacement_ids;
     expected_ids.reserve(expected_notes->notes().size());
-    replacement_ids.reserve(next_notes->notes().size());
     for (const auto& note : expected_notes->notes())
         expected_ids.push_back(note.id);
-    for (const auto& note : next_notes->notes())
-        replacement_ids.push_back(note.id);
     std::sort(expected_ids.begin(), expected_ids.end());
-    std::sort(replacement_ids.begin(), replacement_ids.end());
 
     const auto location = expected_location(ItemKind::Note, project, replace.sequence_id,
                                             replace.track_id, replace.clip_id);
