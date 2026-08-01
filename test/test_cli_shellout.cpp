@@ -3103,4 +3103,32 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     REQUIRE(stale.stdout_output.find(
         "\"inspector_capability_evidence_complete\": false") != std::string::npos);
     REQUIRE(stale.exit_code != 0);
+
+    auto stale_plain = run_pulp({"validate", "--target", "standalone",
+                                 (dir / "First.app").string()});
+    REQUIRE_FALSE(stale_plain.timed_out);
+    REQUIRE(stale_plain.stderr_output.find(
+        "Inspector capability evidence incomplete") != std::string::npos);
+    REQUIRE(stale_plain.exit_code != 0);
+}
+
+TEST_CASE("pulp validate accepts a manifest-free empty build report",
+          "[cli][shellout][validate][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-validate-empty-build");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream manifest(project / "pulp.toml");
+        manifest << "[project]\nname = \"Empty\"\n";
+    }
+    auto result = run_pulp_in_directory(project, {"validate", "--json"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
 }

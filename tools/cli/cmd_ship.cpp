@@ -6,6 +6,7 @@
 #include "notary_env.hpp"
 #include "ship_tracing_guard.hpp"
 #include "inspector_shipping_report.hpp"
+#include "json_writer.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <algorithm>
@@ -951,7 +952,8 @@ static int ship_package(const std::vector<std::string>& args,
     }
     if (json_output && result == 0) {
         std::cout << "{\"inspector_capabilities\": " << evidence.report.json
-                  << ", \"evidence\": " << std::quoted(evidence.path.string())
+                  << ", \"evidence\": "
+                  << pulp::cli::json_string(evidence.path.string())
                   << "}\n";
     }
     return result;
@@ -984,7 +986,8 @@ static int ship_check(const std::vector<std::string>& args,
                       << inspector_report.json << ",\"artifacts\":[";
             for (std::size_t i = 0; i < checked_artifacts.size(); ++i) {
                 if (i != 0) std::cout << ",";
-                std::cout << "{\"name\":" << std::quoted(checked_artifacts[i].first)
+                std::cout << "{\"name\":"
+                          << pulp::cli::json_string(checked_artifacts[i].first)
                           << ",\"signed\":"
                           << (checked_artifacts[i].second ? "true" : "false") << "}";
             }

@@ -136,46 +136,46 @@ int cmd_validate(const std::vector<std::string>& args) {
             else if (r.status == "skip") ++skip_count;
         }
         bool inspector_evidence_complete = true;
+        auto inspector_report = pulp::cli::inspector_shipping::empty_report();
+        if (std::find(targets.begin(), targets.end(), "standalone") !=
+            targets.end()) {
+            std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
+            for (const auto& artifact_string : positional) {
+                const fs::path artifact = artifact_string;
+                if (artifact.extension() != ".app") continue;
+                auto artifact_report =
+                    pulp::cli::inspector_shipping::load_report(
+                        inspector_evidence_root(artifact));
+                if (artifact_report.complete) {
+                    const auto executable =
+                        mr::resolve_standalone_executable(artifact, env);
+                    if (executable.empty()) {
+                        artifact_report.complete = false;
+                        artifact_report.error =
+                            "could not resolve standalone executable for inspector "
+                            "capability scan: " + artifact.string();
+                    } else if (artifact_report.manifests.size() != 1) {
+                        artifact_report.complete = false;
+                        artifact_report.error =
+                            "expected exactly one inspector capability manifest for " +
+                            artifact.string();
+                    } else if (!pulp::cli::inspector_shipping::scan_artifact(
+                                   executable, artifact_report.manifests.front(),
+                                   artifact_report.error)) {
+                        artifact_report.complete = false;
+                    }
+                }
+                artifact_reports.push_back(std::move(artifact_report));
+            }
+            inspector_report = pulp::cli::inspector_shipping::combine_reports(
+                std::move(artifact_reports));
+        }
+        inspector_evidence_complete = inspector_report.complete;
+        if (!inspector_evidence_complete)
+            std::cerr << "Inspector capability evidence incomplete: "
+                      << inspector_report.error << "\n";
         if (json_output || !report_path.empty()) {
             std::ostringstream report;
-            auto inspector_report = pulp::cli::inspector_shipping::empty_report();
-            if (std::find(targets.begin(), targets.end(), "standalone") !=
-                targets.end()) {
-                std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
-                for (const auto& artifact_string : positional) {
-                    const fs::path artifact = artifact_string;
-                    if (artifact.extension() != ".app") continue;
-                    auto artifact_report =
-                        pulp::cli::inspector_shipping::load_report(
-                            inspector_evidence_root(artifact));
-                    if (artifact_report.complete) {
-                        const auto executable =
-                            mr::resolve_standalone_executable(artifact, env);
-                        if (executable.empty()) {
-                            artifact_report.complete = false;
-                            artifact_report.error =
-                                "could not resolve standalone executable for inspector "
-                                "capability scan: " + artifact.string();
-                        } else if (artifact_report.manifests.size() != 1) {
-                            artifact_report.complete = false;
-                            artifact_report.error =
-                                "expected exactly one inspector capability manifest for " +
-                                artifact.string();
-                        } else if (!pulp::cli::inspector_shipping::scan_artifact(
-                                       executable, artifact_report.manifests.front(),
-                                       artifact_report.error)) {
-                            artifact_report.complete = false;
-                        }
-                    }
-                    artifact_reports.push_back(std::move(artifact_report));
-                }
-                inspector_report = pulp::cli::inspector_shipping::combine_reports(
-                    std::move(artifact_reports));
-            }
-            inspector_evidence_complete = inspector_report.complete;
-            if (!inspector_evidence_complete)
-                std::cerr << "Inspector capability evidence incomplete: "
-                          << inspector_report.error << "\n";
             const bool tgt_install_ready = (fail_count == 0) &&
                 !(strict && skip_count > 0) && inspector_evidence_complete;
             report << "{\n  \"version\": 1,\n  \"target\": \""
@@ -634,7 +634,9 @@ int cmd_validate(const std::vector<std::string>& args) {
         // only when nothing failed (and, under --strict, nothing was skipped),
         // matching `pulp build --install`'s "validation is the gate" policy.
         const auto inspector_report =
-            pulp::cli::inspector_shipping::load_report(build_dir);
+            fs::is_directory(build_dir / "pulp-inspector-manifests")
+                ? pulp::cli::inspector_shipping::load_report(build_dir)
+                : pulp::cli::inspector_shipping::empty_report();
         inspector_evidence_complete = inspector_report.complete;
         if (!inspector_evidence_complete)
             std::cerr << "Inspector capability evidence incomplete: "
