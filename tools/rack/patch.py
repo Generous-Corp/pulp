@@ -1216,6 +1216,33 @@ def default_output_device() -> str | None:
     return default
 
 
+def keep_attempt(patch: dict, report: str, n: int, why: str) -> None:
+    """Keep a failed attempt where a person can read it.
+
+    The per-module activity is the whole diagnosis -- the FIRST module reading
+    0.000 is where the signal stops -- and it went to the model and nowhere
+    else. The run log kept the verdict ("makes no sound") and not one number
+    behind it, so answering "why was it silent" meant spending another dozen
+    model calls to reproduce a failure that had already happened.
+
+    Off unless FORGE_ATTEMPT_DIR names somewhere, so an ordinary build from
+    the app does not litter a person's patch folder. prove_idioms.sh sets it.
+    """
+    dest = os.environ.get("FORGE_ATTEMPT_DIR")
+    if not dest:
+        return
+    try:
+        os.makedirs(dest, exist_ok=True)
+        stem = os.path.join(dest, f"attempt{n:02d}-{why}")
+        with open(stem + ".vcv", "w") as f:
+            json.dump(patch, f, indent=2)
+        with open(stem + ".txt", "w") as f:
+            f.write(report)
+    except OSError:
+        # Evidence is worth having and never worth failing a build over.
+        pass
+
+
 def configure_audio(patch: dict) -> str | None:
     """Point the patch's audio interface at the default output device.
 
@@ -1384,6 +1411,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 pass                       # prose is optional; the patch is not
         errs = lint(patch, inv)
         if errs:
+            keep_attempt(patch, report, attempt + 1, "rejected")
             print(f"  rejected (attempt {attempt + 1}):", flush=True)
             for e in errs[:5]:
                 print(f"    {e}", flush=True)
@@ -1416,6 +1444,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     continue
                 print(f"  idiom holds: {claimed}")
             return patch, why
+        keep_attempt(patch, report, attempt + 1, "silent")
         print(f"  builds, but makes no sound (attempt {attempt + 1}):", flush=True)
         for line in report.splitlines():
             if "FAIL" in line or "silent" in line:

@@ -78,7 +78,11 @@ print(resolve('''$prompt''') or '')
     fi
 
     printf '%2d. %-9s %-52s -> %s (%s)\n' "$n" "$family" "${prompt:0:52}" "$slug" "$how" | tee -a "$OUT"
-    log="$(cd "$TOOLS" && cap 1500 python3 patch.py build "$prompt" 2>&1)"
+    # Each failed attempt's patch and full activity report land here, so a
+    # silent run can be diagnosed from what it produced rather than by paying
+    # for another one.
+    log="$(cd "$TOOLS" && FORGE_ATTEMPT_DIR="$LOGS/$(printf '%02d' "$n")-attempts" \
+           cap 1500 python3 patch.py build "$prompt" 2>&1)"
 
     # The generator prints the verdict; the artifact is checked again here
     # rather than trusted, because "built" and "holds" are separate claims and
