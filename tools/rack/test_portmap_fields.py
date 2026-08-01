@@ -24,6 +24,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CARTOG = os.path.join(HERE, "..", "..", "examples", "forge-modular", "src",
                       "CARTOG.cpp")
 READER = os.path.join(HERE, "..", "..", "forge-seam", "modular", "portmap.cpp")
+# The map has THREE parsers, not two. The app draws from it, and the generator
+# reads it for real jack names — "Frequency modulation" instead of "in1" — so a
+# renamed field costs the explanations their labels without any error. Checking
+# only the app's reader leaves that half unguarded.
+OTHER_READERS = [os.path.join(HERE, "patch.py")]
 
 # Written on purpose and not read YET. Each needs a reason, so that removing
 # one is a deliberate act and adding one is visible in review.
@@ -67,6 +72,30 @@ def main():
         bad += 1
     else:
         print(f"  ok     every field the drawing needs is one CARTOG writes")
+
+    # Every other reader must also find what it needs.
+    for path in OTHER_READERS:
+        if not os.path.exists(path):
+            continue
+        text = open(path).read()
+        # Only the region that parses the map, so unrelated dict keys in the
+        # file are not mistaken for fields it reads.
+        at = text.find("PORTMAP")
+        region = text[at:at + 3000] if at >= 0 else text
+        wants = set(re.findall(r'\.get\("([a-zA-Z]+)"|\["([a-zA-Z]+)"\]', region))
+        wants = {a or b for a, b in wants}
+        missing = sorted(w for w in wants
+                         if w in {"modules", "plugin", "model", "inputs",
+                                  "outputs", "index", "name", "x", "y", "size"}
+                         and w not in written)
+        who = os.path.basename(path)
+        if missing:
+            print(f"  WRONG  {who} reads fields CARTOG does not write: "
+                  f"{missing} — the explanations lose their jack names and "
+                  f"nothing reports an error")
+            bad += 1
+        else:
+            print(f"  ok     {who} reads only fields CARTOG writes")
 
     print("\n" + ("all good" if bad == 0 else "FAILED"))
     return 1 if bad else 0
