@@ -33,8 +33,8 @@ TEST_CASE("server stop waits for an active request callback",
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(server.start_authenticated(
-        InspectorServerConfig{&session, &publisher, record, *token}));
+    REQUIRE(start_test_inspector_server(
+        server, InspectorServerConfig{&session, &publisher, record, *token}));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
 
@@ -97,7 +97,8 @@ TEST_CASE("authentication rejects a replaced credential and teardown removes dis
         record.session_id = session.info().session_id;
         record.instance_id = session.info().instance_id;
         record.plugin_id = session.info().plugin_id;
-        REQUIRE(server.start_authenticated(
+        REQUIRE(start_test_inspector_server(
+            server,
             InspectorServerConfig{&session, &publisher, record, *token}));
         auto records = reader.list();
         REQUIRE(records.size() == 1);
@@ -142,7 +143,7 @@ TEST_CASE("unauthenticated connections are closed at the authentication deadline
     record.plugin_id = session.info().plugin_id;
     InspectorServerConfig config{&session, &publisher, record, *token};
     config.authentication_timeout = std::chrono::milliseconds(20);
-    REQUIRE(server.start_authenticated(std::move(config)));
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
 
     std::mutex mutex;
     std::condition_variable cv;
@@ -187,7 +188,7 @@ TEST_CASE("server bounds pending unauthenticated clients",
     InspectorServerConfig config{
         &session, &publisher, record, *token};
     config.max_clients = 2;
-    REQUIRE(server.start_authenticated(std::move(config)));
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
 
@@ -239,7 +240,7 @@ TEST_CASE("authenticated partial frames expire without consuming the client pool
         &session, &publisher, record, *token};
     config.max_clients = 1;
     config.frame_read_timeout = std::chrono::milliseconds(40);
-    REQUIRE(server.start_authenticated(std::move(config)));
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
 

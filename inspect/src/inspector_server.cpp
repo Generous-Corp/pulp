@@ -96,6 +96,7 @@ public:
     std::size_t max_clients = 16;
     std::atomic<int> port{0};
     InspectorSession* session = nullptr;
+    std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
     detail::InspectorPublication publication;
     std::vector<std::uint8_t> token;
     std::chrono::milliseconds authentication_timeout =
@@ -418,6 +419,15 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         session = config.session;
+        main_thread_rpc = config.main_thread_rpc
+            ? std::move(config.main_thread_rpc)
+            : std::make_shared<InspectorMainThreadRpc>();
+        if (!main_thread_rpc->active()) {
+            session = nullptr;
+            main_thread_rpc.reset();
+            return false;
+        }
+        session->set_main_thread_rpc(main_thread_rpc);
         session->resume_dispatches();
         token = std::move(config.token);
         config_token_wiper.disarm();
@@ -511,6 +521,13 @@ void InspectorServer::Impl::stop_generation(
 void InspectorServer::Impl::stop_locked() {
     session_generation.fetch_add(1, std::memory_order_acq_rel);
     transition_waiting_for_callbacks.store(true, std::memory_order_release);
+    std::shared_ptr<InspectorMainThreadRpc> rpc_to_cancel;
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        rpc_to_cancel = main_thread_rpc;
+    }
+    if (rpc_to_cancel)
+        rpc_to_cancel->cancel();
     if (session)
         session->suspend_dispatches();
     {
@@ -570,7 +587,10 @@ void InspectorServer::Impl::stop_locked() {
             for (const auto& client_id : authenticated_clients)
                 session->disconnect(client_id);
         }
+        if (session)
+            session->set_main_thread_rpc({});
         session = nullptr;
+        main_thread_rpc.reset();
         pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();
     }

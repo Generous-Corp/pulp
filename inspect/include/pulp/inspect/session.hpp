@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <mutex>
 #include <span>
@@ -15,6 +16,8 @@
 #include <vector>
 
 namespace pulp::inspect {
+
+class InspectorMainThreadRpc;
 
 struct InspectorPolicyConfig {
     InspectorProfile profile = InspectorProfile::Off;
@@ -120,6 +123,9 @@ public:
 
     InspectorMessage handle(std::string_view client_id,
                             const InspectorMessage& request);
+    /// Install the generation-scoped main-thread handoff used for domain
+    /// requests. Session control methods remain synchronous on their caller.
+    void set_main_thread_rpc(std::shared_ptr<InspectorMainThreadRpc> rpc);
     void disconnect(std::string_view client_id);
     /// Cancel queued domain handlers and reject new ones during server teardown.
     /// The handler already executing on the dispatch owner may finish.
@@ -131,22 +137,13 @@ public:
     const InspectorAccessPolicy& policy() const { return policy_; }
 
 private:
+    class State;
     InspectorMessage handle_session_method(std::string_view client_id,
                                            const InspectorMessage& request);
-    bool begin_dispatch();
-    void end_dispatch();
 
     InspectorSessionInfo info_;
     InspectorAccessPolicy policy_;
-    RequestHandler handler_;
-    InspectorControllerLease lease_;
-    mutable std::mutex mutex_;
-    std::mutex dispatch_mutex_;
-    std::condition_variable dispatch_cv_;
-    bool dispatch_accepting_ = true;
-    bool dispatch_active_ = false;
-    std::thread::id dispatch_owner_;
-    std::size_t dispatch_recursion_ = 0;
+    std::shared_ptr<State> state_;
 };
 
 } // namespace pulp::inspect

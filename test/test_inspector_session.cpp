@@ -683,6 +683,90 @@ TEST_CASE("timed-out started main-thread work returns while retaining its slot",
     CHECK(caller_returned.load(std::memory_order_acquire));
 }
 
+TEST_CASE("started main-thread mutation retains its controller lease until apply",
+          "[inspect][session][main-thread-rpc][timeout][lease]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    bool operation_started = false;
+    bool release_operation = false;
+    std::atomic<std::int64_t> elapsed_ms{0};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{5ms, 2},
+        [&](auto task) {
+            {
+                std::lock_guard lock(mutex);
+                queued = std::move(task);
+            }
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+    InspectorSession session(
+        {"session-rpc-lease", "instance", "fixture"},
+        policy(InspectorProfile::Develop),
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            operation_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_operation; });
+            return make_response(request.id, R"({"applied":true})");
+        },
+        100ms,
+        [&] {
+            return std::chrono::steady_clock::time_point{} +
+                   std::chrono::milliseconds(
+                       elapsed_ms.load(std::memory_order_acquire));
+        });
+    session.set_main_thread_rpc(rpc);
+    REQUIRE_FALSE(
+        session.handle("alpha",
+                       make_request(1, "Session.acquireController"))
+            .is_error);
+
+    pulp::inspect::InspectorMessage mutation;
+    std::thread caller([&] {
+        mutation = session.handle(
+            "alpha", make_request(2, "State.setParameter"));
+    });
+    std::function<void()> main_task;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] {
+            return static_cast<bool>(queued);
+        }));
+        main_task = std::move(queued);
+    }
+    std::thread executor([&] { main_task(); });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return operation_started; }));
+    }
+    caller.join();
+    REQUIRE(mutation.is_error);
+    CHECK(mutation.error_code == "main_thread_timeout");
+    CHECK(mutation.error_data_json.find(
+              R"("mayHaveApplied":true)") != std::string::npos);
+
+    elapsed_ms.store(101, std::memory_order_release);
+    session.disconnect("alpha");
+    const auto fenced = session.handle(
+        "beta", make_request(3, "Session.acquireController"));
+    CHECK(fenced.is_error);
+    CHECK(fenced.error_code == "controller_lease_conflict");
+
+    {
+        std::lock_guard lock(mutex);
+        release_operation = true;
+    }
+    cv.notify_all();
+    executor.join();
+
+    const auto acquired = session.handle(
+        "beta", make_request(4, "Session.acquireController"));
+    CHECK_FALSE(acquired.is_error);
+}
+
 TEST_CASE("timed-out started work does not block RPC destruction",
           "[inspect][session][main-thread-rpc][timeout][teardown]") {
     std::mutex mutex;
@@ -787,6 +871,163 @@ TEST_CASE("cancelling main-thread RPC wakes queued callers and rejects new work"
     const auto rejected =
         rpc.call(10, [] { return make_response(10, "{}"); });
     CHECK(rejected.error_code == "dispatch_cancelled");
+}
+
+TEST_CASE("main-thread RPC completion runs exactly once at actual terminal state",
+          "[inspect][session][main-thread-rpc][completion]") {
+    SECTION("direct completion is exception-contained") {
+        std::atomic<int> completions{0};
+        InspectorMainThreadRpc rpc(
+            {1s, 1}, [](auto) { return false; }, [] { return true; });
+        const auto response = rpc.call(
+            20, [] { return make_response(20, "{}"); }, [&] {
+                ++completions;
+                throw std::runtime_error("completion failure");
+            });
+        CHECK_FALSE(response.is_error);
+        CHECK(completions.load() == 1);
+    }
+
+    SECTION("invalid and inactive calls each complete once") {
+        std::atomic<int> invalid_completions{0};
+        InspectorMainThreadRpc invalid_rpc;
+        const auto invalid = invalid_rpc.call(
+            26, {}, [&] {
+                ++invalid_completions;
+                throw std::runtime_error("completion failure");
+            });
+        CHECK(invalid.error_code == "invalid_dispatch");
+        CHECK(invalid_completions.load() == 1);
+
+        std::atomic<int> inactive_completions{0};
+        InspectorMainThreadRpc inactive_rpc;
+        inactive_rpc.cancel();
+        const auto inactive = inactive_rpc.call(
+            27, [] { return make_response(27, "{}"); },
+            [&] { ++inactive_completions; });
+        CHECK(inactive.error_code == "dispatch_cancelled");
+        CHECK(inactive_completions.load() == 1);
+    }
+
+    SECTION("post failure completes once") {
+        std::atomic<int> completions{0};
+        InspectorMainThreadRpc rpc(
+            {1s, 1}, [](auto) { return false; }, [] { return false; });
+        const auto response = rpc.call(
+            21, [] { return make_response(21, "{}"); },
+            [&] { ++completions; });
+        CHECK(response.error_code == "main_thread_unavailable");
+        CHECK(completions.load() == 1);
+    }
+
+    SECTION("queue-full rejection and queued cancellation each complete once") {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool posted = false;
+        std::atomic<int> first_completions{0};
+        std::atomic<int> rejected_completions{0};
+        InspectorMainThreadRpc rpc(
+            {1s, 1},
+            [&](auto) {
+                {
+                    std::lock_guard lock(mutex);
+                    posted = true;
+                }
+                cv.notify_all();
+                return true;
+            },
+            [] { return false; });
+        pulp::inspect::InspectorMessage first;
+        std::thread caller([&] {
+            first = rpc.call(
+                22, [] { return make_response(22, "{}"); },
+                [&] { ++first_completions; });
+        });
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] { return posted; }));
+        }
+        const auto rejected = rpc.call(
+            23, [] { return make_response(23, "{}"); },
+            [&] { ++rejected_completions; });
+        CHECK(rejected.error_code == "dispatch_queue_full");
+        CHECK(rejected_completions.load() == 1);
+        rpc.cancel();
+        caller.join();
+        CHECK(first.error_code == "dispatch_cancelled");
+        CHECK(first_completions.load() == 1);
+    }
+
+    SECTION("queued timeout completes now, started timeout completes later") {
+        std::function<void()> queued;
+        std::atomic<int> queued_completions{0};
+        InspectorMainThreadRpc queued_rpc(
+            {5ms, 1},
+            [&](auto task) {
+                queued = std::move(task);
+                return true;
+            },
+            [] { return false; });
+        const auto queued_timeout = queued_rpc.call(
+            24, [] { return make_response(24, "{}"); },
+            [&] { ++queued_completions; });
+        CHECK(queued_timeout.error_code == "main_thread_timeout");
+        CHECK(queued_completions.load() == 1);
+        queued();
+        CHECK(queued_completions.load() == 1);
+
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool started = false;
+        bool release = false;
+        std::function<void()> started_task;
+        std::atomic<int> started_completions{0};
+        InspectorMainThreadRpc started_rpc(
+            {5ms, 1},
+            [&](auto task) {
+                {
+                    std::lock_guard lock(mutex);
+                    started_task = std::move(task);
+                }
+                cv.notify_all();
+                return true;
+            },
+            [] { return false; });
+        pulp::inspect::InspectorMessage started_timeout;
+        std::thread caller([&] {
+            started_timeout = started_rpc.call(
+                25,
+                [&] {
+                    std::unique_lock lock(mutex);
+                    started = true;
+                    cv.notify_all();
+                    cv.wait(lock, [&] { return release; });
+                    return make_response(25, "{}");
+                },
+                [&] { ++started_completions; });
+        });
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] {
+                return static_cast<bool>(started_task);
+            }));
+        }
+        std::thread executor([&] { started_task(); });
+        {
+            std::unique_lock lock(mutex);
+            REQUIRE(cv.wait_for(lock, 1s, [&] { return started; }));
+        }
+        caller.join();
+        CHECK(started_timeout.error_code == "main_thread_timeout");
+        CHECK(started_completions.load() == 0);
+        {
+            std::lock_guard lock(mutex);
+            release = true;
+        }
+        cv.notify_all();
+        executor.join();
+        CHECK(started_completions.load() == 1);
+    }
 }
 
 TEST_CASE("cancelling main-thread RPC does not wait for running direct work",

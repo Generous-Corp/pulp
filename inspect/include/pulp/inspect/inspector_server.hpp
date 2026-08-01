@@ -3,6 +3,7 @@
 #pragma once
 
 #include <pulp/inspect/discovery_publisher.hpp>
+#include <pulp/inspect/main_thread_rpc.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/publication_binding.hpp>
 #include <pulp/inspect/session.hpp>
@@ -35,6 +36,9 @@ struct InspectorServerConfig {
     // Appended to preserve positional initialization of the original fields.
     // The composition root supplies all publication-scoped domain bindings.
     InspectorDomainPublicationBindings* domain_bindings = nullptr;
+    // Appended for source-compatible test/host injection. When absent, each
+    // authenticated server generation creates a default main-thread RPC.
+    std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
 };
 
 /// TCP server exposing the inspector protocol to external tools.
