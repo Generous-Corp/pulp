@@ -258,6 +258,7 @@ TEST_CASE("incremental compilation refreshes unchanged offline Stretch provenanc
         value.project = project;
         value.sequence_id = {2};
         value.tempo_map = fixture.map;
+        value.sample_rate = value.tempo_map->sample_rate();
         value.document_revision = revision;
         value.dirty = std::move(dirty);
         value.audio_assets = assets;
@@ -302,6 +303,7 @@ TEST_CASE("superseded offline Stretch programs never publish stale revisions",
         value.project = fixture.project;
         value.sequence_id = {2};
         value.tempo_map = fixture.map;
+        value.sample_rate = value.tempo_map->sample_rate();
         value.document_revision = revision;
         value.dirty.all = true;
         value.audio_assets = assets;

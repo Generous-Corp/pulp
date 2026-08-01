@@ -56,6 +56,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     request.project = shared(nested_note_project(true));
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(request));
@@ -243,6 +244,7 @@ TEST_CASE("Audio clip limits do not cap non-audio sequence expansion") {
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_limits.max_clips = 1;
@@ -263,6 +265,7 @@ TEST_CASE("Incremental nested compilation charges reused expansion") {
     first.project = project;
     first.sequence_id = {2};
     first.tempo_map = tempo;
+    first.sample_rate = first.tempo_map->sample_rate();
     first.document_revision = 1;
     first.dirty.all = true;
     first.max_expanded_note_events = 4;
@@ -291,6 +294,7 @@ TEST_CASE("Incremental nested compilation preserves generated identities") {
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(request));
@@ -369,6 +373,7 @@ TEST_CASE("Nested audio trimming rejects projected-start underflow") {
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(std::move(request)));
@@ -403,6 +408,7 @@ TEST_CASE("Nested audio trimming handles saturated sample distance") {
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = std::move(tempo);
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(std::move(request)));
@@ -431,6 +437,7 @@ TEST_CASE("Nested note clipping consumes compile slice work units") {
     request.project = shared(std::move(project));
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(std::move(request)));
@@ -560,6 +567,7 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
             request.project = std::move(project);
             request.sequence_id = {2};
             request.tempo_map = map_120();
+            request.sample_rate = request.tempo_map->sample_rate();
             request.document_revision = 1;
             request.dirty.all = true;
             request.audio_assets = assets;
@@ -728,6 +736,7 @@ CompileError compile_error_for(const Project& project) {
     request.project = shared(project);
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(std::move(request)));
@@ -823,6 +832,7 @@ TEST_CASE("A clip carrying expression lanes is refused instead of compiled witho
     request.project = shared(flat_note_project({controller_lane()}));
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     REQUIRE(compiler.submit(std::move(request)));

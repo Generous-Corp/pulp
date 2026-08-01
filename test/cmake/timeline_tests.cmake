@@ -107,6 +107,9 @@ pulp_add_test_suite(pulp-test-playback-program
     COMPILE_DEFINITIONS
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
+pulp_add_test_suite(pulp-test-playback-compile-sample-rate
+    SOURCES test_playback_compile_sample_rate.cpp
+    LIBRARIES pulp::playback pulp::timeline pulp::timebase)
 pulp_add_test_suite(pulp-test-timeline-nesting
     SOURCES test_timeline_nesting_model.cpp
         test_timeline_nesting_playback.cpp

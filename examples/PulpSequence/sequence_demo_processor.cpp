@@ -123,6 +123,7 @@ class PulpSequenceDemoProcessor final : public format::Processor {
         request.project = project_;
         request.sequence_id = {2};
         request.tempo_map = tempo_map;
+        request.sample_rate = request.tempo_map->sample_rate();
         request.audio_assets = std::move(assets).value();
         request.document_revision = ++revision_;
         request.dirty.all = true;

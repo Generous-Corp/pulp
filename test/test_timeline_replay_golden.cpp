@@ -103,6 +103,7 @@ RenderTrace render_trace(std::shared_ptr<const Project> project,
     request.project = std::move(project);
     request.sequence_id = {2};
     request.tempo_map = map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = assets;

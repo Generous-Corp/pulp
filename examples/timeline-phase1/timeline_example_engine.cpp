@@ -144,6 +144,13 @@ struct TimelineExampleEngine::Impl {
                std::uint32_t max_block_size, bool add_audible_synth) {
         if (!request.project || !request.tempo_map || max_block_size == 0 || sample_rate <= 0.0)
             return false;
+        // The device rate and the rate the program was compiled at must be the
+        // same number. Reject the caller rather than preparing the graph at one
+        // rate while every frame position in the program means the other.
+        const auto compiled_rate = request.sample_rate.normalized();
+        if (!compiled_rate.valid() ||
+            std::abs(static_cast<double>(compiled_rate.as_long_double()) - sample_rate) > 1e-6)
+            return false;
         maximum_block_size = max_block_size;
         request.dirty.all = true;
         if (!compiler.submit(std::move(request)) || compiler.status().has_error)
@@ -197,6 +204,9 @@ struct TimelineExampleEngine::Impl {
         if (!live)
             return false;
         request.tempo_map = live->tempo_map_owner();
+        // Recompiling reuses the live map, so the rate is that map's by
+        // definition rather than anything the caller may restate.
+        request.sample_rate = live->tempo_map().sample_rate();
         request.dirty.all = true;
         if (!compiler.submit(std::move(request)) || compiler.status().has_error)
             return false;

@@ -242,11 +242,15 @@ block.
 #include <memory>
 #include <utility>
 
+// One rate for the whole compile. It builds the tempo map and is restated on
+// the request below, and it is the rate you must render the result at.
+constexpr timebase::RationalRate render_rate{48'000, 1};
+
 const std::array tempo_points{
     timebase::TempoPoint{timebase::TickPosition{0}, 120.0},
 };
 auto compiled_tempo =
-    timebase::CompiledTempoMap::compile(tempo_points, {48'000, 1});
+    timebase::CompiledTempoMap::compile(tempo_points, render_rate);
 if (!compiled_tempo)
     return report(compiled_tempo.error());
 auto tempo = std::make_shared<const timebase::CompiledTempoMap>(
@@ -261,6 +265,7 @@ playback::ProgramCompileRequest request;
 request.project = redone->snapshot;
 request.sequence_id = redone->snapshot->root_sequence_id();
 request.tempo_map = std::move(tempo);
+request.sample_rate = render_rate;
 request.document_revision = redone->revision.value;
 request.dirty = playback::lower_dirty_set(
     *redone->snapshot, request.sequence_id, redone->dirty);

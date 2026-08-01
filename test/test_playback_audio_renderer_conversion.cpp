@@ -395,6 +395,7 @@ TEST_CASE("audio compiler enforces whole program track capacity") {
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = pool({{3, data}});
@@ -421,6 +422,7 @@ TEST_CASE("audio compiler bounds distinct sample-rate conversion kernels") {
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = pool({{3, data_44}, {4, data_96}});
@@ -472,6 +474,7 @@ TEST_CASE("fixed sample-rate conversion preparation yields within compiler work 
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = pool({{3, data}});
@@ -500,6 +503,7 @@ TEST_CASE("host-tempo conversion preparation is incremental and capacity bounded
         request.project = project;
         request.sequence_id = {2};
         request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = pool({{3, data}});
@@ -520,6 +524,7 @@ TEST_CASE("host-tempo conversion preparation is incremental and capacity bounded
         request.project = project;
         request.sequence_id = {2};
         request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = pool({{3, data}});
@@ -538,6 +543,7 @@ TEST_CASE("host-tempo conversion preparation is incremental and capacity bounded
         request.project = project;
         request.sequence_id = {2};
         request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = pool({{3, data}});
@@ -572,6 +578,7 @@ TEST_CASE("incremental audio compilation shares and globally bounds conversion k
     first.project = make_project(5);
     first.sequence_id = {2};
     first.tempo_map = map;
+    first.sample_rate = first.tempo_map->sample_rate();
     first.document_revision = 1;
     first.dirty.all = true;
     first.audio_assets = assets;
@@ -584,6 +591,7 @@ TEST_CASE("incremental audio compilation shares and globally bounds conversion k
         second.project = make_project(6);
         second.sequence_id = {2};
         second.tempo_map = map;
+        second.sample_rate = second.tempo_map->sample_rate();
         second.document_revision = 2;
         second.dirty.tracks = {{20}};
         second.audio_assets = assets;
@@ -600,6 +608,7 @@ TEST_CASE("incremental audio compilation shares and globally bounds conversion k
         second.project = make_project(4);
         second.sequence_id = {2};
         second.tempo_map = map;
+        second.sample_rate = second.tempo_map->sample_rate();
         second.document_revision = 2;
         second.dirty.tracks = {{20}};
         second.audio_assets = assets;
@@ -633,6 +642,7 @@ TEST_CASE("incremental audio compilation reuses seeded host-tempo pyramids") {
     first.project = make_project();
     first.sequence_id = {2};
     first.tempo_map = map;
+    first.sample_rate = first.tempo_map->sample_rate();
     first.document_revision = 1;
     first.dirty.all = true;
     first.audio_assets = assets;
@@ -645,6 +655,7 @@ TEST_CASE("incremental audio compilation reuses seeded host-tempo pyramids") {
     second.project = make_project();
     second.sequence_id = {2};
     second.tempo_map = map;
+    second.sample_rate = second.tempo_map->sample_rate();
     second.document_revision = 2;
     second.dirty.tracks = {{20}};
     second.audio_assets = assets;
@@ -685,6 +696,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     first.project = make_project(false);
     first.sequence_id = {2};
     first.tempo_map = first_map;
+    first.sample_rate = first.tempo_map->sample_rate();
     first.document_revision = 1;
     first.dirty.all = true;
     first.audio_assets = first_pool;
@@ -698,6 +710,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     over_limit.project = make_project(true);
     over_limit.sequence_id = {2};
     over_limit.tempo_map = first_map;
+    over_limit.sample_rate = over_limit.tempo_map->sample_rate();
     over_limit.document_revision = 2;
     over_limit.dirty.tracks = {{10}};
     over_limit.audio_assets = first_pool;
@@ -713,6 +726,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     new_pool.project = make_project(false);
     new_pool.sequence_id = {2};
     new_pool.tempo_map = first_map;
+    new_pool.sample_rate = new_pool.tempo_map->sample_rate();
     new_pool.document_revision = 3;
     new_pool.dirty.tracks = {{10}};
     new_pool.audio_assets = second_pool;
@@ -729,6 +743,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     new_map.project = make_project(false);
     new_map.sequence_id = {2};
     new_map.tempo_map = same_rate_new_map;
+    new_map.sample_rate = new_map.tempo_map->sample_rate();
     new_map.document_revision = 4;
     new_map.dirty.tracks = {{10}};
     new_map.audio_assets = second_pool;

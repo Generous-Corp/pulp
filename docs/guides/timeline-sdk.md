@@ -340,6 +340,16 @@ closed. Complete nested media clips retain their authored time-conform intent;
 a source window that trims a `Resample` or `Stretch` clip fails with
 `NestedSequenceUnsupported` until playback can map that partial conforming
 source range without changing its authored phase.
+Set `ProgramCompileRequest::sample_rate` to the rate you will render the
+compiled program at. It is required, and `submit()` rejects a request whose
+rate is unset or disagrees with `tempo_map->sample_rate()` with
+`CompileErrorCode::InvalidRequest`. The tempo map stays authoritative — its
+segments already carry frame anchors computed at its own rate, so the field
+cannot override it — but stating the rate is what turns "compiled against 48
+kHz, rendered at 44.1 kHz" from a silent frame-position error into a rejected
+submission. The comparison normalizes, so `{96'000, 2}` and `{48'000, 1}` are
+the same rate.
+
 Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization

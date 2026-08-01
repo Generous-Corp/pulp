@@ -72,6 +72,7 @@ struct ProgramHarness {
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = std::move(map);
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = revision;
         request.dirty = std::move(dirty);
         REQUIRE(compiler.submit(std::move(request)));
@@ -380,7 +381,8 @@ TEST_CASE("many note merge sort advances one charged work unit per slice") {
     TinyBudgetExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
     ProgramCompileRequest request{
-        note_project(*map, std::move(notes), 2'100), {2}, map, 1, {.all = true}, {}};
+        note_project(*map, std::move(notes), 2'100), {2},           map,
+        map->sample_rate(),                                    1, {.all = true}, {}};
     REQUIRE(compiler.submit(std::move(request)));
     while (compiler.status().busy && executor.slice_count < 100'000) {
         executor.run_one_work_unit();
@@ -922,7 +924,8 @@ TEST_CASE("compiler rejects note ranges outside their clip and sub-sample notes"
     ProgramHarness programs;
     auto outside = note(*map, 30, 900, 1'100, 60);
     auto project = note_project(*map, {outside}, 1'000);
-    ProgramCompileRequest request{project, {2}, map, 1, {.all = true}, {}};
+    ProgramCompileRequest request{project, {2},   map, map->sample_rate(),
+                                  1,       {.all = true}, {}};
     REQUIRE(programs.compiler.submit(std::move(request)));
     while (programs.compiler.status().busy)
         programs.executor.run_for(std::chrono::seconds(1), 64);
@@ -933,7 +936,8 @@ TEST_CASE("compiler rejects note ranges outside their clip and sub-sample notes"
     ProgramHarness sub_sample_programs;
     NoteEvent sub_sample{{31}, {1}, {1}, 0xffff, 60, 0};
     auto sub_sample_project = note_project(*map, {sub_sample}, 1'000);
-    ProgramCompileRequest sub_request{sub_sample_project, {2}, map, 1, {.all = true}, {}};
+    ProgramCompileRequest sub_request{sub_sample_project, {2}, map, map->sample_rate(),
+                                      1, {.all = true}, {}};
     REQUIRE(sub_sample_programs.compiler.submit(std::move(sub_request)));
     while (sub_sample_programs.compiler.status().busy)
         sub_sample_programs.executor.run_for(std::chrono::seconds(1), 64);

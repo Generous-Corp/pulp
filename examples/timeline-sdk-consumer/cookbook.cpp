@@ -115,6 +115,7 @@ bool compile_and_publish(const timeline::CommitResult& committed) {
     request.project = committed.snapshot;
     request.sequence_id = committed.snapshot->root_sequence_id();
     request.tempo_map = tempo;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = committed.revision.value;
     // A consumer that just wants everything compiled asks for exactly that.
     // Translating a transaction's dirty set into compiler dirtiness is an

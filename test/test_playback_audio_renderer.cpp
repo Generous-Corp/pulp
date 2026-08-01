@@ -804,6 +804,7 @@ TEST_CASE("take comp compilation validates asset rate and whole program capacity
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = pool({{3, audio_data({{1.0f, 2.0f, 3.0f, 4.0f}})}});
@@ -862,6 +863,7 @@ TEST_CASE("playback property commands dirty and rebuild audible clip gain") {
     request.project = std::make_shared<const Project>(changed->project);
     request.sequence_id = {2};
     request.tempo_map = map;
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 2;
     request.dirty = {false, {{10}}};
     request.audio_assets = asset_pool;
@@ -937,6 +939,7 @@ TEST_CASE("active take comp compile cost is independent of the hidden arrangemen
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = tempo_map;
+        request.sample_rate = request.tempo_map->sample_rate();
         request.document_revision = 1;
         request.dirty.all = true;
         request.audio_assets = asset_pool;
@@ -966,6 +969,7 @@ TEST_CASE("expired compile deadlines stop an in-progress audio link pass") {
     request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = pool({{3, audio_data({{1.0f}})}});

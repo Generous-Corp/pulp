@@ -257,7 +257,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
                      live->generated_id_base() != request_->project->next_item_id() ||
-                     live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
+                     live->tempo_map().sample_rate() != request_->sample_rate;
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
             *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
             request_->max_expanded_clips);
@@ -289,8 +289,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 if (sample_rate_converter) {
                     const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
                     auto seeded = audio_compiler_.converters().seed(
-                        source_rate, request_->tempo_map->sample_rate(), sample_rate_converter,
-                        clip.id, clip.asset_id, request_->audio_limits);
+                        source_rate, request_->sample_rate, sample_rate_converter, clip.id,
+                        clip.asset_id, request_->audio_limits);
                     if (!seeded)
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});
@@ -802,6 +802,13 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
         request.maximum_note_events_per_track == 0 ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
+        return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
+    // The tempo map owns the rate; the request must state the same one. Reject
+    // an unstated rate rather than adopting the map's, so a caller that renders
+    // at a different rate than it compiled against is caught here instead of
+    // producing frame positions that quietly mean something else.
+    request.sample_rate = request.sample_rate.normalized();
+    if (!request.sample_rate.valid() || request.sample_rate != request.tempo_map->sample_rate())
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);
     if (!sequence)
