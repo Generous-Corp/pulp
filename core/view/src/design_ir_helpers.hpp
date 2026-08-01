@@ -23,6 +23,8 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -216,6 +218,21 @@ inline std::optional<std::filesystem::path> resolve_asset_file(
     return std::nullopt;
 }
 
+// One diagnosable line for an asset that named a file and reached none of them.
+// A recorded-but-absent path is the interesting case: an asset with no
+// local_path at all was never materialized and is not a defect.
+inline void log_unresolvable_asset(const IRAssetRef& asset,
+                                   const std::filesystem::path& asset_base_directory) {
+    if (!asset.local_path || asset.local_path->empty()) return;
+    runtime::log_warn(
+        "design-import: asset '{}' is unresolvable — manifest local_path '{}' "
+        "does not exist under '{}', and no content-addressed file matched hash '{}'",
+        asset.asset_id,
+        *asset.local_path,
+        asset_base_directory.generic_string(),
+        asset.content_hash);
+}
+
 // A loadable URI for a manifest asset at RUNTIME: a `file://` URI only for a
 // file that exists, else an already-self-contained original URI (data /
 // resource / memory). A manifest path that resolves to nothing yields "" and a
@@ -232,16 +249,25 @@ inline std::string resolved_asset_uri(
          asset.original_uri.rfind("memory:", 0) == 0)) {
         return asset.original_uri;
     }
-    if (asset.local_path && !asset.local_path->empty()) {
-        runtime::log_warn(
-            "design-import: asset '{}' is unresolvable — manifest local_path '{}' "
-            "does not exist under '{}', and no content-addressed file matched hash '{}'",
-            asset.asset_id,
-            *asset.local_path,
-            asset_base_directory.generic_string(),
-            asset.content_hash);
-    }
+    log_unresolvable_asset(asset, asset_base_directory);
     return {};
+}
+
+// The backing file's bytes as text, or "" plus a logged line when nothing
+// resolves. Host-side / codegen-time only — does file I/O; never the
+// audio/render thread.
+inline std::string read_asset_text(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    auto file = resolve_asset_file(asset, asset_base_directory);
+    if (!file) {
+        log_unresolvable_asset(asset, asset_base_directory);
+        return {};
+    }
+    std::ifstream input(*file, std::ios::binary);
+    if (!input) return {};
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────

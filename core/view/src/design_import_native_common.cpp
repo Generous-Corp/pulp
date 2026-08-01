@@ -19,7 +19,6 @@
 #include <pulp/view/widgets/svg_rect.hpp>
 
 #include <pulp/runtime/base64.hpp>
-#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -27,8 +26,6 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -976,9 +973,8 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
         const IRNode& alt = node.alternate_frames[i];
         const std::string alt_id = alt.svg_asset_id.value_or("");
         const IRAssetRef* alt_asset = alt_id.empty() ? nullptr : manifest.resolve(alt_id);
-        std::string alt_svg = alt_asset
-            ? resolve_svg_document(*alt_asset, asset_base_directory)
-            : std::string{};
+        std::string alt_svg;
+        if (alt_asset) alt_svg = resolve_svg_document(*alt_asset, asset_base_directory);
         if (alt_svg.empty()) {
             diagnostics.push_back(diagnostic(
                 ImportDiagnosticSeverity::warning,
@@ -1711,8 +1707,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             const IRAssetRef* asset = manifest.resolve(*asset_id);
             if (asset == nullptr)
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
-            auto uri = resolved_asset_uri(
-                *asset, options.asset_base_directory);
+            auto uri = resolved_asset_uri(*asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
             auto image = std::make_unique<ImageView>();
@@ -2045,23 +2040,7 @@ std::string resolve_svg_document(const IRAssetRef& asset,
         }
         return svg_percent_decode(payload);
     }
-    auto read_file = [](const std::string& path) -> std::string {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return {};
-        return std::string(std::istreambuf_iterator<char>(f),
-                           std::istreambuf_iterator<char>());
-    };
-    if (auto file = resolve_asset_file(asset, asset_base_directory))
-        return read_file(file->string());
-    if (asset.local_path && !asset.local_path->empty()) {
-        runtime::log_warn(
-            "design-import: svg asset '{}' is unresolvable — manifest local_path "
-            "'{}' does not exist under '{}'",
-            asset.asset_id,
-            *asset.local_path,
-            asset_base_directory.generic_string());
-    }
-    return {};
+    return read_asset_text(asset, asset_base_directory);
 }
 
 const char* native_widget_kind_name(NativeWidgetKind kind) {
