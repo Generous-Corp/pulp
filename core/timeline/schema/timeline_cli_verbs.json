@@ -241,6 +241,13 @@
           "value_type": "uint"
         },
         {
+          "kind": "String",
+          "name": "fade-shape",
+          "required": true,
+          "schema_field": "fade_shape",
+          "value_type": "string"
+        },
+        {
           "kind": "U64String",
           "name": "gain-linear-bits",
           "required": false,
@@ -271,7 +278,7 @@
       ],
       "name": "timeline:clip",
       "schema_type": "pulp.timeline.clip",
-      "version": 2
+      "version": 3
     },
     {
       "domain": "Command",

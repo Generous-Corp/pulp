@@ -52,11 +52,12 @@ export interface PulpTimelineChordScaleEvent {
   scale_root: number | string;
 }
 
-/** `pulp.timeline.clip` — domain Document, schema version 2. */
+/** `pulp.timeline.clip` — domain Document, schema version 3. */
 export interface PulpTimelineClip {
   content: Record<string, unknown>;
   fade_in_duration?: number | string;
   fade_out_duration?: number | string;
+  fade_shape: string;
   gain_linear_bits?: number | string;
   id: number | string;
   time_conform: string;

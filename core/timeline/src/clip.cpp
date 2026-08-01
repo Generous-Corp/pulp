@@ -19,8 +19,18 @@ bool positive_range(std::int64_t start, std::int64_t duration) noexcept {
     return duration > 0 && start <= std::numeric_limits<std::int64_t>::max() - duration;
 }
 
+bool valid_fade_shape(ClipFadeShape shape) noexcept {
+    switch (shape) {
+        case ClipFadeShape::Linear:
+        case ClipFadeShape::EqualPower:
+            return true;
+    }
+    return false;
+}
+
 bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t duration) noexcept {
-    if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f)
+    if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f ||
+        !valid_fade_shape(playback.fade_shape))
         return false;
     return playback.fade_in_duration <= duration && playback.fade_out_duration <= duration;
 }

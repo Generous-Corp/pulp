@@ -1,6 +1,7 @@
 #include <pulp/playback/audio_renderer.hpp>
 
 #include "audio_renderer_internal.hpp"
+#include "clip_fade_envelope.hpp"
 #include <pulp/playback/realtime_stretch_renderer.hpp>
 
 #include <pulp/audio/sample_rate_conversion.hpp>
@@ -14,6 +15,8 @@
 namespace pulp::playback {
 namespace {
 
+using detail::clip_envelope;
+
 bool same_rate(timebase::RationalRate lhs, timebase::RationalRate rhs) noexcept {
     return lhs.normalized() == rhs.normalized();
 }
@@ -21,27 +24,6 @@ bool same_rate(timebase::RationalRate lhs, timebase::RationalRate rhs) noexcept 
 bool transport_range_add_fits(std::int64_t start, std::uint64_t count) noexcept {
     return count <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) &&
            start <= std::numeric_limits<std::int64_t>::max() - static_cast<std::int64_t>(count);
-}
-
-float envelope(const AudioClipRendererProgram& clip, std::uint64_t relative) noexcept {
-    float value = clip.gain_linear;
-    if (clip.fade_in_frames != 0 && relative < clip.fade_in_frames)
-        value *= static_cast<float>(relative) / static_cast<float>(clip.fade_in_frames);
-    const auto remaining = clip.timeline_frame_count - 1u - relative;
-    if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
-        value *= static_cast<float>(remaining) / static_cast<float>(clip.fade_out_frames);
-    return value;
-}
-
-float envelope(const AudioClipRendererProgram& clip, long double relative) noexcept {
-    auto value = static_cast<long double>(clip.gain_linear);
-    if (clip.fade_in_frames != 0 && relative < clip.fade_in_frames)
-        value *= relative / static_cast<long double>(clip.fade_in_frames);
-    const auto remaining =
-        std::max(0.0L, static_cast<long double>(clip.timeline_frame_count - 1u) - relative);
-    if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
-        value *= remaining / static_cast<long double>(clip.fade_out_frames);
-    return static_cast<float>(value);
 }
 
 float source_sample(
@@ -344,7 +326,7 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
                                   musical_phase_mapping
                                       ? std::optional<double>{read_point.filter_step}
                                       : std::nullopt) *
-                    envelope(*clip, relative) * mixer_factor;
+                    clip_envelope(*clip, relative) * mixer_factor;
             }
         }
     }
@@ -437,7 +419,7 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
                                   fraction, static_cast<double>(source_position),
                                   read_point.filter_step) *
-                    envelope(*clip, relative) * mixer_factor;
+                    clip_envelope(*clip, relative) * mixer_factor;
             }
         }
     }
