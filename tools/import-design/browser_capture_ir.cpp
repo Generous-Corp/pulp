@@ -964,6 +964,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // is indistinguishable from the bug this lowering exists to fix. The
         // one refusal a caller can act on gets said out loud, with the action.
         if (tree.svg_refused_stale_capture > 0) {
+            // Also ON the IR, because the IR is the artifact a render harness
+            // dumps and greps. A warning only the CLI prints is invisible to
+            // every caller that lowers in-process, which is how this went
+            // unnoticed for a whole debugging round.
+            ir.root.attributes["native_svg_stale_capture"] =
+                std::to_string(tree.svg_refused_stale_capture);
             result.warnings.push_back(
                 "capture predates the SVG paint protocol: " +
                 std::to_string(tree.svg_refused_stale_capture) + " of " +

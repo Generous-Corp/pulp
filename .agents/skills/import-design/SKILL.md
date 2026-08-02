@@ -5562,8 +5562,16 @@ same snapshot and it produces 0 vector nodes and 18
 properties and the current one collects **68** — `len(computedStyleNames)` in
 `dom-snapshot.json` is the fastest way to tell which one you are holding. The
 importer now prints a `Warning: capture predates the SVG paint protocol …` line
-naming the count and the action, and `BrowserCaptureIrResult::warnings` carries
-it for any other caller. **Re-capture before debugging the lowering.**
+naming the count and the action, `BrowserCaptureIrResult::warnings` carries it
+for any other caller, and `native_svg_stale_capture` is stamped on the IR root —
+because a harness that lowers in-process and dumps `native.ir.json` never sees a
+CLI print, which is exactly how this stayed invisible. **Re-capture before
+debugging the lowering.**
+
+**The capture runtime is STAGED into the build directory** (`browser_capture-v1/`
+beside `pulp-import-design`, copied by a CMake custom target). A capture taken
+before that copy runs is old even though the source tree is current — so
+re-capture only counts if the importer was rebuilt first.
 
 Two things this rules out, both checked rather than assumed: an icon `<svg>`
 with no background of its own IS in the painted set (every one of forge's 18 has
@@ -5581,6 +5589,16 @@ stroke IS there. Both consumers already understand the literal string `none`
 (`apply_svg_paint` calls `clear_fill()`, the `setSvgFill` bridge treats it as
 clear), so emit it. Found by looking at the render; no IR-level assertion could
 have caught it.
+
+**One place decides a node is a captured element.** Two conditions reach the
+element-capture fallback — an element style cannot describe, and an `<svg>`
+whose shapes refused — and they are `capture_fallback()` in
+`lower_painted_tree`, not two branches each writing the node's attributes. This
+is not tidiness: when the fallback branch was duplicated, a parallel branch
+added `unpainted` + `unpainted_fallback_area` to one copy, and every refused
+`<svg>` then counted as a fallback while contributing zero fallback area. The
+tally and the area disagreed, and the metric under-reported every unpainted icon
+on every design. Anything true of *every* fallback goes in that one helper.
 
 **Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
 one user-coordinate space (the root `viewBox`), so every vector node is placed

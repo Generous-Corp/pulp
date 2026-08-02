@@ -1203,6 +1203,13 @@ TEST_CASE("a capture with no SVG paint says so out loud",
 
     // The warning has to name the ACTION, not just the symptom: nothing about
     // the design tells a reader that re-capturing is the fix.
+    // On the IR too, not only in the warning: a harness that lowers in-process
+    // and dumps `native.ir.json` never sees a CLI print, which is exactly how a
+    // whole design's missing icons read as a code failure for a full round of
+    // debugging.
+    CHECK(attribute(stale.design_ir->root, "native_svg_stale_capture") == "6");
+    CHECK(live.design_ir->root.attributes.count("native_svg_stale_capture") == 0);
+
     REQUIRE(stale.warnings.size() == 1);
     INFO(stale.warnings.front());
     CHECK(stale.warnings.front().find("6 of 6") != std::string::npos);
