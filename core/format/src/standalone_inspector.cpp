@@ -546,11 +546,11 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     }
     // Processor-level editor replacement needs every borrowed inspector source
     // to detach before the swap and reattach to the new processor lifetime.
-    // That complete workflow is Phase 8; Phase 2 fails closed instead of
-    // publishing an endpoint whose scripted bridge could become stale.
+    // Fail closed unless both operations are available; publishing through a
+    // partially detached scripted bridge would expose stale sources.
     if (processor.supports_editor_reload()) {
         runtime::log_error(
-            "Standalone: Development Inspector does not yet support processors "
+            "Standalone: Development Inspector does not support processors "
             "that replace the editor at runtime");
         return nullptr;
     }
