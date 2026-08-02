@@ -26,8 +26,9 @@ struct BrowserCaptureIrOptions {
     std::string source_file;
     bool require_interaction_report = false;
     /// Draw the panel instead of photographing it: lower every painted node
-    /// from the DOM snapshot at its absolute solved box, and emit no
-    /// `faithful_capture` backdrop.
+    /// from the DOM snapshot into a tree that mirrors the DOM, each node
+    /// absolutely positioned at Chrome's solved box expressed relative to its
+    /// parent, and emit no `faithful_capture` backdrop.
     ///
     /// Off by default on purpose. The capture is the A-side of an A/B and the
     /// permanent CI oracle — native ships per panel only once it has been shown

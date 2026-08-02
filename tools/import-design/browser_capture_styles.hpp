@@ -96,6 +96,27 @@ public:
     /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
     int parent_of(int node_index) const;
 
+    /// A node's DOM `nodeType` (1 element, 3 text), or 0 when out of range.
+    ///
+    /// A doctype carries the same `nodeName` as the root element, so tag name
+    /// alone cannot tell them apart — and an anchor that counted the doctype as
+    /// an `html` sibling would number the real root element `html[1]`.
+    int node_type_of(int node_index) const noexcept {
+        if (node_index < 0 || node_index >= static_cast<int>(node_type_.size()))
+            return 0;
+        return node_type_[static_cast<size_t>(node_index)];
+    }
+
+    /// How many nodes the document declares, laid out or not.
+    ///
+    /// A stable anchor is a DOM path, and a path segment's ordinal has to count
+    /// ALL same-signature siblings — not only the ones that painted — or the
+    /// anchor moves when a sibling is hidden rather than when the design
+    /// changes.
+    int node_count() const noexcept {
+        return static_cast<int>(parent_index_.size());
+    }
+
     bool empty() const noexcept { return style_rows_.empty(); }
 
 private:

@@ -924,6 +924,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // silently wrong.
         ir.root.attributes["native_nodes_missing_paint_order"] =
             std::to_string(tree.missing_paint_order);
+        // The shape of the tree, not just its size. A depth of 1 means the
+        // lowering flattened the design and an agent asked to "tweak the
+        // pickup section" has no section to grab — the number that says so
+        // belongs next to the counts, where a reviewer already looks.
+        ir.root.attributes["native_tree_root_children"] =
+            std::to_string(tree.root_children);
+        ir.root.attributes["native_tree_depth"] =
+            std::to_string(tree.max_depth);
         // Recorded only when they happened, following the same rule as the
         // controls counters: a zero here is the normal case and printing it
         // everywhere buries the one panel where a node went missing.
@@ -933,6 +941,9 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
         record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
         record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
+        record_if("native_nodes_hoisted", tree.hoisted_escapes);
+        record_if("native_nodes_overlapping_reorders",
+                  tree.overlapping_reorders);
     }
 
     int styled_controls = 0;

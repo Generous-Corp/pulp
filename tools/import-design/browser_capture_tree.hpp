@@ -42,18 +42,49 @@ struct PaintedTreeCounts {
     int skipped_blank_text = 0;    ///< collapsed whitespace runs
     int skipped_non_visual = 0;    ///< the document node, doctype, comments
     int missing_paint_order = 0;   ///< layout objects Chrome did not rank
+    int root_children = 0;         ///< direct children lowering added to root
+    int max_depth = 0;             ///< deepest lowered node, root children = 1
+    /// Nodes attached above their DOM parent because they paint BEFORE it —
+    /// a negative-`z-index` child or a descendant that escaped to an outer
+    /// stacking context. A nested painter draws a parent's own box before any
+    /// descendant, so that order is unrepresentable in place; the node is
+    /// hoisted and flagged rather than silently drawn in the wrong order.
+    int hoisted_escapes = 0;
+    /// Composed-order inversions against Chrome that are actually VISIBLE:
+    /// a pair whose relative paint order differs from Chrome's AND whose boxes
+    /// overlap. Re-expressing a flat paint order hierarchically reorders
+    /// disjoint boxes freely — that is unobservable — so this is the honest
+    /// measure of whether nesting cost any fidelity. Zero is the claim.
+    int overlapping_reorders = 0;
 };
 
-/// Lower every painted node in the captured document into absolutely positioned
-/// children of `root`, in Chrome's paint order.
+/// Lower every painted node in the captured document into a TREE under `root`
+/// that mirrors the captured DOM.
 ///
-/// The children are FLAT and each carries the absolute box Chrome solved. Yoga
-/// therefore does nothing but place them, so a Yoga-versus-Blink layout
-/// divergence cannot exist by construction — which is the entire argument for
-/// this design over re-solving the page's layout natively.
+/// Two invariants, and they are different things:
+///
+///   * **Yoga must not re-solve.** Every lowered node is `position: absolute`
+///     with its width, height, and offsets taken from the box Chrome already
+///     solved. Yoga takes an absolutely positioned child out of flow, so it
+///     performs offset arithmetic and no flex resolution — a Yoga-versus-Blink
+///     divergence remains impossible by construction. That is the invariant.
+///   * **The tree must be editable.** Structure is NOT the same invariant, and
+///     flattening it costs the whole editing surface: two `div.face` nodes with
+///     no parent cannot be told apart, and there is no group to grab. So DOM
+///     parentage, ids, and class-derived names are preserved, and a child's box
+///     is stored RELATIVE to its parent. Moving a container then moves its
+///     children by construction rather than by special case.
+///
+/// Ordering follows Chrome's own paint model, which is hierarchical: within a
+/// stacking context, siblings are emitted in Chrome's paint order and carry it
+/// as `z-index`. A node that paints before its own parent cannot be expressed
+/// in place at all, so it is hoisted and counted in `hoisted_escapes`.
 ///
 /// `dx`/`dy` shift page coordinates into the cropped panel's frame, matching
-/// the offset the semantic controls are placed with.
+/// the offset the semantic controls are placed with. They define the root's own
+/// page origin, so a root child's relative box is its page box plus the shift
+/// and the composition of offsets down any chain returns Chrome's absolute box
+/// exactly — Blink's 1/64px grid values survive the arithmetic unrounded.
 PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      double dx,
                                      double dy,

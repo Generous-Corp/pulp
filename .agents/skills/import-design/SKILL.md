@@ -275,6 +275,56 @@ Facts worth knowing before touching any of it:
   reports `border-*-color` on every element whether or not one is drawn, so an
   ungated mapping paints borders the design never had.
 
+**Whole-tree lowering (`native_panel_lowering`, opt-in) draws the panel from
+its nodes instead of photographing it.** `browser_capture_tree.cpp` lowers every
+painted node in the snapshot into a tree under the IR root. Two invariants that
+are routinely confused, and the confusion is expensive:
+
+- **"Yoga must not re-solve" is the invariant.** It is satisfied by every node
+  being `position: absolute` with Chrome's own solved width/height/offsets.
+  Yoga takes an absolutely positioned child out of flow, so nesting adds offset
+  arithmetic and no flex resolution — a Yoga-vs-Blink divergence stays
+  impossible however deep the tree goes.
+- **"The tree must be flat" is NOT that invariant, and flattening costs the
+  editing surface.** A design gets edited section by section, which means an
+  agent has to be able to name a section and get its contents with it. Flat, two
+  `div.face` nodes are indistinguishable and there is no group to grab. So DOM
+  parentage, ids and class-derived names are preserved, and a child's box is
+  stored RELATIVE to its parent — which is what makes "move a container and its
+  children follow" true by construction rather than by special case. Composing
+  the offsets back down a chain returns Chrome's absolute box exactly; Blink's
+  1/64 px values survive binary32 unrounded, so the tests assert them with no
+  tolerance.
+
+Ordering follows Chrome's paint model, which is itself hierarchical: siblings
+are emitted in `paint_order` and carry it as `z-index`, so order lives inside
+its stacking context rather than in one global sequence. Two consequences worth
+knowing before you touch that file:
+
+- **A node that paints BEFORE its own DOM parent is hoisted, and flagged.** A
+  nested painter always draws a parent's box before anything inside it, so a
+  negative-`z-index` child (or a descendant that escaped to an outer stacking
+  context) cannot be expressed in place. It is regrafted onto the nearest
+  ancestor that works and carries `paint_order_hoisted` + `hoisted_from`; the
+  root counts them in `native_nodes_hoisted`. Never reorder one silently. On a
+  real panel this is a handful of backdrop divs, not a rarity.
+- **Re-expressing one flat order as a hierarchy can reorder interleaved
+  subtrees — `native_nodes_overlapping_reorders` is the honest measure of
+  whether it mattered.** Reordering disjoint boxes is invisible to the painter's
+  algorithm; reordering overlapping ones is a real regression. Only the
+  overlapping half is counted, and the count is recorded only when non-zero.
+- **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
+  of 1 means the lowering reflattened and every per-node count still looks
+  right, so check the shape, not only the census.
+- **Anchors are DOM paths, not capture positions.** `stable_anchor_id` is
+  `capture:tag#id-or-.class[ordinal]/…`, with ordinals counted over ALL
+  same-signature siblings in the document rather than over the painted ones, so
+  hiding a sibling does not move the anchor. Keying on a layout index instead
+  identifies a node within one capture — the one job an anchor does not have,
+  since the tweaks layer replays edits ACROSS captures. A hoisted node keeps its
+  DOM anchor: hoisting is a rendering accommodation, not a claim about
+  structure.
+
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
   route. It runs Chromium and `--offline` separately, renders the candidate
