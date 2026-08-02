@@ -1264,6 +1264,33 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+`TrackEditIntent` is a second channel beside it, for arranging tracks rather than
+editing clips, and `lower_track_edit_intent` turns one into the `MoveTrack` that
+performs it. It is a separate type rather than added fields on `EditIntent`
+because the two name different subjects: a clip intent names a clip inside a
+track and carries clip time ranges, while a track intent names a track inside a
+sequence and carries an insertion point. Folded together, every clip intent would
+carry track-destination fields that are always empty and vice versa, with nothing
+in the type able to say which combination is meaningful. `TrackEditIntentHost` is
+the matching `SequencerUiHostT<TrackEditIntent>`, so a view that only rearranges
+tracks never acquires the clip vocabulary.
+
+Insertion is expressed as "before this track", matching the command, so a
+front-end that resolved a drop position to a neighbour need not convert it to an
+index. A `std::nullopt` destination means last position — a request, not an
+omission, and deliberately not a separate append verb.
+
+```cpp
+#include <pulp/timeline_editor/track_edit_intent.hpp>
+
+TrackEditIntent intent;                       // drag `moved` above `neighbour`
+intent.sequence_id = sequence_id;
+intent.track_id = moved;
+intent.expected_before_track_id = current_neighbour_of(moved);
+intent.replacement_before_track_id = neighbour;
+auto transaction = lower_track_edit_intent(intent, identity);
+```
+
 Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
 only a replacement note, erase carries only the expected note, and move, resize,
 and velocity edits carry both snapshots with the same note identity.

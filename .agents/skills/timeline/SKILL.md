@@ -1170,6 +1170,51 @@ Two things not to do here:
   zoom-to-range are deliberately absent: they are view state, and routing them
   through the document channel puts transient selection into undo history.
 
+### An intent lowerer validates the gesture; the model keeps its own rules
+
+`lower_edit_intent` and `lower_track_edit_intent` are pure and hold no `Project`,
+so the only things they can check are properties of the *gesture*: identity
+agreement between the transaction and command ids, the undo-group bracket a
+non-`Single` phase requires, and ids that are structurally invalid. Everything
+that needs the document — does the destination exist, is the track in this
+sequence, does the optimistic gate still hold — belongs to the reducer.
+
+**Resist re-checking a model rule in the lowerer even when it looks cheap.**
+`Sequence::move_track` refuses a track named as its own destination, and says why
+(the track is lifted out before the destination is located, so the request would
+silently land at the end). Copying that check up into the lowerer would put the
+same rule in two places that can drift, and the editing paths enforce the model's
+copy. Pin *where* the refusal comes from with a test that lowers successfully and
+asserts the session rejects it — otherwise a later reader adds the duplicate
+"for a better error message."
+
+The line worth drawing: **a neighbour id that is present but structurally invalid
+is a malformed gesture** (the front-end never resolved it) and belongs in the
+lowerer; **an id that is well-formed but absent from the document** is the
+reducer's `MissingItem`. An `std::optional` destination left empty is neither —
+it is a request for last position.
+
+### A negative control on a compound condition can exercise half of it
+
+Disabling one disjunct of an `if (A || B)` guard and seeing the suite stay green
+does **not** mean the guard is untested — it may mean your case only ever
+exercised `B`. This bit here for real: a control rewritten as
+
+```cpp
+if (false && (expected && !expected->valid()) || (replacement && !replacement->valid()))
+```
+
+parses as `(false && A) || B`, because `&&` binds tighter than `||`. The
+replacement half still fired, the suite passed, and the control looked like a
+false alarm. It was not — it had found a genuine gap, because the test asserted
+only the *destination* neighbour and never the *gate* neighbour.
+
+Two rules from it: **delete the whole condition rather than negating one operand**,
+so a surviving disjunct cannot answer for the one you meant to disable; and
+**assert every disjunct separately**, so the two halves fail at different lines.
+A control that passes is either a blind test or a malformed mutation, and the two
+are indistinguishable until you read the mutated source.
+
 ## Schema codegen & drift gate
 
 ### Bumping a schema version touches two hand-written validators the codegen never reaches

@@ -62,6 +62,13 @@ pulp_add_test_suite(pulp-test-playback-production
 # link is the test's alone — it stands where a front-end stands, above both
 # rungs, and is exactly what neither pulp::timeline-editor nor pulp::timeline
 # is allowed to name.
+# The track channel stands beside the clip one rather than inside it, so the two
+# are proven by separate suites: a link list naming only the editor rung and the
+# document model is what shows an arranger needs no view layer to rearrange
+# tracks, unlike the clip parity fixture below.
+pulp_add_test_suite(pulp-test-timeline-track-edit-intents
+    SOURCES test_timeline_track_edit_intents.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
