@@ -147,10 +147,17 @@ def instances() -> list[str]:
     for pid in pids:
         comm = subprocess.run(["ps", "-p", pid, "-o", "comm="],
                               capture_output=True, text=True).stdout.strip()
-        # A shell or editor that merely MENTIONS the name also matches; only an
-        # executable inside a .app is an instance.
-        if "/Contents/MacOS/" in comm:
-            paths.append(comm)
+        # `pgrep -f` matches the whole COMMAND LINE, so any process whose
+        # arguments merely mention the name is caught -- VCV Rack, with a
+        # patch path containing "Forge Modular", was reported as "another
+        # Forge Modular running from a different build" and the driver refused
+        # to run. The executable's own name is the identity; its arguments are
+        # not.
+        if "/Contents/MacOS/" not in comm:
+            continue
+        if os.path.basename(comm) != os.path.basename(APP).removesuffix(".app"):
+            continue
+        paths.append(comm)
     return paths
 
 
@@ -217,6 +224,52 @@ def point(target: str) -> tuple[int, int]:
     return int(x + w * fx), int(y + h * fy)
 
 
+# The band of the window the composer sits in, as fractions. Wide and shallow:
+# it has to contain the accent button at any window size, and nothing else that
+# is this colour.
+COMPOSER_BAND = (0.25, 0.40, 0.95, 0.62)
+
+
+def is_accent(px) -> bool:
+    """Forge's mint accent, as it comes out of a screen capture."""
+    r, g, b = px[0], px[1], px[2]
+    return g > 170 and b > 140 and r < 130
+
+
+def find_accent(region, out: str = "/tmp/drive-accent.png"):
+    """The centre of the accent-coloured button in `region`, in POINTS.
+
+    Returns None when there is none. Captures with `screencapture -R`, which
+    takes points, then converts back through the ratio of captured pixels to
+    requested points -- so it is correct on a 1:1 display and on a 2x one
+    without either being hardcoded.
+    """
+    x, y, w, h = window()
+    l, t, r, b = region
+    rx, ry = int(x + l * w), int(y + t * h)
+    rw, rh = int((r - l) * w), int((b - t) * h)
+    if subprocess.run(["screencapture", "-x", "-o", "-R",
+                       f"{rx},{ry},{rw},{rh}", out],
+                      capture_output=True).returncode != 0:
+        return None
+    try:
+        from PIL import Image
+        im = Image.open(out).convert("RGB")
+    except Exception:                                       # noqa: BLE001
+        return None
+    scale = im.width / float(rw) if rw else 1.0
+    xs, ys, n = 0, 0, 0
+    for py in range(0, im.height, 2):
+        for px in range(0, im.width, 2):
+            if is_accent(im.getpixel((px, py))):
+                xs += px; ys += py; n += 1
+    # A handful of stray pixels is antialiasing on something else; a button is
+    # thousands. The threshold is in captured pixels, so scale it.
+    if n < 200 * scale * scale:
+        return None
+    return (rx + (xs / n) / scale, ry + (ys / n) / scale)
+
+
 def on_home() -> bool:
     """True when the Home composer is showing.
 
@@ -227,31 +280,28 @@ def on_home() -> bool:
     accent Build button at this spot; the Build screen has a dark preview
     there.
     """
-    # Captured by POINTS, with `screencapture -R`, rather than by scaling a
-    # full-screen capture. The scaled version multiplied by a hardcoded 2, so on
-    # a display that captures 1:1 the sample box landed off the right-hand edge
-    # of the image entirely -- an empty crop, no mint in it, and the report
-    # "the composer's Build button is not where it should be" while the button
-    # was plainly on screen. A probe that cannot see is indistinguishable from
-    # a thing that is not there.
+    # FIND the button; do not assume where it is.
+    #
+    # This sampled a 40x16 box at a hardcoded fraction of the window. That
+    # survives exactly one window size on exactly one display: on m5 it
+    # reported "the composer's Build button is not where it should be" for a
+    # screen that plainly showed the button, and an earlier version multiplied
+    # by a hardcoded 2x and sampled off the edge of the image entirely. A probe
+    # that cannot see is indistinguishable from a thing that is not there, and
+    # it fails toward "broken", which is the expensive direction.
+    #
+    # Searching a band for the accent colour needs no coordinate to be right,
+    # and it yields the button's REAL centre for the click.
     shot("/tmp/drive-probe.png")   # kept: it is what a human is pointed at
-    bx, by = point("build")
-    rect = f"{int(bx - 20)},{int(by - 8)},40,16"
-    probe = "/tmp/drive-probe-button.png"
-    if subprocess.run(["screencapture", "-x", "-o", "-R", rect, probe],
-                      capture_output=True).returncode != 0:
-        return False
-    try:
-        from PIL import Image
-        crop = Image.open(probe).convert("RGB")
-        # Forge's accent is a distinctive mint. Nothing on the Build screen is
-        # that colour at this position.
-        for r, g, b in crop.getdata():
-            if g > 170 and b > 140 and r < 130:
-                return True
-        return False
-    except Exception:
-        return False
+    # Retried, because a capture taken while the window is repainting or has
+    # just been raised finds nothing and that is not the same as not being on
+    # Home. Measured: one miss in three at a size that succeeded seconds
+    # before and after.
+    for _ in range(5):
+        if find_accent(COMPOSER_BAND) is not None:
+            return True
+        time.sleep(0.4)
+    return False
 
 
 def ensure_home() -> None:
@@ -265,16 +315,59 @@ def ensure_home() -> None:
     """
     if on_home():
         return
-    click("home")
-    time.sleep(1.5)
-    if on_home():
-        return
+    # Clicked more than once. Coming back from a loaded rack takes longer than
+    # one click-and-check: with a patch on screen the first attempt failed and
+    # the second succeeded, every time. One try turned a slow transition into
+    # "the app is broken".
+    for _ in range(3):
+        click("home")
+        time.sleep(1.5)
+        if on_home():
+            return
     sys.exit("could not reach the Home screen — the composer's Build button is "
              "not where it should be. Refusing to click blind; a screenshot is "
              "at /tmp/drive-probe.png")
 
 
+def frontmost_is_ours() -> bool:
+    """Is the app under test the frontmost application, right now?"""
+    front = osa('tell application "System Events" to get name of every process '
+                'whose frontmost is true')
+    return NAME in front
+
+
+def refuse_unless_front(what: str) -> None:
+    """Stop rather than send input into whatever happens to be in front.
+
+    focus() was checked once per RUN. A window can fall behind at any point
+    after that -- an AppleScript that activates System Events, a notification,
+    the user reaching for their own machine -- and every later click then lands
+    in a stranger's window. It did: a sweep clicked repeatedly into the
+    terminal the run was launched from, at coordinates meant for the app's
+    sidebar. Checked before EVERY click and keystroke instead.
+    """
+    if not frontmost_is_ours():
+        sys.exit(f"refusing to {what}: {NAME} is not frontmost. Something else "
+                 f"came forward mid-run, and input would land in it.")
+
+
 def click(target: str) -> None:
+    refuse_unless_front(f"click {target}")
+    # The accent button is found, not computed. Its fraction was right for one
+    # window on one display and wrong on the next machine.
+    if target == "build":
+        found = None
+        for _ in range(5):
+            found = find_accent(COMPOSER_BAND)
+            if found:
+                break
+            time.sleep(0.4)
+        if found:
+            px, py = int(found[0]), int(found[1])
+            subprocess.run([uidriver(), "click", str(px), str(py)], check=True)
+            print(f"  clicked build at ({px}, {py}) — located by colour")
+            time.sleep(0.6)
+            return
     px, py = point(target)
     subprocess.run([uidriver(), "click", str(px), str(py)], check=True)
     print(f"  clicked {target} at ({px}, {py})")
@@ -282,6 +375,7 @@ def click(target: str) -> None:
 
 
 def type_text(text: str) -> None:
+    refuse_unless_front("type")
     subprocess.run([uidriver(), "type", text], check=True)
     print(f"  typed {text!r}")
     time.sleep(0.6)
