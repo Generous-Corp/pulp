@@ -537,6 +537,72 @@ TEST_CASE("Project package rejects wrong hashes, unsafe reads, conflicts, and si
     REQUIRE_FALSE(invalid_hash);
 }
 
+TEST_CASE("Project package root entry points reject embedded NUL pathnames",
+          "[project-package][errors][path]") {
+    TemporaryPackage temporary("root-nul");
+    fs::create_directories(temporary.path);
+    auto nul_name = fs::path("victim").native();
+    nul_name.push_back(fs::path::value_type{});
+    nul_name += fs::path("-suffix").native();
+    const auto nul_root = temporary.path / fs::path(nul_name);
+    const auto truncated_root = temporary.path / "victim";
+    const std::vector<std::uint8_t> bytes{'d', 'a', 't', 'a'};
+    const BlobReference reference{BlobStore::Media, hash_bytes(bytes)};
+
+    const auto writer = PackageWriter::create(nul_root, registry());
+    REQUIRE_FALSE(writer);
+    REQUIRE(writer.error().code == PackageErrorCode::InvalidPath);
+
+    const auto opened = open_package(nul_root, registry());
+    REQUIRE_FALSE(opened);
+    REQUIRE(opened.error().code == PackageErrorCode::InvalidPath);
+
+    const auto blob = read_blob(nul_root, reference, 1024);
+    REQUIRE_FALSE(blob);
+    REQUIRE(blob.error().code == PackageErrorCode::InvalidPath);
+    REQUIRE_FALSE(fs::exists(truncated_root));
+}
+
+TEST_CASE("Project package lock rejects symbolic-link redirection",
+          "[project-package][lock][symlink]") {
+    TemporaryPackage temporary("lock-symlink");
+    TemporaryPackage external("lock-symlink-external");
+    fs::create_directories(temporary.path);
+    fs::create_directories(external.path);
+    const auto target = external.path / "target";
+    std::ofstream(target, std::ios::binary) << "sentinel";
+    std::error_code error;
+    fs::create_symlink(target, temporary.path / ".pulp-package.lock", error);
+    if (error)
+        SKIP("file symlink creation is unavailable: " << error.message());
+
+    const auto writer = PackageWriter::create(temporary.path, registry());
+
+    REQUIRE_FALSE(writer);
+    REQUIRE(writer.error().code == PackageErrorCode::AlreadyOpen);
+    REQUIRE(read_text(target) == "sentinel");
+}
+
+TEST_CASE("Project package lock rejects multi-linked files",
+          "[project-package][lock][hardlink]") {
+    TemporaryPackage temporary("lock-hardlink");
+    TemporaryPackage external("lock-hardlink-external");
+    fs::create_directories(temporary.path);
+    fs::create_directories(external.path);
+    const auto target = external.path / "target";
+    std::ofstream(target, std::ios::binary) << "sentinel";
+    std::error_code error;
+    fs::create_hard_link(target, temporary.path / ".pulp-package.lock", error);
+    if (error)
+        SKIP("hard-link creation is unavailable: " << error.message());
+
+    const auto writer = PackageWriter::create(temporary.path, registry());
+
+    REQUIRE_FALSE(writer);
+    REQUIRE(writer.error().code == PackageErrorCode::AlreadyOpen);
+    REQUIRE(read_text(target) == "sentinel");
+}
+
 TEST_CASE("Project package treats cache loss as recoverable derived-state loss",
           "[project-package][recovery]") {
     TemporaryPackage temporary("cache");
