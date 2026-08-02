@@ -5476,6 +5476,70 @@ resolves in the wrong direction**. Confirmed arithmetically against Chrome. It
 needs paint-time resolution. Radial `farthest-corner` separately uses a constant
 `0.7071·max(w,h)` and ignores an off-centre `at`, running ~28% short.
 
+## Inline `<svg>` — the geometry is captured, the PAINT was not
+
+An icon's shapes are in the DOM snapshot all along: `<path d="…">`, `viewBox`,
+`points`, `cx`/`r` are authored attributes and the snapshot carries every
+attribute of every node. What was missing is the other half — **`fill` and
+`stroke` were not in `COMPUTED_STYLES`** (`browser_capture/semantics.mjs`), so
+the capture held shapes with no colour for them.
+
+Reading the paint back off the authored attributes does not substitute, and the
+failure is silent in the two most common idioms:
+
+- `fill="currentColor"` resolves against the `color` of the box AROUND the
+  icon, which is nowhere in the SVG markup;
+- a stylesheet rule (`.icon path { fill: var(--accent) }`) leaves no attribute
+  on the element at all.
+
+Only the browser knows which one won, so the resolved value is the only usable
+input. The capture now collects `fill`, `fill-opacity`, `fill-rule`, `stroke`,
+`stroke-opacity`, `stroke-width` and `stroke-dasharray`. **A capture taken
+before that refuses with `capture_fallback_reason: svg-paint-unavailable`
+rather than defaulting** — see the next trap for why defaulting is worse than
+refusing.
+
+**`fill: none` must be STATED, never omitted.** SVG's own default fill is
+opaque black and `SvgPathWidget`'s default matches it, so a lowering that emits
+no `svg_fill` for a stroke-only icon does not leave it unfilled — it fills the
+outline solid black. A stroke-only waveform renders as a black blob with the
+right stroke around it, and every colour assertion still passes, because the
+stroke IS there. Both consumers already understand the literal string `none`
+(`apply_svg_paint` calls `clear_fill()`, the `setSvgFill` bridge treats it as
+clear), so emit it. Found by looking at the render; no IR-level assertion could
+have caught it.
+
+**Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
+one user-coordinate space (the root `viewBox`), so every vector node is placed
+at the `<svg>` element's own box and carries the same viewBox. Giving each
+shape the box Chrome solved for IT rescales every path by a different factor
+and the icon comes apart. This is the one place whole-tree lowering
+deliberately does not use a node's own solved box.
+
+**What still refuses, and why the reason is per-node.** `capture_fallback_reason`
+carries `svg-<refusal>` and `capture_fallback_detail` names the element:
+`transform` (no per-node matrix in the lowering), `paint-reference` (a
+`url(#…)` fill/stroke, `clip-path`, `mask-image` or `filter`),
+`dashed-stroke`, `group-opacity`, `element` (a `<text>`, `<image>`, `<use>`,
+nested `<svg>`), `shape-geometry` (a percentage length, a malformed `points`).
+A refusal pools the WHOLE subtree, so a refused icon never half-draws over its
+own capture. Read `native_svg_lowered` / `native_svg_refused` /
+`native_svg_shapes` on the IR root beside those per-node strings: the residual
+is meant to be a list of constructs, not a total.
+
+Two refusals are easy to get wrong in the permissive direction, and both draw a
+plausible-looking WRONG picture rather than nothing: `<switch>` renders the
+FIRST child whose requirement attributes hold, so walking it as a plain group
+draws every alternative stacked; and a non-default `preserveAspectRatio`
+(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
+renderer's fixed `xMidYMid meet` will not.
+
+**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
+miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
+stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
+coverage by <1%, which is why it is accepted rather than sent to the fallback —
+refusing on it would capture most real icons. Revisit if a design shows it.
+
 ## Scoring a native panel — the instrument lies in two specific ways
 
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and

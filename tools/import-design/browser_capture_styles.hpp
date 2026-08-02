@@ -95,6 +95,22 @@ public:
     std::map<std::string, std::string> styles_for_layout(
         int layout_index) const;
 
+    /// Computed declarations for one DOM node, or empty when that node
+    /// produced no layout object.
+    ///
+    /// Empty is a real answer, not an error: an SVG `<defs>` subtree, a
+    /// `display: none` element, and a comment all legitimately have no solved
+    /// style. A caller that needs a property from such a node has to fall back
+    /// to the authored attribute.
+    std::map<std::string, std::string> styles_for_node(int node_index) const;
+
+    /// Whether the capture asked Chrome for this property at all.
+    ///
+    /// Distinguishes "the browser resolved it to nothing" from "no consumer
+    /// can ever know" — an older capture is missing whole properties, and a
+    /// caller that reads absence as a value silently invents one.
+    bool has_property(std::string_view name) const;
+
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
 

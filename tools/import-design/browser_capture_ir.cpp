@@ -969,6 +969,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // census stops counting the affected nodes as faithfully drawn.
         record_if("native_nodes_clip_over_applied", tree.clip_over_applied);
         record_if("native_nodes_clip_lost", tree.clip_lost);
+        // Inline `<svg>`, reported as three numbers rather than one: how many
+        // icons became geometry, how many still arrive as a captured element,
+        // and how many vector nodes the drawn ones cost. Read `svg_refused`
+        // beside the per-node `capture_fallback_reason` — that string names the
+        // construct that refused, which is the actual can't-draw list.
+        record_if("native_svg_lowered", tree.svg_lowered);
+        record_if("native_svg_refused", tree.svg_refused);
+        record_if("native_svg_shapes", tree.svg_shapes);
     }
 
     int styled_controls = 0;

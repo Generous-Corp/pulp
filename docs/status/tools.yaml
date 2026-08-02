@@ -89,30 +89,6 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
-  - name: score-native-panel
-    path: tools/import-validation/score_native_panel.py
-    category: visual-compare
-    use_when: Measure how much of a natively-rendered panel disagrees with Chrome, attributed per node and per drawing feature.
-    invocation: python3 tools/import-validation/score_native_panel.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--json-out report.json] [--diff-out diff.png]
-    inputs: A browser capture directory (browser.png + dom-snapshot.json) and a native render of the same design.
-    outputs: Area-weighted failing fraction, per-node scores, coverage, and failing area grouped by drawing feature.
-    caveat: "Two traps live in the METRIC, not the code. (1) A blank render scores WELL against a dark design: an empty SPECTR render scored 12.45% failing while the correct one scored 10.99%, because black matches black and the denominator comes from the capture side, so it never notices the render contributed no ink. ALWAYS read coverage beside the failing fraction. (2) It is AREA-weighted while perception is salience-weighted: a gradient fix moved one design 46% with no visible change, while a missing icon or a lost accent fill costs a fraction of a percent. Per-node scores are not usable yet (worst-node 1.0000, ~0% of ink nodes passing everywhere). Never inherit tau from the identity-blit calibration control, which contains no native rasterisation."
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: chrome-gradient-oracle
-    path: tools/import-validation/chrome_gradient_oracle.py
-    category: visual-compare
-    use_when: Get the expected numbers for a CSS gradient geometry test from Chromium rather than from your own formula.
-    invocation: python3 tools/import-validation/chrome_gradient_oracle.py
-    inputs: Nothing; it renders its own hard-edged gradient cases through Chromium.
-    outputs: Measured boundary positions per case, the source of the expected values in test_css_gradient_geometry.cpp.
-    caveat: "Exists because a fixture derived from the same formula as the implementation agrees with it BY CONSTRUCTION, including when both are wrong. Chromium is an independent implementation of the same spec, so it can disagree, which is the only reason those tests can fail for a real cause. Cases use hard-edged stops so a scanline reads the boundary exactly, and a 160x100 box on purpose: a square box makes an ellipse a circle and a 45-degree angle its own reflection, hiding every defect worth testing."
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
   - name: diff-against-reference
     path: tools/import-validation/diff_against_reference.py
     category: visual-compare
@@ -164,23 +140,11 @@ tools:
   - name: score-native-panel
     path: tools/import-validation/score_native_panel.py
     category: visual-compare
-    use_when: Score a natively rendered panel against the Chromium capture that is its oracle, per node.
-    invocation: python3 tools/import-validation/score_native_panel.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--tau 0.05]
-    inputs: A browser-capture directory (browser.png + dom-snapshot.json + capture.json) and the rendered composite at the same size.
-    outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, and failing area grouped by drawing feature.
-    caveat: Area-weighted. It cannot see a small feature disappear — a missing knob pointer or an absent icon is a few hundred px on a panel of millions, and a change with no visible effect moved it 46%. Pair it with check-panel-presence, which asks the questions area weighting cannot.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-panel-presence
-    path: tools/import-validation/check_panel_presence.py
-    category: visual-compare
-    use_when: Catch a feature that vanished, a mark that was invented, an accent that went grey, or text that stopped fitting — the defects an area score ranks as noise.
-    invocation: python3 tools/import-validation/check_panel_presence.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--baseline <previous.json>]
-    inputs: The same browser-capture directory and rendered composite the area score takes, plus an optional previous run's JSON as the no-regression baseline.
-    outputs: Per-node findings under five presence checks (ink present, ink absent, colour present, text contained, text runs), a panel-wide blank-render guard, and the set of findings new since the baseline.
-    caveat: Presence, not fidelity — a mark that is present but the wrong shape, weight or position by less than a couple of px passes, and a missing mark inside a gradient can hide in the gradient's own variation. Nodes it cannot measure are reported under `unmeasurable`, never counted as passing. It complements score-native-panel; neither replaces the other.
+    use_when: Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle.
+    invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render <composite.png> [--crop L,T,W,H] [--json-out <report.json>]
+    inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and one full-resolution render of the same panel.
+    outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, per-feature buckets, and distinct exit codes for calibration, size, and threshold failures.
+    caveat: A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md

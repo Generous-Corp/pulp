@@ -822,8 +822,6 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
-- Catch a feature that vanished, a mark that was invented, an accent that went grey, or text that stopped fitting — the defects an area score ranks as noise. → `tools/import-validation/check_panel_presence.py`
-  - ⚠ **Cannot see:** Presence, not fidelity — a mark that is present but the wrong shape, weight or position by less than a couple of px passes, and a missing mark inside a gradient can hide in the gradient's own variation. Nodes it cannot measure are reported under `unmeasurable`, never counted as passing. It complements score-native-panel; neither replaces the other.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
@@ -844,8 +842,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
-- Score a natively rendered panel against the Chromium capture that is its oracle, per node. → `tools/import-validation/score_native_panel.py`
-  - ⚠ **Cannot see:** Area-weighted. It cannot see a small feature disappear — a missing knob pointer or an absent icon is a few hundred px on a panel of millions, and a change with no visible effect moved it 46%. Pair it with check-panel-presence, which asks the questions area weighting cannot.
+- Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle. → `tools/import-validation/score_native_panel.py`
+  - ⚠ **Cannot see:** A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
