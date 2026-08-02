@@ -125,6 +125,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: audit-paint-capability
+    path: tools/import-validation/audit_paint_capability.py
+    category: visual-compare
+    use_when: Ask whether a captured panel's declared appearance has a lowering path at all, before spending time on how closely it matches. Reports three numbers per design — worst node, ink-bearing node pass rate, area-weighted failing fraction — and which properties block which nodes.
+    invocation: python3 tools/import-validation/audit_paint_capability.py --capture <browser-capture-dir> --label <name>
+    inputs: One or more browser-capture directories (dom-snapshot.json + capture.json) and the capability ledger, compat.json.
+    outputs: Per design, the three numbers plus a cause breakdown (unsupported value form / no ledger entry / svg geometry / image asset) and a per-property tally of how many ink-bearing nodes each property blocks.
+    caveat: CAPABILITY, not fidelity. It reads compat.json, which says "there is a path", never "it matches Chrome" — so treat its failing fraction as a LOWER bound on divergence and use score_native_panel.py for the real answer. It is also only as truthful as the ledger. A property whose entry declares no unsupportedValueForms is decided by its status alone, and one that over-claims reads as drawable here. A property the capture does not record is invisible to it entirely.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: golden-regression
     path: tools/import-validation/golden_regression.py
     category: visual-compare

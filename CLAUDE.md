@@ -822,6 +822,8 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
+- Ask whether a captured panel's declared appearance has a lowering path at all, before spending time on how closely it matches. Reports three numbers per design — worst node, ink-bearing node pass rate, area-weighted failing fraction — and which properties block which nodes. → `tools/import-validation/audit_paint_capability.py`
+  - ⚠ **Cannot see:** CAPABILITY, not fidelity. It reads compat.json, which says "there is a path", never "it matches Chrome" — so treat its failing fraction as a LOWER bound on divergence and use score_native_panel.py for the real answer. It is also only as truthful as the ledger. A property whose entry declares no unsupportedValueForms is decided by its status alone, and one that over-claims reads as drawable here. A property the capture does not record is invisible to it entirely.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`

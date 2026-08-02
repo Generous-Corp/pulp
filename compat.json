@@ -1,6 +1,6 @@
 {
   "compat-schema-version": "0.3",
-  "_comment": "Compat matrix per #1027. This file is the spec-driven inventory of every prop / style / API surface Pulp's React + DOM-lite consumers might use, mapped to its current implementation status. Status values: supported | partial | missing | wontfix. The 'mapsTo' field names the bridge / Yoga / Skia path the prop lowers to. The 'tests' field records validation references; legacy free-form test paths may coexist with typed routes such as semantic:<fixture-id>, visual:<fixture-id>, dom:<fixture-id>, behavior:<fixture-id>, unit:<test-id>, or cannot-validate:<tracking-id>. The audit was generated 2026-04-30 by walking three reference specs (Yoga via React Native Layout Props, React Native View / Text / Transform Style Props, and the most-used MDN CSS reference) and cross-referencing against four implementation surfaces: packages/pulp-react/src/prop-applier.ts (the @pulp/react switch), core/view/js/web-compat-style-decl.js (the DOM-lite CSS adapter), core/view/src/widget_bridge.cpp (the C++ bridge \u2014 251 register_function entries), and core/view/include/pulp/view/{view,geometry}.hpp (the Flex / View widget surface).",
+  "_comment": "Compat matrix per #1027. This file is the spec-driven inventory of every prop / style / API surface Pulp's React + DOM-lite consumers might use, mapped to its current implementation status. Status values: supported | partial | missing | wontfix. The 'mapsTo' field names the bridge / Yoga / Skia path the prop lowers to. The optional 'unsupportedValueForms' field makes an entry in 'unsupportedValues' mechanically decidable: each item is {value, match} where 'value' repeats the unsupportedValues string verbatim and 'match' is a Python regular expression searched (case-insensitively) against a concrete computed value, plus an optional 'requires' {property, notMatch} guard for a form that is only wrong in the presence of another declaration. Prose alone cannot be evaluated, so a consumer that has to decide whether a real value is drawable reads this field. The 'tests' field records validation references; legacy free-form test paths may coexist with typed routes such as semantic:<fixture-id>, visual:<fixture-id>, dom:<fixture-id>, behavior:<fixture-id>, unit:<test-id>, or cannot-validate:<tracking-id>. The audit was generated 2026-04-30 by walking three reference specs (Yoga via React Native Layout Props, React Native View / Text / Transform Style Props, and the most-used MDN CSS reference) and cross-referencing against four implementation surfaces: packages/pulp-react/src/prop-applier.ts (the @pulp/react switch), core/view/js/web-compat-style-decl.js (the DOM-lite CSS adapter), core/view/src/widget_bridge.cpp (the C++ bridge \u2014 251 register_function entries), and core/view/include/pulp/view/{view,geometry}.hpp (the Flex / View widget surface).",
   "_audit": {
     "_evidence_grace_until": "2026-05-22",
     "generated": "2026-05-04",
@@ -42,7 +42,7 @@
       "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial \u2192 supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) \u2014 the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
     },
     "counts": {
-      "css": 217,
+      "css": 226,
       "rn": 120,
       "yoga": 56,
       "react": 0,
@@ -51,6 +51,7 @@
       "imports": 5
     },
     "changelog": {
+      "2026-08-02_value-forms": "Value-form truthfulness pass. `unsupportedValues` was an empty array on every paint-decisive css/* entry while the entry's own notes described a real value-coverage gap — the Wave 1 `backgroundAttachment` precedent had moved those caveats out of the field and into prose, which reads as a cleaner catalog and leaves every mechanical consumer unable to see the gap. Repopulated boxShadow, textShadow, backgroundImage, backgroundSize, backgroundPosition, backgroundRepeat, backdropFilter and clipPath from their own notes, and removed two affirmative over-claims (css/boxShadow listed comma-separated multi-shadow as a SUPPORTED value; css/backdropFilter listed non-blur filter functions as supported-but-ignored). Corrected css/backgroundImage, whose `arch-single-bg` note was stale: `apply_css_background_gradient` splits top-level commas and stores the whole ordered stack. Added nine css/* entries at status `missing` for captured properties the catalog was silent about (background-blend-mode, the four border-*-style longhands, font-variation-settings, word-spacing, text-decoration-thickness, text-underline-offset); css count 217 -> 226. Added the optional `unsupportedValueForms` field so a consumer can decide mechanically whether a concrete value falls in the unsupported set — a prose caveat cannot be evaluated, which is why the paint-capability audit was returning `native` for every node.",
       "2026-05-07_W4css": "pulp Wave 4 css extensive \u2014 DIVERGE sweep. Drove the css surface from 128 PASS / 49 DIVERGE (60.4%) to 177 PASS / 0 DIVERGE (83.5%) in a single pass \u2014 the 35 non-PASS remainder is fully architectural (10 noop intentional stubs + 25 wontfix). Per-entry reclassifications follow the Wave 1 backgroundAttachment precedent: paint-time / architectural value-coverage caveats moved out of unsupportedValues into notes; status flipped partial -> supported when value-coverage is complete; partial-deferred-* used when a real subsystem (image loader, HarfBuzz, paint pipeline) is the gating block. Border family (5) arch-solid-only-pen; border-radius (2) arch-skia-rrect-single-radius; background family (5) arch-deferred-image-loader / historical conic deferral later superseded by sweep-gradient support / arch-single-bg; mask family (2) arch-paint-deferred; layout-length (2) arch-yoga-no-intrinsic-sizing + arch-no-calc-eval + single-level-cascade for em/rem; outline family (4) arch-numeric-only + arch-no-cascade-color + arch-paint-px-only; overflow (3) arch-scroll-via-scrollview + arch-axis-tied-overflow; display (1) arch-flex-only; enum cleanups (8) cursor / pointerEvents / textDecoration / userSelect / visibility / whiteSpace / fontStyle label trimming + arch caveats. Drift count: 7 -> 0 on css. css count holds at 212."
     }
   },
@@ -611,14 +612,21 @@
       "mapsTo": "parses blur(Npx) \u2192 setBackdropFilter(id, blur_px)",
       "supportedValues": [
         "blur(<px>)",
-        "none",
-        "other filter functions (parsed; only blur applies at paint time per arch-blur-only-backdrop)"
+        "none"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "any filter function other than blur() — saturate() / brightness() / contrast() / grayscale() / invert() / sepia() / hue-rotate() / opacity() / drop-shadow() are dropped, including when chained after a blur() that does apply"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "any filter function other than blur() — saturate() / brightness() / contrast() / grayscale() / invert() / sepia() / hue-rotate() / opacity() / drop-shadow() are dropped, including when chained after a blur() that does apply",
+          "match": "\\b(?:saturate|brightness|contrast|grayscale|greyscale|invert|sepia|hue-rotate|opacity|drop-shadow)\\s*\\("
+        }
+      ],
       "tests": [
         "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
       ],
-      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot. Wave 4 css extensive \u2014 non-blur filter functions are arch-blur-only-backdrop (the bridge slot View::backdrop_filter_blur_ is scalar; the multi-function chain that the foreground filter chain uses is queued behind SkImageFilters compose-list parity). Authors who need brightness/saturate stack via the foreground filter property which IS chain-aware.",
+      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot. `backdrop-filter: blur(8px) saturate(1.4)` therefore renders as a plain blur, with no error anywhere. Wave 4 css extensive \u2014 non-blur filter functions are arch-blur-only-backdrop (the bridge slot View::backdrop_filter_blur_ is scalar; the multi-function chain that the foreground filter chain uses is queued behind SkImageFilters compose-list parity). Authors who need brightness/saturate stack via the foreground filter property which IS chain-aware.",
       "issue": "1434"
     },
     "css/backfaceVisibility": {
@@ -659,6 +667,23 @@
       ],
       "notes": "pulp #1517 \u2014 accepts the keyword without crashing; paint impact is exactly zero because pulp doesn't model scroll contexts. `scroll` is the spec-conformant default for our case. Status `noop` means the property is wired through but has no rendered effect. Wave 1 architectural reclassification \u2014 `fixed` / `local` are arch-no-scroll-context (Pulp's layout is non-scrolling so `scroll` is the spec-conformant default; viewport-relative paint origin and scroll-context coupling are not modeled). Wave 1 drift cleanup \u2014 noop status retained; cleared unsupportedValues since `fixed` / `local` are arch-no-scroll-context (Pulp doesn't model scroll contexts; the default `scroll` is the spec-conformant rendering).",
       "issue": "1517"
+    },
+    "css/backgroundBlendMode": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values other than `normal`"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "all values other than `normal`",
+          "match": "^(?!\\s*normal\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. View has no background blend slot and the paint path composites the background unconditionally, so `multiply` / `screen` / `overlay` on a layered background renders as the top layer alone.",
+      "issue": ""
     },
     "css/backgroundClip": {
       "status": "supported",
@@ -706,14 +731,26 @@
       "supportedValues": [
         "linear-gradient(...)",
         "radial-gradient(...)",
-        "conic-gradient(...)"
+        "conic-gradient(...)",
+        "repeating-linear-gradient(...) / repeating-radial-gradient(...)",
+        "two or more comma-separated gradient layers, painted in CSS order"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "url() / image() / image-set() layers",
+        "a layer list containing any non-gradient layer — one unreadable layer refuses the whole list, so the node paints no background image at all"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "url() / image() / image-set() layers",
+          "match": "\\b(?:url|image|image-set)\\s*\\("
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
-        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\"",
+        "test/test_css_gradient_render.cpp"
       ],
-      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. multiple backgrounds remain arch-single-bg.",
+      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). Multiple comma-separated GRADIENT layers are supported: `apply_css_background_gradient` splits on top-level commas only (commas inside a `gradient(...)` separate stops, not layers) and stores the whole ordered stack via `View::set_background_gradient_layers`. The single-layer note this entry used to carry predates that and was wrong. Refusal is all-or-nothing by design: if any layer fails to parse the whole list is rejected rather than painting the remainder, because a stack missing a layer is a wrong render that looks like a right one — so one `url()` layer in an otherwise-gradient list removes the background image entirely.",
       "issue": ""
     },
     "css/backgroundOrigin": {
@@ -733,11 +770,22 @@
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js:1418 forwards `background-position` to setBackgroundPosition(id, value); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and stores the keyword on View::background_position_. Storage-only today: pulp's solid-bg paint path doesn't honor position offsets, which only matter for url() / image-set() raster backgrounds (deferred to image-loader slice \u2014 see backgroundImage).",
       "supportedValues": [
-        "<keyword>",
-        "<percentage>",
-        "<length>"
+        "0% 0% / left top (the initial value, which is where a gradient already paints)",
+        "<keyword> / <percentage> / <length> round-trip through the bridge and are queryable"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "any offset other than the initial `0% 0%` alongside a background-image \u2014 the offset is stored and never painted, so the gradient stays anchored at the box origin"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "any offset other than the initial `0% 0%` alongside a background-image \u2014 the offset is stored and never painted, so the gradient stays anchored at the box origin",
+          "match": "^(?!\\s*(?:0%\\s+0%|left\\s+top|0px\\s+0px)\\s*$).+",
+          "requires": {
+            "property": "background-image",
+            "notMatch": "^\\s*none\\s*$"
+          }
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundPosition wires JS \u2192 bridge \u2192 View slot"
       ],
@@ -755,7 +803,9 @@
         "space",
         "round"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "every keyword at paint time — the slot is stored and no paint path reads it. No machine-checkable form is declared here on purpose: repeat only changes the picture once a background is tiled, and tiling requires a background-size, which css/backgroundSize already flags. Flagging repeat as well would attribute one wrong render to two causes."
+      ],
       "tests": [
         "test/test_widget_bridge_css_misc.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View"
       ],
@@ -766,17 +816,26 @@
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js:1413 forwards `background-size` to setBackgroundSize(id, value); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and stores the keyword on View::background_size_. Storage-only today: same arch-deferred-image-loader caveat as backgroundPosition \u2014 `cover` / `contain` / `<length>` only sized-fit a raster image, and pulp paints solid bg / gradients (which auto-fit to the box).",
       "supportedValues": [
-        "cover",
-        "contain",
-        "auto",
-        "<length>",
-        "<percentage>"
+        "auto (the initial value; a gradient auto-fits its box, which is what the slot's absence already does)",
+        "cover / contain / <length> / <percentage> round-trip through the bridge and are queryable"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "any sized value (cover / contain / <length> / <percentage>) alongside a background-image \u2014 the size is stored and never painted, so a gradient tiled by background-size fills the whole box as one gradient instead"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "any sized value (cover / contain / <length> / <percentage>) alongside a background-image \u2014 the size is stored and never painted, so a gradient tiled by background-size fills the whole box as one gradient instead",
+          "match": "^(?!\\s*auto\\s*$).+",
+          "requires": {
+            "property": "background-image",
+            "notMatch": "^\\s*none\\s*$"
+          }
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp::Wave5 css/backgroundSize wires JS \u2192 bridge \u2192 View slot"
       ],
-      "notes": "Wave 5 css.5 \u2014 registered the previously-missing setBackgroundSize bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_size_ slot for a future raster-image paint pass. The `cover` / `contain` / `auto` / `<length>` / `<percentage>` value space all round-trip through bridge. Architectural caveat: arch-deferred-image-loader \u2014 without a raster bg pipeline these have no visual effect, but the catalog claim is honest because the value is captured and queryable.",
+      "notes": "Storage-only round-trip: the keyword is stored verbatim on the View::background_size_ slot for a future raster-image paint pass, and no paint path reads it. Value coverage is complete and the value is queryable \u2014 but a size that is stored and not painted is a wrong picture, not a missing feature, and this entry says so rather than calling the round-trip alone honest. The load-bearing case is a hard-stop gradient tiled by background-size, which is the standard CSS grid idiom: with the size dropped, eight columns paint as one gradient across the box.",
       "issue": ""
     },
     "css/border": {
@@ -856,6 +915,23 @@
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
+      "issue": ""
+    },
+    "css/borderBottomStyle": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid",
+          "match": "^(?!\\s*(?:solid|none|hidden)\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. The `border-style` shorthand and the per-edge width/colour longhands ARE routed, so a captured box keeps its edge widths and colours and loses only the line style: a dashed or dotted edge paints solid, and `none` / `hidden` paints as a solid line of the declared width. Chromium's computed style reports the four per-edge longhands and never the shorthand, so this is the form every browser capture carries.",
       "issue": ""
     },
     "css/borderBottomWidth": {
@@ -938,6 +1014,23 @@
       "notes": "",
       "issue": ""
     },
+    "css/borderLeftStyle": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid",
+          "match": "^(?!\\s*(?:solid|none|hidden)\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. The `border-style` shorthand and the per-edge width/colour longhands ARE routed, so a captured box keeps its edge widths and colours and loses only the line style: a dashed or dotted edge paints solid, and `none` / `hidden` paints as a solid line of the declared width. Chromium's computed style reports the four per-edge longhands and never the shorthand, so this is the form every browser capture carries.",
+      "issue": ""
+    },
     "css/borderLeftWidth": {
       "status": "supported",
       "mapsTo": "setBorderSide(id, 'left', px, '')",
@@ -996,6 +1089,23 @@
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
+      "issue": ""
+    },
+    "css/borderRightStyle": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid",
+          "match": "^(?!\\s*(?:solid|none|hidden)\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. The `border-style` shorthand and the per-edge width/colour longhands ARE routed, so a captured box keeps its edge widths and colours and loses only the line style: a dashed or dotted edge paints solid, and `none` / `hidden` paints as a solid line of the declared width. Chromium's computed style reports the four per-edge longhands and never the shorthand, so this is the form every browser capture carries.",
       "issue": ""
     },
     "css/borderRightWidth": {
@@ -1105,6 +1215,23 @@
       "notes": "",
       "issue": ""
     },
+    "css/borderTopStyle": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "every line style other than `solid` \u2014 dashed / dotted / double / groove / ridge / inset / outset all paint solid",
+          "match": "^(?!\\s*(?:solid|none|hidden)\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. The `border-style` shorthand and the per-edge width/colour longhands ARE routed, so a captured box keeps its edge widths and colours and loses only the line style: a dashed or dotted edge paints solid, and `none` / `hidden` paints as a solid line of the declared width. Chromium's computed style reports the four per-edge longhands and never the shorthand, so this is the form every browser capture carries.",
+      "issue": ""
+    },
     "css/borderTopWidth": {
       "status": "supported",
       "mapsTo": "setBorderSide(id, 'top', px, '')",
@@ -1157,14 +1284,26 @@
       "status": "supported",
       "mapsTo": "regex parse -> setBoxShadow(id, dx, dy, blur, spread, color, inset)",
       "supportedValues": [
-        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
-        "comma-separated multi-shadow (first shadow wins per arch-single-shadow)"
+        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color> \u2014 offsets first, colour last (the author-order form)"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "colour-first serialization `<color> <dx>px <dy>px <blur>px <spread>px` \u2014 the form getComputedStyle() returns, and therefore the form every browser capture carries",
+        "two or more comma-separated shadow layers on this surface"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "colour-first serialization `<color> <dx>px <dy>px <blur>px <spread>px` \u2014 the form getComputedStyle() returns, and therefore the form every browser capture carries",
+          "match": "^\\s*(?:#|rgba?\\(|hsla?\\(|oklab\\(|oklch\\(|lab\\(|lch\\(|color\\(|transparent\\b|[a-z]+\\s+-?[\\d.]+px)"
+        },
+        {
+          "value": "two or more comma-separated shadow layers on this surface",
+          "match": "^(?:[^(,]|\\([^)]*\\))*,"
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "Single-shadow only. Multiple comma-separated shadows are not split. pulp #1434 Triage #15: catalog status flipped supported\u2192partial \u2014 single-shadow with optional inset is wired (web-compat-style-decl.js:565); multi-shadow comma-separated lists are deferred. Wave 4 css extensive \u2014 multi-shadow comma-separated lists are arch-single-shadow (View::shadow_ stores a single ShadowSpec; stacking multiple drop-shadows would require a layered SkLayer paint pass and is an explicit non-goal \u2014 when authors need two shadows they use boxShadow + filter:drop-shadow).",
+      "notes": "This entry is the CSS-string surface (`el.style.boxShadow`), which is narrower than what Pulp can draw. The View and the bridge carry a full ordered stack \u2014 `View::set_box_shadow` / `add_box_shadow` take offsets, blur, spread, colour and an inset flag per layer, and `View::box_shadows()` returns the whole vector \u2014 so multi-layer shadows with spread and inset ARE drawable, and the design-import widget lowering emits exactly that (`setBoxShadow` for the first layer, `addBoxShadow` for the rest). What is narrow is the regex in `web-compat-style-decl-paint.js`, which parses one layer and expects the colour LAST. Two consequences, both silent: on the colour-first form CSS serializes (`rgba(0, 0, 0, 0.5) 0px 1px 2px 0px`) it binds the spread token as the colour and loses the real colour; and on a comma-separated list it takes the leading offsets of the first layer while a trailing `inset` on the LAST layer flips the first layer inset. A captured design reaches this surface through `.style.boxShadow`, so a captured shadow is not drawn as authored.",
       "issue": ""
     },
     "css/boxSizing": {
@@ -1212,11 +1351,19 @@
         "path(\"...\")",
         "none"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "every basic shape and reference other than path() \u2014 inset() / circle() / ellipse() / polygon() / rect() / xywh() / url(#ref) / the border-box..content-box keywords"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "every basic shape and reference other than path() \u2014 inset() / circle() / ellipse() / polygon() / rect() / xywh() / url(#ref) / the border-box..content-box keywords",
+          "match": "^(?!\\s*(?:none|path\\s*\\()).+"
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. Wiring landed in #1540 (clip_path_svg). Wave 1 architectural reclassification \u2014 Pulp wires only SVG `path()` by design (arch-path-only); url() / circle() / ellipse() / inset() / polygon() / box keywords are explicit non-goals (the Skia path is the universal primitive).",
+      "notes": "Pulp wires only SVG `path()` by design (arch-path-only); url() / circle() / ellipse() / inset() / polygon() / box keywords are explicit non-goals (the Skia path is the universal primitive). The failure is not a no-op: an unrecognized value sets the clip slot to the empty string, so the clip is DROPPED and the node paints its full box. A `clip-path: inset(0 round 12px)` corner therefore renders square with nothing reported.",
       "issue": ""
     },
     "css/color": {
@@ -1660,6 +1807,23 @@
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 A4 Bundle 7: status flipped missing \u2192 partial. setFontVariant bridge fn now exists; mirrors rn/fontVariant. Wave 4 css extensive \u2014 HarfBuzz feature integration is arch-paint-deferred (the bridge stores the value on View::font_variant_; HarfBuzz line-break/feature wiring at paint time is the follow-up tracked in mapsTo). Reclassified as paint-side gap rather than value-coverage gap.",
+      "issue": ""
+    },
+    "css/fontVariationSettings": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "all values",
+          "match": ".+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. A variable font therefore renders at its default instance: a design that reaches a weight or width through an axis rather than through font-weight renders at the wrong one, and nothing distinguishes that from the design having asked for the default.",
       "issue": ""
     },
     "css/fontWeight": {
@@ -3104,6 +3268,23 @@
       "notes": "CSS shim + bridge accept all 5 spec values and store them on Label. Paint path renders solid regardless today; non-solid styles fall back to solid (spec-allowed).",
       "issue": "1434"
     },
+    "css/textDecorationThickness": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "all values",
+          "match": ".+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. An underline paints at the Label's own default thickness.",
+      "issue": ""
+    },
     "css/textIndent": {
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js parses the length and forwards to setTextIndent(id, px); the bridge stores the value on View::text_indent_. SkParagraph::setTextIndent integration at paint time is the follow-up.",
@@ -3139,13 +3320,26 @@
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js:1356 parses `<dx>px <dy>px <blur>px <color>` and calls setTextShadow(id, dx, dy, blur, color); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and routes into the existing per-attribute slots (text_shadow_offset / text_shadow_radius / text_shadow_color) \u2014 same slots the React-style setTextShadow{Color,Offset,Radius} fan-out uses.",
       "supportedValues": [
-        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color> (parsed at the JS shim; bridge fn registration deferred to paint-time)"
+        "<dx>px <dy>px <blur>px <color> \u2014 offsets first, colour last, exactly one layer"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "colour-first serialization `<color> <dx>px <dy>px <blur>px` \u2014 the form getComputedStyle() returns; the regex does not match it at all, so the shadow is dropped with no error",
+        "two or more comma-separated shadow layers"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "colour-first serialization `<color> <dx>px <dy>px <blur>px` \u2014 the form getComputedStyle() returns; the regex does not match it at all, so the shadow is dropped with no error",
+          "match": "^\\s*(?:#|rgba?\\(|hsla?\\(|oklab\\(|oklch\\(|lab\\(|lch\\(|color\\(|transparent\\b|[a-z]+\\s+-?[\\d.]+px)"
+        },
+        {
+          "value": "two or more comma-separated shadow layers",
+          "match": "^(?:[^(,]|\\([^)]*\\))*,"
+        }
+      ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "Wave 5 css.5 \u2014 registered the previously-missing setTextShadow bridge fn so the JS shim no longer no-ops. Composes into the existing 3 per-attribute slots that already round-trip through bridge (color / offset / radius). Catalog stays `supported`: the round-trip is honest. Multi-shadow comma-separated lists are arch-single-shadow (Pulp's text-shadow model is one SkPaint::Looper per Label, matching box-shadow's single-shadow architecture). Inset is parsed but is invalid for text-shadow per CSS L3 (text-shadow has no inset variant) \u2014 the JS shim accepts it for shorthand parity but the bridge ignores.",
+      "notes": "One layer, offsets first. Text shadow shares box-shadow's shape and its two silent failures on captured input: the shim's regex wants `<dx>px <dy>px <blur>px <color>`, while CSS serializes the computed value colour-first, and a comma-separated list is not split. Because this regex has no optional spread group, the colour-first form does not match at all \u2014 so unlike box-shadow, which paints with a wrong colour, a captured text shadow is dropped entirely. Multi-layer is also an architectural limit here and not only a parser one: the paint model is one SkPaint looper per Label. Inset is invalid for text-shadow per CSS L3; the shim accepts it for shorthand parity and the bridge ignores it.",
       "issue": ""
     },
     "css/textTransform": {
@@ -3166,6 +3360,23 @@
         "test/test_widget_bridge_rn_oos_fixup.cpp [css-textTransform]"
       ],
       "notes": "Closure: 4 supported values pinned by test/test_widget_bridge_rn_oos_fixup.cpp [css-textTransform]; the two unsupported CJK-specific transforms are honestly reclassified as ARCH-DEFERRED (would require ICU Unicode-width data Pulp's Skia text path does not currently load).",
+      "issue": ""
+    },
+    "css/textUnderlineOffset": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "all values",
+          "match": ".+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. An underline paints at the Label's own default offset from the baseline.",
       "issue": ""
     },
     "css/top": {
@@ -3498,6 +3709,23 @@
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 A4 Bundle 5: missing -> partial -> supported. Bridge fn setWordBreak stores the keyword on View::word_break_; all 4 CSS-spec values (normal | break-all | keep-all | break-word) round-trip through the bridge. HarfBuzz line-break feature integration at paint time is the behavior-fidelity follow-up; the catalog claim is keyword-coverage complete.",
+      "issue": ""
+    },
+    "css/wordSpacing": {
+      "status": "missing",
+      "mapsTo": "n/a \u2014 not routed",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values other than `normal`"
+      ],
+      "unsupportedValueForms": [
+        {
+          "value": "all values other than `normal`",
+          "match": "^(?!\\s*normal\\s*$).+"
+        }
+      ],
+      "tests": [],
+      "notes": "No `case` for this property in core/view/js/web-compat-style-decl*.js and no bridge setter, so the declaration is discarded at the JS boundary. letter-spacing IS routed, so a design that spaces words apart keeps its glyph tracking and loses its word tracking \u2014 the run measures short and the text sits wrong inside a box the capture solved for the wider run.",
       "issue": ""
     },
     "css/wordWrap": {

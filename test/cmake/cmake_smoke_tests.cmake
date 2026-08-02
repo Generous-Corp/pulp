@@ -417,6 +417,21 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity"
         TIMEOUT 30)
 
+    # Paint-capability audit (tools/import-validation/audit_paint_capability.py)
+    # — asks whether a captured node's declared appearance has a lowering path,
+    # by reading compat.json. Every value-form check is tested in both
+    # directions, because the predecessor audit's defect was a predicate that
+    # could only ever answer "drawable". Also pins the ledger invariant that a
+    # machine-readable unsupportedValueForms entry names a value the
+    # human-readable unsupportedValues list also declares.
+    add_test(NAME audit-paint-capability
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_audit_paint_capability.py)
+    set_tests_properties(audit-paint-capability PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "import;fidelity"
+        TIMEOUT 60)
+
     # Golden re-import regression tool (tools/import-validation/golden_regression.py)
     # — self-test for its structural edge map. Guards the uint8-wraparound fix
     # (a 255->0 dark-on-light edge must not vanish). Exits 77 (skips) when numpy

@@ -1,0 +1,131 @@
+<!doctype html>
+<!--
+  Out-of-family probe for the paint-capability audit.
+
+  Every design in the capture corpus came from one generator family, and they
+  share an idiom: flat panels, gradients, rounded rectangles, text. A capability
+  number measured only on that family says what the family uses, not what the
+  lowering can do — and the confound is not theoretical, since one corpus design
+  already scores 1% per node and 100% per pixel.
+
+  So this page is deliberately built out of what that family never emits:
+  raster texture, a photographic image, a live <canvas>, blend modes, tiled
+  backgrounds, clip shapes and multi-layer shadows. It is a probe, not a design.
+  A high failure score here is the intended outcome — it is the measurement
+  working. Every asset is generated inline (an SVG data URI and canvas drawing
+  calls) so the page has no network dependency and captures identically anywhere.
+-->
+<meta charset="utf-8">
+<title>Out-of-family paint probe</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 1280px; height: 800px;
+    background: #14161c;
+    font-family: system-ui, sans-serif;
+    color: #e8ecf4;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .row { display: flex; gap: 16px; flex: 1; }
+  .cell {
+    flex: 1;
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+    padding: 14px;
+    box-sizing: border-box;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+
+  /* A photographic fill: a raster the lowering has to carry as an asset. */
+  .photo {
+    background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'>\
+<defs><radialGradient id='g'><stop offset='0' stop-color='%23ffb347'/>\
+<stop offset='1' stop-color='%236a1b9a'/></radialGradient></defs>\
+<rect width='160' height='160' fill='url(%23g)'/>\
+<circle cx='48' cy='56' r='30' fill='%23fff' opacity='0.5'/></svg>");
+    background-size: cover;
+    background-position: center;
+  }
+
+  /* A tiled texture: the size IS the pattern, not a decoration on top of it. */
+  .texture {
+    background-image:
+      repeating-linear-gradient(45deg, #1e2430 0 6px, #2a3242 6px 12px);
+    background-size: 24px 24px;
+    background-repeat: repeat;
+  }
+
+  /* Two backgrounds blended together — the layered-material idiom. */
+  .blended {
+    background-image:
+      linear-gradient(135deg, #ff5f6d 0%, #ffc371 100%),
+      repeating-radial-gradient(circle at 30% 30%, #000 0 4px, #fff 4px 8px);
+    background-blend-mode: overlay;
+  }
+
+  /* A non-rectangular cut. */
+  .clipped {
+    background: linear-gradient(180deg, #00d2ff, #3a7bd5);
+    clip-path: polygon(0 0, 100% 0, 100% 76%, 0 100%);
+  }
+
+  /* Depth built from a stack of shadows, not one. */
+  .stacked {
+    background: #202634;
+    box-shadow:
+      0 18px 40px rgba(0, 0, 0, 0.55),
+      0 2px 0 rgba(255, 255, 255, 0.08) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+
+  /* A frosted panel that tints as well as blurs. */
+  .frosted {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px) saturate(1.6) brightness(1.1);
+    border: 1px dashed rgba(255, 255, 255, 0.35);
+  }
+
+  canvas { display: block; width: 100%; height: 100%; border-radius: 10px; }
+  .label { position: absolute; bottom: 10px; left: 14px; text-shadow: 0 1px 2px #000; }
+</style>
+
+<div class="row">
+  <div class="cell photo"><span class="label">photographic fill</span></div>
+  <div class="cell texture"><span class="label">tiled texture</span></div>
+  <div class="cell blended"><span class="label">blended layers</span></div>
+</div>
+<div class="row">
+  <div class="cell clipped"><span class="label">clip shape</span></div>
+  <div class="cell stacked"><span class="label">stacked shadows</span></div>
+  <div class="cell frosted"><span class="label">frosted panel</span></div>
+</div>
+<div class="row">
+  <div class="cell" style="padding:0"><canvas id="scope" width="1216" height="220"></canvas></div>
+</div>
+
+<script>
+  // An imperative surface: there is no style to reproduce, which is exactly
+  // the case the style-driven audit must report rather than absorb.
+  const context = document.getElementById("scope").getContext("2d");
+  const { width, height } = context.canvas;
+  const fill = context.createLinearGradient(0, 0, width, 0);
+  fill.addColorStop(0, "#0f2027");
+  fill.addColorStop(1, "#2c5364");
+  context.fillStyle = fill;
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "#7ef9c0";
+  context.lineWidth = 2;
+  context.beginPath();
+  for (let x = 0; x < width; x++) {
+    const y = height / 2 + Math.sin(x / 26) * 60 * Math.exp(-x / 900);
+    x ? context.lineTo(x, y) : context.moveTo(x, y);
+  }
+  context.stroke();
+</script>
