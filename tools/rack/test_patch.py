@@ -616,8 +616,25 @@ def check_buildable_from_parts() -> tuple:
         "150-300 ms) to create a percussive pluck. Sequence a tight 16th-note "
         "pattern. Keep modulation minimal, a slow LFO on cutoff. Finish with a "
         "touch of saturation, short plate reverb, and a tempo-synced delay.")
+    # A FIXED inventory, not this machine's.
+    #
+    # The first version used P.inventory(), and installing a plugin that
+    # happens to carry a Reverb tag flipped the verdict from "reverb omitted"
+    # to "nothing missing" — the test was measuring the machine, not the logic.
+    # A capability test must state the world it is testing.
+    MORODER_INV = {"ForgeModular": {"modules": {
+        "VCO":      {"tags": ["Oscillator"]},
+        "FOURPOLE": {"tags": ["Filter"]},
+        "ENV":      {"tags": ["Envelope generator"]},
+        "SEQ":      {"tags": ["Sequencer"]},
+        "LFO":      {"tags": ["Low-frequency oscillator"]},
+        "VCA":      {"tags": ["Voltage-controlled amplifier"]},
+        "FOLD":     {"tags": ["Waveshaper", "Distortion"]},
+    }}, "Fundamental": {"modules": {
+        "Delay":    {"tags": ["Delay"]},
+    }}}
     ran += 1
-    pf = P.preflight(MORODER, P.inventory(), P.module_index(), P.catalog())
+    pf = P.preflight(MORODER, MORODER_INV, P.module_index(), P.catalog())
     if not pf["ok"]:
         print(f"  WRONG  the Moroder prompt is still refused: "
               f"{list(pf.get('missing') or {})}")
