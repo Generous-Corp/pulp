@@ -171,7 +171,46 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
     if (::stat(parent.c_str(), &status) != 0 || !S_ISDIR(status.st_mode))
         return false;
     const bool writable_by_others = (status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
-    return !writable_by_others || (status.st_mode & S_ISVTX) != 0;
+    if (writable_by_others && (status.st_mode & S_ISVTX) == 0)
+        return false;
+#if defined(__APPLE__)
+    errno = 0;
+    acl_t acl = ::acl_get_file(parent.c_str(), ACL_TYPE_EXTENDED);
+    if (acl == nullptr)
+        return errno == ENOENT || errno == EOPNOTSUPP;
+    bool safe = true;
+    acl_entry_t entry = nullptr;
+    int entry_result = ::acl_get_entry(acl, ACL_FIRST_ENTRY, &entry);
+    while (entry_result == 0 && safe) {
+        acl_tag_t tag = ACL_UNDEFINED_TAG;
+        acl_flagset_t flags = nullptr;
+        if (::acl_get_tag_type(entry, &tag) != 0 ||
+            ::acl_get_flagset_np(entry, &flags) != 0) {
+            safe = false;
+            break;
+        }
+        const int only_inherit = ::acl_get_flag_np(flags, ACL_ENTRY_ONLY_INHERIT);
+        acl_permset_mask_t mask = 0;
+        if (only_inherit < 0 || ::acl_get_permset_mask_np(entry, &mask) != 0) {
+            safe = false;
+            break;
+        }
+        const bool applies_to_parent = only_inherit == 0;
+        constexpr acl_permset_mask_t dangerous_mask =
+            ACL_ADD_FILE | ACL_ADD_SUBDIRECTORY | ACL_DELETE_CHILD | ACL_DELETE |
+            ACL_WRITE_SECURITY | ACL_CHANGE_OWNER;
+        const bool dangerous = (mask & dangerous_mask) != 0;
+        if (tag == ACL_EXTENDED_ALLOW && applies_to_parent && dangerous)
+            safe = false;
+        entry_result = ::acl_get_entry(acl, ACL_NEXT_ENTRY, &entry);
+    }
+    if (entry_result < 0 && errno != EINVAL)
+        safe = false;
+    ::acl_free(acl);
+    return safe;
+#else
+    return true;
+#endif
 #endif
 }
 

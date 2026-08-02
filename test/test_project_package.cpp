@@ -31,6 +31,10 @@
 #include <windows.h>
 #else
 #include <csignal>
+#if defined(__APPLE__)
+#include <membership.h>
+#include <sys/acl.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -761,6 +765,33 @@ TEST_CASE("Atomic project-package publisher creates owner-private staging",
     REQUIRE_FALSE(error);
     REQUIRE(status.type() == fs::file_type::directory);
     REQUIRE((status.permissions() & fs::perms::all) == fs::perms::owner_all);
+}
+#endif
+
+#if defined(__APPLE__)
+TEST_CASE("Atomic project-package publisher rejects namespace-writing parent ACLs",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-parent-acl");
+    fs::create_directories(temporary.path);
+    acl_t acl = ::acl_init(1);
+    REQUIRE(acl != nullptr);
+    acl_entry_t entry = nullptr;
+    REQUIRE(::acl_create_entry(&acl, &entry) == 0);
+    REQUIRE(::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0);
+    uuid_t user{};
+    REQUIRE(::mbr_uid_to_uuid(::geteuid(), user) == 0);
+    REQUIRE(::acl_set_qualifier(entry, user) == 0);
+    acl_permset_t permissions = nullptr;
+    REQUIRE(::acl_get_permset(entry, &permissions) == 0);
+    REQUIRE(::acl_add_perm(permissions, ACL_ADD_FILE) == 0);
+    REQUIRE(::acl_set_permset(entry, permissions) == 0);
+    REQUIRE(::acl_set_file(temporary.path.c_str(), ACL_TYPE_EXTENDED, acl) == 0);
+    ::acl_free(acl);
+
+    const auto publisher = AtomicPublisher::create(temporary.path / "published");
+
+    REQUIRE_FALSE(publisher);
+    REQUIRE(publisher.error().code == PackageErrorCode::InvalidPath);
 }
 #endif
 
