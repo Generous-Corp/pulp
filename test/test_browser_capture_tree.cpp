@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -193,6 +194,12 @@ struct SnapshotSpec {
 ///   31 rgb(9, 11, 16)
 ///   32 linear-gradient(180deg, rgb(40, 44, 52), rgb(9, 11, 16))
 ///   33 rgba(0, 0, 0, 0.6) 0px 8px 24px 0px   34 3px  35 rgb(240, 240, 240)
+///   36 knob      37 DRIVE   38 TONE   39 MIX
+///   40 "panel<TAB>active"   41 "<LF>  card  x"   42 " panel"
+///   43 "w-1/2 p-4"          44 a      45 b      46 "a[0]/div.b"
+///   47 matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)   — 45° rotation
+///   48 matrix(2, 0, 0, 2, 0, 0)                                — 2× scale
+///   49 SPAN
 /// so a style row of [11,14] is `background-image: none; display: block`.
 constexpr std::string_view kSnapshotStrings =
     R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
@@ -203,7 +210,12 @@ constexpr std::string_view kSnapshotStrings =
     R"J("class","wrap","inner","leaf","item","#text","   ","Level",)J"
     R"J("rgb(9, 11, 16)",)J"
     R"J("linear-gradient(180deg, rgb(40, 44, 52), rgb(9, 11, 16))",)J"
-    R"J("rgba(0, 0, 0, 0.6) 0px 8px 24px 0px","3px","rgb(240, 240, 240)")J";
+    R"J("rgba(0, 0, 0, 0.6) 0px 8px 24px 0px","3px","rgb(240, 240, 240)",)J"
+    R"J("knob","DRIVE","TONE","MIX",)J"
+    R"J("panel\tactive","\n  card  x"," panel",)J"
+    R"J("w-1/2 p-4","a","b","a[0]/div.b",)J"
+    R"J("matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)",)J"
+    R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN")J";
 
 /// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
 std::string build_snapshot(const SnapshotSpec& spec) {
@@ -563,7 +575,14 @@ TEST_CASE("every lowered node carries a stable anchor",
         INFO("node " << entry.node->name);
         REQUIRE(entry.node->stable_anchor_id);
         CHECK_FALSE(entry.node->stable_anchor_id->empty());
-        CHECK(entry.node->anchor_strategy.value_or("") == "path");
+        // NOT `path`. `AnchorStrategy::path` is an existing, different scheme
+        // — `Type[idx]` over the IR's own node types, no prefix — so a
+        // consumer that re-derived one against these anchors would compute
+        // `frame[0]/frame[0]` and match nothing. The name is asserted, and
+        // asserted to be distinct, because nothing re-derives it today and a
+        // silent collision would surface only once something did.
+        CHECK(entry.node->anchor_strategy.value_or("") == "capture-path");
+        CHECK(entry.node->anchor_strategy.value_or("") != "path");
         // Distinct nodes must not collide, or the tweaks layer applies a human
         // edit to whichever node it happened to find first.
         unique.insert(*entry.node->stable_anchor_id);
@@ -1062,6 +1081,273 @@ TEST_CASE("a hidden sibling does not move its neighbour's anchor",
           "capture:html[0]/body[0]/div.item[0]");
     CHECK(*shown_body->children[1].stable_anchor_id ==
           *survivor->stable_anchor_id);
+}
+
+TEST_CASE("hiding a middle sibling misapplies no stored edit",
+          "[browser-capture][native-lowering]") {
+    // The consequence, rather than the mechanism. Three knobs; the MIDDLE one
+    // is `display: none` in one capture and visible in the other, and nothing
+    // structural changed between them. An ordinal counted over the painted set
+    // renumbers MIX from `knob[2]` to `knob[1]` — so an edit stored against MIX
+    // silently lands on TONE, and the merge reports a clean apply.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV.knob 4 #text DRIVE, 5 DIV.knob 6 #text TONE,
+    //        7 DIV.knob 8 #text MIX
+    const std::string names = "[0,1,2,3,28,3,28,3,28]";
+    const std::string types = "[9,1,1,1,3,1,3,1,3]";
+    const std::string parents = "[-1,0,1,2,3,2,5,2,7]";
+    const std::string attributes =
+        "[[],[],[],[23,36],[],[23,36],[],[23,36],[]]";
+
+    const auto hidden = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,7,8]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14],"
+                      "[11,14]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,80,80],[10,10,80,20],"
+                      "[190,10,80,80],[190,10,80,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .texts = "[-1,-1,-1,-1,37,-1,39]",
+        },
+        "knobs-hidden");
+    const auto shown = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5,6,7,8]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14],"
+                      "[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,80,80],[10,10,80,20],"
+                      "[100,10,80,80],[100,10,80,20],"
+                      "[190,10,80,80],[190,10,80,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5,6,7]",
+            .texts = "[-1,-1,-1,-1,37,-1,38,-1,39]",
+        },
+        "knobs-shown");
+    CHECK(hidden.counts.lowered == 6);   // html, body, two knobs, two labels
+    CHECK(shown.counts.lowered == 8);    // and the middle knob with its label
+
+    // What an edit is stored against, keyed by the label a human recognises.
+    const auto anchor_of_label = [](const IRNode& root) {
+        std::map<std::string, std::string> out;
+        for (const auto& entry : composed(root)) {
+            if (entry.node->text_content.empty()) continue;
+            out[entry.node->text_content] =
+                entry.node->stable_anchor_id.value_or("<none>");
+        }
+        return out;
+    };
+    const auto before = anchor_of_label(hidden.root);
+    const auto after = anchor_of_label(shown.root);
+
+    // MIX keeps its ordinal across the sibling appearing, because the tally
+    // counts the document's children and not the capture's.
+    REQUIRE(before.count("MIX") == 1);
+    CHECK(before.at("MIX") ==
+          "capture:html[0]/body[0]/div.knob[2]/#text[0]");
+    CHECK(after.at("MIX") == before.at("MIX"));
+    CHECK(after.at("DRIVE") == before.at("DRIVE"));
+
+    // Said as the failure it prevents: no anchor stored against one label may
+    // resolve to a different label after the re-capture.
+    std::map<std::string, std::string> label_at_anchor;
+    for (const auto& [label, anchor] : after) label_at_anchor[anchor] = label;
+    for (const auto& [label, anchor] : before) {
+        INFO("anchor " << anchor << " stored against " << label);
+        REQUIRE(label_at_anchor.count(anchor) == 1);
+        CHECK(label_at_anchor.at(anchor) == label);
+    }
+}
+
+TEST_CASE("a class list is split on any whitespace, not only a space",
+          "[browser-capture][native-lowering]") {
+    // Every HTML formatter wraps a long class list across lines, and
+    // `prettier-plugin-tailwindcss` reorders one on save, so a tab or a newline
+    // between class tokens is ordinary rather than exotic. Splitting on a
+    // literal space alone leaves that whitespace INSIDE the node's signature —
+    // and inside every anchor derived from it — so reformatting a file that
+    // changed nothing renames the node and orphans its stored edits.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV class="panel<TAB>active", 4 DIV class="<LF>  card  x",
+    //        5 DIV class=" panel"  (a template rendering an empty slot first)
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2]",
+            .attributes = "[[],[],[],[23,40],[23,41],[23,42]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[10,10,80,80],[100,10,80,80],[190,10,80,80]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "class-whitespace");
+    const auto& root = lowered.root;
+    CHECK(lowered.counts.lowered == 5);
+
+    // The tab-separated and the leading-space forms both name the same class
+    // the plain form would.
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.name == "div.panel";
+          }) == 2);
+    CHECK(find_named(root, "div.card") != nullptr);
+
+    // The two failures this replaces, said directly: whitespace never reaches a
+    // name, and an empty leading token never degenerates one to a bare dot.
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.name.find_first_of(" \t\r\n\f\v") != std::string::npos;
+          }) == 0);
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.name == "div.";
+          }) == 0);
+}
+
+TEST_CASE("an anchor segment escapes the path's own delimiters",
+          "[browser-capture][native-lowering]") {
+    // `id` and `class` text is author-controlled and routinely contains the
+    // characters the path is built out of. Concatenating it raw makes an anchor
+    // that cannot be split back into segments, and — the part that costs a
+    // human their edit — lets two different nodes spell the same anchor.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.a, 4 DIV.b inside it,
+    //        5 DIV whose class is literally `a[0]/div.b`,
+    //        6 DIV class="w-1/2 p-4"  (the everyday Tailwind spelling)
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,3]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,2,2]",
+            .attributes = "[[],[],[],[23,44],[23,45],[23,46],[23,43]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14],"
+                      "[11,14]]",
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[10,10,80,80],[20,20,40,40],[100,10,80,80],"
+                      "[190,10,80,80]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+        },
+        "anchor-escaping");
+    const auto& root = lowered.root;
+    CHECK(lowered.counts.lowered == 6);
+
+    // The nested `div.b` and the node whose class merely SPELLS that nesting
+    // are different nodes, so they must not be the same anchor. Unescaped they
+    // are both `capture:html[0]/body[0]/div.a[0]/div.b[0]`.
+    const auto* nested = find_named(root, "div.b");
+    const auto* impostor = find_named(root, "div.a[0]/div.b");
+    REQUIRE(nested != nullptr);
+    REQUIRE(impostor != nullptr);
+    CHECK(*nested->stable_anchor_id != *impostor->stable_anchor_id);
+    CHECK(*nested->stable_anchor_id ==
+          "capture:html[0]/body[0]/div.a[0]/div.b[0]");
+    CHECK(*impostor->stable_anchor_id ==
+          "capture:html[0]/body[0]/div.a\\[0\\]\\/div.b[0]");
+
+    // A Tailwind fraction is the version of this that ships in real designs.
+    const auto* fraction = find_named(root, "div.w-1/2");
+    REQUIRE(fraction != nullptr);
+    CHECK(*fraction->stable_anchor_id ==
+          "capture:html[0]/body[0]/div.w-1\\/2[0]");
+
+    // The invariant the collision breaks, restated over the whole tree.
+    const auto all = anchors(root);
+    const std::set<std::string> unique(all.begin(), all.end());
+    CHECK(unique.size() == all.size());
+}
+
+TEST_CASE("a rotated element is not reported as drawn",
+          "[browser-capture][native-lowering]") {
+    // Snapshot bounds are post-transform, but for a rotation that box is the
+    // axis-aligned BOUNDING box and not the element's shape: Chrome reports a
+    // 100×20 bar at 45° as an 85×85 square. Drawing the box fills ~3.7× the ink
+    // in the wrong outline — and classifying it `native` makes the census claim
+    // the panel is fully drawn while it is not.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV rotated 45°,
+    //        4 SPAN inside it, 5 DIV scaled 2×
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,49,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,2]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[14,11],[14,11],[14,11],[14,47],[14,11],[14,48]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[157.5625,157.5625,84.875,84.875],"
+                      "[163.21875,161.8125,27.84375,27.828125],"
+                      "[95,35,100,100]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+            .computed_names = R"(["display","transform"])",
+        },
+        "rotated");
+    const auto& root = lowered.root;
+
+    CHECK(lowered.counts.element_capture_fallback == 1);
+    // The SPAN inside the rotated box is covered by the raster the box becomes,
+    // so it pools rather than drawing over it — the same rule an `<svg>` gets.
+    CHECK(lowered.counts.pooled_into_fallback == 1);
+    CHECK(lowered.counts.lowered == 4);
+
+    const auto* rotated = find_node(root, [](const IRNode& node) {
+        return attribute(node, "paint_class") == "element-capture-fallback";
+    });
+    REQUIRE(rotated != nullptr);
+    CHECK(attribute(*rotated, "capture_fallback_reason") == "transform");
+
+    // A 2× scale stays native, because ITS bounding box really is its shape.
+    // This is why the assumption reads as true until something rotates, so it
+    // is pinned rather than left to be rediscovered.
+    CHECK(lowered.counts.native == 3);   // html, body, and the scaled div
+    const auto* scaled = find_node(root, [](const IRNode& node) {
+        return attribute(node, "paint_class") == "native" &&
+               node.style.width && *node.style.width == 100.0f;
+    });
+    REQUIRE(scaled != nullptr);
+}
+
+TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",
+          "[browser-capture][native-lowering]") {
+    // The DOM snapshot is a sidecar of a bundle the pipeline otherwise treats
+    // as untrusted, and every ancestry question here walks `parent_of` until it
+    // goes negative. A node whose parent is itself never gets there: the walk
+    // spins while its accumulator grows, and a self-parented node additionally
+    // becomes its own child and recurses the tree walk until the stack is gone.
+    //
+    // Reaching this assertion at all is the result being asserted.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV whose parent is itself
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,3]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,50,50]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "parent-cycle");
+    CHECK(lowered.counts.lowered == 3);
+
+    // The cyclic node is still emitted, and it is NOT inside itself.
+    const auto* cyclic = find_named(lowered.root, "div");
+    REQUIRE(cyclic != nullptr);
+    CHECK(cyclic->children.empty());
+    CHECK(cyclic->stable_anchor_id.has_value());
 }
 
 TEST_CASE("the reorder audit counts a real inversion and only a visible one",

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <string_view>
@@ -39,6 +41,69 @@ bool is_blank(const std::string& text) {
     });
 }
 
+constexpr std::string_view kCssWhitespace = " \t\r\n\f\v";
+
+/// Visit `start`, then each of its ancestors, nearest first, until `visit`
+/// returns false or the root is reached.
+///
+/// Bounded by the node count as well as by `parent_of` returning -1. The DOM
+/// snapshot is an untrusted sidecar of the capture bundle, and a `parentIndex`
+/// entry that points at itself — or into a longer cycle — would otherwise spin
+/// forever while the caller's accumulator grew without bound.
+template <typename Visit>
+void walk_ancestry(const CapturedStyleIndex& index, int start, Visit&& visit) {
+    const int limit = index.node_count();
+    int current = start;
+    for (int steps = 0; current >= 0 && steps < limit; ++steps) {
+        if (!visit(current)) return;
+        current = index.parent_of(current);
+    }
+}
+
+/// The first class in a `class` attribute.
+///
+/// Split on ANY whitespace, not only a space: every HTML formatter wraps a long
+/// class list across lines, so a tab or a newline routinely sits between the
+/// tokens — and one left inside would put a line break inside the node's
+/// signature and inside every anchor derived from it. Leading whitespace is
+/// skipped for the same reason: a template that renders an empty slot
+/// (`class=" panel"`) still names the node `div.panel`, not `div.`.
+std::string_view first_class(std::string_view classes) {
+    const auto begin = classes.find_first_not_of(kCssWhitespace);
+    if (begin == std::string_view::npos) return {};
+    const auto end = classes.find_first_of(kCssWhitespace, begin);
+    return classes.substr(begin, end == std::string_view::npos
+                                     ? std::string_view::npos
+                                     : end - begin);
+}
+
+/// One anchor path segment with the path's own delimiters escaped.
+///
+/// `id` and `class` text is author-controlled and routinely contains the
+/// characters the path is built out of — Tailwind's `w-1/2` is the everyday
+/// case — so an unescaped segment yields an anchor that cannot be split back
+/// into segments and that two different nodes can spell the same way. A quote
+/// or a newline additionally breaks `find_anchored_tag`, which locates
+/// `data-pulp-anchor="<anchor>"` by literal scan.
+std::string escape_segment(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '/': out += "\\/"; break;
+            case '[': out += "\\["; break;
+            case ']': out += "\\]"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
 /// A fill that needs a decoded raster rather than a paintable gradient.
 ///
 /// `apply_computed_styles` has already split gradients out, so ANY surviving
@@ -66,12 +131,13 @@ std::string describe(const CapturedStyleIndex& index, int node_index) {
     if (name.empty()) return name;
     const auto id = index.attribute(node_index, "id");
     if (!id.empty()) return name + "#" + id;
-    const auto classes = index.attribute(node_index, "class");
-    if (classes.empty()) return name;
     // The first class is the identifying one in every design-system idiom we
-    // import; appending all of them makes the name unreadable.
-    const auto end = classes.find(' ');
-    return name + "." + classes.substr(0, end);
+    // import; appending all of them makes the name unreadable. The attribute is
+    // held by value because the view below points into it.
+    const auto classes = index.attribute(node_index, "class");
+    const auto first = first_class(classes);
+    if (first.empty()) return name;
+    return name + "." + std::string(first);
 }
 
 /// Ordinal of every node among its same-signature siblings.
@@ -106,15 +172,18 @@ std::string anchor_path(const CapturedStyleIndex& index,
                         const std::vector<int>& ordinal,
                         int node_index) {
     std::vector<std::string> segments;
-    for (int node = node_index; node >= 0; node = index.parent_of(node)) {
-        auto key = describe(index, node);
-        if (key.empty()) continue;
-        const int position =
-            node < static_cast<int>(ordinal.size())
-                ? ordinal[static_cast<size_t>(node)]
-                : 0;
-        segments.push_back(key + "[" + std::to_string(position) + "]");
-    }
+    walk_ancestry(index, node_index, [&](int node) {
+        const auto key = describe(index, node);
+        if (!key.empty()) {
+            const int position =
+                node < static_cast<int>(ordinal.size())
+                    ? ordinal[static_cast<size_t>(node)]
+                    : 0;
+            segments.push_back(escape_segment(key) + "[" +
+                               std::to_string(position) + "]");
+        }
+        return true;
+    });
     std::string path = "capture:";
     for (auto segment = segments.rbegin(); segment != segments.rend();
          ++segment) {
@@ -134,6 +203,47 @@ struct LoweredNode {
     int dom_parent_slot = -1;     ///< where DOM parentage alone would put it
     std::vector<int> children;    ///< slots, already in Chrome's paint order
 };
+
+/// Whether a computed `transform` leaves the element's painted shape equal to
+/// the box the snapshot reports for it.
+///
+/// DOMSnapshot bounds ARE post-transform, but for anything that rotates or
+/// skews, that box is the axis-aligned BOUNDING box rather than the shape: a
+/// 100×20 bar at 45° is reported as an 85×85 square, and painting the box fills
+/// roughly 3.7× the ink in the wrong outline. A scale is safe precisely because
+/// its bounding box IS its shape, which is why the assumption reads as true
+/// until something rotates.
+bool is_axis_preserving_transform(const std::string& value) {
+    if (value.empty() || value == "none") return true;
+    // Chrome serializes computed `transform` as a matrix, so the numbers are
+    // the whole answer. Any other spelling is treated as non-preserving rather
+    // than assumed harmless — including `matrix3d`, whose out-of-plane terms
+    // this two-dimensional test cannot speak to.
+    if (value.rfind("matrix(", 0) != 0 || value.back() != ')') return false;
+    std::vector<double> numbers;
+    const std::string body = value.substr(7, value.size() - 8);
+    size_t start = 0;
+    while (start <= body.size()) {
+        const auto comma = body.find(',', start);
+        const auto piece = body.substr(
+            start, comma == std::string::npos ? std::string::npos
+                                              : comma - start);
+        try {
+            numbers.push_back(std::stod(piece));
+        } catch (const std::exception&) {
+            return false;
+        }
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    if (numbers.size() != 6) return false;
+    constexpr double kFlat = 1e-6;
+    // b and c zero is a translation, a scale, or a flip. a and d zero is a
+    // quarter turn, whose bounding box is still the shape. Anything else has
+    // put the element's outline off the axes.
+    return (std::abs(numbers[1]) < kFlat && std::abs(numbers[2]) < kFlat) ||
+           (std::abs(numbers[0]) < kFlat && std::abs(numbers[3]) < kFlat);
+}
 
 bool boxes_overlap(const CapturedBox& a, const CapturedBox& b) {
     return a.left < b.left + b.width && b.left < a.left + a.width &&
@@ -160,6 +270,33 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     const auto painted = index.painted_nodes();
     counts.painted = static_cast<int>(painted.size());
 
+    // Which layout row carries each painted node's computed style. Ancestry
+    // questions have to reach a node's declarations, not only its tag.
+    std::unordered_map<int, int> layout_of;
+    for (const auto& node : painted) layout_of[node.node_index] = node.layout_index;
+
+    // "Are this element's pixels something style can reproduce at all?" Two
+    // separate reasons say no: the tag draws from outside CSS, or a transform
+    // has taken the element's outline off the axes so the box the snapshot
+    // reports is its bounding box rather than its shape.
+    std::unordered_map<int, bool> capture_only_memo;
+    const auto capture_only_node = [&](int node_index) {
+        const auto seen = capture_only_memo.find(node_index);
+        if (seen != capture_only_memo.end()) return seen->second;
+        bool answer = is_capture_only_element(index.tag_name(node_index));
+        if (!answer) {
+            const auto layout = layout_of.find(node_index);
+            if (layout != layout_of.end()) {
+                const auto computed = index.styles_for_layout(layout->second);
+                const auto transform = computed.find("transform");
+                answer = transform != computed.end() &&
+                         !is_axis_preserving_transform(transform->second);
+            }
+        }
+        capture_only_memo[node_index] = answer;
+        return answer;
+    };
+
     // "Is some ancestor of this node captured as one element?" — answered from
     // the DOCUMENT tree, never from what the walk has already visited. Paint
     // order is not document order, so a node inside an `<svg>` can be reached
@@ -167,25 +304,22 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // "not under a capture" for that whole chain and then keep answering it.
     std::unordered_map<int, bool> under_capture_only_memo;
     const auto under_capture_only = [&](int node_index) {
-        // Bounded by tree depth: `parent_of` returns -1 at the root and for any
-        // out-of-range index, so a malformed forest terminates rather than
-        // spinning. The chain is back-filled so each node is walked once.
+        // The chain is back-filled so each node is walked once.
         std::vector<int> chain;
         bool answer = false;
-        int current = index.parent_of(node_index);
-        while (current >= 0) {
+        walk_ancestry(index, index.parent_of(node_index), [&](int current) {
             const auto seen = under_capture_only_memo.find(current);
             if (seen != under_capture_only_memo.end()) {
                 answer = seen->second;
-                break;
+                return false;
             }
-            if (is_capture_only_element(index.tag_name(current))) {
+            if (capture_only_node(current)) {
                 answer = true;
-                break;
+                return false;
             }
             chain.push_back(current);
-            current = index.parent_of(current);
-        }
+            return true;
+        });
         for (const int node : chain) under_capture_only_memo[node] = answer;
         return answer;
     };
@@ -203,9 +337,8 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         }
         if (node.paint_order < 0) ++counts.missing_paint_order;
 
-        const bool capture_only =
-            node.node_type == kElementNode &&
-            is_capture_only_element(node.tag_name);
+        const bool capture_only = node.node_type == kElementNode &&
+                                  capture_only_node(node.node_index);
         if (under_capture_only(node.node_index)) {
             // The captured ancestor covers this node's pixels already. Emitting
             // it too would draw the same content twice, once wrongly. A nested
@@ -237,6 +370,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             paint_class = PaintClass::element_capture_fallback;
             lowered.type = "frame";
             lowered.attributes["capture_fallback_element"] = node.tag_name;
+            // WHY it cannot be drawn, because the two reasons have different
+            // fixes: a `<canvas>` is the permanent answer, a rotation is a
+            // transform the IR does not carry yet.
+            lowered.attributes["capture_fallback_reason"] =
+                is_capture_only_element(node.tag_name) ? "element" : "transform";
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
@@ -264,7 +402,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         lowered.attributes["paint_order"] = std::to_string(node.paint_order);
         lowered.attributes["source_tag"] = node.tag_name;
         lowered.stable_anchor_id = anchor_path(index, ordinal, node.node_index);
-        lowered.anchor_strategy = "path";
+        // NOT `path`: that name is already owned by `AnchorStrategy::path`,
+        // which is `Type[idx]` over the IR's own node types with no prefix. A
+        // consumer re-deriving one of those against an anchor built here would
+        // compute `frame[0]/frame[0]` and match nothing.
+        lowered.anchor_strategy = "capture-path";
 
         switch (paint_class) {
             case PaintClass::native: ++counts.native; break;
@@ -290,14 +432,17 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // a collapsed whitespace run) elides rather than orphaning its subtree.
     for (size_t i = 0; i < slots.size(); ++i) {
         int parent = -1;
-        for (int walk = index.parent_of(slots[i].node_index); walk >= 0;
-             walk = index.parent_of(walk)) {
-            const auto found = node_to_slot.find(walk);
-            if (found != node_to_slot.end()) {
-                parent = found->second;
-                break;
-            }
-        }
+        walk_ancestry(index, index.parent_of(slots[i].node_index),
+                      [&](int walk) {
+                          const auto found = node_to_slot.find(walk);
+                          if (found == node_to_slot.end()) return true;
+                          parent = found->second;
+                          return false;
+                      });
+        // A node that reaches itself is a `parentIndex` cycle, not parentage.
+        // Left alone it becomes its own child, and materializing the tree then
+        // recurses until the stack is gone.
+        if (parent == static_cast<int>(i)) parent = -1;
         slots[i].dom_parent_slot = parent;
     }
 
@@ -313,8 +458,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // in paint order, so "paints first" is simply the lower slot index, and
         // each step moves to a strict DOM ancestor so the walk terminates.
         const bool hoisted = parent > static_cast<int>(i);
-        while (parent > static_cast<int>(i))
+        // Each step moves to a strict DOM ancestor, so this terminates on any
+        // well-formed document; the slot count bounds it on a malformed one,
+        // where the parentage above can have been cut short mid-cycle.
+        for (size_t step = 0;
+             parent > static_cast<int>(i) && step < slots.size(); ++step)
             parent = slots[static_cast<size_t>(parent)].dom_parent_slot;
+        if (parent > static_cast<int>(i)) parent = -1;
         slots[i].parent_slot = parent;
         if (!hoisted) continue;
         ++counts.hoisted_escapes;
