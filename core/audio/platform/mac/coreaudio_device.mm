@@ -383,6 +383,7 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         auto buf_frames = static_cast<UInt32>(config_.buffer_size);
 
         input_buffer_storage_.resize(in_ch * buf_frames, 0.0f);
+        input_buffer_frames_ = buf_frames;
         input_ptrs_.resize(in_ch);
 
         // Build an AudioBufferList for AudioUnitRender
@@ -737,26 +738,52 @@ OSStatus CoreAudioDevice::render_callback(
     // Capture input from bus 1 if enabled
     BufferView<const float> input_view;
     if (self->input_enabled_ && self->input_buffer_list_) {
-        // Reset buffer sizes in case CoreAudio changed them
+        // Reset buffer sizes in case CoreAudio changed them — CLAMPED to what
+        // was actually allocated.
+        //
+        // This declared `inNumberFrames` of space unconditionally. The storage
+        // is allocated once for the configured block size, so a device that
+        // asks for more frames than that had AudioUnitRender memcpy past the
+        // end of the heap buffer. AddressSanitizer caught it as a 1880-byte
+        // heap-buffer-overflow inside AudioUnitRender, on the audio thread;
+        // the process then aborted later in whatever unrelated code allocated
+        // next — CoreText, CFPreferences, CoreGraphics — which is why it read
+        // as three different bugs.
+        //
+        // Clamping is the only response available here: growing the buffer
+        // means allocating on the audio thread, which is worse than dropping
+        // the extra frames of INPUT for one callback.
         auto in_ch = static_cast<UInt32>(self->config_.input_channels);
+        const UInt32 in_frames =
+            clamped_input_frames(inNumberFrames, self->input_buffer_frames_);
         for (UInt32 c = 0; c < in_ch; ++c) {
-            self->input_buffer_list_->mBuffers[c].mDataByteSize = inNumberFrames * sizeof(float);
+            self->input_buffer_list_->mBuffers[c].mDataByteSize =
+                in_frames * sizeof(float);
         }
 
         // Pull input with its own action-flags slot so flags written by the
         // bus-1 input render never leak back into the bus-0 output render on the
         // duplex path.
         AudioUnitRenderActionFlags input_flags = 0;
+        // ASKED for what there is room for, not for what was requested.
+        //
+        // Declaring the clamped size in the buffer list is not enough on its
+        // own: the frame count passed here is the REQUEST, and asking for more
+        // frames than the list has room for is what let AudioUnitRender write
+        // past the end. Request and capacity have to agree.
         OSStatus input_status = AudioUnitRender(
             self->audio_unit_, &input_flags, inTimeStamp,
             1,  // Bus 1 = input
-            inNumberFrames,
+            in_frames,
             self->input_buffer_list_);
 
         if (input_status == noErr) {
+            // The view is `in_frames` long, which may be shorter than the
+            // output block. A view claiming frames that were never captured
+            // hands the processor whatever the buffer held last.
             input_view = BufferView<const float>(
                 const_cast<const float**>(self->input_ptrs_.data()),
-                self->input_ptrs_.size(), inNumberFrames);
+                self->input_ptrs_.size(), in_frames);
         }
         // On error, input_view remains empty (silence) — don't crash
     }

@@ -72,6 +72,29 @@ private:
 };
 #endif
 
+/// Frames of input that may safely be requested, given what was allocated.
+///
+/// A free function, and PUBLIC, for one reason: the render callback is a
+/// static member driven by CoreAudio with a live AudioUnit, so the only thing
+/// a headless test can reach is this. Keeping the rule in one named place
+/// means the test exercises the code the callback runs rather than a copy of
+/// its reasoning — a test that re-implements a clamp passes while the clamp is
+/// missing.
+///
+/// The bug it exists to prevent: the callback declared `inNumberFrames` of
+/// space to AudioUnitRender and requested that many, while the storage is
+/// allocated once for the configured block size. A device asking for more had
+/// CoreAudio memcpy past the end of the heap buffer, on the audio thread —
+/// found by AddressSanitizer as a 1880-byte heap-buffer-overflow, and observed
+/// only as an abort later, in whatever unrelated code allocated next.
+///
+/// Clamping is the only response available on the audio thread: growing the
+/// buffer means allocating there, which is worse than dropping the extra
+/// frames of INPUT for one callback.
+constexpr UInt32 clamped_input_frames(UInt32 requested, UInt32 capacity) {
+    return requested < capacity ? requested : capacity;
+}
+
 class CoreAudioDevice : public AudioDevice {
 public:
     CoreAudioDevice(AudioDeviceID device_id);
@@ -182,6 +205,16 @@ private:
     std::vector<AudioBuffer> input_audio_buffers_;
     AudioBufferList* input_buffer_list_ = nullptr;
     size_t input_buffer_list_size_ = 0;
+    /// Frames the input storage was ALLOCATED for.
+    ///
+    /// The render callback is handed `inNumberFrames` by CoreAudio and used to
+    /// declare that many frames of space to AudioUnitRender without checking
+    /// this. A device that asks for more than was allocated then had
+    /// AudioUnitRender memcpy past the end of the heap buffer — caught by
+    /// AddressSanitizer as a 1880-byte heap-buffer-overflow on the audio
+    /// thread, which corrupted the heap and aborted the process later, in
+    /// whatever unrelated code allocated next.
+    UInt32 input_buffer_frames_ = 0;
 };
 
 class CoreAudioSystem : public AudioSystem {
