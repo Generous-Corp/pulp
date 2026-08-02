@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.770.0
+    VERSION 0.771.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -180,15 +180,13 @@ if(PULP_ENABLE_SWIFT)
         "helpers such as pulp_add_ios_host_app(), which enable Swift when "
         "Swift sources are present.")
 endif()
-# Visual Cmd+I inspector overlay in the standalone host. Default ON for
-# dev/examples builds. This option currently gates only standalone overlay
-# construction; it does not create a TCP inspector endpoint and does not prove
-# that inspector archive code is absent from a final artifact.
-#
-# The inspector library is still a transitive desktop-GPU dependency of
-# pulp-format. Until target separation lands, release configurations must not
-# infer endpoint reachability or binary stripping from this option alone.
-option(PULP_ENABLE_INSPECTOR "Wire the visual dev inspector overlay into the standalone host" ON)
+# Optional development-inspector SDK components. This controls build presence
+# only: protocol/client/runtime libraries and the desktop visual overlay are
+# available when ON, while every network endpoint still defaults to runtime
+# profile `off`. Ordinary plugin targets never link these components.
+option(PULP_ENABLE_INSPECTOR
+       "Build optional development-inspector SDK components"
+       ON)
 # RT output-boundary audio probe in the standalone host — the data source for
 # the dev Audio Inspector window. Default ON for dev/examples; release /
 # standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
@@ -293,6 +291,11 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # Sanitizers via PULP_SANITIZER=address|thread|undefined|memory|realtime
 # Coverage via PULP_ENABLE_COVERAGE=ON (Clang only, mutually exclusive
 # with PULP_SANITIZER).
+# Coverage-guided fuzz targets via PULP_ENABLE_FUZZING=ON. Off by default
+# because -fsanitize=fuzzer needs a compiler runtime Apple's clang does not
+# ship; the properties those targets check are also driven by deterministic
+# replays in the normal test suite, which need no special toolchain.
+option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtime)" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
@@ -332,6 +335,7 @@ else()
         "Pulp: project-package disabled; atomic Timeline authoring targets and "
         "the corresponding pulp-cpp/pulp-mcp commands will not be built")
 endif()
+add_subdirectory(core/timeline_agent_view)
 add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
@@ -358,6 +362,9 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The arranger rung sits above both the editor kernel and the view stack, so it
+# is added after core/view rather than beside core/timeline_editor.
+add_subdirectory(core/timeline_view)
 add_subdirectory(core/osc)
 add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
@@ -399,8 +406,24 @@ target_link_libraries(pulp-standalone
         $<INSTALL_INTERFACE:Pulp::sdl3-static>
 )
 
-if(PULP_ENABLE_GPU AND NOT ANDROID)
+# The inspector protocol/session/client foundation is CPU-only and installable
+# when the optional SDK component is requested. inspect/CMakeLists.txt adds the
+# GPU/view overlay target only where that stack exists.
+if(PULP_ENABLE_INSPECTOR)
     add_subdirectory(inspect)
+endif()
+
+# The visual Cmd+I overlay belongs only to the standalone authoring target.
+# Keeping this dependency off pulp-format is what prevents ordinary plugin
+# targets from inheriting inspector archives through the format SDK.
+if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
+    target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
+    target_compile_definitions(pulp-standalone PRIVATE
+        PULP_ENABLE_INSPECTOR=1
+        PULP_HAS_INSPECT=1)
+else()
+    target_compile_definitions(pulp-standalone PRIVATE
+        PULP_ENABLE_INSPECTOR=0)
 endif()
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
@@ -458,9 +481,12 @@ include(PulpUtils)
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
 
-# ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
-# pulp-cli requires the GPU stack through pulp::inspect. Its optional Timeline
-# authoring commands follow PULP_ENABLE_PROJECT_PACKAGE inside tools/cli.
+# ── CLI Tool (desktop only) ────────────────────────────────────────────────
+# The CLI already requires the desktop GPU stack for render/audio authoring
+# commands. Inspector commands use the CPU-only client/authoring targets when
+# the optional component exists and compile explicit unavailable stubs when it
+# does not; the CLI never links the visual pulp::inspect overlay. Its optional
+# Timeline authoring commands follow PULP_ENABLE_PROJECT_PACKAGE inside tools/cli.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()

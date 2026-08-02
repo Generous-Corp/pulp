@@ -3,6 +3,7 @@
 #include "asset_schema_policy.hpp"
 #include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
+#include "document_enum_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "sequence_schema_policy.hpp"
@@ -664,6 +665,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     const auto* automation = data.find("automation_lanes");
     const auto* take_lanes = data.find("take_lanes");
     const auto* record = data.find("record_armed");
+    const auto* tuning = data.find("tuning");
     const auto requires_devices =
         detail::track_schema_policy.requires_device_chain(envelope.value().version);
     const auto requires_automation =
@@ -676,6 +678,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.supports_freeze(envelope.value().version);
     const auto supports_mixer =
         detail::track_schema_policy.supports_mixer(envelope.value().version);
+    const auto supports_tuning =
+        detail::track_schema_policy.supports_tuning(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -688,8 +692,16 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         (requires_active_take_lane &&
          (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
         (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object) ||
-        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object))
+        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object) ||
+        (!supports_tuning && tuning))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
+    std::optional<TuningReference> decoded_tuning;
+    if (tuning) {
+        auto decoded = decode_tuning(*tuning, path + "/data/tuning");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_tuning = std::move(decoded).value();
+    }
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Track>(decoded_id.error().code, decoded_id.error().path,
@@ -773,10 +785,61 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .record_armed = decoded_record_armed,
                                             .active_take_lane_id = decoded_active_take_lane,
                                             .freeze = std::move(decoded_freeze).value(),
-                                            .mixer = decoded_mixer.value()});
+                                            .mixer = decoded_mixer.value(),
+                                            .tuning = decoded_tuning});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
+runtime::Result<TuningReference, PersistenceError> decode_tuning(const JsonValue& value,
+                                                                 std::string path) {
+    if (value.kind != JsonValue::Kind::Object)
+        return fail<TuningReference>(PersistenceErrorCode::InvalidSchema, path, value.begin);
+    auto system = string_field(value, "system", path);
+    auto pitch = required(value, "reference_pitch_millihertz", path);
+    const auto* scale = value.find("scale_content");
+    const auto* keyboard = value.find("keyboard_map_content");
+    if (!system)
+        return runtime::Err(system.error());
+    if (!pitch || !scale || !keyboard)
+        return fail<TuningReference>(PersistenceErrorCode::MissingField, std::move(path),
+                                     value.begin);
+    const auto named = detail::tuning_system_from_name(system.value());
+    if (!named)
+        return fail<TuningReference>(PersistenceErrorCode::InvalidSchema, path + "/system",
+                                     value.begin);
+    auto decoded_pitch = parse_u32_number(*pitch.value(), path + "/reference_pitch_millihertz");
+    if (!decoded_pitch)
+        return runtime::Err(decoded_pitch.error());
+    TuningReference tuning;
+    tuning.system = *named;
+    tuning.reference_pitch_millihertz = decoded_pitch.value();
+    // A hash is either the full 64-digit encoding or nothing. A malformed one
+    // is refused rather than decoded as absent, which would silently retune the
+    // document to whatever the fallback is.
+    const auto decode_hash =
+        [&](const JsonValue& encoded, const std::string& field_path,
+            std::optional<ContentHash>& out) -> std::optional<PersistenceErrorCode> {
+        if (encoded.kind == JsonValue::Kind::Null)
+            return std::nullopt;
+        if (encoded.kind != JsonValue::Kind::String)
+            return PersistenceErrorCode::InvalidSchema;
+        auto hash = ContentHash::from_hex(encoded.scalar);
+        if (!hash)
+            return PersistenceErrorCode::InvalidSchema;
+        out = *hash;
+        return std::nullopt;
+    };
+    if (const auto error = decode_hash(*scale, path + "/scale_content", tuning.scale_content))
+        return fail<TuningReference>(*error, path + "/scale_content", scale->begin);
+    if (const auto error =
+            decode_hash(*keyboard, path + "/keyboard_map_content", tuning.keyboard_map_content))
+        return fail<TuningReference>(*error, path + "/keyboard_map_content", keyboard->begin);
+    // The model owns the cross-member rules (which system may name a payload,
+    // and the admitted pitch range); restating them here would be a second copy
+    // that could disagree.
+    return runtime::Ok(tuning);
 }
 
 // A pre-v3 sequence carries no lane member at all, so a null value decodes as
@@ -785,7 +848,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
 // ordering the model requires — a document whose harmony is out of order is
 // rejected rather than silently sorted into a different tune.
 runtime::Result<ChordScaleLane, PersistenceError>
-decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
+                        DecodeContext& context, std::string lane_path) {
     if (!value) {
         auto empty = ChordScaleLane::create({});
         if (!empty)
@@ -830,10 +894,50 @@ decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::str
         if (!decoded_chord_root || !decoded_scale_root || decoded_chord_root.value() > 0xffu ||
             decoded_scale_root.value() > 0xffu)
             return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+        // The bass, the extension mask, and the voicing hint arrive together
+        // with the version that introduced them. A payload that carries some
+        // but not all of them, or carries any of them at an older version, is a
+        // contradiction rather than a partial event to be filled in.
+        const auto* bass = encoded.find("chord_bass");
+        const auto* extensions = encoded.find("chord_extensions");
+        const auto* voicing = encoded.find("voicing");
+        const auto present = (bass != nullptr) + (extensions != nullptr) + (voicing != nullptr);
+        if (detail_policy == MemberPolicy::Forbidden ? present != 0
+            : detail_policy == MemberPolicy::Required
+                ? present != 3
+                : present != 0 && present != 3)
+            return fail<ChordScaleLane>(PersistenceErrorCode::MissingField, item_path);
+        std::optional<std::uint8_t> decoded_bass;
+        std::uint16_t decoded_extensions = 0;
+        std::optional<ChordVoicing> decoded_voicing;
+        if (present == 3) {
+            if (bass->kind != JsonValue::Kind::Null) {
+                auto parsed = parse_u32_number(*bass, item_path + "/chord_bass");
+                // Narrowing must not be what makes an out-of-range bass look
+                // valid, for the same reason the roots above are width-checked.
+                if (!parsed || parsed.value() > 0xffu)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+                decoded_bass = static_cast<std::uint8_t>(parsed.value());
+            }
+            auto parsed_extensions =
+                parse_u32_number(*extensions, item_path + "/chord_extensions");
+            if (!parsed_extensions || parsed_extensions.value() > 0xffffu)
+                return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+            decoded_extensions = static_cast<std::uint16_t>(parsed_extensions.value());
+            if (voicing->kind != JsonValue::Kind::Null) {
+                if (voicing->kind != JsonValue::Kind::String)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+                const auto named = detail::chord_voicing_from_name(voicing->scalar);
+                if (!named)
+                    return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+                decoded_voicing = *named;
+            }
+        }
         events.push_back(
             ChordScaleEvent{timebase::TickPosition{decoded_position.value()}, *decoded_quality,
                             static_cast<std::uint8_t>(decoded_chord_root.value()), *decoded_mode,
-                            static_cast<std::uint8_t>(decoded_scale_root.value())});
+                            static_cast<std::uint8_t>(decoded_scale_root.value()), decoded_bass,
+                            decoded_extensions, decoded_voicing});
     }
     auto created = ChordScaleLane::create(std::move(events));
     if (!created)
@@ -987,15 +1091,21 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         }
         decoded_regions.reserve(regions.value()->array.size());
         for (std::size_t index = 0; index < regions.value()->array.size(); ++index) {
-            auto decoded = decode_region(regions.value()->array[index], context,
-                                         path + "/data/regions/" + std::to_string(index));
+            auto decoded = decode_region(
+                regions.value()->array[index],
+                member_policy_for(
+                    sequence_schema_policy.requires_section_role(structural.value().version)),
+                context, path + "/data/regions/" + std::to_string(index));
             if (!decoded)
                 return runtime::Err(decoded.error());
             decoded_regions.push_back(std::move(decoded).value());
         }
     }
-    auto decoded_lane =
-        decode_chord_scale_lane(chord_lane, context, path + "/data/chord_scale_lane");
+    auto decoded_lane = decode_chord_scale_lane(
+        chord_lane,
+        member_policy_for(
+            sequence_schema_policy.requires_chord_detail(structural.value().version)),
+        context, path + "/data/chord_scale_lane");
     if (!decoded_lane)
         return runtime::Err(decoded_lane.error());
     auto decoded_groove = decode_groove(groove, context, path + "/data/groove");
@@ -1232,6 +1342,18 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
         decoded_session_start =
             SessionStart{timebase::SamplePosition{decoded_start.value()}, decoded_rate.value()};
     }
+    // The tuning arrives only from a payload whose version admits it, on the
+    // same terms as the session origin above.
+    std::optional<TuningReference> decoded_tuning;
+    if (const auto* tuning = data.value()->find("tuning")) {
+        if (!detail::project_schema_policy.supports_tuning(envelope.value().version))
+            return fail<Project>(PersistenceErrorCode::InvalidSchema, "/data/tuning");
+        auto decoded = detail::decode_tuning(*tuning, "/data/tuning");
+        if (!decoded)
+            return fail<Project>(decoded.error().code, decoded.error().path,
+                                 decoded.error().byte_offset);
+        decoded_tuning = std::move(decoded).value();
+    }
     auto created = Project::create(ProjectInput{.id = {decoded_id.value()},
                                                 .name = std::move(name).value(),
                                                 .next_item_id = decoded_next.value(),
@@ -1240,7 +1362,8 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                                                 .sequences = std::move(decoded_sequences),
                                                 .tempo_map = std::move(decoded_tempo_map),
                                                 .meter_map = std::move(decoded_meter_map),
-                                                .session_start = decoded_session_start});
+                                                .session_start = decoded_session_start,
+                                                .tuning = decoded_tuning});
     if (!created)
         return model_fail<Project>(created.error(), "/");
     if (identities) {

@@ -337,6 +337,34 @@ TEST_CASE("design-import benchmark metric helpers handle edge inputs",
     REQUIRE(cpu_clock_delta_ms(0, CLOCKS_PER_SEC) == Catch::Approx(1000.0));
 }
 
+TEST_CASE("design-import benchmark baked IR fixture states every widget colour",
+          "[design-import][benchmark][tokens]") {
+    // The fixture stands in for a captured design, and materializing it must
+    // leave no widget key on Pulp's built-in colour — otherwise the baked-native
+    // lane measures a tree painted by the framework rather than by the design,
+    // and the benchmark is itself an instance of the gap the
+    // `design-token-unmapped` diagnostic exists to report.
+    //
+    // Asking the mapper which keys it could not fill, rather than listing them,
+    // keeps this true as the rule table grows.
+    const auto ir = build_baked_ir();
+    std::vector<std::string> unresolved;
+    const auto theme = ir_tokens_to_theme(ir.tokens, &unresolved);
+    std::string gaps;
+    for (const auto& key : unresolved) gaps += (gaps.empty() ? "" : ", ") + key;
+    INFO("unfilled widget keys: " << gaps);
+    CHECK(unresolved.empty());
+    CHECK_FALSE(unmapped_widget_token_diagnostic(unresolved).has_value());
+
+    // The palette must actually reach the primitives, and must not be Pulp's
+    // own: a fixture that happened to state the built-in colours would satisfy
+    // the count above while proving nothing.
+    REQUIRE(theme.colors.count("knob.arc") == 1);
+    CHECK(theme.colors.at("knob.arc") == theme.colors.at("accent"));
+    CHECK(theme.colors.at("meter.green") == theme.colors.at("signal-low"));
+    CHECK(theme.colors.at("control.track") == theme.colors.at("line-strong"));
+}
+
 TEST_CASE("design-import benchmark baked IR fixture carries expected controls",
           "[design-import][benchmark]") {
     const auto ir = build_baked_ir();

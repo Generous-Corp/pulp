@@ -8,6 +8,12 @@
 // checked rather than asserted: the interchange dependency floor gate scans
 // this file, so reaching for a view, host, or format header fails CI.
 //
+// The WASM half of that claim is carried by core/interchange/wasm, which builds
+// this file under emscripten, and by tools/ci/wasm-fixture-lane.sh, which runs
+// the corpus through the wasm build and requires a broken copy of it to come
+// back red. The Android half is still a statement about what this binary avoids
+// depending on rather than a lane that runs it.
+//
 // A corpus entry is a document plus a sibling `.expect` manifest stating what
 // the document is: its schema envelope version, identity, structural counts,
 // and the interchange concepts it uses. Without the manifest a fixture's

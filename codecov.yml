@@ -297,9 +297,17 @@ flags:
     paths:
       - core/timeline/
     carryforward: true
+  timeline_agent_view:
+    paths:
+      - core/timeline_agent_view/
+    carryforward: true
   timeline_editor:
     paths:
       - core/timeline_editor/
+    carryforward: true
+  timeline_view:
+    paths:
+      - core/timeline_view/
     carryforward: true
   view:
     paths:
@@ -519,9 +527,15 @@ component_management:
     - component_id: timeline
       name: timeline
       paths: ["core/timeline/**"]
+    - component_id: timeline_agent_view
+      name: timeline_agent_view
+      paths: ["core/timeline_agent_view/**"]
     - component_id: timeline_editor
       name: timeline_editor
       paths: ["core/timeline_editor/**"]
+    - component_id: timeline_view
+      name: timeline_view
+      paths: ["core/timeline_view/**"]
     - component_id: view
       name: view
       paths:

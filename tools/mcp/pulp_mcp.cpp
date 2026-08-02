@@ -13,10 +13,14 @@
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <algorithm>
+#include <optional>
+#include <vector>
 
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/service.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include "pulp_mcp_version.h"
 #include "mcp_json.hpp"
@@ -51,47 +55,193 @@ using pulp_mcp::handle_compat;
 // Shell-execution + tool handlers live in mcp_shell.hpp /
 // mcp_tools.{hpp,cpp}.
 using pulp_mcp::exec;
+using pulp_mcp::find_inspector_mcp_tool;
 using pulp_mcp::find_project_root;
-using pulp_mcp::shell_quote;
+using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_audio_excerpt_find;
+using pulp_mcp::handle_audio_model_activate;
+using pulp_mcp::handle_audio_model_list;
+using pulp_mcp::handle_audio_model_status;
+using pulp_mcp::handle_audio_plugin_inspect;
+using pulp_mcp::handle_audio_probe_json;
+using pulp_mcp::handle_audio_read_bundle;
+using pulp_mcp::handle_audio_render;
+using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_build;
-using pulp_mcp::handle_test;
-using pulp_mcp::handle_status;
-using pulp_mcp::handle_validate;
-using pulp_mcp::handle_minos;
+using pulp_mcp::handle_content;
+using pulp_mcp::handle_content_install;
+using pulp_mcp::handle_content_list;
+using pulp_mcp::handle_content_preview;
+using pulp_mcp::handle_content_remove;
+using pulp_mcp::handle_content_rescan;
+using pulp_mcp::handle_content_reveal;
+using pulp_mcp::handle_content_update;
+using pulp_mcp::handle_content_validate;
+using pulp_mcp::handle_inspect_pending_requests;
 using pulp_mcp::handle_kit;
+using pulp_mcp::handle_kit_apply;
+using pulp_mcp::handle_kit_init;
+using pulp_mcp::handle_kit_inspect;
+using pulp_mcp::handle_kit_pack;
+using pulp_mcp::handle_kit_plan;
+using pulp_mcp::handle_kit_publish_check;
+using pulp_mcp::handle_kit_remove;
 using pulp_mcp::handle_kit_search;
 using pulp_mcp::handle_kit_validate;
-using pulp_mcp::handle_kit_inspect;
-using pulp_mcp::handle_kit_plan;
 using pulp_mcp::handle_kit_verify;
-using pulp_mcp::handle_kit_apply;
-using pulp_mcp::handle_kit_remove;
-using pulp_mcp::handle_kit_pack;
-using pulp_mcp::handle_kit_publish_check;
-using pulp_mcp::handle_kit_init;
-using pulp_mcp::handle_content;
-using pulp_mcp::handle_content_validate;
-using pulp_mcp::handle_content_preview;
-using pulp_mcp::handle_content_install;
-using pulp_mcp::handle_content_update;
-using pulp_mcp::handle_content_list;
-using pulp_mcp::handle_content_rescan;
-using pulp_mcp::handle_content_remove;
-using pulp_mcp::handle_content_reveal;
-using pulp_mcp::handle_audio_model_status;
-using pulp_mcp::handle_audio_model_list;
-using pulp_mcp::handle_audio_model_activate;
-using pulp_mcp::handle_audio_read_bundle;
-using pulp_mcp::handle_audio_excerpt_find;
-using pulp_mcp::handle_audio_probe_json;
-using pulp_mcp::handle_audio_scope;
-using pulp_mcp::handle_audio_plugin_inspect;
-using pulp_mcp::handle_audio_render;
-using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_minos;
+using pulp_mcp::handle_status;
+using pulp_mcp::handle_test;
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
 #endif
-using pulp_mcp::handle_inspect_pending_requests;
+using pulp_mcp::handle_validate;
+using pulp_mcp::resolve_inspect_cli_binary;
+using pulp_mcp::shell_quote;
+
+namespace {
+
+struct InspectorCommandResult {
+    pulp::platform::ProcessResult process;
+    std::string output;
+
+    bool succeeded() const {
+        return process.exit_code == 0 &&
+               !process.timed_out &&
+               !process.was_cancelled;
+    }
+};
+
+InspectorCommandResult run_inspector_command(
+    const fs::path& root,
+    const std::string& method,
+    const std::string& params_json = "{}",
+    const std::string& session_id = {},
+    const std::string& instance_id = {},
+    const std::string& publication_id = {}) {
+    const auto cli = resolve_inspect_cli_binary(root);
+    pulp::platform::ProcessOptions options;
+    options.working_directory = root.string();
+    options.max_output_bytes = 2u * 1024u * 1024u;
+    std::vector<std::string> arguments{"inspect"};
+    if (!session_id.empty() && !instance_id.empty()) {
+        arguments.insert(arguments.end(),
+                         {"--session", session_id, "--instance", instance_id});
+        if (!publication_id.empty()) {
+            arguments.insert(
+                arguments.end(),
+                {"--publication", publication_id});
+        }
+    }
+    arguments.insert(arguments.end(),
+                     {"--command", method, "--params", params_json});
+    auto result = pulp::platform::ChildProcess::run(
+        cli.string(),
+        arguments,
+        options);
+    auto output = result.stdout_output + result.stderr_output;
+    if (output.empty() && result.exit_code != 0) {
+        output = "pulp inspect subprocess failed with exit code " +
+                 std::to_string(result.exit_code);
+    }
+    return {std::move(result), std::move(output)};
+}
+
+bool valid_inspector_identity(const std::string& value) {
+    return !value.empty() &&
+           std::all_of(value.begin(), value.end(), [](unsigned char byte) {
+               return (byte >= 'a' && byte <= 'z') ||
+                      (byte >= 'A' && byte <= 'Z') ||
+                      (byte >= '0' && byte <= '9') ||
+                      byte == '-' || byte == '_';
+           });
+}
+
+struct InspectorSelectionFields {
+    bool session_id = false;
+    bool instance_id = false;
+    bool publication_id = false;
+
+    bool any() const {
+        return session_id || instance_id || publication_id;
+    }
+
+    bool all() const {
+        return session_id && instance_id && publication_id;
+    }
+};
+
+InspectorSelectionFields inspector_selection_fields(const std::string& args_json) {
+    return {!extract_raw(args_json, "session_id").empty(),
+            !extract_raw(args_json, "instance_id").empty(),
+            !extract_raw(args_json, "publication_id").empty()};
+}
+
+bool has_inspector_selection(const std::string& session_id, const std::string& instance_id,
+                             const std::string& publication_id) {
+    return !session_id.empty() || !instance_id.empty() || !publication_id.empty();
+}
+
+bool valid_exact_inspector_selection(const std::string& session_id, const std::string& instance_id,
+                                     const std::string& publication_id) {
+    return valid_inspector_identity(session_id) && valid_inspector_identity(instance_id) &&
+           valid_inspector_identity(publication_id);
+}
+
+struct InspectorSelection {
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+};
+
+std::optional<InspectorSelection>
+resolve_inspector_selection(
+    const fs::path& root,
+    const std::string& session_id = {},
+    const std::string& instance_id = {},
+    const std::string& publication_id = {}) {
+    const bool has_explicit_selection =
+        has_inspector_selection(session_id, instance_id, publication_id);
+    if (has_explicit_selection) {
+        if (!valid_exact_inspector_selection(session_id, instance_id, publication_id)) {
+            return std::nullopt;
+        }
+        return InspectorSelection{session_id, instance_id, publication_id};
+    }
+    auto capabilities =
+        run_inspector_command(root, "Session.getCapabilities");
+    if (!capabilities.succeeded())
+        return std::nullopt;
+    auto discovered_session_id =
+        extract_string(capabilities.process.stdout_output, "sessionId");
+    auto discovered_instance_id =
+        extract_string(capabilities.process.stdout_output, "instanceId");
+    auto discovered_publication_id =
+        extract_string(capabilities.process.stdout_output, "publicationId");
+    if (!valid_inspector_identity(discovered_session_id) ||
+        !valid_inspector_identity(discovered_instance_id) ||
+        !valid_inspector_identity(discovered_publication_id))
+        return std::nullopt;
+    return InspectorSelection{
+        std::move(discovered_session_id),
+        std::move(discovered_instance_id),
+        std::move(discovered_publication_id)};
+}
+
+std::string inspector_tool_payload(InspectorCommandResult command) {
+    auto payload = "{\"content\":[{\"type\":\"text\",\"text\":" +
+                   json_string(command.output) + "}]}";
+    if (!command.succeeded())
+        payload.insert(payload.size() - 1, ",\"isError\":true");
+    return payload;
+}
+
+std::string inspector_error_payload(const std::string& message) {
+    return "{\"content\":[{\"type\":\"text\",\"text\":" +
+           json_string(message) + "}],\"isError\":true}";
+}
+
+}  // namespace
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
@@ -143,33 +293,45 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_create","description":"Scaffold a new plugin project from templates","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Plugin name"},"type":{"type":"string","enum":["effect","instrument"],"description":"Plugin type"},"manufacturer":{"type":"string","description":"Manufacturer name"}}}},)JSON";
     out += R"JSON({"name":"pulp_docs_check","description":"Validate docs consistency against the codebase","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_dom","description":"Experimental source-checkout client for DOM.getDocument. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_params","description":"Experimental source-checkout client for State.getParameters. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_value_channels","description":"Experimental source-checkout client for the value-channel catalog. Requires a custom inspector fixture; normal launches provide no endpoint and live telemetry is not wired.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_set_param","description":"Experimental source-checkout State.setParameter client for custom fixtures only. Normal launches provide no endpoint, and the current server lacks authenticated main-thread dispatch required for production mutation.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_screenshot","description":"Experimental source-checkout client requiring a custom inspector fixture. Live host capture is unavailable; use pulp_validate screenshot=true or pulp run --headless --screenshot today.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_evaluate","description":"Experimental source-checkout Runtime.evaluate client for a custom fixture only. Normal launches provide no endpoint; high-risk evaluation also requires explicit host wiring and enablement.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_performance","description":"Experimental source-checkout Performance.getMetrics client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_inspect_audio","description":"Experimental source-checkout Audio.getConfig client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_dom","description":"Experimental source-checkout client for DOM.getDocument. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_params","description":"Experimental source-checkout client for State.getParameters. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_value_channels","description":"Experimental source-checkout client for the value-channel catalog. Requires a custom inspector fixture; normal launches provide no endpoint and live telemetry is not wired.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_set_param","description":"Experimental source-checkout State.setParameter client for custom fixtures only. Normal launches provide no endpoint; the authenticated CLI path acquires a same-connection controller lease before mutation.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_screenshot","description":"Experimental source-checkout client requiring a custom inspector fixture. Live host capture is unavailable; use pulp_validate screenshot=true or pulp run --headless --screenshot today.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_evaluate","description":"Experimental source-checkout Runtime.evaluate client for a custom fixture only. Normal launches provide no endpoint; high-risk evaluation also requires explicit host wiring and enablement.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_performance","description":"Experimental source-checkout Performance.getMetrics client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_inspect_audio","description":"Experimental source-checkout Audio.getConfig client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_start_trace","description":"Experimental source-checkout custom-fixture client for Motion.startTrace; normal Pulp launches provide no endpoint. Attaches metric probes and returns trace_id when such a fixture is running.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_stop_trace","description":"Experimental source-checkout custom-fixture client for Motion.stopTrace; normal Pulp launches provide no endpoint. Releases a fixture-owned trace.","inputSchema":{"type":"object","required":["trace_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_snapshot","description":"Experimental source-checkout custom-fixture client for Motion.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_list_traces","description":"Experimental source-checkout custom-fixture client for Motion.listTraces; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_load_fixture","description":"Experimental source-checkout custom-fixture client for Motion.loadFixture; normal Pulp launches provide no endpoint. This legacy method reads a filesystem path and is classified unavailable in the future policy.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Absolute path to a .motion.jsonl fixture"}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_scrub_to","description":"Experimental source-checkout custom-fixture client for Motion.scrubTo; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["frame"],"properties":{"frame":{"type":"integer","description":"Target playhead frame (>= 0)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_play","description":"Experimental source-checkout custom-fixture client for Motion.play; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_pause","description":"Experimental source-checkout custom-fixture client for Motion.pause; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_enable_cost","description":"Experimental source-checkout custom-fixture client for Motion.enableCost; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_disable_cost","description":"Experimental source-checkout custom-fixture client for Motion.disableCost; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. The fixture must also be built with PULP_TRACING=ON.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"out_path":{"type":"string","description":"Explicit .pftrace output path (inspector picks a temp path when omitted)"},"ring_mb":{"type":"integer","description":"In-process ring size in mebibytes (default 80)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_stop","description":"Experimental source-checkout custom-fixture client for Trace.stopSession; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_snapshot","description":"Experimental source-checkout custom-fixture client for Trace.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_query","description":"Experimental source-checkout custom-fixture client for live Trace.query; normal Pulp launches provide no endpoint. Offline SQL over a .pftrace remains available through the CLI.","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_explain","description":"Experimental source-checkout custom-fixture client for live Trace.explain; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["question"],"properties":{"question":{"type":"string","description":"Plain-English question to investigate, e.g. 'why is my plugin slow to open?'"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_start_trace","description":"Experimental source-checkout custom-fixture client for Motion.startTrace; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns trace_id plus the exact session_id, instance_id, and non-reusable publication_id required for follow-up mutations.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_stop_trace","description":"Experimental source-checkout custom-fixture client for Motion.stopTrace; normal Pulp launches provide no endpoint. Releases a fixture-owned trace on the exact publication selected by start.","inputSchema":{"type":"object","required":["trace_id","session_id","instance_id","publication_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_motion_snapshot","description":"Experimental source-checkout custom-fixture client for Motion.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_motion_list_traces","description":"Experimental source-checkout custom-fixture client for Motion.listTraces; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_scrub_to","description":"Experimental source-checkout custom-fixture client for Motion.scrubTo on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["frame","session_id","instance_id","publication_id"],"properties":{"frame":{"type":"integer","description":"Target playhead frame (>= 0)"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_play","description":"Experimental source-checkout custom-fixture client for Motion.play on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_pause","description":"Experimental source-checkout custom-fixture client for Motion.pause on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_enable_cost","description":"Experimental source-checkout custom-fixture client for Motion.enableCost on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact authenticated session id"},"instance_id":{"type":"string","description":"Exact authenticated instance id"},"publication_id":{"type":"string","description":"Exact non-reusable publication id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_disable_cost","description":"Experimental source-checkout custom-fixture client for Motion.disableCost on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact authenticated session id"},"instance_id":{"type":"string","description":"Exact authenticated instance id"},"publication_id":{"type":"string","description":"Exact non-reusable publication id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns the exact session_id, instance_id, and non-reusable publication_id required to stop it. The fixture must also be built with PULP_TRACING=ON. The host owns the trace destination.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_stop","description":"Experimental source-checkout custom-fixture client for Trace.stopSession on the exact publication selected by start; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
+    out +=
+        R"JSON({"name":"pulp_trace_snapshot","description":"Experimental source-checkout custom-fixture client for Trace.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_query","description":"Reserved source-checkout live Trace.query compatibility surface. It currently returns capability_unavailable instead of pretending to run SQL; use the CLI's offline `pulp trace query <sql> --trace <file>` path.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Reserved named preset"},"format":{"type":"string","enum":["json","table","csv"],"description":"Requested output format"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_explain","description":"Reserved source-checkout live Trace.explain compatibility surface. It currently returns capability_unavailable; capture a .pftrace and run the trace-analysis workflow over offline queries.","inputSchema":{"type":"object","required":["question","session_id","instance_id","publication_id"],"properties":{"question":{"type":"string","description":"Plain-English investigation question"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
     out += R"JSON({"name":"pulp_minos","description":"Measure the minimum OS a built binary needs, read straight from the artifact (macOS deployment target / Linux glibc symbol version / Windows PE subsystem). Point it at any Mach-O / ELF / PE / static archive or a plugin bundle's inner binary. The floor of a binary is the MAX minimum among everything linked into it. The multi-repo consumer sweep (rebuild every downstream project and compare floors) is CLI-only: `pulp minos sweep`, because it clones and builds many repositories.","inputSchema":{"type":"object","required":["binary"],"properties":{"binary":{"type":"string","description":"Path to a built binary: a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo)"}}}},)JSON";
     out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
+    if (!pulp_mcp::decorate_inspector_mcp_tool_descriptions(out))
+        return R"JSON({"tools":[],"error":"invalid inspector MCP registry"})JSON";
     return out;
 }
 
@@ -280,6 +442,7 @@ static std::string handle_request_raw(const std::string& json) {
         }
 
         std::string result;
+        const auto* inspector_tool = find_inspector_mcp_tool(name);
         if (name == "pulp_compat")         result = handle_compat();
         else if (name == "pulp_build")          result = handle_build(args_json);
         else if (name == "pulp_test")      result = handle_test(args_json);
@@ -381,7 +544,7 @@ static std::string handle_request_raw(const std::string& json) {
             } else if (query.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: query is required\"}]}";
             } else {
-                auto output = exec(shell_quote((root / "build" / "tools" / "cli" / "pulp").string()) +
+                auto output = exec(shell_quote(pulp_mcp::resolve_cli_binary(root).string()) +
                                    " docs search " + shell_quote(query) + " 2>&1");
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
@@ -399,98 +562,195 @@ static std::string handle_request_raw(const std::string& json) {
         // pulp_motion_start_trace flips Coordinator::tracing_enabled
         // on attach (matches motion_inspector.cpp:~265), so callers
         // don't need to pre-arm tracing.
-        else if (name == "pulp_motion_start_trace" || name == "pulp_motion_stop_trace" ||
-                 name == "pulp_motion_snapshot" || name == "pulp_motion_list_traces" ||
-                 name == "pulp_motion_load_fixture" || name == "pulp_motion_scrub_to" ||
-                 name == "pulp_motion_play" || name == "pulp_motion_pause" ||
-                 name == "pulp_motion_enable_cost" || name == "pulp_motion_disable_cost") {
-            std::string inspector_method;
-            std::string inspector_params;  // pulp inspect --params JSON, empty for none
+        else if (inspector_tool != nullptr && name.starts_with("pulp_motion_")) {
+            std::string inspector_method(inspector_tool->method);
+            std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
-                inspector_method = "Motion.startTrace";
-                // Forward the raw args sub-object as params verbatim
-                // — the inspector parses {view_name, fps, metrics}
-                // out of it. Empty {} would fail with "metrics array
-                // required" on the inspector side, which is the
-                // right answer for callers that omit metrics.
-                inspector_params = " --params '" + args_json + "'";
+                const auto view_name = extract_string(args_json, "view_name");
+                const auto metrics = extract_raw(args_json, "metrics");
+                const auto fps = extract_raw(args_json, "fps");
+                inspector_params =
+                    "{\"view_name\":" + json_string(view_name) +
+                    ",\"metrics\":" +
+                    (metrics.empty() ? "null" : metrics);
+                if (!fps.empty())
+                    inspector_params += ",\"fps\":" + fps;
+                inspector_params += "}";
             } else if (name == "pulp_motion_stop_trace") {
-                inspector_method = "Motion.stopTrace";
                 auto trace_id_raw = extract_raw(args_json, "trace_id");
                 if (trace_id_raw.empty()) trace_id_raw = "0";
-                inspector_params = std::string(" --params '{\"trace_id\":") + trace_id_raw + "}'";
-            } else if (name == "pulp_motion_snapshot") {
-                inspector_method = "Motion.snapshot";
-            } else if (name == "pulp_motion_list_traces") {
-                inspector_method = "Motion.listTraces";
-            } else if (name == "pulp_motion_load_fixture") {
-                inspector_method = "Motion.loadFixture";
-                auto path = extract_string(args_json, "path");
-                // Shell-quote the JSON object in single quotes so the
-                // file path's spaces and special characters survive
-                // the cli's argv parse. Paths cannot contain single
-                // quotes in practice (POSIX) — if a user passes one
-                // the inspector will reject the malformed JSON, which
-                // is the right answer.
-                inspector_params = std::string(" --params '{\"path\":\"") + path + "\"}'";
+                inspector_params =
+                    std::string("{\"trace_id\":") + trace_id_raw + "}";
             } else if (name == "pulp_motion_scrub_to") {
-                inspector_method = "Motion.scrubTo";
                 auto frame_raw = extract_raw(args_json, "frame");
                 if (frame_raw.empty()) frame_raw = "0";
-                inspector_params = std::string(" --params '{\"frame\":") + frame_raw + "}'";
-            } else if (name == "pulp_motion_play") {
-                inspector_method = "Motion.play";
-            } else if (name == "pulp_motion_pause") {
-                inspector_method = "Motion.pause";
-            } else if (name == "pulp_motion_enable_cost") {
-                inspector_method = "Motion.enableCost";
-            } else if (name == "pulp_motion_disable_cost") {
-                inspector_method = "Motion.disableCost";
+                inspector_params =
+                    std::string("{\"frame\":") + frame_raw + "}";
             }
 
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                auto session_id = extract_string(args_json, "session_id");
+                auto instance_id = extract_string(args_json, "instance_id");
+                auto publication_id =
+                    extract_string(args_json, "publication_id");
+                const auto selection_fields = inspector_selection_fields(args_json);
+                if (selection_fields.any() &&
+                    (!selection_fields.all() ||
+                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be supplied together as exact safe identities");
+                }
+                if (result.empty() && name == "pulp_motion_start_trace") {
+                    auto selection = resolve_inspector_selection(
+                        root, session_id, instance_id, publication_id);
+                    if (!selection) {
+                        result = inspector_error_payload(
+                            "Error: could not resolve a safe exact inspector "
+                            "publication before Motion.startTrace");
+                    } else {
+                        session_id = selection->session_id;
+                        instance_id = selection->instance_id;
+                        publication_id = selection->publication_id;
+                    }
+                }
+                const bool requires_selection =
+                    name == "pulp_motion_start_trace" ||
+                    name == "pulp_motion_stop_trace" ||
+                    name == "pulp_motion_scrub_to" ||
+                    name == "pulp_motion_play" ||
+                    name == "pulp_motion_pause" ||
+                    name == "pulp_motion_enable_cost" ||
+                    name == "pulp_motion_disable_cost";
+                if (result.empty() && requires_selection &&
+                    !valid_exact_inspector_selection(session_id, instance_id, publication_id)) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be the exact safe identities returned by the "
+                        "start tool");
+                }
+                if (result.empty()) {
+                    auto command = run_inspector_command(
+                        root, inspector_method, inspector_params,
+                        session_id, instance_id, publication_id);
+                    if (command.succeeded() &&
+                        name == "pulp_motion_start_trace") {
+                        command.output +=
+                            "\nExact selection: {\"session_id\":" +
+                            json_string(session_id) +
+                            ",\"instance_id\":" +
+                            json_string(instance_id) +
+                            ",\"publication_id\":" +
+                            json_string(publication_id) + "}";
+                    }
+                    result = inspector_tool_payload(std::move(command));
+                }
             }
         }
         // Perfetto tracing — inspector Trace.* wrappers (mirror the motion
         // block). These proxy the LIVE-session RPCs; the client-side CLI verbs
         // (doctor / open / fetch, and offline `query --trace`) have no
-        // inspector RPC and therefore no MCP tool. start/query/explain forward
-        // their args sub-object verbatim — the inspector parses the same keys
-        // the CLI's build_*_params emit ({categories,out_path,ring_mb},
-        // {sql|preset,format}, {question}).
-        else if (name == "pulp_trace_start" || name == "pulp_trace_stop" ||
-                 name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
-                 name == "pulp_trace_explain") {
-            std::string inspector_method;
-            std::string inspector_params;  // pulp inspect --params JSON, empty for none
+        // inspector RPC and therefore no MCP tool. query/explain forward their
+        // argument objects; start rebuilds only its protocol fields so MCP-only
+        // exact selectors are not exposed to the inspector domain.
+        else if (inspector_tool != nullptr && name.starts_with("pulp_trace_")) {
+            std::string inspector_method(inspector_tool->method);
+            std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
-                inspector_method = "Trace.startSession";
-                inspector_params = " --params '" + args_json + "'";
-            } else if (name == "pulp_trace_stop") {
-                inspector_method = "Trace.stopSession";
-            } else if (name == "pulp_trace_snapshot") {
-                inspector_method = "Trace.snapshot";
+                const auto categories = extract_raw(args_json, "categories");
+                const auto ring_mb = extract_raw(args_json, "ring_mb");
+                inspector_params = "{";
+                if (!categories.empty())
+                    inspector_params += "\"categories\":" + categories;
+                if (!ring_mb.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"ring_mb\":" + ring_mb;
+                }
+                inspector_params += "}";
             } else if (name == "pulp_trace_query") {
-                inspector_method = "Trace.query";
-                inspector_params = " --params '" + args_json + "'";
+                const auto sql = extract_string(args_json, "sql");
+                const auto preset = extract_string(args_json, "preset");
+                const auto format = extract_string(args_json, "format");
+                inspector_params = "{";
+                if (!sql.empty())
+                    inspector_params += "\"sql\":" + json_string(sql);
+                if (!preset.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"preset\":" + json_string(preset);
+                }
+                if (!format.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"format\":" + json_string(format);
+                }
+                inspector_params += "}";
             } else if (name == "pulp_trace_explain") {
-                inspector_method = "Trace.explain";
-                inspector_params = " --params '" + args_json + "'";
+                inspector_params =
+                    "{\"question\":" +
+                    json_string(extract_string(args_json, "question")) + "}";
             }
 
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                auto session_id = extract_string(args_json, "session_id");
+                auto instance_id = extract_string(args_json, "instance_id");
+                auto publication_id =
+                    extract_string(args_json, "publication_id");
+                const auto selection_fields = inspector_selection_fields(args_json);
+                if (selection_fields.any() &&
+                    (!selection_fields.all() ||
+                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be supplied together as exact safe identities");
+                }
+                if (result.empty() && name == "pulp_trace_start") {
+                    auto selection = resolve_inspector_selection(
+                        root, session_id, instance_id, publication_id);
+                    if (!selection) {
+                        result = inspector_error_payload(
+                            "Error: could not resolve a safe exact inspector "
+                            "publication before Trace.startSession");
+                    } else {
+                        session_id = selection->session_id;
+                        instance_id = selection->instance_id;
+                        publication_id = selection->publication_id;
+                    }
+                }
+                const bool requires_selection =
+                    name == "pulp_trace_start" ||
+                    name == "pulp_trace_stop" ||
+                    name == "pulp_trace_query" ||
+                    name == "pulp_trace_explain";
+                if (result.empty() && requires_selection &&
+                    !valid_exact_inspector_selection(session_id, instance_id, publication_id)) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be the exact safe identities returned by "
+                        "pulp_trace_start");
+                }
+                if (result.empty()) {
+                    auto command = run_inspector_command(
+                        root, inspector_method, inspector_params,
+                        session_id, instance_id, publication_id);
+                    if (command.succeeded() && name == "pulp_trace_start") {
+                        command.output +=
+                            "\nExact selection: {\"session_id\":" +
+                            json_string(session_id) +
+                            ",\"instance_id\":" +
+                            json_string(instance_id) +
+                            ",\"publication_id\":" +
+                            json_string(publication_id) + "}";
+                    }
+                    result = inspector_tool_payload(std::move(command));
+                }
             }
         }
         // Pending agent-request queue — an in-process read of the
@@ -503,7 +763,7 @@ static std::string handle_request_raw(const std::string& json) {
         // Inspector parameter mutation — delegate to `pulp inspect` with a
         // typed `--params` payload. Kept separate from the read-only inspector
         // tools below because those pass no arguments; this one carries id/value.
-        else if (name == "pulp_inspect_set_param") {
+        else if (inspector_tool != nullptr && name == "pulp_inspect_set_param") {
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
@@ -514,48 +774,59 @@ static std::string handle_request_raw(const std::string& json) {
                 std::string params_json = std::string("{\"id\":") + std::to_string(pid) +
                     ",\"value\":" + std::to_string(value) +
                     ",\"normalized\":" + (normalized ? "true" : "false") + "}";
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                // Single-quote the JSON payload: it contains only digits,
-                // braces, colons, commas and bare true/false — no single quotes.
-                auto output = exec(cli + " inspect --command State.setParameter --params '"
-                                   + params_json + "' 2>&1");
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                const auto session_id = extract_string(args_json, "session_id");
+                const auto instance_id = extract_string(args_json, "instance_id");
+                const auto publication_id = extract_string(args_json, "publication_id");
+                const auto selection_fields = inspector_selection_fields(args_json);
+                if (selection_fields.any() &&
+                    (!selection_fields.all() ||
+                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be supplied together as exact safe identities");
+                } else {
+                    auto command =
+                        run_inspector_command(root, std::string(inspector_tool->method),
+                                              params_json, session_id, instance_id, publication_id);
+                    result = inspector_tool_payload(std::move(command));
+                }
             }
         }
         // Inspector tools — delegate to pulp inspect CLI for now
         // (in the future these could connect directly via TCP)
-        else if (name == "pulp_inspect_dom" || name == "pulp_inspect_params" ||
-                 name == "pulp_inspect_value_channels" ||
-                 name == "pulp_inspect_screenshot" || name == "pulp_inspect_evaluate" ||
-                 name == "pulp_inspect_performance" || name == "pulp_inspect_audio") {
-            // Map MCP tool name to inspector protocol method
-            std::string inspector_method;
-            std::string inspector_params;
-            if (name == "pulp_inspect_dom")         inspector_method = "DOM.getDocument";
-            else if (name == "pulp_inspect_params")  inspector_method = "State.getParameters";
-            else if (name == "pulp_inspect_value_channels") inspector_method = "State.getValueChannels";
-            else if (name == "pulp_inspect_screenshot") inspector_method = "Capture.screenshot";
-            else if (name == "pulp_inspect_evaluate") {
-                inspector_method = "Runtime.evaluate";
+        else if (inspector_tool != nullptr) {
+            std::string inspector_method(inspector_tool->method);
+            std::string inspector_params = "{}";
+            if (name == "pulp_inspect_evaluate") {
                 auto expr = extract_string(args_json, "expression");
                 if (!expr.empty()) {
                     auto params_json = std::string("{\"expression\":") + json_string(expr) + "}";
-                    inspector_params = " --params " + shell_quote(params_json);
+                    inspector_params = params_json;
                 }
             }
-            else if (name == "pulp_inspect_performance") inspector_method = "Performance.getMetrics";
-            else if (name == "pulp_inspect_audio")   inspector_method = "Audio.getConfig";
 
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                const auto session_id = extract_string(args_json, "session_id");
+                const auto instance_id = extract_string(args_json, "instance_id");
+                const auto publication_id = extract_string(args_json, "publication_id");
+                const auto selection_fields = inspector_selection_fields(args_json);
+                if (selection_fields.any() &&
+                    (!selection_fields.all() ||
+                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
+                    result = inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "must be supplied together as exact safe identities");
+                } else {
+                    auto command = run_inspector_command(root, inspector_method, inspector_params,
+                                                         session_id, instance_id, publication_id);
+                    result = inspector_tool_payload(std::move(command));
+                }
             }
-        }
-        else return json_error(id, -32601, "Unknown tool: " + name);
+        } else
+            return json_error(id, -32601, "Unknown tool: " + name);
 
         return json_result(id, result);
     }

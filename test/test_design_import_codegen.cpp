@@ -3761,3 +3761,134 @@ TEST_CASE("generate_pulp_js escapes raw box shadows and keeps audio labels escap
     const auto with_comments = generate_pulp_js(ir, commented);
     REQUIRE(with_comments.find("\nsetTheme('light');\n") == std::string::npos);
 }
+
+// A faithful browser capture is one absolutely-positioned backdrop image with
+// the bound controls placed ON it at their designed coordinates. The web-compat
+// audio-widget branch returns before the shared style emitter, so every style
+// the panel depends on has to be written inside that branch — and placement was
+// not, which dropped each control into flex flow. They then stack down one edge
+// sharing an x, which renders cleanly and is invisible to anything that only
+// checks the controls exist.
+namespace {
+
+DesignIR capture_overlay_ir() {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 600.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode backdrop;
+    backdrop.type = "image";
+    backdrop.name = "capture";
+    backdrop.style.position = "absolute";
+    backdrop.style.left = 0.0f;
+    backdrop.style.top = 0.0f;
+    backdrop.style.width = 600.0f;
+    backdrop.style.height = 400.0f;
+    ir.root.children.push_back(std::move(backdrop));
+
+    // Three knobs across the panel — different x AND different y, as a real
+    // design places them.
+    const float xs[] = {40.0f, 180.0f, 320.0f};
+    const float ys[] = {50.0f, 90.0f, 130.0f};
+    for (int i = 0; i < 3; ++i) {
+        IRNode knob;
+        knob.type = "frame";
+        knob.name = "knob_" + std::to_string(i);
+        knob.audio_widget = AudioWidgetType::knob;
+        knob.attributes["binding"] = "param_" + std::to_string(i);
+        knob.style.position = "absolute";
+        knob.style.left = xs[i];
+        knob.style.top = ys[i];
+        knob.style.width = 64.0f;
+        knob.style.height = 64.0f;
+        // z-index 10 is exactly web-compat's auto-overlay threshold. Set here
+        // on purpose: the lowering must NOT pass it through, or these three
+        // controls would each claim the single global overlay slot.
+        knob.style.z_index = 10;
+        ir.root.children.push_back(std::move(knob));
+    }
+    return ir;
+}
+
+}  // namespace
+
+TEST_CASE("web-compat overlay controls carry their designed position",
+          "[view][import][web-compat][overlay]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(capture_overlay_ir(), opts);
+    INFO(js);
+
+    // Four absolutely-positioned boxes: the backdrop plus three controls. Before
+    // the fix only the backdrop had one.
+    REQUIRE(count_occurrences(js, ".style.position = 'absolute';") == 4);
+
+    // Each control at ITS OWN x. This is the assertion that fails when controls
+    // fall into flex flow: they would then share the parent's left edge, and the
+    // panel is a column of knobs beside the artwork instead of over it.
+    REQUIRE(js.find(".style.left = '40px';") != std::string::npos);
+    REQUIRE(js.find(".style.left = '180px';") != std::string::npos);
+    REQUIRE(js.find(".style.left = '320px';") != std::string::npos);
+    REQUIRE(js.find(".style.top = '50px';") != std::string::npos);
+    REQUIRE(js.find(".style.top = '90px';") != std::string::npos);
+    REQUIRE(js.find(".style.top = '130px';") != std::string::npos);
+
+    // Three distinct x values, not three copies of one. A lowering that emitted
+    // the same left for every control would satisfy a mere "left is present"
+    // check and still render the stacked column this test exists to catch.
+    REQUIRE(count_occurrences(js, ".style.left = '0px';") == 1);  // backdrop only
+
+    // And NO z-index, however the design declared one. `position:absolute`
+    // with z-index >= 10 makes web-compat claim the single global overlay slot,
+    // so passing a designed stacking order through would have three controls
+    // fighting over it — last one wins and the other two are released. Placing
+    // them is the fix; promoting them to popovers is not.
+    REQUIRE(js.find(".style.zIndex") == std::string::npos);
+}
+
+TEST_CASE("a web-compat control with no declared position emits none",
+          "[view][import][web-compat][overlay]") {
+    // Flex flow is correct for a control the design did not place. Emitting a
+    // position anyway would break every non-overlay panel to fix the overlay one.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Rack";
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "flow_knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 64.0f;
+    knob.style.height = 64.0f;
+    ir.root.children.push_back(std::move(knob));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    REQUIRE(js.find(".style.position") == std::string::npos);
+    REQUIRE(js.find(".style.left") == std::string::npos);
+    REQUIRE(js.find(".style.zIndex") == std::string::npos);
+    // The box itself still lands.
+    REQUIRE(js.find(".style.width = '64px';") != std::string::npos);
+}
+
+TEST_CASE("an overlay control keeps the capture visible beneath it",
+          "[view][import][web-compat][overlay]") {
+    // The positioning subset is emitted, NOT the general style run. A control
+    // over a capture has no body of its own — the bitmap underneath IS its body
+    // — so a background emitted here would paint over the art.
+    const auto js = generate_pulp_js(capture_overlay_ir(), [] {
+        CodeGenOptions o;
+        o.mode = CodeGenMode::web_compat;
+        o.include_comments = false;
+        return o;
+    }());
+    INFO(js);
+    REQUIRE(js.find(".style.backgroundColor") == std::string::npos);
+}

@@ -265,6 +265,36 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map"
+    },
+    "sequence.section-role": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject arrangement markers carry a name and span but no typed structural role"
+    },
+    "context.chord-bass": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the DAWproject chord representation carries quality and root but no bass"
+    },
+    "context.chord-extension": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the DAWproject chord representation carries no added scale degrees"
+    },
+    "context.chord-voicing": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the DAWproject chord representation carries no voicing hint"
+    },
+    "tuning.project": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject has no document-wide tuning statement"
+    },
+    "tuning.instrument": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject has no per-instrument tuning statement"
     }
   }
 }

@@ -32,6 +32,12 @@ modules:
     dependencies: [timeline, timebase]
     docs: reference/modules.md#timeline_editor
 
+  - name: timeline_view
+    summary: Views that draw the document and turn a gesture into an edit intent the first consumer of the editor rung with a floor row that deliberately omits playback so a view acquires no transport and takes resolved values rather than viewport policy
+    status: experimental
+    dependencies: [timeline_editor, timeline, timebase, view, canvas]
+    docs: reference/modules.md#timeline_view
+
   - name: interchange
     summary: Format-neutral interchange capability tables loss manifests and the export plan/run seam that refuses any concept a writer cannot represent unless the caller accepts it by name
     status: experimental
@@ -233,7 +239,7 @@ modules:
       during recording so goldens can't silently compare across policies.
       `MotionScrubber` (in `inspect/`) loads a `.motion.jsonl` fixture and
       re-emits the prefix of events with `frame <= playhead` over the inspector
-      wire via `Motion.loadFixture` / `.scrubTo` / `.play` / `.pause` — passive
+      wire in-process fixture loading plus `Motion.scrubTo` / `.play` / `.pause` — passive
       timeline replay for design review and CI artifact triage.
       Visual-analyzer (`tools/motion/visual/analyze_sequence.py`) adds
       `--grid` (alphanumeric A1..H12 cell overlay), `--trim` (drop idle

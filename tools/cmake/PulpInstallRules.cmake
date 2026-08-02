@@ -32,7 +32,7 @@ if(TARGET pulp-project-package)
     list(APPEND PULP_SDK_TARGETS pulp-project-package)
 endif()
 list(APPEND PULP_SDK_TARGETS
-    pulp-timeline-editor
+    pulp-timeline-agent-view pulp-timeline-editor
     pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
@@ -90,6 +90,27 @@ endif()
 
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
+endif()
+if(TARGET pulp-inspect-protocol)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
+endif()
+if(TARGET pulp-inspect-discovery-support)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery-support)
+endif()
+if(TARGET pulp-inspect-discovery)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
+endif()
+if(TARGET pulp-inspect-publication)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
+endif()
+if(TARGET pulp-inspect-client)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-client)
+endif()
+if(TARGET pulp-inspect-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
+endif()
+if(TARGET pulp-inspect-authoring)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
@@ -249,7 +270,7 @@ if(TARGET pulp-project-package)
     list(APPEND _pulp_sdk_header_subsystems project_package)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
-    timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
+    timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
@@ -265,6 +286,31 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+# The inspector protocol/session foundation is deliberately separate from the
+# desktop GPU overlay and remains available to installed CPU-only clients.
+if(TARGET pulp-inspect)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inc")
+elseif(TARGET pulp-inspect-protocol)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+endif()
 
 # SDK license + third-party attribution.
 #

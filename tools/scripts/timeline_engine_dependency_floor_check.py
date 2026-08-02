@@ -36,6 +36,17 @@ MODULE_FLOORS = {
         "platform",
         "runtime",
     },
+    # Agent-facing read projections sit directly above the immutable document.
+    # They may hash and summarize timeline values but must not acquire editor,
+    # playback, interchange, UI, host, or adapter dependencies.
+    "timeline_agent_view": {
+        "timeline_agent_view",
+        "timeline-agent-view",
+        "timeline",
+        "timebase",
+        "platform",
+        "runtime",
+    },
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
     # host, or a view must never become something it can reach for.
@@ -73,6 +84,29 @@ MODULE_FLOORS = {
         "platform",
         "runtime",
     },
+    # The arranger rung, above the editor kernel. It is the first thing that
+    # consumes the kernel rather than declaring it, and it is where the view
+    # and canvas stack becomes admissible — which is the whole reason it is a
+    # row of its own instead of a widening of timeline_editor's.
+    #
+    # Two absences carry the ladder. `playback` keeps a view's only coupling
+    # toward audio the SequencerUiHost interface, so an arranger drawn over
+    # somebody else's engine acquires no transport. `project_package` keeps
+    # storage a sibling rung rather than a base: an editor is proven against
+    # serialize round-trip, and re-hosting it on a package protocol later is
+    # adapter work above this row, not a change to it.
+    "timeline_view": {
+        "timeline_view",
+        "timeline-view",
+        "timeline_editor",
+        "timeline-editor",
+        "timeline",
+        "timebase",
+        "view",
+        "canvas",
+        "platform",
+        "runtime",
+    },
 }
 
 # Modules a row's *link closure* drags in beyond its floor. These are recorded
@@ -100,6 +134,30 @@ LINK_CLOSURE_DEBT = {
     # whatever answer is reached, instead of passing green on a floor the
     # artifact never honoured.
     "playback": {"state", "signal", "sample_bank_manifest", "events"},
+    "timeline_view": {
+        "audio",
+        "events",
+        "format",
+        "graph",
+        "host",
+        "midi",
+        "playback",
+        "render",
+        "sample_bank_manifest",
+        "signal",
+        "state",
+    },
+    # core/timeline_view links pulp::view for its canvas and input types, and
+    # pulp::view's own closure reaches the whole desktop stack — most of this
+    # arrives through `view -> host -> playback`. None of it is a header the
+    # view rung may include: the floor row deliberately omits `playback` so a
+    # view's only coupling toward audio stays the SequencerUiHost interface,
+    # and widening the row to silence this would grant exactly the include
+    # rights the omission exists to deny.
+    #
+    # This is the debt to pay down if a view is ever to link something
+    # narrower than pulp::view. Until then the gate polices the artifact the
+    # link actually produces rather than the one the row describes.
 }
 
 # Modules under core/ that link a declared engine module but carry no floor row
@@ -638,15 +696,38 @@ def run_selftest() -> int:
             return 1
 
         # A core/ module that reaches into the engine while owning no floor.
-        consumer_root = root / "core" / "timeline_view"
+        #
+        # The name must be one no real module will ever take: the assertion
+        # needs this consumer to be *undeclared*, so naming it after a module
+        # that does not exist yet is correct only until someone creates one.
+        # That already happened once — the fixture was `timeline_view`, which
+        # became a real rung, and the mkdir then collided with a directory the
+        # fixture tree already carried. The guard below turns that from a
+        # confusing FileExistsError into a statement of what broke.
+        consumer_name = "selftest_undeclared_consumer"
+        if consumer_name in MODULE_FLOORS or consumer_name in ENGINE_CONSUMERS:
+            print(
+                f"selftest fixture name {consumer_name!r} is now a declared "
+                "module; the undeclared-consumer assertion cannot hold. "
+                "Rename the fixture."
+            )
+            return 1
+        consumer_root = root / "core" / consumer_name
+        if consumer_root.exists():
+            print(
+                f"selftest fixture name {consumer_name!r} already exists under "
+                "core/; the undeclared-consumer assertion cannot hold. "
+                "Rename the fixture."
+            )
+            return 1
         consumer_root.mkdir(parents=True)
         consumer_cmake = consumer_root / "CMakeLists.txt"
         consumer_cmake.write_text(
-            "target_link_libraries(pulp-timeline-view PUBLIC "
+            "target_link_libraries(pulp-selftest-undeclared-consumer PUBLIC "
             "pulp::view pulp::playback)\n"
         )
         if not any(
-            "core/timeline_view: links engine module(s) pulp::playback" in error
+            f"core/{consumer_name}: links engine module(s) pulp::playback" in error
             for error in verify(root)
         ):
             print("selftest missed an undeclared engine consumer")

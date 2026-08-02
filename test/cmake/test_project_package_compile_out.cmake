@@ -139,9 +139,14 @@ foreach(_forbidden_registration IN ITEMS
         pulp-test-mcp-timeline-tools
         pulp-test-timeline-agent
         pulp-test-cli-timeline)
-    string(FIND "${_inner_ctest}" "${_forbidden_registration}"
-        _registration_offset)
-    if(NOT _registration_offset EQUAL -1)
+    # Catch-discovered suites appear as <name>-<hex>_include.cmake. Match that
+    # exact suffix (or a direct add_test name) so a new independent suite such
+    # as pulp-test-timeline-agent-view cannot satisfy this negative check by
+    # prefix alone.
+    string(REGEX MATCH
+        "(\\[=\\[${_forbidden_registration}\\]=\\]|/${_forbidden_registration}-[0-9a-f]+_include\\.cmake)"
+        _forbidden_registration_match "${_inner_ctest}")
+    if(_forbidden_registration_match)
         message(FATAL_ERROR
             "package-stripped build retained Timeline registration "
             "${_forbidden_registration}")
