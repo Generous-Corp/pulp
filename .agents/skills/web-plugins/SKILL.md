@@ -179,6 +179,15 @@ Consequences for anything on the web lane that publishes program state:
   the `AudioContext` survives — the new Worker republishes generation 1, and a
   consumer comparing generations alone refuses every publish from then on and
   renders a stale program with no diagnostic to distinguish it from silence.
+- **Decide a lane `Unchanged` on its `instance_token` too, not on
+  `(lane_id, generation)`.** The epoch separates producers; it does not separate
+  two programs from one producer, and that is the common case — a worklet's
+  Worker recompiling. `generation` is supplied by the caller rather than minted
+  per compile, so everything else about the lane can be identical. Each
+  `ProgramWireAutomationLaneRecord` carries the producer's own token for exactly
+  this; compare it for equality only, and only against a token from the same
+  `producer_epoch`. Keeping cursor state on a lane whose token moved renders the
+  stale curve with nothing malformed for the decoder to reject.
 
 ## Capability tiers are shared with mobile — do not mint a browser-local enum
 
