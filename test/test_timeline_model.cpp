@@ -25,6 +25,16 @@ TEST_CASE("Package-relative paths reject embedded NUL without C-string aliasing"
     REQUIRE(package_relative_path_is_lexically_safe("media/x.wav"));
 }
 
+TEST_CASE("Persisted locator compatibility is separate from portable publication paths") {
+    for (const auto path : {"media/take:1.wav", "media//take.wav", "media/./take.wav",
+                            "media/trailing. ", "media/CON.wav"}) {
+        INFO("historical package-relative locator: " << path);
+        REQUIRE(package_relative_path_is_lexically_safe(path));
+        REQUIRE_FALSE(package_relative_path_is_portable(path));
+    }
+    REQUIRE(package_relative_path_is_portable("media/take-1.wav"));
+}
+
 TEST_CASE("Timeline private identity equality is semantic across insertion histories") {
     pulp::timeline::detail::IdentityDirectory ascending;
     pulp::timeline::detail::IdentityDirectory interleaved;

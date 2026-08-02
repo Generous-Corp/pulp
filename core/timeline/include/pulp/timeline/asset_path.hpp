@@ -10,19 +10,33 @@ namespace pulp::timeline {
  * @{
  */
 
-/// Returns whether a UTF-8 package-relative asset locator is portable and
-/// cannot be reinterpreted as traversal, a Windows device, or an alternate
-/// data stream.
+/// Returns whether a persisted package-relative locator preserves Timeline's
+/// historical lexical contract: relative, NUL-free, and without parent traversal.
 inline bool package_relative_path_is_lexically_safe(std::string_view path) noexcept {
     if (path.empty() || path.find('\0') != std::string_view::npos || path.front() == '/' ||
         path.front() == '\\')
-        return false;
-    if (!is_valid_utf8(path))
         return false;
     const auto ascii_alpha = [](char value) noexcept {
         return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
     };
     if (path.size() >= 2 && ascii_alpha(path.front()) && path[1] == ':')
+        return false;
+
+    std::size_t component_begin = 0;
+    for (std::size_t index = 0; index <= path.size(); ++index) {
+        if (index != path.size() && path[index] != '/' && path[index] != '\\')
+            continue;
+        if (path.substr(component_begin, index - component_begin) == "..")
+            return false;
+        component_begin = index + 1;
+    }
+    return true;
+}
+
+/// Returns whether a new package-publication path is portable across supported
+/// filesystems and cannot be reinterpreted as a device or alternate data stream.
+inline bool package_relative_path_is_portable(std::string_view path) noexcept {
+    if (!package_relative_path_is_lexically_safe(path) || !is_valid_utf8(path))
         return false;
 
     const auto ascii_upper = [](char value) noexcept {

@@ -405,7 +405,7 @@ read_bounded_zip_archive(const fs::path& input, std::uint64_t limit, std::size_t
                                                  &impl->resource);
             if (stat.m_is_directory && !name.empty() && name.back() == '/')
                 name.pop_back();
-            if (name.empty() || !pulp::timeline::package_relative_path_is_lexically_safe(name)) {
+            if (name.empty() || !pulp::timeline::package_relative_path_is_portable(name)) {
                 ok = false;
                 message = "DAWproject ZIP contains an unsupported or unsafe entry";
                 break;
@@ -485,7 +485,7 @@ write_dawproject_archive_no_replace(const pulp::interchange::ExportArtifacts& ar
             if (!ok)
                 break;
             std::pmr::string name(artifact.name, &resource);
-            ok = pulp::timeline::package_relative_path_is_lexically_safe(name) &&
+            ok = pulp::timeline::package_relative_path_is_portable(name) &&
                  names.emplace(std::move(name)).second &&
                  mz_zip_writer_add_mem(&zip, artifact.name.c_str(), artifact.bytes.data(),
                                        artifact.bytes.size(), MZ_DEFAULT_COMPRESSION) != 0;

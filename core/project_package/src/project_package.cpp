@@ -117,7 +117,7 @@ bool validate_locator(const fs::path& root, const timeline::AssetLocator& locato
                       std::set<timeline::ContentHash>& verified) {
     if (locator.kind != timeline::AssetLocatorKind::PackageRelative)
         return true;
-    if (!timeline::package_relative_path_is_lexically_safe(locator.hint))
+    if (!timeline::package_relative_path_is_portable(locator.hint))
         return false;
     const auto canonical = std::string("media/") + expected.to_hex();
     return locator.hint == canonical && validate_canonical_blob(root, expected, maximum, verified);

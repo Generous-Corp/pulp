@@ -423,7 +423,7 @@ runtime::Result<bool, PackageError>
 AtomicPublisher::write(std::string_view relative_utf8,
                        std::span<const std::uint8_t> bytes) noexcept {
     if (!impl_ || impl_->committed ||
-        !timeline::package_relative_path_is_lexically_safe(relative_utf8))
+        !timeline::package_relative_path_is_portable(relative_utf8))
         return failure<bool>(PackageErrorCode::InvalidPath, impl_ ? impl_->staging : fs::path{});
     const fs::path relative = path_from_utf8(relative_utf8);
     if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
