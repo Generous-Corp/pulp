@@ -59,6 +59,7 @@ from test_version_bump_intent import (  # noqa: E402,F401
     StrandedDetectorIntentPendingTests,
 )
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401
+from test_skill_sync import RealSkillPathMapOwnershipTests  # noqa: E402,F401
 from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
 from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 
