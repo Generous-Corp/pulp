@@ -5603,3 +5603,45 @@ small escape hatch; it is the screen-sized photograph the native path exists to
 remove, reintroduced under another name. The area fraction is what makes that
 decidable: **bound it, and refuse a design whose unpainted area crosses the
 bound** rather than quietly rasterising a whole panel.
+
+## `cursor: pointer` turned every clickable thing into a grey box
+
+The single largest visual defect on a captured panel was not a border bug at
+all, and it looked like five unrelated ones: tabs gaining outlines they never
+had, a teal underline vanishing, `STEREO` / `TAPE` / a milestone chip / a
+"Signal on" button all losing their accent fill and rendering as identical grey
+boxes, and four sidebar nav items outlined where Chrome outlines only the
+active one. **Every selected state in the UI was invisible** — a semantic loss,
+not a cosmetic one, at an area-weighted score of 0.10.
+
+One cause: `parse_design_ir_json` runs `promote_interactive_frames`, which
+rewrites any frame with `cursor: pointer` to `type: "button"`. The materializer
+then builds a real widget, and the widget paints its **default chrome** — a
+grey rounded fill — **over** the captured appearance rather than alongside it.
+
+A web design puts `cursor: pointer` on *every* clickable thing — tabs, cards,
+nav items, mode switches — and the browser draws none of them any differently
+for it. **It is a hover affordance, not ink.** Inferring a widget from it is
+right for the authoring lanes (v0 / Figma / Stitch turn a clickable div into a
+control) and wrong for the capture lane, whose entire contract is that the
+panel is reproduced rather than re-designed.
+
+The gate is the `paint_class` attribute, which `lower_painted_tree` stamps on
+every node it lowers: **a node that carries it keeps its own appearance and is
+never promoted**, on any signal including a declared `role="button"` — what
+breaks the panel is default chrome overpainting, whatever prompted it.
+Interactivity on that lane comes from the semantic report, which names its
+controls and lowers them separately.
+
+**Two lessons worth carrying:**
+
+- **Diagnose with a minimal IR, not by reading the render.** Four hand-written
+  nodes — styleless, `cursor`, `color`, `zIndex`, `fontFamily`, a layout block —
+  through `pulp-design-ir-observe` isolated the trigger in one render. Reading
+  the paint path for an invented border would never have found it, because the
+  border code was innocent.
+- **Check the IR before blaming the renderer, and the renderer before blaming
+  the IR.** The IR for those nodes was perfect — `borderWidth: 0`, no fill. The
+  defect was between them. Two plausible mechanisms had been proposed (a border
+  shorthand painting at zero width; accent colours failing to parse) and both
+  were wrong; a five-minute bisect beat both guesses.
