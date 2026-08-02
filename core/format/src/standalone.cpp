@@ -782,19 +782,25 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     };
 
 #if PULP_STANDALONE_INSPECTOR
-    auto inspector_runtime = detail::StandaloneInspectorRuntime::create(
-        *this, *processor_, *bridge, window_root, *window,
-        effective_config.inspector_profile,
-        effective_config.inspector_capabilities);
-    if (!inspector_runtime) {
-        runtime::log_error(
-            "Standalone: requested Development Inspector profile could not start");
-        detail::retire_standalone_editor(*window, *bridge);
-        stop();
-        return false;
+    std::unique_ptr<detail::StandaloneInspectorRuntime> inspector_runtime;
+    if (!detail::StandaloneInspectorRuntime::profile_is_off(
+            effective_config.inspector_profile)) {
+        inspector_runtime = detail::StandaloneInspectorRuntime::create(
+            *this, *processor_, *bridge, window_root, *window,
+            effective_config.inspector_profile,
+            effective_config.inspector_capabilities);
+        if (!inspector_runtime) {
+            runtime::log_error(
+                "Standalone: requested Development Inspector profile could not start");
+            detail::retire_standalone_editor(*window, *bridge);
+            stop();
+            return false;
+        }
+        window->set_close_callback(
+            inspector_runtime->wrap_close(std::move(close_editor)));
+    } else {
+        window->set_close_callback(std::move(close_editor));
     }
-    window->set_close_callback(
-        inspector_runtime->wrap_close(std::move(close_editor)));
 #else
     window->set_close_callback(std::move(close_editor));
 #endif
@@ -835,17 +841,26 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
 #if PULP_STANDALONE_INSPECTOR
-    auto* inspector_runtime_ptr = inspector_runtime.get();
-    pre_screenshot_idle = [settings_ptr, inspector_runtime_ptr] {
-        if (settings_ptr) settings_ptr->poll();
-        inspector_runtime_ptr->pump();
-    };
-    window->set_idle_callback(pre_screenshot_idle);
+    if (inspector_runtime) {
+        auto* inspector_runtime_ptr = inspector_runtime.get();
+        pre_screenshot_idle = [settings_ptr, inspector_runtime_ptr] {
+            if (settings_ptr) settings_ptr->poll();
+            inspector_runtime_ptr->pump();
+        };
+        window->set_idle_callback(pre_screenshot_idle);
 
-    // Enable inspector by default when PULP_INSPECTOR env var is set
-    if (runtime::get_env("PULP_INSPECTOR")) {
-        inspector_runtime->set_overlay_active(true);
-        runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
+        // Enable inspector by default when PULP_INSPECTOR env var is set.
+        if (runtime::get_env("PULP_INSPECTOR")) {
+            inspector_runtime->set_overlay_active(true);
+            runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
+        }
+    } else {
+        pre_screenshot_idle = detail::make_standalone_idle_callback(
+            {},
+            settings_ptr
+                ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
+                : std::function<void()>{});
+        window->set_idle_callback(pre_screenshot_idle);
     }
 #else
     pre_screenshot_idle = detail::make_standalone_idle_callback(
@@ -1074,16 +1089,18 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // from the event loop without going through that callback. Close here
     // while the processor is still alive; the call is idempotent.
 #if PULP_STANDALONE_INSPECTOR
-    // Application quit can leave the event loop without invoking the window's
-    // close callback. Begin the same fence-gated retirement used by ordinary
-    // window close, then keep the platform's main-thread dispatcher alive until
-    // the accepted operation unwinds and the borrowed state is detached.
-    window->run_event_loop_until([&] {
-        inspector_runtime->stop();
-        return inspector_runtime->try_finish_retirement();
-    });
-    return !inspector_runtime->startup_failed();
-#else
+    if (inspector_runtime) {
+        // Application quit can leave the event loop without invoking the window's
+        // close callback. Begin the same fence-gated retirement used by ordinary
+        // window close, then keep the platform's main-thread dispatcher alive until
+        // the accepted operation unwinds and the borrowed state is detached.
+        window->run_event_loop_until([&] {
+            inspector_runtime->stop();
+            return inspector_runtime->try_finish_retirement();
+        });
+        return !inspector_runtime->startup_failed();
+    }
+#endif
     window->run_event_loop();
     // Application quit can leave the event loop without invoking the window's
     // close callback. Remove this owner's entry before the bridge/window or
@@ -1093,7 +1110,6 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     detail::retire_standalone_editor(*window, *bridge);
     stop();
     return true;
-#endif
 }
 
 void StandaloneApp::stop_audio_keep_processor() {

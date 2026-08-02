@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::format {
@@ -43,6 +44,7 @@ void set_standalone_inspector_rpc_post_override_for_testing(
 /// this owner binds live standalone state and tears transport down before UI.
 class StandaloneInspectorRuntime {
   public:
+    static bool profile_is_off(std::string_view profile);
     static std::unique_ptr<StandaloneInspectorRuntime>
     create(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
            view::WindowHost& window, std::string profile,

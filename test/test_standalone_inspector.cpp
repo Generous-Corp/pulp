@@ -270,7 +270,7 @@ private:
 } // namespace
 
 #if PULP_TEST_STANDALONE_INSPECTOR
-TEST_CASE("Standalone inspector off mode publishes no endpoint or artifact",
+TEST_CASE("Standalone inspector off mode creates no runtime, hook, endpoint, or artifact",
           "[standalone][inspect][negative]") {
     const auto runtime_dir = std::filesystem::temp_directory_path()
         / "pulp-standalone-inspector-off-test";
@@ -285,10 +285,21 @@ TEST_CASE("Standalone inspector off mode publishes no endpoint or artifact",
     ViewBridge bridge(processor, store);
     View root;
     StubWindowHost window;
+
+    int sentinel_key_calls = 0;
+    View::set_inspector_key_hook([&sentinel_key_calls](const KeyEvent&) {
+        ++sentinel_key_calls;
+        return true;
+    });
+    struct ResetInspectorKeyHook {
+        ~ResetInspectorKeyHook() { View::set_inspector_key_hook({}); }
+    } reset_inspector_key_hook;
+
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "off", {});
-    REQUIRE(runtime != nullptr);
-    runtime->pump();
+    REQUIRE(runtime == nullptr);
+    REQUIRE(View::call_inspector_key_hook(KeyEvent{}));
+    REQUIRE(sentinel_key_calls == 1);
     REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
 }
 
