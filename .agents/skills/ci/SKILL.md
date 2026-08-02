@@ -4299,8 +4299,8 @@ three properties when editing that workflow — running anything out of
 
 ### `merge_group` belongs ONLY on workflows that produce a required context
 
-A queue entry re-runs every workflow that declares `merge_group:`, and with
-`max_entries_to_build: 1` the queue validates one batch at a time — so any
+A queue entry re-runs every workflow that declares `merge_group:`. The live
+build window is configurable, so any
 workflow on `merge_group` whose contexts are **not** required sets the drain
 rate while being unable to affect the merge decision. Nine workflows once fired
 per entry when only five could gate; two of the extras (`Validate examples
@@ -4331,6 +4331,21 @@ queue slow, so re-verify rather than believing the comment.
 Dropping `merge_group` costs no PR-time signal: those workflows keep
 `pull_request` and still run on every PR. They just stop re-running against a
 merged result they cannot gate.
+
+### Diagnose a stalled queue from its active build window
+
+`tools/scripts/merge_stall_watchdog.py` treats the merge queue as its own
+failure surface. It reads `maximumEntriesToBuild`, tracks activity only across
+the entries GitHub can currently build, and reports the head's exact synthetic
+merge SHA and unresolved required contexts. Activity from entries outside that
+window must not suppress an alarm; activity from a cumulative follower inside
+it is real progress. If live collection is degraded, preserve prior state and
+fail closed instead of clearing an existing incident from an incomplete sweep.
+
+Use the head-specific blocker list before cancelling anything. A queued
+required context is evidence of capacity pressure, not a disposable run; only
+cancel exact-current advisory work after proving it cannot contribute to a
+required context or another agent's live PR.
 
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
