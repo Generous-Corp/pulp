@@ -5470,11 +5470,52 @@ fixture you derived from the same matrices as the code agrees with it by
 construction. On an out-of-gamut `oklch` the hand-written expectation was simply
 wrong and Chrome settled it.
 
-**Still open, diagnosed not fixed:** `apply_css_background_gradient` reads
-`local_bounds()` *before* layout, so the box is 1:1 and **every angled gradient
-resolves in the wrong direction**. Confirmed arithmetically against Chrome. It
-needs paint-time resolution. Radial `farthest-corner` separately uses a constant
-`0.7071·max(w,h)` and ignores an off-centre `at`, running ~28% short.
+**Gradient geometry cannot be resolved when the CSS is parsed.** The importer
+runs its whole style pass *before* Yoga sizes anything, so
+`apply_css_background_gradient` sees a degenerate 1x1 box. Every box-dependent
+number therefore has to travel as CSS *intent* on `View::BackgroundGradient` and
+be resolved in `View::paint_background_and_border` against real `bounds_`:
+
+- a linear `<angle>`'s endpoints (the line's length is the box's projection onto
+  it, so the aspect ratio is in the answer);
+- a `to <corner>` keyword's angle, which is itself a function of the aspect;
+- a radial's radii, which are percentages of width and height *independently*.
+
+`View::resolve_radial` is the single place that turns a radial's CSS sizing into
+pixels, shared by the painter, the parser's calc()-stop resolution, and the
+tests, so the three cannot drift.
+
+**Three things about radial gradients that are easy to get wrong:**
+
+- **The default shape is an ELLIPSE, not a circle**, and a two-value size
+  (`90% 70%`) can only be an ellipse. Skia has no elliptical gradient — put the
+  y-squash in a **local matrix on the shader** (`set_fill_gradient_radial_-
+  elliptical`), never on the canvas: a background gradient is routinely filled
+  through a rounded-rect or per-corner path, and a canvas scale would stretch
+  those corners with it.
+- **The corner keywords are not the corner distance.** For an ellipse the spec
+  takes the matching `-side` aspect and scales it until it passes through the
+  corner, which works out to exactly `sqrt(2)` per axis — noticeably larger.
+- **`to bottom right` is `atan2(HEIGHT, width)`, not `atan2(width, height)`.**
+  The gradient line is perpendicular to the *other* diagonal `(w, -h)`, whose
+  perpendicular is `(h, w)`. The transposed form is a plausible-looking
+  expression that is only correct on a square box; on 160x100 it misses Chrome's
+  boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
+
+**Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
+premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
+fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
+the colour toward **black** as the alpha falls instead of just fading. Opaque
+gradients are bit-identical either way, which is why every existing gradient test
+passed over it. It only shows on a stop with alpha < 1, and that is exactly the
+form real panels use for a soft screen-sized wash. `skia_gradient_compat.hpp`
+now routes all four makers through `css_interpolation()`.
+
+**Symptom to recognise:** a wash that is present, correctly positioned, and
+*too weak and too grey* — the tint reads roughly a third of Chrome's over most
+of its area while matching near the hot centre. Compute the expected delta both
+ways (`α·(C−B)` vs `α·(lerp(C,black,f)−B)`) at one off-centre pixel; the two
+predictions differ by ~3x and pick the answer immediately.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
@@ -5490,6 +5531,28 @@ the code, and both were found by measuring rather than reasoning:
 - **Per-node scores are not usable yet.** worst-node reads 1.0000 and ~0% of
   ink-bearing nodes pass on every real design. Quote the area-weighted number and
   say the per-node gate is not live.
+
+**Its feature classifier lied about `background-blend-mode`, and the shape of
+that lie generalises.** `background-blend-mode` carries **one value per
+background layer**, so a node with two background layers and no blending at all
+computes to the string `"normal, normal"` — which is not `"normal"`. Comparing
+the whole computed value against the keyword classified every multi-layer
+background as a blend. That mislabelled *the single largest node on the panel* on
+three of four designs, and it read as "59-70% of failing area is
+`background-blend-mode`" when the corpus contains **zero** non-normal
+`background-blend-mode` anywhere; the node was two ordinary radial gradients.
+**Any CSS property that takes a comma-separated list per background layer or per
+transition needs its value split before a keyword comparison** — `background-*`,
+`transition-*`, `animation-*`, `mask-*` are all like this. A grep-shaped check
+over a computed style is not a check.
+
+**Always report a coverage statistic beside the failing fraction.** Take the
+reference's modal colour, call pixels beyond a threshold from it "ink", and
+report both `covered = |render ink ∩ ref ink| / |ref ink|` and
+`inkRatio = |render ink| / |ref ink|`. **Both, not one:** a solid-black render
+against SPECTR scores `covered = 1.00` (black is far from the modal colour
+everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
+blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
 
 **Prove the bitmap is absent by substitution, not by scanning.** A static scan
 shows no node *references* the capture; it cannot show no pixel *comes from* it.
