@@ -664,6 +664,48 @@ def check_buildable_from_parts() -> tuple:
         print(f"  WRONG  a suggestion carries the tag incidentally: "
               f"{[(o['module'], o['rank']) for o in top]}")
         bad += 1
+
+    # Settings, and the one promise that must not depend on a file.
+    ran += 1
+    import tempfile, json as _json
+    _d = tempfile.mkdtemp()
+    _f = os.path.join(_d, "settings.json")
+    _saved = P.SETTINGS_PATH
+    try:
+        # A file that tries to switch off never_buy must not succeed. If a
+        # preference could disable it, "we will never spend your money" is a
+        # claim rather than a property.
+        open(_f, "w").write(_json.dumps({"never_buy": False,
+                                         "auto_fill_gaps": False}))
+        P.SETTINGS_PATH = _f
+        st = P.settings()
+        if st["never_buy"] is not True:
+            print("  WRONG  a settings file switched off never_buy")
+            bad += 1
+        elif st["auto_fill_gaps"] is not False:
+            print("  WRONG  a real preference was ignored")
+            bad += 1
+        else:
+            print("  ok     never_buy cannot be disabled; other settings can")
+
+        # A missing or corrupt file must not break anything.
+        ran += 1
+        P.SETTINGS_PATH = os.path.join(_d, "does-not-exist.json")
+        if P.settings() == P.SETTINGS_DEFAULTS:
+            print("  ok     a missing settings file falls back to defaults")
+        else:
+            print(f"  WRONG  missing file did not give defaults: {P.settings()}")
+            bad += 1
+        ran += 1
+        open(_f, "w").write("{not json")
+        P.SETTINGS_PATH = _f
+        if P.settings()["never_buy"] is True:
+            print("  ok     a corrupt settings file does not break the run")
+        else:
+            print("  WRONG  a corrupt settings file broke settings()")
+            bad += 1
+    finally:
+        P.SETTINGS_PATH = _saved
     return bad, ran
 
 

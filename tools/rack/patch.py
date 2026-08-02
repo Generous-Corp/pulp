@@ -1250,6 +1250,60 @@ BUILDABLE_FROM = {
 }
 
 
+SETTINGS_PATH = os.path.expanduser(
+    "~/Library/Application Support/Forge Modular/settings.json")
+
+SETTINGS_DEFAULTS = {
+    # Fill a genuine gap by GENERATING the module ourselves rather than
+    # refusing. Costs a model call and needs Rack restarted once — Rack loads
+    # plugins at startup, so nothing that adds a module can avoid that,
+    # download or generate alike. On by default because the alternative is a
+    # dead end.
+    "auto_fill_gaps": True,
+    # Fetch a FREE module from the VCV library when one would close the gap.
+    # Off by default and useless without a Rack account token, which Rack
+    # stores in its own settings only after you sign in. We never sign in for
+    # you and we never spend money — see never_buy.
+    "auto_download_free": False,
+    # Not a setting. A statement, kept in the file so it is visible to anyone
+    # who opens it: nothing here will ever purchase a module. A paid module is
+    # named and linked, never acquired.
+    "never_buy": True,
+}
+
+
+def settings() -> dict:
+    """User preferences, defaults filled in. Never raises."""
+    out = dict(SETTINGS_DEFAULTS)
+    try:
+        with open(SETTINGS_PATH) as f:
+            user = json.load(f)
+        if isinstance(user, dict):
+            out.update({k: v for k, v in user.items() if k in SETTINGS_DEFAULTS})
+    except Exception:                                       # noqa: BLE001
+        pass
+    # never_buy is not overridable. A preference file that could switch it off
+    # would make "we will never spend your money" a claim rather than a
+    # property, and it is the one promise that must not depend on a file.
+    out["never_buy"] = True
+    return out
+
+
+def rack_library_token() -> str:
+    """Rack's own library token, or empty when nobody has signed in.
+
+    Read from Rack's settings rather than stored by us: it is the user's
+    credential, we do not ask for it, and a copy of it here would be a second
+    place for it to leak from.
+    """
+    try:
+        with open(os.path.expanduser(
+                "~/Library/Application Support/Rack2/settings.json")) as f:
+            return str(json.load(f).get("token") or "")
+    except Exception:                                       # noqa: BLE001
+        return ""
+
+
 def _options_for(tags, inv: dict, midx: dict, cat: dict) -> dict:
     """The modules that would provide each tag, best answer first.
 
