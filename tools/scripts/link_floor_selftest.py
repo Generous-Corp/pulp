@@ -7,9 +7,14 @@ configure rather than a string comparison: each case writes a small project with
 a known graph, runs the checker over it, and asserts the verdict and the reason
 given. Both bounds are covered: TIER rejects a module that is reached and not
 declared, REQUIRE rejects one that is declared and not reached. A green repo
-says nothing on its own — `--mutate` then weakens the checker itself in eleven
+says nothing on its own — `--mutate` then weakens the checker itself in sixteen
 ways and requires the battery to go red for each, so a pass cannot be the walk
 quietly failing to arrive.
+
+Carrier-derived debt is covered here as well as by the configure arms, because
+unlike a hand-written guard it is checker behavior: the walk re-runs with a
+module stepped around and the difference decides whether an entry is owed, so
+weakening it is something a mutation can see.
 
     link_floor_selftest.py            # run the battery
     link_floor_selftest.py --mutate   # also prove the battery is not vacuous
@@ -218,6 +223,89 @@ CASES: list[tuple[str, str, bool, str]] = [
         "pulp/alpha is outside tier 'fixture'",
     ),
     (
+        # Carrier-derived debt, the half that declares. `probe` reaches `alpha`
+        # only across `beta`, so with `beta` walked around the closure loses it
+        # and the derivation appends both — as ordinary debt, checked as such.
+        "carried_debt_is_declared_where_the_carrier_is_reached",
+        case(tier("gamma")
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe beta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_VIA_beta_probe alpha beta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # The separation, and the only thing between this case and the one above
+        # is the direct edge on the next line. `alpha` now arrives two ways, so
+        # removing `beta` does not remove it and the walk refuses to call it
+        # carried — the same shape as `render` reaching a plugin both through
+        # the view stack and by pulp_add_plugin's own per-format link. Nothing
+        # tells the checker which module is which; the second edge is the whole
+        # difference, and moving it moves the verdict.
+        "carried_debt_refuses_a_module_with_a_second_edge",
+        case(tier("gamma")
+             + "target_link_libraries(probe PRIVATE pulp::alpha)\n"
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe beta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_VIA_beta_probe alpha beta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "debt entry 'alpha' is declared as reached only through pulp/beta",
+    ),
+    (
+        # The half that exempts: a consumer with no route to the carrier at all,
+        # which is what a platform dropping core/host looks like. The entries
+        # are not declared, so the gate stops asking for them — and asks for
+        # nothing else, which is the failure a blanket exemption would invite.
+        "carried_debt_is_exempt_where_the_carrier_is_not_reached",
+        case(tier("zeta")
+             + "add_library(probe2 MODULE consumer/unit.cpp)\n"
+             + "target_link_libraries(probe2 PRIVATE pulp::zeta)\n"
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe2 beta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_VIA_beta_probe2 alpha beta)\n"
+             + "pulp_assert_link_floor(probe2 TIER fixture)\n"),
+        True,
+        "link-floor: probe2 within tier",
+    ),
+    (
+        # And it is still rot-checked where the carrier IS reached. Deriving the
+        # set outright — appending whatever the difference contains — would lose
+        # this: the difference is a subset of the closure by construction, so
+        # every derived entry would be reached by definition and a genuinely cut
+        # edge would never be reported. The declaration is what gets appended;
+        # the derivation only decides whether to.
+        "carried_debt_is_still_rot_checked_where_the_carrier_is_reached",
+        case(tier("alpha", "beta", "gamma")
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe beta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_VIA_beta_probe zeta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "debt entry 'zeta' is no longer linked",
+    ),
+    (
+        # Two declarations of one entry are two different claims about when it
+        # is owed, and the gate would silently honour whichever it read last.
+        "carried_entry_may_not_also_be_unconditional_debt",
+        case(tier("beta", "gamma")
+             + "set(PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe beta)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_VIA_beta_probe alpha)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        # Short on purpose: CMake reflows a FATAL_ERROR body, so a substring
+        # long enough to wrap would be asserting the line width.
+        "'alpha' is declared both in",
+    ),
+    (
+        # A carrier with nothing behind it costs a walk and exempts nothing, so
+        # it is a leftover rather than a choice.
+        "carrier_without_entries_is_rejected",
+        case(tier("alpha", "beta", "gamma")
+             + "set(PULP_LINK_FLOOR_CARRIERS_probe beta)\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "carrier 'beta' declares no entries",
+    ),
+    (
         # core/host links pulp::format while format reaches back through view,
         # so a walk that does not close over what it has seen hangs on the real
         # repo. Reproduced here in two targets; the case is bounded by the
@@ -349,6 +437,32 @@ MUTATIONS: list[tuple[str, str, str]] = [
     (
         "lets REQUIRE name a module no tier or debt list declares",
         "if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)",
+        "if(FALSE)",
+    ),
+    (
+        "walks into the carrier it was asked to step around, so nothing can be "
+        "shown to depend on it",
+        "if(_dependency_module IN_LIST PLC_EXCLUDE_MODULES)",
+        "if(FALSE)",
+    ),
+    (
+        "declares carried entries in a configure with no route to the carrier",
+        "if(NOT _carrier IN_LIST _modules)",
+        "if(FALSE)",
+    ),
+    (
+        "exempts carried entries even where the carrier is reached",
+        "if(NOT _carrier IN_LIST _modules)",
+        "if(TRUE)",
+    ),
+    (
+        "grants a carried entry without checking it is carried",
+        "if(_entry IN_LIST _modules AND NOT _entry IN_LIST _carried)",
+        "if(FALSE)",
+    ),
+    (
+        "lets one entry be declared both unconditionally and behind a carrier",
+        "if(_entry IN_LIST PULP_LINK_FLOOR_DEBT_${target})",
         "if(FALSE)",
     ),
 ]

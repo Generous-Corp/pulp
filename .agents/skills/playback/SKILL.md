@@ -896,10 +896,15 @@ disallows dlopen of third-party plugins, so hosting is not built there and the
 `pulp-view-core -> pulp::host` edge is dropped too. One guard therefore removes
 `host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
 plugin's only route to all three. Anything asserting `playback` is present in a
-plugin binary must say which configure it means; entries a guard can remove
-must be appended to `PULP_LINK_FLOOR_DEBT_<target>` under that same condition
-rather than declared unconditionally, which reads their absence as rot. See the
-`timeline` skill for the full rule.
+plugin binary must say which configure it means.
+
+Note the distinction when recording that in a link floor: `host` is genuinely
+*not built* on iOS, but `core/playback` is — it is simply unreachable from that
+target once the carrying hop is gone. So `playback` is not guarded on the
+platform (which would state something false about the module); it is declared
+behind a carrier and the walk derives it, by re-running the closure with `host`
+stepped around and keeping what disappears. See the `timeline` skill for the
+full rule.
 
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor

@@ -100,6 +100,9 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # configure where the link genuinely exists. An upper bound is not violated by
 # reaching less, so an entry a documented guard can remove is APPENDED under
 # that same guard below, which keeps it rot-checked wherever the guard holds.
+# Where the guard is not an option but a route — the entry arrives only by
+# passing through another module — the condition is derived from the graph
+# rather than written down; see the carriers below.
 #
 # StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
 # write and cannot cut from its own CMakeLists account for all of it.
@@ -133,7 +136,7 @@ set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
 # being packaged by the same format machinery over the same view stack. It has
 # no `timeline` entry because it REQUIREs timeline and timeline_editor outright
 # and links them directly, so they are a lower bound here rather than debt —
-# which is why the conditional appends below must never name them.
+# which is why neither the guard nor the carrier list below may name them.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
     canvas events graph native-components sample_bank_manifest signal state view)
 
@@ -164,32 +167,61 @@ set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
 #     and core/view's `if(TARGET pulp-render)` block. Guarding on either edge
 #     would make the entry unfalsifiable from one side.
 #
-#   host, playback, timeline — core/host is skipped on iOS (App Store policy
-#     disallows dlopen of third-party plugins), so the pulp-view-core ->
-#     pulp-host hop does not exist there. `playback` and `timeline` are guarded
-#     on the same condition for a DIFFERENT reason, and the difference matters:
-#     core/playback and core/timeline are added unconditionally and ARE built on
-#     iOS. They are guarded because this target's only route to them runs
-#     THROUGH host — reachability, not existence. The iOS configure is what
-#     established that, by naming all three as unreached; the closure report
-#     could not have, since it records one shortest chain per module and a
-#     second, longer edge would be invisible in it.
-#
-#     That claim stays refutable: add a direct pulp::playback link on iOS and
-#     the module is reached while the condition is false, which the walk reports
-#     as "outside tier". What it does NOT catch is the carrying hop being
-#     rerouted rather than removed. The way to close that is to DERIVE the set
-#     from the graph — re-run the closure with pulp-host excluded and take the
-#     difference — so the exemption is recomputed per configure instead of
-#     asserted here. Recorded as the follow-up; this list is the interim.
+#     `host`, `playback` and `timeline` are NOT here. They are absent for a
+#     reason the graph knows and an option name does not — see the carriers
+#     below.
 if(PULP_ENABLE_GPU)
     list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
     list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
 endif()
-if(NOT IOS)
-    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP host playback timeline)
-    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP host playback)
-endif()
+
+# Entries a target reaches only by passing THROUGH another module, derived from
+# the graph rather than guarded by hand. PULP_LINK_FLOOR_CARRIERS_<target> names
+# the modules worth removing; PULP_LINK_FLOOR_DEBT_VIA_<carrier>_<target> the
+# entries claimed to arrive only through one. pulp_assert_link_floor re-walks
+# the closure with the carrier stepped around and keeps the difference.
+#
+# Why these are not `if(NOT IOS)` like `render` is `if(PULP_ENABLE_GPU)`:
+# core/host is skipped on iOS (App Store policy disallows dlopen of third-party
+# plugins), so guarding `host` on the platform is at least true. But core/
+# playback and core/timeline are added unconditionally and ARE built on iOS —
+# `if(NOT IOS)` over those two would say "not built here", which is false. The
+# true statement is about reachability: this target's only route to them runs
+# through host. Writing the platform test anyway is what rots, and it rots
+# silently the moment a fourth module arrives behind the same hop and nobody
+# remembers there was a list to extend.
+#
+# What the derivation buys beyond spelling that correctly: it is recomputed per
+# configure, so it also catches the carrying hop being REROUTED rather than
+# removed. If `playback` ever acquires a second edge that does not pass through
+# host, it stops being carried debt and the gate says so — where a platform test
+# would have kept permitting it under a reason that had stopped being true.
+#
+# `render` is the case that proves the derivation is not just being told the
+# answer. Under GPU=ON it is reached through the view stack AND directly, by
+# pulp_add_plugin's own per-format `target_link_libraries(... pulp::render)`
+# under PULP_HAS_SKIA — an edge the closure report never shows, because the
+# report keeps one shortest chain per module. Removing host does not remove
+# render, so the derivation refuses to call it carried and it keeps the
+# existence guard above. Nothing distinguishes the two cases in this file; the
+# walk separates them.
+#
+# THE BOUND ON THE SEARCH: carriers are declared, never discovered. Cost is one
+# extra closure walk per (target, declared carrier) pair — two per configure
+# today — and adding a module to the repo adds none. A carrier is admissible
+# only where the module itself sits behind a build condition, which is
+# core/host under `if(NOT IOS)` and nothing else at present. Widening that to
+# "try every module" would be an all-pairs walk, which is why it is not the
+# rule.
+set(PULP_LINK_FLOOR_CARRIERS_StepSequencer_CLAP host)
+set(PULP_LINK_FLOOR_DEBT_VIA_host_StepSequencer_CLAP host playback timeline)
+
+# The proof plugin has no `timeline` entry: it REQUIREs timeline and
+# timeline_editor and links them directly, so timeline is a lower bound here and
+# is reached on iOS too. A carrier list must never name a REQUIREd module —
+# relaxing an upper bound cannot answer a lower-bound violation.
+set(PULP_LINK_FLOOR_CARRIERS_TimelinePluginProof_CLAP host)
+set(PULP_LINK_FLOOR_DEBT_VIA_host_TimelinePluginProof_CLAP host playback)
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 
@@ -264,6 +296,13 @@ endfunction()
 #                can name the edge that brought a module in rather than only
 #                the module
 #
+# EXCLUDE_MODULES names modules to walk AROUND: their targets are never entered,
+# so nothing reachable only through them is reported. That turns the walk into
+# an instrument the report cannot be — because PATHS_OUT keeps one chain per
+# module, a second and longer edge to the same module leaves no trace in it, and
+# "reached only through X" is a question no report can answer. Removing X and
+# re-measuring asks the graph directly.
+#
 # The root is read through LINK_LIBRARIES — its own direct links, both scopes —
 # and every dependency through INTERFACE_LINK_LIBRARIES, which is precisely what
 # that dependency propagates to whoever links it. Reading a dependency's
@@ -276,7 +315,7 @@ endfunction()
 # paths are shortest and the format->view->view-core->host->format cycle
 # terminates rather than hanging.
 function(pulp_link_closure target)
-    cmake_parse_arguments(PLC "" "MODULES_OUT;TARGETS_OUT;PATHS_OUT" "" ${ARGN})
+    cmake_parse_arguments(PLC "" "MODULES_OUT;TARGETS_OUT;PATHS_OUT" "EXCLUDE_MODULES" ${ARGN})
     if(NOT TARGET "${target}")
         message(FATAL_ERROR "pulp_link_closure: no such target: ${target}")
     endif()
@@ -310,6 +349,19 @@ function(pulp_link_closure target)
             foreach(_dependency IN LISTS _dependencies)
                 if(_dependency IN_LIST _seen)
                     continue()
+                endif()
+                # An excluded module is dropped at the edge rather than seeded
+                # into `_seen`: that list and `_chains` are parallel and read by
+                # position, so an entry in one without a mate in the other would
+                # shift every chain onto the wrong target. Dropping here also
+                # keeps the module out of the reported closure, which seeding
+                # would not — a seeded target is still `_seen` and would be
+                # collected below as reached.
+                if(PLC_EXCLUDE_MODULES)
+                    _pulp_link_floor_module(_dependency_module "${_dependency}")
+                    if(_dependency_module IN_LIST PLC_EXCLUDE_MODULES)
+                        continue()
+                    endif()
                 endif()
                 list(APPEND _seen "${_dependency}")
                 list(APPEND _chains "${_chain}>${_dependency}")
@@ -348,6 +400,28 @@ function(pulp_link_closure target)
     if(PLC_PATHS_OUT)
         set(${PLC_PATHS_OUT} "${_paths}" PARENT_SCOPE)
     endif()
+endfunction()
+
+# Return the modules `target` reaches ONLY by a route through `carrier`.
+#
+# Two walks and a set difference: whatever the closure loses when the carrier is
+# walked around had no other way in. The carrier itself is in the result, since
+# removing it removes it.
+#
+# This is a claim about THIS configure and is recomputed in each one, which is
+# the whole point — a module carried on desktop may be built and unreachable on
+# a platform that skips the carrier, and neither answer is written down anywhere
+# a person has to remember to update.
+function(pulp_link_floor_carried out_var target carrier)
+    pulp_link_closure(${target} MODULES_OUT _reached)
+    pulp_link_closure(${target} MODULES_OUT _without EXCLUDE_MODULES ${carrier})
+    set(_carried "")
+    foreach(_module IN LISTS _reached)
+        if(NOT _module IN_LIST _without)
+            list(APPEND _carried "${_module}")
+        endif()
+    endforeach()
+    set(${out_var} "${_carried}" PARENT_SCOPE)
 endfunction()
 
 # Write a target's measured closure to ${CMAKE_BINARY_DIR}/link-floor/<target>.txt
@@ -411,6 +485,56 @@ function(pulp_assert_link_floor target)
 
     set(_failures "")
     set(_over FALSE)
+
+    # Debt that exists only where a carrying module does. `render` is absent
+    # because an option did not build it, and a person has to name that option;
+    # but a module this target reaches only by passing THROUGH another one is
+    # absent for a reason the graph already knows, so it is derived here instead
+    # of restated as a platform test that would be false about the module and
+    # stale the moment a fourth entry arrives behind the same hop.
+    #
+    #   carrier not reached  the entries have no route in this configure, so the
+    #                        gate stops asking for them and asks for nothing else
+    #   carrier reached      the entries join _debt and are rot-checked with it,
+    #                        AND each must vanish from the carrier-less closure
+    #
+    # The second half is what no hand-written guard can do: an entry that
+    # survives the carrier's removal arrived some other way, so the declaration
+    # is stale and this says so rather than granting it. A module with a second,
+    # independent edge is therefore refused as carried without anyone having to
+    # know it has one — which is the case that is hardest to get right by hand,
+    # because the closure report does not show the second edge.
+    foreach(_carrier IN LISTS PULP_LINK_FLOOR_CARRIERS_${target})
+        if(NOT DEFINED PULP_LINK_FLOOR_DEBT_VIA_${_carrier}_${target})
+            message(FATAL_ERROR
+                "pulp_assert_link_floor(${target}): carrier '${_carrier}' declares no "
+                "entries. Set PULP_LINK_FLOOR_DEBT_VIA_${_carrier}_${target} in "
+                "tools/cmake/PulpLinkFloor.cmake, or drop the carrier.")
+        endif()
+        if(NOT _carrier IN_LIST _modules)
+            continue()
+        endif()
+        pulp_link_floor_carried(_carried ${target} ${_carrier})
+        foreach(_entry IN LISTS PULP_LINK_FLOOR_DEBT_VIA_${_carrier}_${target})
+            if(_entry IN_LIST PULP_LINK_FLOOR_DEBT_${target})
+                message(FATAL_ERROR
+                    "pulp_assert_link_floor(${target}): '${_entry}' is declared both in "
+                    "PULP_LINK_FLOOR_DEBT_${target} and behind carrier '${_carrier}'. "
+                    "One of the two is the claim; delete the other.")
+            endif()
+            list(APPEND _debt "${_entry}")
+            if(_entry IN_LIST _modules AND NOT _entry IN_LIST _carried)
+                set(_over TRUE)
+                string(CONCAT _line
+                    "  debt entry '${_entry}' is declared as reached only through "
+                    "pulp/${_carrier}, but the closure still reaches it with "
+                    "pulp/${_carrier} walked around, so it has another route. Move it "
+                    "to PULP_LINK_FLOOR_DEBT_${target}")
+                list(APPEND _failures "${_line}")
+            endif()
+        endforeach()
+    endforeach()
+
     foreach(_module IN LISTS _modules)
         if(_module IN_LIST _allowed OR _module IN_LIST _debt)
             continue()

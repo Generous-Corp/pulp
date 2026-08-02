@@ -1253,20 +1253,14 @@ by construction — and the plain debt list reads that absence as rot, failing w
 *"debt entry 'render' is no longer linked. Delete it to tighten the bound"*. The
 gate is asking you to delete an entry the wider configure genuinely needs, so
 **taking the advice literally trades a false failure on GPU-less trees for a
-false pass on GPU-enabled ones.** Declare such entries in
-the entry under that same condition instead — `if(PULP_ENABLE_GPU)
-list(APPEND PULP_LINK_FLOOR_DEBT_<target> render)` — so where the condition
-holds the entry is an ordinary debt entry and is still rot-checked, and only the
-configure that cannot have the edge stops asking. Guard on the condition that
-decides whether the module is **built**, never on one edge: `render` has two
-independent edges (`pulp_add_plugin` under `PULP_HAS_SKIA`, and `core/view`'s
-`if(TARGET pulp-render)`), so guarding either leaves it unfalsifiable from one
-side. `playback` and `timeline` are guarded on the same `NOT IOS` for a
-*different* reason worth stating wherever it is written: both **are** built on
-iOS and are guarded because the target's only route to them runs through `host`.
-Establish that by configuring both ways — **not** from the closure report, which
-records one shortest chain per module (`PATHS_OUT`, BFS first-arrival), so a
-second longer edge is invisible in it. Note the
+false pass on GPU-enabled ones.** Append such an entry under that same condition
+instead — `if(PULP_ENABLE_GPU) list(APPEND PULP_LINK_FLOOR_DEBT_<target>
+render)` — so where the condition holds the entry is an ordinary debt entry and
+is still rot-checked, and only the configure that cannot have the edge stops
+asking. Guard on the condition that decides whether the module is **built**,
+never on one edge: `render` has two independent edges (`pulp_add_plugin` under
+`PULP_HAS_SKIA`, and `core/view`'s `if(TARGET pulp-render)`), so guarding either
+leaves it unfalsifiable from one side. Note the
 blast radius before dismissing this as a test failure — the assertion runs at
 configure time from the plugin's `CMakeLists.txt`, so with
 `PULP_BUILD_EXAMPLES=ON` a mismatch kills `cmake --build` at
@@ -1280,6 +1274,39 @@ chain), while a desktop `GPU=OFF` configure loses only `render` — so **match t
 literal entry list, not the first line.** And `cmake-link-floor-selftest` passing
 says nothing about this: its battery configures its own fixture project, so it is
 green on a desktop tree while the real gate is broken on two narrower ones.
+
+**Do not write a build condition for an entry that arrives THROUGH another
+module — declare a carrier and let the walk derive it.** `render` is absent under
+`GPU=OFF` because an option did not build it, and only a person can name that
+option. `playback` and `timeline` are a different case that looks identical from
+the failure message: both **are** built on iOS, and `StepSequencer_CLAP` loses
+them there only because its one route runs through `host`. `if(NOT IOS)` over
+those two would encode "not built here", which is false, and it rots silently the
+moment a fourth module arrives behind the same hop. Declare instead:
+
+```cmake
+set(PULP_LINK_FLOOR_CARRIERS_<target> host)
+set(PULP_LINK_FLOOR_DEBT_VIA_host_<target> host playback timeline)
+```
+
+`pulp_assert_link_floor` re-walks the closure with `EXCLUDE_MODULES host` and
+compares. Carrier not reached → the entries have no route here and are not
+declared. Carrier reached → they join the debt list and are rot-checked with it,
+**and** each must vanish from the carrier-less closure, so an entry that acquires
+a second route is reported rather than granted. That second half is the part no
+hand-written guard can do, and it is why `render` cannot be expressed this way:
+removing `host` does not remove it, so the walk refuses to call it carried —
+without being told which module is which.
+
+**Carriers are declared, never discovered.** One extra closure walk per (target,
+carrier) pair, and a carrier is admissible only where the module itself sits
+behind a build condition. "Try every module" would be an all-pairs walk.
+
+**Do not put a `REQUIRE`d module behind a carrier.** Debt is an upper bound and
+`REQUIRE` is a lower one; relaxing the upper bound cannot answer a lower-bound
+violation, it only hides it. `TimelinePluginProof_CLAP` `REQUIRE`s `timeline` and
+links it directly, so `timeline` is reached on iOS too and appears in neither
+list.
 
 **A tier is an upper bound and proves only absence.** `TIER` says nothing outside
 it is reached; it cannot say anything inside it *is*. "Reaches nothing extra" is

@@ -612,7 +612,7 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
 # reached this point is already its verdict — and a verdict is worth nothing
 # without evidence the checker can still say no. The selftest configures fixture
 # projects with known graphs and asserts both the verdict and the reason given;
-# --mutate then weakens the checker itself eleven ways and requires each
+# --mutate then weakens the checker itself sixteen ways and requires each
 # weakening to be caught, so a green run cannot be the walk failing to arrive.
 #
 # What this selftest does NOT cover is the configuration axis: it configures its
