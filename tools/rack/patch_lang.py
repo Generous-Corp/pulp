@@ -21,6 +21,7 @@ a model to emit it means asking for three things it cannot know:
 None of those are expressible here, so none of them can be wrong.
 
     # a melodic arpeggiator quantized to the key of g
+    EXAMPLE-BEGIN
     lfo   : ForgeModular/LFO
     seq   : ForgeModular/SEQ
     quant : Fundamental/Quantizer
@@ -28,8 +29,18 @@ None of those are expressible here, so none of them can be wrong.
     out   : Core/AudioInterface2
 
     lfo.SQR >> seq.CLK
-    seq.CV  >> quant.IN >> vco.VOCT   # the quantizer forces every step into G
-    vco.SAW >> out.LEFT
+    seq.CV  >> quant.'1V/octave pitch' >> vco."V/OCT"
+    vco.SAW >> out.'To "device output 1"', out.'To "device output 2"'
+
+    vco.'Pulse width' = 0.5
+    EXAMPLE-END
+
+Those are the real port spellings, and the test suite PARSES this very block —
+see `test_patch_lang.py`. Two earlier drafts of this docstring invented port
+names (`out.LEFT`, `quant.IN`) that do not exist; both would have been caught
+by reading the inventory, and neither was. A language whose own advertisement
+is a syntax error is worse than one with no example, so the example is now
+checked rather than believed.
 
 HOW OURS DIFFERS FROM THE PRIOR ART
 
@@ -167,6 +178,14 @@ def port_label(names: list, index: int) -> str:
 
 # ------------------------------------------------------------------- parsing --
 
+# ONE definition of a port token, shared by the endpoint and the setting
+# grammars. They were written separately, single quoting was added to one of
+# them, and the docstring's own example then parsed as an endpoint and failed
+# as a setting. Two grammars for one concept drift; one cannot.
+PORT_TOKEN = r"""(?:"((?:[^"\\]|\\.)*)"      # ."a port"
+                   |'([^']*)'                  # .'a port with "quotes"'
+                   |([A-Za-z0-9_/\-\#]+))"""    # .PORT or .PORT#2
+
 DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z0-9_\-]+)/([A-Za-z0-9_\-]+)\s*$")
 # A port name is whatever its author called it, and vendors call them things
 # like `A IN`, `Channel 1` and `To "device output 1"`. A grammar that only
@@ -174,7 +193,8 @@ DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z0-9_\-]+)/([A-Za-
 # language would print files it could not parse. Quoted form covers everything.
 ENDPOINT = re.compile(
     r"""^([A-Za-z_][A-Za-z0-9_]*)                 # the local name
-        (?:\.(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9_/\-]+)))?$""",  # .PORT or ."a port"
+        (?:\.""" + PORT_TOKEN + """)?$""",
+
     re.VERBOSE)
 
 
@@ -189,6 +209,13 @@ def quote_port(name: str) -> str:
     """
     if re.fullmatch(r"[A-Za-z0-9_/\-]+", name):
         return name
+    # Single quotes when the name contains double ones — the common case, not
+    # an exotic one. Rack's audio interface calls its inputs
+    # `To "device output 1"`, so the double-quoted form put backslash escapes
+    # on the single most travelled line in the corpus. `'To "device output 1"'`
+    # can be read aloud to another person; `"To \\"device output 1\\""` cannot.
+    if '"' in name and "'" not in name:
+        return "'" + name + "'"
     return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -335,8 +362,24 @@ def _parse_chain(n: int, line: str, names: dict, inv: dict) -> list:
 
 
 SETTING = re.compile(
-    r"""^([A-Za-z_][A-Za-z0-9_]*)\.(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9_/\-\#]+))
-        \s*=\s*(-?[0-9.eE+]+)\s*$""", re.VERBOSE)
+    r"""^([A-Za-z_][A-Za-z0-9_]*)\.""" + PORT_TOKEN + r"""
+        # A float, INCLUDING a negative exponent. The first version omitted
+        # `-` inside the exponent, so `%g` printed 1e-05 for a small value and
+        # the parser then refused its own output. The corpus never caught it
+        # because no patch happened to hold a value that small — a round-trip
+        # breaker hiding in the grammar rather than in the data.
+        \s*=\s*([-+]?(?:[0-9]*\.?[0-9]+)(?:[eE][-+]?[0-9]+)?)\s*$""",
+    re.VERBOSE)
+
+
+def _token_text(groups: tuple) -> str:
+    """The port name out of a PORT_TOKEN match: double, single, or bare."""
+    dq, sq, bare = groups
+    if dq is not None:
+        return unquote_port(dq)
+    if sq is not None:
+        return sq
+    return bare
 
 
 def _parse_setting(n: int, line: str, names: dict, inv: dict) -> tuple:
@@ -353,7 +396,7 @@ def _parse_setting(n: int, line: str, names: dict, inv: dict) -> tuple:
             n, f"cannot read the setting {line.strip()!r}",
             "a setting looks like  name.PARAM = 0.5")
     local = m.group(1)
-    pname = unquote_port(m.group(2)) if m.group(2) is not None else m.group(3)
+    pname = _token_text((m.group(2), m.group(3), m.group(4)))
     if local not in names:
         raise PatchLangError(n, f"'{local}' was never declared")
     params = _params(inv, *names[local])
@@ -366,7 +409,7 @@ def _parse_setting(n: int, line: str, names: dict, inv: dict) -> tuple:
             "its parameters: " + (", ".join(p for p in params if p) or
                                   "none are named; use an index"))
     try:
-        value = float(m.group(4))
+        value = float(m.group(5))
     except ValueError:
         raise PatchLangError(n, f"{m.group(4)!r} is not a number") from None
     return (local, idx, value)
@@ -378,7 +421,7 @@ def _endpoint(n: int, txt: str, names: dict) -> tuple:
         raise PatchLangError(n, f"cannot read the endpoint {txt!r}",
                              "endpoints look like  name  or  name.PORT")
     local = m.group(1)
-    port = unquote_port(m.group(2)) if m.group(2) is not None else m.group(3)
+    port = _token_text((m.group(2), m.group(3), m.group(4)))
     if local not in names:
         raise PatchLangError(
             n, f"'{local}' was never declared",
@@ -443,23 +486,7 @@ def render(doc: dict, inv: dict) -> str:
     for m in doc.get("modules", []):
         lines.append(f"{local_of[m['id']]:<{width}} : "
                      f"{m.get('plugin')}/{m.get('model')}")
-    # Values, under the declarations they belong to.
-    wrote_any = False
-    for m in doc.get("modules", []):
-        names = _params(inv, m.get("plugin"), m.get("model"))
-        for prm in (m.get("params") or []):
-            if not isinstance(prm, dict) or "value" not in prm:
-                continue
-            i = int(prm.get("id", -1))
-            label = port_label(names, i) if 0 <= i < len(names) and names[i] \
-                else str(i)
-            lines.append(f"{local_of[m['id']]}.{quote_port(label)} = "
-                         f"{prm['value']:g}")
-            wrote_any = True
-    if wrote_any:
-        lines.append("")
-    lines.append("") if not wrote_any else None
-
+    lines.append("")            # the bill of materials ends here
     by_id = {m["id"]: m for m in doc.get("modules", [])}
     for c in doc.get("cables", []):
         src, dst = by_id.get(c.get("outputModuleId")), by_id.get(c.get("inputModuleId"))
@@ -471,6 +498,29 @@ def render(doc: dict, inv: dict) -> str:
         dp = port_label(d_in, c.get("inputId", -1))
         lines.append(f"{local_of[src['id']]}.{quote_port(sp)} >> "
                      f"{local_of[dst['id']]}.{quote_port(dp)}")
+
+    # Tuning LAST.
+    #
+    # Values were emitted between the declarations and the cables, so a patch
+    # with eleven modules opened with eleven declarations, thirty knob
+    # positions, and only then the sixteen cables — the wiring, which is the
+    # story of the patch and the reason the notation exists, buried under a
+    # wall of numbers. Bill of materials, then what is connected to what, then
+    # how it is set.
+    tuning = []
+    for m in doc.get("modules", []):
+        pnames = _params(inv, m.get("plugin"), m.get("model"))
+        for prm in (m.get("params") or []):
+            if not isinstance(prm, dict) or "value" not in prm:
+                continue
+            i = int(prm.get("id", -1))
+            label = port_label(pnames, i) if 0 <= i < len(pnames) and pnames[i] \
+                else str(i)
+            tuning.append(f"{local_of[m['id']]}.{quote_port(label)} = "
+                          f"{prm['value']:g}")
+    if tuning:
+        lines.append("")
+        lines.extend(tuning)
     return "\n".join(lines) + "\n"
 
 

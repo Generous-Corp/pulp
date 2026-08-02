@@ -187,6 +187,67 @@ try:
 except L.PatchLangError as e:
     wrong(f"a patch with knob positions did not parse: {e}")
 
+
+# The advertisement must be a working program.
+#
+# Two drafts of the module docstring invented port names that do not exist —
+# `out.LEFT` when the port is `To "device output 1"`, and `quant.IN` when it is
+# `1V/octave pitch`. Both were written by reasoning about what a port is
+# probably called instead of reading the inventory, and neither was caught
+# because nothing ever ran the example. A language whose own example is a
+# syntax error is worse than one with no example, so the example is now
+# executed rather than believed.
+import re as _re                                            # noqa: E402
+_m = _re.search(r"EXAMPLE-BEGIN\n(.*?)\n\s*EXAMPLE-END", L.__doc__ or "", _re.S)
+if not _m:
+    wrong("the docstring has no EXAMPLE-BEGIN/END block to check")
+else:
+    _text = "\n".join(l[4:] if l.startswith("    ") else l
+                      for l in _m.group(1).splitlines())
+    try:
+        _d = L.parse(_text, inv)
+        if _d["modules"] and _d["cables"]:
+            ok(f"the docstring's example parses ({len(_d['modules'])} modules, "
+               f"{len(_d['cables'])} cables)")
+        else:
+            wrong("the docstring's example parses to an empty patch")
+    except L.PatchLangError as _e:
+        wrong(f"the docstring's example does not parse: {_e}")
+
+# A number the renderer can print, the parser must read. `%g` emits 1e-05 for a
+# small value, and the first grammar had no `-` inside the exponent — so the
+# language refused its own output. The corpus never caught it because no patch
+# held a value that small: a round-trip breaker hiding in the grammar rather
+# than in the data.
+for _v in ("1e-05", "-2.5e+10", "0.000012", "-0", "3"):
+    try:
+        _doc = L.parse(f"f : ForgeModular/FOURPOLE\nf.Cutoff = {_v}\n", inv)
+        _got = _doc["modules"][0]["params"][0]["value"]
+        if abs(_got - float(_v)) < 1e-12:
+            ok(f"the grammar reads {_v}")
+        else:
+            wrong(f"{_v} parsed as {_got}")
+    except L.PatchLangError as _e:
+        wrong(f"the grammar cannot read {_v}, which its own renderer prints: {_e}")
+
+# Whatever %g prints for any value in the corpus must read back.
+_worst = None
+for _f in files[:40]:
+    try:
+        _o = json.load(open(_f))
+    except Exception:                                       # noqa: BLE001
+        continue
+    for _m2 in _o.get("modules", []):
+        for _p in (_m2.get("params") or []):
+            if isinstance(_p, dict) and "value" in _p:
+                _s = f"{float(_p['value']):g}"
+                if not _re.fullmatch(r"[-+]?(?:[0-9]*\.?[0-9]+)(?:[eE][-+]?[0-9]+)?", _s):
+                    _worst = _worst or _s
+if _worst:
+    wrong(f"the renderer prints {_worst!r}, which the grammar does not accept")
+else:
+    ok("every value in the corpus survives %g and the grammar")
+
 # The property that makes the language worth having: positions are not
 # expressible, so a hand-written patch cannot have overlapping panels.
 text = "\n".join(f"m{i} : ForgeModular/VCO" for i in range(6)) + "\n"
