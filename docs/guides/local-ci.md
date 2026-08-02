@@ -225,7 +225,7 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.0`, which
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.80.2`, which
 provides it, so no separate binary is needed.
 
 ```bash
