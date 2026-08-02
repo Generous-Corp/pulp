@@ -161,18 +161,6 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
-  - name: score-native-panel
-    path: tools/import-validation/score_native_panel.py
-    category: visual-compare
-    use_when: Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle.
-    invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render <composite.png> [--crop L,T,W,H] [--json-out <report.json>]
-    inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and one full-resolution render of the same panel.
-    outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, per-feature buckets, and distinct exit codes for calibration, size, and threshold failures.
-    caveat: A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
   - name: importer-differential-lab
     path: tools/import-validation/importer_differential_lab.py
     category: visual-compare
