@@ -125,6 +125,13 @@ void record_track(ConceptCensus& out, const timeline::Project& project,
 
     if (track.freeze().has_value())
         out.record(Concept::TrackFreeze, id, limits);
+
+    // An override is its own concept, not a second sighting of the project's.
+    // A format that carries one document-wide tuning satisfies tuning.project
+    // honestly, so reporting only that for a document whose instruments differ
+    // would let an export claim full fidelity while flattening them into one.
+    if (track.tuning())
+        out.record(Concept::TuningInstrument, id, limits);
 }
 
 } // namespace
@@ -186,6 +193,19 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
         // claiming nothing was lost.
         if (!sequence.chord_scale_lane().empty())
             out.record(Concept::ContextChordScale, sequence.id(), limits);
+        // Richer chord spelling is recorded beside context.chord-scale rather
+        // than instead of it: a format carrying quality and root satisfies the
+        // base concept honestly, so an export that also drops a slash bass or
+        // an added ninth has to say so separately or its loss manifest would
+        // claim the harmony survived intact.
+        for (const timeline::ChordScaleEvent& event : sequence.chord_scale_lane().events()) {
+            if (event.chord_bass)
+                out.record(Concept::ContextChordBass, sequence.id(), limits);
+            if (event.chord_extensions != 0)
+                out.record(Concept::ContextChordExtension, sequence.id(), limits);
+            if (event.voicing)
+                out.record(Concept::ContextChordVoicing, sequence.id(), limits);
+        }
         if (!sequence.groove().is_canonical_default())
             out.record(Concept::ContextGroove, sequence.id(), limits);
         // Markers and regions share one concept: its vocabulary entry is "a
@@ -194,8 +214,14 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
         // format either carries or drops.
         for (const timeline::SequenceMarker& marker : sequence.markers())
             out.record(Concept::Marker, marker.id, limits);
-        for (const timeline::SequenceRegion& region : sequence.regions())
+        for (const timeline::SequenceRegion& region : sequence.regions()) {
             out.record(Concept::Marker, region.id, limits);
+            // A role is a claim the name is not. A format carrying named spans
+            // satisfies `marker`, so a document whose sections are typed needs
+            // its own concept or an export would report nothing lost.
+            if (region.role != timeline::SectionRole::Unspecified)
+                out.record(Concept::SequenceSectionRole, region.id, limits);
+        }
         for (const timeline::Scene& scene : sequence.scenes())
             out.record(Concept::ClipLaunch, scene.id, limits);
         for (const timeline::Track& track : sequence.tracks())
@@ -207,6 +233,10 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
     // opens the session at zero, silently moving every timecode reference.
     if (project.session_start())
         out.record(Concept::TimecodeOrigin, project_id, limits);
+    // The tuning every instrument follows unless it states its own. A format
+    // without it plays the document in whatever its default is.
+    if (project.tuning())
+        out.record(Concept::TuningProject, project_id, limits);
 
     // One point is a constant governing the whole document; more than one is a
     // map, and formats that carry only a constant lose the difference.

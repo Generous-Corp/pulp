@@ -25,6 +25,11 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
   immutable programs and transport snapshots, and capture publication as
   ordinary timeline commands.
+- Link `Pulp::timeline-agent-view` when an agent or remote client needs a
+  bounded, deterministic projection of one pinned `DocumentView`. `AgentView`
+  exposes a committed outline, cursor-paged clip regions, and a projection of
+  one adjacent commit's `DirtySet` without widening the dependency-minimal
+  `Pulp::timeline` model.
 - Link the optional `Pulp::dawproject-import` SDK target only when ingesting
   DAWproject XML, and `Pulp::smf-interop` only when reading or writing Standard
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
@@ -123,12 +128,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   `SetClipSequenceRef`. Pass two command IDs allocated from the session
   `WriterToken`; the helper consumes item IDs from `Project::next_item_id`
   before publication but never synthesizes writer-scoped IDs.
-- For incremental compilation, build and retain one snapshot-scoped
-  `CompileInvalidationIndex` from the project, root sequence, and context
-  registry, then call `resolve_dirty_tracks()`; it maps direct edits, child
-  dirtiness, and nested context readers to the root tracks that must be
-  recompiled and fails closed on a stale structure token, root, or registry
-  generation.
+- For incremental compilation, construct `ProgramCompileRequest::invalidation`
+  from the shared context registry and exact `CommitResult`; `submit()`
+  builds and resolves the snapshot-scoped index against that same request. It
+  maps direct edits, child dirtiness, built-in MIDI groove reads, and nested
+  context readers to root tracks. The input pins that result's snapshot,
+  revision, exact predecessor snapshot, and an immutable registry copy. If the
+  predecessor is not the currently published project, sparse reuse is refused
+  and the cumulative target snapshot is rebuilt in full. A later registry
+  generation also forces a full compile without fabricating a document revision.
 - `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
   and positions are unique within a curve; values are finite; curvature is in
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
@@ -463,6 +471,33 @@ artifact is needed. Never modify canonical project JSON text directly.
   remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
+### AgentView is a bounded projection of one immutable pin
+
+`pulp::timeline_agent_view::AgentView` is created from one non-null
+`DocumentView` and never follows a live `DocumentSession`. Every read therefore
+requires the pin's exact revision; a caller that needs freshness must pin the
+session again after a commit. `outline()` returns deterministic sequence,
+track, and clip rows plus the complete `ProjectSnapshotCounts` census. Bounded
+details are fail-closed commitments, not silent truncation: each omitted row
+set carries a count and SHA-256, and the outline carries a commitment to the
+canonical project snapshot.
+
+`region()` pages clips in canonical `(start, ItemId)` order over one half-open
+start-position window `[start, end)`. A continuation cursor is valid only for
+the exact version, revision, sequence, anchor, and original window that issued
+it; changing either bound while retaining an in-range cursor key is still
+`InvalidCursor`. The request limit must be non-zero and no larger than
+`Limits::max_page_items`.
+
+`diff()` projects an already-produced `DirtySet` into deterministic outline
+changes. Its `DirtyRevisionRange` must be exactly one adjacent transition ending
+at the pin (`after != 0`, `before == after - 1`); stale, non-adjacent, and
+underflow-shaped ranges fail with `InvalidProvenance`. This adjacency check does
+not authenticate the `DirtySet`: the public type has no session-issued origin
+token, so callers must pair it with the exact `CommitResult` that produced it.
+Do not present AgentView as an arbitrary since-revision diff or as a substitute
+for session provenance.
+
 ### Widening `ClipContent` is guarded, and the two guards are not interchangeable
 
 `ClipContent` decides what a clip *is*, so nearly every consumer dispatches on
@@ -790,6 +825,13 @@ that has to pick a position swing carries across a step boundary; most positions
 land in the same step under either order and a test using one of those passes
 whichever way the code is written.
 
+Playback applies this context to built-in MIDI at compile time. The owning
+sequence's groove moves onset and release by one shared delta, scales velocity
+at the original onset, and is inherited unchanged by ratchets. Nested MIDI reads
+the child groove exactly once rather than composing it with the parent. A
+trimmed nested MIDI leaf with authored groove is currently refused because the
+source-window chase rule for displaced notes is intentionally undefined.
+
 ### Downgrade refusals: refuse on *authored* data, not just audible data
 
 The recipe says a downgrade must refuse rather than lie. The narrower trap is
@@ -830,6 +872,97 @@ than testing a literal:
 The downgrade refuses on anything but the field's default, for the reason in
 *Downgrade refusals* above: a shape a v(N-1) reader cannot express is not an
 annotation it can drop, it changes what the document sounds like.
+
+### Drop-vs-refuse is decided per field, not per version
+
+Two fields introduced by the *same* schema version can land on opposite sides of
+the refusal rule, and the version number tells you nothing about which. Ask what
+an older reader that silently discarded the field would then believe:
+
+- If it would believe something **different about the music**, refuse. A chord
+  event's bass turns `C/E` into `C`; the older reader states a different chord,
+  not a less annotated one.
+- If it would believe the **same thing, less precisely**, drop. A region's
+  section role sits beside a free-text name the older reader still sees at the
+  same position over the same span; the information is degraded, not falsified.
+
+So one migration pair can refuse over one member and drop another in the same
+pass. Say which and why in the migration's own comment — the next reader cannot
+recover the reasoning from the code, and "it entered at the same version" is the
+wrong reason to make them match.
+
+### A member on an array element migrates per element, not by splicing `data`
+
+Every earlier sequence migration inserts or erases one member of the top-level
+`data` object, so the recipe reads as "find the neighbouring member's span and
+splice". A member that lives on a **chord event** or inside a **region
+envelope's `data`** is not reachable that way: each element needs its own edit,
+and the count varies with the document.
+
+`apply_edits` already takes a sorted `span<RawEdit>`, so a `std::vector<RawEdit>`
+built by walking the array works — sort order is established inside
+`apply_edits`, and overlapping or out-of-order edits fail closed there. Two
+details bite:
+
+- An object's `begin`/`end` bracket its braces, so an insert at the head goes at
+  `begin + 1` and at the tail at `end - 1`. Check `end > begin + 1` first, or an
+  empty object produces an inverted edit.
+- Erasing a member needs the **key** offset, which `JsonValue` does not store —
+  only value spans. Locate it with `source.find("\"<key>\"", <previous value>.end)`
+  for a leading member, or `source.find(',', <previous value>.end)` for a
+  trailing one, and assert the offset lands before the value's span before
+  trusting it.
+
+Prove the pair round-trips by asserting `upgrade(downgrade(x)) == x` on the raw
+bytes, not just that both calls succeeded.
+
+### Marker, region, scene, and slot envelopes carry a version they do not own
+
+These nested types are written with `write_envelope(..., 1, ...)` and appear in
+the registry with `current_version` 1, which reads like an independent version
+axis. It is not one: they only ever exist inside a sequence, and the **sequence**
+version is what decides their shape. Gate a new member on
+`sequence_schema_policy`, leave the nested envelope's version alone, and say so
+in a comment — bumping it instead makes "sequence v7 with region v1" a
+representable state that means nothing, and forces two numbers to be kept in
+agreement forever.
+
+### Commands are not version-gated, so a shared decoder needs three states, not two
+
+A document's schema version decides exactly whether a member is present, so the
+decoder's natural parameter is a `bool requires_x`. But some entity decoders are
+shared with the **command** path (`decode_region` via `insert_region`,
+`decode_chord_scale_lane` via `set_chord_scale_lane`), and a command payload is
+authored input with no migration path of its own. Forcing the member there
+breaks every hand-written and previously-journalled command; forbidding it drops
+the data silently.
+
+The shape that works is a tri-state (`MemberPolicy { Forbidden, Required,
+Optional }`): documents pass `member_policy_for(requires_x)`, commands pass
+`Optional`. When a version introduces **several** members together, `Optional`
+must still reject a payload carrying only some of them — half the detail is
+neither spelling, and filling in the rest invents data.
+
+### A "one field" document feature is often several schema bumps
+
+Fields land on entities, and entities have their own schemas. A tuning reference
+at project scope plus an override at instrument scope is `pulp.timeline.project`
+**and** `pulp.timeline.track`, each with its own policy header, both migration
+directions, and its own registry entry — plus a shared nested type if the value
+is a struct. Size the work by the entities touched, not by the number of fields.
+
+Two consequences downstream:
+
+- **Content-address a payload reference rather than pointing at an `ItemId`.** A
+  `ContentHash` needs no remapping, so a copy, paste, or import carries it with
+  no `id_remap.cpp` change; an identity reference would need one.
+- **Every suite that pins a current schema version breaks at once.** The literal
+  `"type_name":"pulp.timeline.sequence","version":N` appears in several suites,
+  in both raw-string and escaped-quote spellings — grep for both. Worse is the
+  `migrate(domain, type, N, N - 1, saved, ...)` idiom, where `saved` is a fresh
+  serialization: after a bump it starts from a version the payload no longer has
+  and fails for a reason unrelated to what the test is about. A refusal test
+  written that way passes for the wrong reason and stays green.
 
 ### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
@@ -1267,6 +1400,42 @@ it once the edge is cut tightens the gate with no other edit. The check rejects 
 debt entry that is no longer linked and one that duplicates its tier, so the list
 cannot outlive its subject.
 
+**Debt is declared per target but measured per CONFIGURE, and that asymmetry
+bites.** A closure is whatever *this* configure links, and the project does not
+have one: `core/render` is behind `PULP_ENABLE_GPU`, `core/host` is behind
+`NOT IOS`. Under a narrower configure the modules those guards remove are absent
+by construction — and the plain debt list reads that absence as rot, failing with
+*"debt entry 'render' is no longer linked. Delete it to tighten the bound"*. The
+gate is asking you to delete an entry the wider configure genuinely needs, so
+**taking the advice literally trades a false failure on GPU-less trees for a
+false pass on GPU-enabled ones.** Declare such entries in
+the entry under that same condition instead — `if(PULP_ENABLE_GPU)
+list(APPEND PULP_LINK_FLOOR_DEBT_<target> render)` — so where the condition
+holds the entry is an ordinary debt entry and is still rot-checked, and only the
+configure that cannot have the edge stops asking. Guard on the condition that
+decides whether the module is **built**, never on one edge: `render` has two
+independent edges (`pulp_add_plugin` under `PULP_HAS_SKIA`, and `core/view`'s
+`if(TARGET pulp-render)`), so guarding either leaves it unfalsifiable from one
+side. `playback` and `timeline` are guarded on the same `NOT IOS` for a
+*different* reason worth stating wherever it is written: both **are** built on
+iOS and are guarded because the target's only route to them runs through `host`.
+Establish that by configuring both ways — **not** from the closure report, which
+records one shortest chain per module (`PATHS_OUT`, BFS first-arrival), so a
+second longer edge is invisible in it. Note the
+blast radius before dismissing this as a test failure — the assertion runs at
+configure time from the plugin's `CMakeLists.txt`, so with
+`PULP_BUILD_EXAMPLES=ON` a mismatch kills `cmake --build` at
+`cmake_check_build_system`, and a headers-only `external/skia-build` (an ordinary
+fresh-worktree state) forces `GPU=OFF` on its own.
+
+Two readings that cost real time here: the same assertion text covers different
+failures — an iOS Simulator configure loses `host`, `playback`, `render` and
+`timeline` (the `NOT IOS` guard severs `view-core -> host` and takes the whole
+chain), while a desktop `GPU=OFF` configure loses only `render` — so **match the
+literal entry list, not the first line.** And `cmake-link-floor-selftest` passing
+says nothing about this: its battery configures its own fixture project, so it is
+green on a desktop tree while the real gate is broken on two narrower ones.
+
 **A tier is an upper bound and proves only absence.** `TIER` says nothing outside
 it is reached; it cannot say anything inside it *is*. "Reaches nothing extra" is
 satisfied most easily by reaching nothing at all, so a tier naming a module the
@@ -1426,6 +1595,41 @@ The `timeline-mcp-drift` ctest byte-checks the artifact;
 determinism, exact operation membership, complete domain projection,
 fail-closed empty command behavior, and confirm-the-failure.
 
+### One clean drift run proves one artifact, and a clean auto-merge proves nothing
+
+Two ways to believe a generated tree is in sync when it is not.
+
+**A bare `schema_drift_check.py` guards only its own `DEFAULT_ARTIFACT`**
+(`timeline_schema.json`). It is a reusable gate, not a whole-repo check, so its
+exit 0 says nothing about the four sibling projections or the three interchange
+artifacts. The enforced set is eight registrations, each naming its own
+`--artifact`/`--emit-cmd`: five in `test/cmake/timeline_tests.cmake` (the
+manifest plus `.d.ts`, CLI verbs, JS facade, MCP tools) and three in
+`test/cmake/interchange_tests.cmake` (`concepts.hpp`, `capability_tables.hpp`,
+`docs/reference/interchange-matrix.md`). Verify the set — `ctest -R 'drift'` —
+rather than a single hand run. Note the interchange three come from
+`capability_emit.py` over `core/interchange/capabilities/*.json`, a different
+generator with different inputs; `--update` on the schema gate does not touch
+them.
+
+**After a merge that touches any generator's inputs, regenerate every artifact
+that generator produces — whether or not git reported a conflict.** These
+artifacts are single-line or densely minified, so git will often auto-merge them
+cleanly and be wrong, with no conflict to alert you. A merge bringing in schema
+changes from both sides can leave `.d.ts`, CLI verbs, and the JS facade silently
+stale while the manifest's own gate passes. "Never resolve a generated artifact
+as text" covers only the conflicting case; the set that matters is every output
+of every generator whose inputs the merge touched.
+
+Two adjacent invariants the drift gates do not cover, both fail *after* a merge
+looks fine: `tools/mcp/CMakeLists.txt` FATAL_ERRORs at configure time unless
+`timeline_mcp_tools.json` carries exactly ten tools in an exact name order, and
+`core/interchange/capabilities/concepts.json` is append-only **and
+order-significant** because position fixes the generated enum ordinal. For
+`concepts.json`, check that the *other* side's entries survived at their
+original ordinals — confirming only your own additions passes a resolution that
+silently dropped theirs, and both wrong resolutions compile.
+
 ### Headless operations and CLI
 
 `pulp::tool-timeline` is the shared headless implementation for agent-facing
@@ -1578,6 +1782,35 @@ Things that are easy to get wrong here:
   Program adoption fails closed if a hosted mixer becomes nontransparent
   without that route. Keep stopped automation parked, and evaluate precise
   host-mapped ticks without round-tripping through integer samples.
+
+## A view rung consumes the editor kernel; it never owns a projection
+
+`core/timeline_view` sits above `core/timeline_editor` and is the **first production consumer** of
+that kernel — everything else referencing it is build files, the floor script, docs and tests.
+
+**The convention that keeps it composable: a view takes resolved scalars, never a projection
+object.** The arranger is handed an origin tick and a `px_per_tick`, not a `ViewportProjection`;
+hit-testing takes a resolved `tolerance_px`, not a device-pixel-ratio to interpret. Two consequences
+worth keeping:
+
+- Two slices can build a viewport and a view **concurrently without racing**, because the view has
+  no projection to diverge from. The shell feeds the projection's *output* into the seam.
+- A view stays testable headlessly with plain numbers — no viewport fixture, no DPI plumbing.
+
+**The consumption chain, which is what makes a view worth shipping rather than deferring:**
+
+```
+arranger view -> EditIntent -> SequencerUiHost::submit_intent
+              -> lower_edit_intent -> timeline::Transaction -> reducer -> serialize_project
+```
+
+Every link existed before the arranger and **every link except the arranger was exercised only by
+tests.** When adding to this stack, check the chain more than one level up: this codebase has a
+long history of capabilities whose caller had no caller.
+
+**Acceptance for an editing surface is a `serialize_project` round trip with values asserted** —
+drive it with `simulate_click` / `simulate_drag` and assert the document's values survive, not that
+the view's internal state changed.
 
 ## Scope boundary
 
@@ -1926,3 +2159,25 @@ definition. The general rule: if a documented free function is also declared
 `build-api-docs.sh` now prints the local Doxygen version for exactly this
 reason — when CI is red and local is green, check the versions before assuming
 the tree differs.
+
+## A wait for a published route must keep republishing it
+
+`test_timeline_graph_binding_publication.cpp` drives `binding.prepare()` on the
+control thread while an audio thread renders, and asserts the audio thread
+observed **both** routes (`one_blocks > 0` and `two_blocks > 0`). Two traps
+compound here.
+
+First, the reprepare loop is an ordering budget that orders nothing: it can run
+to completion before the audio thread is ever scheduled, leaving both counters
+at zero.
+
+Second — and this is the one a re-poll cannot fix — the loop **alternates**
+routes and ends on `route_one`. A wait that only spins re-reading `two_blocks`
+can never succeed, because `route_two` is never published again. The wait has to
+keep alternating, not just keep looking.
+
+Bound it, and make the pump cheap. Tearing down reprepared bindings costs
+superlinearly in their count: a full-rate 10s wait spent 10s waiting and then
+~30s in teardown (6663 reprepares), long enough to present as a CTest timeout
+rather than the failure it is. A 1ms pump sleep with a 2s deadline holds the
+whole failing run under 3s.

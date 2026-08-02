@@ -116,13 +116,28 @@ void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
     gradient_is_radial_ = false;
     // Repurpose linear x0/y0 as conic center, x1 as start_angle (radians).
     grad_x0_ = cx; grad_y0_ = cy;
-    grad_x1_ = start_angle; grad_y1_ = 0;
+    // ...and y1 as the turns the stop list spans (1 = plain conic). The slot
+    // was already unused for a conic; this file's convention is to repurpose
+    // the linear slots rather than grow the gradient state.
+    grad_x1_ = start_angle; grad_y1_ = 1.0f;
     grad_colors_.assign(colors, colors + count);
     grad_positions_.assign(positions, positions + count);
     // The bitmap is generated lazily inside fill_with_active_paint() once
     // we know the destination clip rect. Drop any cached image from a
     // previous conic that may not match the upcoming clip.
     release_conic_image();
+}
+
+// CoreGraphics rasterises the sweep itself (build_conic_gradient_image), so a
+// repeating band costs one modulo there rather than a shader tile mode.
+void CoreGraphicsCanvas::set_fill_gradient_conic_repeating(
+        float cx, float cy, float start_angle, float sweep_turns,
+        const Color* colors, const float* positions, int count) {
+    set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
+    if (has_gradient_ && sweep_turns > 0.0f && sweep_turns < 1.0f) {
+        grad_y1_ = sweep_turns;
+        release_conic_image();
+    }
 }
 
 void CoreGraphicsCanvas::clear_fill_gradient() {

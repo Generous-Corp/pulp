@@ -646,10 +646,11 @@ Three pieces, and the boundaries between them matter:
   refuses a duplicate type rather than overwriting — two renderers disagreeing
   about what a content kind reads would make invalidation depend on registration
   order. An unregistered type reads nothing, which is correct: no renderer
-  compiles it, so there is no program that could go stale. Built-in content
-  (media, notes, empty) is not registered and declares nothing, so the contract
-  cannot change the invalidation of anything that predates it.
-- `ContextSubscriberIndex::build()` is the kind → reader-track reverse index.
+  compiles it, so there is no program that could go stale. Built-in MIDI is the
+  deliberate exception: the program compiler reads its owning sequence groove,
+  so `MidiContent` always subscribes to `Groove` without plugin registration.
+  Media and empty content read none.
+- `CompileInvalidationIndex::build()` is the kind → reader-track reverse index.
   Rebuild it when the document's **structure** changes; a context edit alone does
   not invalidate it, because editing a lane's contents does not change who reads
   it. It walks clips through the exhaustive `ClipContentCases` visitor, so a new
@@ -663,8 +664,37 @@ Three pieces, and the boundaries between them matter:
   trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
   structural sequence edit and also sets `all`.
 
+Production callers construct `ProgramCompileRequest::invalidation` from the
+shared registry and exact `CommitResult`. Its constructor binds the dirty set to
+that result's target snapshot, revision, exact predecessor snapshot, and an
+immutable registry copy. Sparse reuse is allowed only when the predecessor is
+the currently published project; a restored or forked lineage rebuilds in full.
+`submit()` resolves that pinned input and remembers the generation that reached
+publication. A different registry generation forces a full compile, including
+at the same document revision. Do not resolve
+outside the request and then drop the registry generation before submission.
+Completion is keyed by `CompileTicket::submission_epoch` and
+`CompilerStatus::latest_published_epoch`; revision equality is insufficient for
+a same-document registry refresh. Treat the latter as a successful-publication
+watermark: `latest_published_epoch >= submission_epoch` is terminal for a ticket,
+meaning its request published or was superseded by a later successful
+publication. Callers requiring exact-current document identity must also
+require epoch equality and compare the published program identity/revision.
+Epochs are scoped to one compiler instance: destroying the facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+If `busy` is false, an error with the watermark still below the ticket is
+terminal failure.
+
+Built-in note compilation applies the owning sequence groove at the original
+owner-sequence onset. Move note-on/off by one shared displacement, intersect the
+pair with the owning clip's half-open window, scale velocity half-up with
+saturation, then subdivide the retained span for ratchets. Nested leaves carry
+their owner sequence and source onset through lowering; never compose parent and
+child groove. A trimmed nested MIDI leaf with authored groove is refused as
+`TrimmedGrooveUnsupported` until source-window chase semantics are specified.
+
 **Adding a `CompileContextKind` is a data change, with one trap.** Both
-`ContextSubscriberIndex::build()` and the `CompileContextSubscriptions` bitset
+`CompileInvalidationIndex::build()` and the `CompileContextSubscriptions` bitset
 loop over `[0, kCompileContextKindCount)`, so a new kind needs no new case in
 either — but it does need `kCompileContextKindCount` bumped in lockstep with the
 enum. Forget that and the new kind is never indexed, never dirtied, and every
@@ -890,6 +920,17 @@ editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
 
+**"Every Pulp plugin links `playback`" is true of a desktop configure only.**
+The chain runs through `pulp-host`, and `core/host` is behind `NOT IOS` — iOS
+disallows dlopen of third-party plugins, so hosting is not built there and the
+`pulp-view-core -> pulp::host` edge is dropped too. One guard therefore removes
+`host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
+plugin's only route to all three. Anything asserting `playback` is present in a
+plugin binary must say which configure it means; entries a guard can remove
+must be appended to `PULP_LINK_FLOOR_DEBT_<target>` under that same condition
+rather than declared unconditionally, which reads their absence as rot. See the
+`timeline` skill for the full rule.
+
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor
 rung — while the binary links neither, and still pass. If what you need to show
@@ -967,3 +1008,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

@@ -39,6 +39,12 @@ TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty ch
     REQUIRE_FALSE(metadata_lowered.all);
     REQUIRE(metadata_lowered.tracks.empty());
 
+    const DirtySet child_groove_edit({DirtyItem{{10}, {}, {10}, DirtyFlags::Context}},
+                                     {{{10}, CompileContextKind::Groove}});
+    const auto groove_lowered = resolve_dirty_tracks(nested, {2}, child_groove_edit, index);
+    REQUIRE_FALSE(groove_lowered.all);
+    REQUIRE(groove_lowered.tracks == std::vector<ItemId>{{3}, {5}});
+
     const DirtySet root_metadata({DirtyItem{{31}, {}, {2}, DirtyFlags::Marker}});
     const auto root_metadata_lowered = resolve_dirty_tracks(nested, {2}, root_metadata, index);
     REQUIRE_FALSE(root_metadata_lowered.all);
@@ -649,7 +655,68 @@ NoteModifier certain_ratchet(std::uint64_t note_id, std::uint16_t ratchets) {
     return modifier;
 }
 
+GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale) {
+    GrooveTemplateInput input;
+    input.step = TickDuration{100};
+    input.steps = {GrooveStep{TickDuration{timing_offset}, velocity_scale}};
+    return take(GrooveTemplate::create(std::move(input)));
+}
+
+Project nested_groove_project(bool trim_child = false) {
+    auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13)));
+    SequenceInput child_input;
+    child_input.id = {10};
+    child_input.name = "child";
+    child_input.musical_duration = TickDuration{960};
+    child_input.tracks = {track(11, {child_clip})};
+    child_input.groove = one_step_groove(20, 500);
+    auto child = take(Sequence::create(std::move(child_input)));
+
+    auto direct_clip = take(Clip::create({20}, {0}, {960}, note_content(21)));
+    const auto reference_duration = trim_child ? 480 : 960;
+    SequenceInput root_input;
+    root_input.id = {2};
+    root_input.name = "root";
+    root_input.tracks = {
+        track(3, {nested_clip(4, 10, 480, reference_duration)}),
+        track(5, {direct_clip}),
+    };
+    root_input.groove = one_step_groove(80, 2000);
+    auto root = take(Sequence::create(std::move(root_input)));
+
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested groove";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+CompileError compile_error_for(const Project& project);
+
 } // namespace
+
+TEST_CASE("Nested MIDI reads exactly its owning sequence groove") {
+    const auto program = compile(shared(nested_groove_project()));
+    const auto nested_events = program->find_track({3})->arrangement_note_events();
+    REQUIRE(nested_events.size() == 2);
+    REQUIRE(nested_events[0].tick == TickPosition{620});
+    REQUIRE(nested_events[0].velocity == 20'000);
+    REQUIRE(nested_events[1].tick == TickPosition{860});
+
+    const auto root_events = program->find_track({5})->arrangement_note_events();
+    REQUIRE(root_events.size() == 2);
+    REQUIRE(root_events[0].tick == TickPosition{200});
+    REQUIRE(root_events[0].velocity == 0xffff);
+    REQUIRE(root_events[1].tick == TickPosition{440});
+}
+
+TEST_CASE("A trimmed nested MIDI leaf with authored groove is explicitly refused") {
+    const auto error = compile_error_for(nested_groove_project(true));
+    REQUIRE(error.code == CompileErrorCode::TrimmedGrooveUnsupported);
+    REQUIRE(error.item == ItemId{12});
+}
 
 TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
     // Ratchet is authored rather than drawn, so it is observable in the compiled
