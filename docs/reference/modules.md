@@ -833,6 +833,15 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
+`LoopRegion` is the loop bounds a transport honours, in document ticks. It lives
+here rather than beside either consumer because that is all it is — two document
+positions and whether they are in force — so the rung that runs the transport
+(`playback::LoopRegion`) and the rung that draws the ruler
+(`timeline_editor::UiPlayhead::loop`) name one type instead of two structurally
+identical ones. A disabled loop keeps its bounds, so turning looping off and back
+on returns the user to the region they set up and a view keeps drawing it
+meanwhile.
+
 ## timeline
 
 Immutable document-model foundations and a bounded typed editing core for musical timelines. `Project`,
@@ -1175,7 +1184,12 @@ Two properties make the split hold, and both are enforced rather than asserted.
 Everything crosses the interface by value, so a playhead reading a view is
 holding cannot be invalidated when the engine adopts a different compiled
 program — it goes stale, never dangling, and `UiPlayhead::program_generation`
-is how a view tells the difference. And the vocabulary is document-side:
+is how a view tells the difference. `UiPlayhead::continuity_epoch` answers the
+separate question of whether the position moved *continuously* between two
+readings: a loop wrap, a seek, and a scrub anchor all break continuity without
+recompiling anything, so a view that smooths motion between readings must hold
+the newer position outright across a change in this value rather than
+interpolating into it. And the vocabulary is document-side:
 positions are `timebase` ticks, subjects are `timeline::ItemId`s. Nothing here
 describes how audio is produced.
 `tools/scripts/timeline_engine_dependency_floor_check.py` holds the module to
@@ -1191,6 +1205,13 @@ using namespace pulp::timeline_editor;
 // A view repaints its ruler from a value it owns outright.
 const UiPlayhead reading = host.playhead();
 if (reading.moving())
+    draw_playhead_at(reading.position);
+
+// Smoothing between publishes stops at a continuity break, so a loop wrap
+// never draws the playhead sliding backwards through the whole timeline.
+if (reading.continuity_epoch == previous.continuity_epoch)
+    draw_playhead_at(interpolate(previous.position, reading.position, alpha));
+else
     draw_playhead_at(reading.position);
 
 // Clicking a note asks to hear it, in document terms only.
@@ -1219,6 +1240,15 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
+only a replacement note, erase carries only the expected note, and move, resize,
+and velocity edits carry both snapshots with the same note identity.
+`ValidatedNoteEditIntent::create` checks that shape and the note domain, and
+`NoteEditIntentHost` accepts only the validated wrapper. Note intents deliberately
+have no transaction lowerer yet: granular
+note commands own that later boundary, so this editor API does not disguise an
+O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no
 mocking framework. It is also a legitimate deployment: an editor embedded in a
@@ -1227,6 +1257,31 @@ auditions, and stays fully usable.
 
 **Depends on:** `pulp::timeline`, `pulp::timebase`
 
+
+## timeline_view
+
+Views that draw the document and turn a gesture into an edit intent — the first
+consumer of the editor rung rather than another declaration of it.
+
+The rung exists so a view can be built, tested and reasoned about without an
+engine. Its floor row admits `timeline_editor`, `timeline`, `timebase`, `view`,
+`canvas`, `platform` and `runtime`, and **deliberately omits `playback`**: that
+omission is the contract, not an oversight. A view's only coupling toward audio
+stays the `SequencerUiHost` interface, so an arranger drawn over somebody else's
+engine acquires no transport. Wanting to widen the row to reach `playback` means
+wanting a host that implements the seam. It also omits `project_package`, which
+keeps storage a sibling rung rather than a base: an editor is proven against a
+`serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row.
+
+A view takes **resolved values** — an origin tick, a `px_per_tick`, a resolved
+`tolerance_px`, or a `TickProjection`/`PitchProjection` that is already a pair of
+scalars with a name. What it does not take is **viewport policy**: an object
+owning DPI, zoom or scroll state that the view must keep in sync. That line is
+what lets a viewport slice and a view slice proceed concurrently without racing,
+and it keeps a view testable headlessly with plain numbers.
+
+**Link:** `pulp::timeline-view` · **Include prefix:** `<pulp/timeline_view/...>`
 
 ## playback
 

@@ -355,3 +355,234 @@ TEST_CASE("Track command equivalence compares the whole authored payload") {
     REQUIRE_FALSE(equivalent(Command{RemoveTrack{kSequence, kTrack}},
                              Command{RemoveTrack{kSequence, kDrums}}));
 }
+
+TEST_CASE("Track reorder rewrites authored order and leaves canonical order and the compiled "
+          "program alone") {
+    const auto initial = seeded();
+    REQUIRE(authored_order(initial) == std::vector<ItemId>{kBass, kTrack, kDrums});
+    REQUIRE(identity_order(initial) == std::vector<ItemId>{kBass, kDrums, kTrack});
+
+    // The moved track currently stands before the drums; send it to the end.
+    const auto reduced = value_of(reduce_transaction(
+        initial,
+        transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kTrack, kDrums, std::nullopt}})));
+    REQUIRE(authored_order(reduced.project) == std::vector<ItemId>{kBass, kDrums, kTrack});
+    // Canonical order carries compile order, census counts, and render hashes,
+    // and a reorder is a display change, so neither it nor the compiled program
+    // may move.
+    REQUIRE(identity_order(reduced.project) == identity_order(initial));
+    REQUIRE(reduced.project.sequence_compile_structure_token() ==
+            initial.sequence_compile_structure_token());
+    require_owned_coordinates(reduced.project, true);
+    REQUIRE(reduced.dirty.items()[0] ==
+            DirtyItem{kTrack, kTrack, kSequence, DirtyFlags::Structure});
+}
+
+TEST_CASE("Track reorder undo restores the exact prior authored order and replay agrees") {
+    const auto initial = seeded();
+    auto session = value_of(DocumentSession::create(initial));
+    auto writer = value_of(session->register_writer());
+    REQUIRE(session->submit(
+        writer,
+        session_transaction(writer, {}, {MoveTrack{kSequence, kTrack, kDrums, std::nullopt}})));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kBass, kDrums, kTrack});
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {MoveTrack{kSequence, kTrack, std::nullopt, kBass}})));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kTrack, kBass, kDrums});
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kBass, kDrums, kTrack});
+    REQUIRE(session->undo(writer));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kBass, kTrack, kDrums});
+    REQUIRE(identity_order(*session->snapshot()) == identity_order(initial));
+
+    REQUIRE(session->redo(writer));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kBass, kDrums, kTrack});
+    REQUIRE(session->redo(writer));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kTrack, kBass, kDrums});
+
+    auto replayed = session->journal().replay(initial, {});
+    REQUIRE(replayed);
+    REQUIRE(authored_order(*replayed) == std::vector<ItemId>{kTrack, kBass, kDrums});
+    REQUIRE(identity_order(*replayed) == identity_order(initial));
+    require_owned_coordinates(*replayed, true);
+}
+
+TEST_CASE("Track reorder succeeds for a track whose clip a launcher slot sources") {
+    const auto initial = launched_arrangement();
+    // Composing a reorder from erase and insert would be refused outright here:
+    // erase_track will not strand the slot that sources the track's clip.
+    REQUIRE_FALSE(initial.find_sequence(kSequence)->erase_track(kTrack));
+
+    auto session = value_of(DocumentSession::create(initial));
+    auto writer = value_of(session->register_writer());
+    REQUIRE(session->submit(
+        writer,
+        session_transaction(writer, {}, {MoveTrack{kSequence, kTrack, kDrums, std::nullopt}})));
+    REQUIRE(authored_order(*session->snapshot()) == std::vector<ItemId>{kBass, kDrums, kTrack});
+    REQUIRE(session->snapshot()->find_sequence(kSequence)->find_slot({36}));
+    REQUIRE(session->snapshot()->sequence_compile_structure_token() ==
+            initial.sequence_compile_structure_token());
+    require_owned_active(*session->snapshot(), true);
+}
+
+TEST_CASE("Track reorder is refused when the expected position is stale") {
+    const auto initial = seeded();
+    // The moved track stands before the drums, not before the bass.
+    auto wrong_neighbour = reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kTrack, kBass, std::nullopt}}));
+    REQUIRE_FALSE(wrong_neighbour);
+    REQUIRE(wrong_neighbour.error().code == ConflictCode::ExpectedValueMismatch);
+
+    // An empty expected names the last position, so it is a value the gate
+    // compares rather than a gap it skips.
+    auto wrong_end = reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kTrack, std::nullopt, kBass}}));
+    REQUIRE_FALSE(wrong_end);
+    REQUIRE(wrong_end.error().code == ConflictCode::ExpectedValueMismatch);
+
+    // The same empty expected admits the track that really is last.
+    const auto reduced = value_of(reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kDrums, std::nullopt, kTrack}})));
+    REQUIRE(authored_order(reduced.project) == std::vector<ItemId>{kBass, kDrums, kTrack});
+}
+
+TEST_CASE("Track reorder is rejected for a missing track a missing destination or itself") {
+    const auto initial = seeded();
+
+    auto missing_track = reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, {999}, kDrums, std::nullopt}}));
+    REQUIRE_FALSE(missing_track);
+    REQUIRE(missing_track.error().code == ConflictCode::TargetMissing);
+
+    auto missing_destination = reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kTrack, kDrums, {{999}}}}));
+    REQUIRE_FALSE(missing_destination);
+    REQUIRE(missing_destination.error().code == ConflictCode::TargetMissing);
+
+    // Naming the moved track as its own destination describes no position, and
+    // an implementation that lifted it out first would silently append.
+    auto itself = reduce_transaction(
+        initial, transaction({1}, 1, 1, {}, {MoveTrack{kSequence, kTrack, kDrums, kTrack}}));
+    REQUIRE_FALSE(itself);
+    REQUIRE(itself.error().code == ConflictCode::ModelInvariant);
+}
+
+TEST_CASE("Track rename replaces the authored name and leaves order and compilation alone") {
+    const auto initial = seeded();
+    auto session = value_of(DocumentSession::create(initial));
+    auto writer = value_of(session->register_writer());
+    auto committed = session->submit(
+        writer,
+        session_transaction(writer, {}, {SetTrackName{kSequence, kTrack, "vocals", "lead vocal"}}));
+    REQUIRE(committed);
+    REQUIRE(committed->dirty.items()[0] ==
+            DirtyItem{kTrack, kTrack, kSequence, DirtyFlags::Content});
+    REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() ==
+            "lead vocal");
+    // A name is a label: it moves neither order nor the compiled program.
+    REQUIRE(authored_order(*session->snapshot()) == authored_order(initial));
+    REQUIRE(identity_order(*session->snapshot()) == identity_order(initial));
+    REQUIRE(session->snapshot()->sequence_compile_structure_token() ==
+            initial.sequence_compile_structure_token());
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() == "vocals");
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() ==
+            "lead vocal");
+
+    auto replayed = session->journal().replay(initial, {});
+    REQUIRE(replayed);
+    REQUIRE(replayed->find_sequence(kSequence)->find_track(kTrack)->name() == "lead vocal");
+}
+
+TEST_CASE("Track rename is refused when the expected name is stale") {
+    const auto initial = seeded();
+    auto session = value_of(DocumentSession::create(initial));
+    auto writer = value_of(session->register_writer());
+    REQUIRE(session->submit(
+        writer,
+        session_transaction(writer, {}, {SetTrackName{kSequence, kTrack, "vocals", "lead vocal"}})));
+
+    auto stale = session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {SetTrackName{kSequence, kTrack, "vocals", "backing"}}));
+    REQUIRE_FALSE(stale);
+    REQUIRE(stale.error().code == ConflictCode::ExpectedValueMismatch);
+    REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() ==
+            "lead vocal");
+
+    // The gate compares bytes, so a difference in case is a stale expectation.
+    auto wrong_case = session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {SetTrackName{kSequence, kTrack, "Lead Vocal", "backing"}}));
+    REQUIRE_FALSE(wrong_case);
+    REQUIRE(wrong_case.error().code == ConflictCode::ExpectedValueMismatch);
+}
+
+TEST_CASE("Track reorder and rename equivalence compares every authored field") {
+    const Command move{MoveTrack{kSequence, kTrack, kDrums, std::nullopt}};
+    REQUIRE(equivalent(move, Command{MoveTrack{kSequence, kTrack, kDrums, std::nullopt}}));
+    REQUIRE_FALSE(equivalent(move, Command{MoveTrack{kSequence, kBass, kDrums, std::nullopt}}));
+    // Same destination, different origin: a different edit with a different
+    // inverse, so coalescing may not drop either one.
+    REQUIRE_FALSE(equivalent(move, Command{MoveTrack{kSequence, kTrack, kBass, std::nullopt}}));
+    REQUIRE_FALSE(equivalent(move, Command{MoveTrack{kSequence, kTrack, kDrums, kBass}}));
+
+    const Command rename{SetTrackName{kSequence, kTrack, "vocals", "lead vocal"}};
+    REQUIRE(equivalent(rename, Command{SetTrackName{kSequence, kTrack, "vocals", "lead vocal"}}));
+    REQUIRE_FALSE(
+        equivalent(rename, Command{SetTrackName{kSequence, kTrack, "vocals", "Lead Vocal"}}));
+    REQUIRE_FALSE(
+        equivalent(rename, Command{SetTrackName{kSequence, kTrack, "vocals", "lead vocal "}}));
+    REQUIRE_FALSE(equivalent(rename, Command{SetTrackName{kSequence, kBass, "vocals",
+                                                          "lead vocal"}}));
+}
+
+TEST_CASE("Track rename is charged both names by the journal byte limit") {
+    const std::string long_name(4'096, 'n');
+    const auto short_charge =
+        retained_size(Command{SetTrackName{kSequence, kTrack, "vocals", "x"}});
+    const auto long_charge =
+        retained_size(Command{SetTrackName{kSequence, kTrack, "vocals", long_name}});
+    // The two charges differ by exactly the bytes the replacement name grew by.
+    REQUIRE(long_charge - short_charge == long_name.size() - 1);
+
+    // Measure what the journal actually charges the short rename, then hold that
+    // exact budget while swapping in the long one. A retained_size with no arm
+    // for this command falls back to sizeof(SetTrackName), which would charge
+    // both the same and admit both, so the refusal below is the proof.
+    SessionLimits limits;
+    {
+        auto probe = value_of(DocumentSession::create(seeded()));
+        auto writer = value_of(probe->register_writer());
+        REQUIRE(probe->submit(
+            writer,
+            session_transaction(writer, {}, {SetTrackName{kSequence, kTrack, "vocals", "x"}})));
+        limits.journal.max_retained_bytes = probe->journal().retained_bytes();
+    }
+
+    SECTION("the measured budget admits the short rename") {
+        auto session = value_of(DocumentSession::create(seeded(), limits));
+        auto writer = value_of(session->register_writer());
+        REQUIRE(session->submit(
+            writer,
+            session_transaction(writer, {}, {SetTrackName{kSequence, kTrack, "vocals", "x"}})));
+        REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() == "x");
+    }
+
+    SECTION("the same budget refuses the long rename atomically") {
+        auto session = value_of(DocumentSession::create(seeded(), limits));
+        auto writer = value_of(session->register_writer());
+        auto rejected = session->submit(
+            writer, session_transaction(writer, {},
+                                        {SetTrackName{kSequence, kTrack, "vocals", long_name}}));
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalFull);
+        REQUIRE(session->revision() == DocumentRevision{});
+        REQUIRE(session->snapshot()->find_sequence(kSequence)->find_track(kTrack)->name() ==
+                "vocals");
+    }
+}

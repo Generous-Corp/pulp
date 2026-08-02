@@ -17,7 +17,6 @@
 //! | `stop  [--trace-id N]`          | `Motion.stopTrace`      |
 //! | `snapshot`                      | `Motion.snapshot`       |
 //! | `list-traces`                   | `Motion.listTraces`     |
-//! | `load-fixture <PATH>`           | `Motion.loadFixture`    |
 //! | `scrub <FRAME>`                 | `Motion.scrubTo`        |
 //! | `play`                          | `Motion.play`           |
 //! | `pause`                         | `Motion.pause`          |
@@ -28,40 +27,29 @@
 //! The inspector socket uses a 4-byte little-endian length-prefix
 //! frame (`core/events/src/interprocess_connection.cpp`), and the
 //! C++ `pulp inspect --command METHOD --params JSON` path already
-//! speaks it correctly, knows how to auto-discover the port via
-//! `/tmp/pulp-inspector-*.port`, and prints the parsed JSON
+//! speaks it correctly, knows how to select authenticated ephemeral
+//! discovery records, and prints the parsed JSON
 //! response. Re-implementing length-prefix framing + port discovery
 //! in Rust would duplicate logic that already lives in the inspect
 //! adapter. The shell-out is what the MCP wrapper does too.
 //!
-//! # Reachability gate (off-by-default ergonomics)
+//! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! Every verb runs a quick `TcpStream::connect` against
-//! `127.0.0.1:<port>` first (default 9147, override via
-//! `PULP_INSPECTOR_PORT`). If nothing is listening we print a clear
-//! "no inspector running — start with `PULP_MOTION_SERVER=1
-//! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
-//! This catches the most common user mistake (forgetting to launch
-//! the host) without making the user wait for the C++ binary's own
-//! discovery + connect cycle to fail.
+//! `--session ID --instance ID --publication ID` selects one exact
+//! publication. An explicit
+//! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
+//! C++ client performs authenticated ephemeral discovery and the real protocol
+//! connection is the only connection opened. If no session is available, the
+//! authenticated client reports that no live session was discovered and exits
+//! 1. No guessed-port probe or unimplemented launcher flag is involved.
 
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use crate::error::{CliError, Result};
 
-/// Default inspector port — matches `inspect/src/inspector_server.cpp`
-/// `kDefaultPort`. The C++ side also honours `PULP_INSPECTOR_PORT`;
-/// we honor the same env var here so a non-default host stays
-/// reachable.
-pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;
-
-/// Env var that overrides [`DEFAULT_INSPECTOR_PORT`]. Same name the
-/// C++ inspector server reads on startup.
-pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
+/// Optional explicit discovery filter understood by the wrapper.
+pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
 
 /// Parsed `pulp motion …` subcommand. One variant per verb; each
 /// carries the already-parsed params so [`dispatch`] is a pure
@@ -79,8 +67,6 @@ pub enum Sub {
     Snapshot,
     /// `pulp motion list-traces`.
     ListTraces,
-    /// `pulp motion load-fixture <PATH>`.
-    LoadFixture { path: PathBuf },
     /// `pulp motion scrub <FRAME>`.
     Scrub { frame: i64 },
     /// `pulp motion play`.
@@ -97,9 +83,15 @@ pub struct GlobalFlags {
     /// `--json` — emit raw inspector JSON instead of the
     /// pretty-printed default.
     pub json: bool,
-    /// Optional explicit port. Falls back to
-    /// `$PULP_INSPECTOR_PORT`, then [`DEFAULT_INSPECTOR_PORT`].
+    /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
+    /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
+    /// Exact session identity forwarded as `pulp inspect --session`.
+    pub session_id: Option<String>,
+    /// Exact instance identity forwarded as `pulp inspect --instance`.
+    pub instance_id: Option<String>,
+    /// Non-reusable publication generation forwarded as `--publication`.
+    pub publication_id: Option<String>,
 }
 
 /// `pulp motion record` flag set.
@@ -149,16 +141,51 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             globals.json = true;
         } else if a == "--port" {
             i += 1;
-            let v = args.get(i).ok_or_else(|| {
-                CliError::BadUsage("--port requires a value".to_owned())
-            })?;
-            globals.port = Some(v.parse::<u16>().map_err(|_| {
-                CliError::BadUsage(format!("--port: invalid u16 value `{v}`"))
-            })?);
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage("--port requires a value".to_owned()))?;
+            let port = v
+                .parse::<u16>()
+                .map_err(|_| CliError::BadUsage(format!("--port: invalid u16 value `{v}`")))?;
+            if port == 0 {
+                return Err(CliError::BadUsage(
+                    "--port must be between 1 and 65535".to_owned(),
+                ));
+            }
+            globals.port = Some(port);
+        } else if a == "--session" || a == "--instance" || a == "--publication" {
+            i += 1;
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage(format!("{a} requires a value")))?;
+            if !crate::cmd::inspector::valid_session_identity(v) {
+                return Err(CliError::BadUsage(format!(
+                    "{a} must contain only ASCII letters, digits, `-`, or `_`"
+                )));
+            }
+            if a == "--session" {
+                globals.session_id = Some(v.clone());
+            } else if a == "--instance" {
+                globals.instance_id = Some(v.clone());
+            } else {
+                globals.publication_id = Some(v.clone());
+            }
         } else {
             rest.push(a.clone());
         }
         i += 1;
+    }
+    if globals.session_id.is_some() != globals.instance_id.is_some() {
+        return Err(CliError::BadUsage(
+            "--session and --instance must be supplied together".to_owned(),
+        ));
+    }
+    if globals.publication_id.is_some()
+        && (globals.session_id.is_none() || globals.instance_id.is_none())
+    {
+        return Err(CliError::BadUsage(
+            "--publication requires --session and --instance".to_owned(),
+        ));
     }
 
     let Some(verb) = rest.first() else {
@@ -169,15 +196,29 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "record" => parse_record(&rest[1..]).map(|s| (s, globals)),
         "stop" => parse_stop(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => Ok((Sub::Snapshot, globals)),
-        "list-traces" | "list" => Ok((Sub::ListTraces, globals)),
-        "load-fixture" => parse_load_fixture(&rest[1..]).map(|s| (s, globals)),
+        "snapshot" => no_args("snapshot", &rest[1..]).map(|()| (Sub::Snapshot, globals)),
+        "list-traces" | "list" => no_args(verb, &rest[1..]).map(|()| (Sub::ListTraces, globals)),
+        "load-fixture" => Err(CliError::BadUsage(
+            "pulp motion load-fixture is unavailable: Motion.loadFixture reads \
+             a server-side filesystem path and authenticated inspector policy \
+             rejects it"
+                .to_owned(),
+        )),
         "scrub" => parse_scrub(&rest[1..]).map(|s| (s, globals)),
-        "play" => Ok((Sub::Play, globals)),
-        "pause" => Ok((Sub::Pause, globals)),
+        "play" => no_args("play", &rest[1..]).map(|()| (Sub::Play, globals)),
+        "pause" => no_args("pause", &rest[1..]).map(|()| (Sub::Pause, globals)),
         "cost" => parse_cost(&rest[1..]).map(|s| (s, globals)),
         _ => Err(CliError::UnknownSubcommand),
     }
+}
+
+fn no_args(verb: &str, args: &[String]) -> Result<()> {
+    if let Some(argument) = args.first() {
+        return Err(CliError::BadUsage(format!(
+            "pulp motion {verb}: unexpected argument `{argument}`"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_record(args: &[String]) -> Result<Sub> {
@@ -193,32 +234,33 @@ fn parse_record(args: &[String]) -> Result<Sub> {
         match a.as_str() {
             "--view" | "--view-name" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--view requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--view requires a value".to_owned()))?;
                 r.view_name = v.clone();
             }
             "--out" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--out requires a path".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--out requires a path".to_owned()))?;
                 r.out = Some(PathBuf::from(v));
             }
             "--fps" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--fps requires a value".to_owned())
-                })?;
-                r.fps = Some(v.parse::<u32>().map_err(|_| {
-                    CliError::BadUsage(format!("--fps: invalid u32 value `{v}`"))
-                })?);
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--fps requires a value".to_owned()))?;
+                r.fps =
+                    Some(v.parse::<u32>().map_err(|_| {
+                        CliError::BadUsage(format!("--fps: invalid u32 value `{v}`"))
+                    })?);
             }
             "--metrics" | "--metric" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--metrics requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--metrics requires a value".to_owned()))?;
                 r.metrics.push(v.clone());
             }
             other => {
@@ -250,13 +292,11 @@ fn parse_stop(args: &[String]) -> Result<Sub> {
         match args[i].as_str() {
             "--trace-id" | "--id" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--trace-id requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--trace-id requires a value".to_owned()))?;
                 trace_id = Some(v.parse::<i64>().map_err(|_| {
-                    CliError::BadUsage(format!(
-                        "--trace-id: invalid i64 value `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--trace-id: invalid i64 value `{v}`"))
                 })?);
             }
             other => {
@@ -270,35 +310,24 @@ fn parse_stop(args: &[String]) -> Result<Sub> {
     Ok(Sub::Stop { trace_id })
 }
 
-fn parse_load_fixture(args: &[String]) -> Result<Sub> {
-    let path = args.first().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp motion load-fixture: missing <PATH>".to_owned(),
-        )
-    })?;
-    Ok(Sub::LoadFixture {
-        path: PathBuf::from(path),
-    })
-}
-
 fn parse_scrub(args: &[String]) -> Result<Sub> {
-    let frame_s = args.first().ok_or_else(|| {
-        CliError::BadUsage("pulp motion scrub: missing <FRAME>".to_owned())
-    })?;
+    let frame_s = args
+        .first()
+        .ok_or_else(|| CliError::BadUsage("pulp motion scrub: missing <FRAME>".to_owned()))?;
     let frame = frame_s.parse::<i64>().map_err(|_| {
         CliError::BadUsage(format!(
             "pulp motion scrub: invalid frame value `{frame_s}`"
         ))
     })?;
+    no_args("scrub", &args[1..])?;
     Ok(Sub::Scrub { frame })
 }
 
 fn parse_cost(args: &[String]) -> Result<Sub> {
     let action = args.first().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp motion cost: missing subcommand (enable|disable)".to_owned(),
-        )
+        CliError::BadUsage("pulp motion cost: missing subcommand (enable|disable)".to_owned())
     })?;
+    no_args("cost", &args[1..])?;
     match action.as_str() {
         "enable" | "on" => Ok(Sub::Cost { enable: true }),
         "disable" | "off" => Ok(Sub::Cost { enable: false }),
@@ -337,31 +366,11 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
         )),
         Sub::Snapshot => Some(("Motion.snapshot", "{}".to_owned())),
         Sub::ListTraces => Some(("Motion.listTraces", "{}".to_owned())),
-        Sub::LoadFixture { path } => {
-            // The inspector expects a JSON string; escape backslashes
-            // and quotes minimally so Windows paths and POSIX paths
-            // with spaces both survive the trip.
-            let escaped = path
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"");
-            Some((
-                "Motion.loadFixture",
-                format!("{{\"path\":\"{escaped}\"}}"),
-            ))
-        }
-        Sub::Scrub { frame } => Some((
-            "Motion.scrubTo",
-            format!("{{\"frame\":{frame}}}"),
-        )),
+        Sub::Scrub { frame } => Some(("Motion.scrubTo", format!("{{\"frame\":{frame}}}"))),
         Sub::Play => Some(("Motion.play", "{}".to_owned())),
         Sub::Pause => Some(("Motion.pause", "{}".to_owned())),
-        Sub::Cost { enable: true } => {
-            Some(("Motion.enableCost", "{}".to_owned()))
-        }
-        Sub::Cost { enable: false } => {
-            Some(("Motion.disableCost", "{}".to_owned()))
-        }
+        Sub::Cost { enable: true } => Some(("Motion.enableCost", "{}".to_owned())),
+        Sub::Cost { enable: false } => Some(("Motion.disableCost", "{}".to_owned())),
     }
 }
 
@@ -393,9 +402,7 @@ fn build_start_trace_params(r: &RecordArgs) -> String {
         // most common shape the quick-start docs show. Users who
         // want a different probe can pass --metrics or drop to
         // `pulp inspect --command Motion.startTrace --params '...'`.
-        buf.push_str(
-            "{\"kind\":\"geometry\",\"name\":\"frame\",\"node_id\":\"",
-        );
+        buf.push_str("{\"kind\":\"geometry\",\"name\":\"frame\",\"node_id\":\"");
         buf.push_str(&escape_json(&r.view_name));
         buf.push_str(
             "\",\"properties\":[\"minX\",\"minY\",\"width\",\"height\"],\
@@ -453,150 +460,42 @@ fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Trait so tests can swap out the inspector "talker" without
-/// spawning a real `pulp-cpp` subprocess. Production code uses the
-/// [`SystemInspector`] impl below.
-pub trait InspectorTalker {
-    /// Send `method` + `params_json` to the inspector and return the
-    /// raw response body (the inspector's JSON result). The trait
-    /// returns the parsed text so the caller can pretty-print or
-    /// pass `--json` through.
-    ///
-    /// # Errors
-    ///
-    /// Implementations return [`CliError::Other`] with a human
-    /// message on transport failures (binary not on PATH, port not
-    /// listening, command exited non-zero).
-    fn call(&self, port: u16, method: &str, params_json: &str)
-        -> Result<String>;
-}
+pub use crate::cmd::inspector::InspectorTalker;
 
-/// Production talker — checks reachability via `TcpStream::connect`
-/// against `127.0.0.1:<port>` first, then shells out to `pulp-cpp
+/// Production talker — shells out to `pulp-cpp
 /// inspect --command METHOD --params JSON`. Captures stdout and
 /// returns it verbatim.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemInspector;
 
 impl InspectorTalker for SystemInspector {
-    fn call(
+    fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String> {
+        crate::cmd::inspector::call("motion", port, method, params_json)
+    }
+
+    fn call_selected(
         &self,
         port: u16,
+        session_id: &str,
+        instance_id: &str,
+        publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // Reachability probe — fail fast with a clear message before
-        // the C++ binary's slower discovery+connect cycle would.
-        if !inspector_reachable(port) {
-            return Err(CliError::Other(no_inspector_hint(port)));
-        }
-        let bin = resolve_inspect_binary().ok_or_else(|| {
-            CliError::Other(
-                "pulp motion: could not find `pulp-cpp` or `pulp` binary \
-                 on PATH (needed to talk to the inspector). Install / \
-                 build the CLI first."
-                    .to_owned(),
-            )
-        })?;
-        let output = Command::new(&bin)
-            .arg("inspect")
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--command")
-            .arg(method)
-            .arg("--params")
-            .arg(params_json)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "pulp motion: failed to spawn {}: {}",
-                    bin.display(),
-                    e
-                ))
-            })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(CliError::Other(format!(
-                "pulp motion: `{} inspect --command {}` exited with {:?}: {}",
-                bin.display(),
-                method,
-                output.status.code(),
-                stderr.trim(),
-            )));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        let selection = crate::cmd::inspector::SessionSelection {
+            session_id: session_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+            publication_id: publication_id.to_owned(),
+        };
+        crate::cmd::inspector::call_selected("motion", port, Some(&selection), method, params_json)
     }
 }
 
-/// Resolve the inspect-capable binary. Preference order:
-///
-/// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
-/// 2. The Rust `pulp` binary on `$PATH` *only if* it can fall
-///    through to `pulp-cpp` via fallthrough. The Rust binary
-///    itself doesn't implement `inspect` natively yet, so we don't
-///    pick `target/release/pulp` here — that would just bounce back
-///    through unknown-subcommand fallthrough.
-fn resolve_inspect_binary() -> Option<PathBuf> {
-    if let Some(p) = crate::proc::which("pulp-cpp") {
-        return Some(p);
-    }
-    // Local in-tree dev build, before `pulp install` runs. Saves
-    // contributors from `cargo install`ing `pulp-cpp` on every
-    // worktree.
-    for candidate in [
-        "build/tools/cli/pulp-cpp",
-        "build/tools/cli/pulp",
-        "build/pulp",
-    ] {
-        let p = PathBuf::from(candidate);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    // Last resort — fall through to `pulp` on PATH and hope its
-    // fallthrough routes the `inspect` verb to `pulp-cpp`.
-    crate::proc::which("pulp")
-}
-
-/// Probe whether something is listening on `127.0.0.1:<port>`. Short
-/// timeout (250ms) so the wait is invisible to the user when the
-/// inspector is alive on the local box.
-#[must_use]
-pub fn inspector_reachable(port: u16) -> bool {
-    let addr = format!("127.0.0.1:{port}");
-    let parsed = match addr.parse() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&parsed, Duration::from_millis(250)).is_ok()
-}
-
-/// The clear "no inspector" hint string — surfaced both on
-/// reachability failure and in `pulp motion` help text.
-fn no_inspector_hint(port: u16) -> String {
-    format!(
-        "pulp motion: no inspector listening on port {port}.\n\
-         Start the host with the motion server enabled, e.g.:\n  \
-         PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview\n\
-         (override the port with --port N or $PULP_INSPECTOR_PORT)."
-    )
-}
-
-/// Resolve the effective port from CLI flags + env.
-#[must_use]
-pub fn resolve_port(flags: &GlobalFlags) -> u16 {
-    if let Some(p) = flags.port {
-        return p;
-    }
-    if let Ok(v) = std::env::var(INSPECTOR_PORT_ENV) {
-        if let Ok(p) = v.parse::<u16>() {
-            return p;
-        }
-    }
-    DEFAULT_INSPECTOR_PORT
+/// Resolve the explicit port filter from CLI flags + env. Zero delegates
+/// selection to authenticated discovery. A configured but invalid environment
+/// filter is an error rather than permission to select a different session.
+pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
+    crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure
@@ -614,13 +513,13 @@ pub fn dispatch<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let port = resolve_port(flags);
     match sub {
         Sub::Help => {
             return print_help(out).map_err(io_err);
         }
         _ => {}
     }
+    let port = resolve_port(flags)?;
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This is unreachable
         // but stays here so adding a new `Sub` variant without a
@@ -630,7 +529,36 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp motion: no inspector mapping for {sub:?}"
         )));
     };
-    let response = talker.call(port, method, &params)?;
+    let explicit_selection = crate::cmd::inspector::explicit_selection(
+        flags.session_id.as_deref(),
+        flags.instance_id.as_deref(),
+        flags.publication_id.as_deref(),
+    );
+    let requires_exact_selection = matches!(
+        sub,
+        Sub::Stop { .. } | Sub::Scrub { .. } | Sub::Play | Sub::Pause | Sub::Cost { .. }
+    );
+    let policy = if requires_exact_selection {
+        crate::cmd::inspector::PublicationSelectionPolicy::RequireExact(
+            "pulp motion mutation requires --session, --instance, and \
+             --publication; reuse the exact selector printed by \
+             `pulp motion record`",
+        )
+    } else if matches!(sub, Sub::Record(_)) {
+        crate::cmd::inspector::PublicationSelectionPolicy::DiscoverExact {
+            command_name: "motion",
+        }
+    } else {
+        crate::cmd::inspector::PublicationSelectionPolicy::Preserve
+    };
+    let selection = crate::cmd::inspector::resolve_publication_selection(
+        talker,
+        port,
+        explicit_selection,
+        policy,
+    )?;
+    let response =
+        crate::cmd::inspector::call_through(talker, port, selection.as_ref(), method, &params)?;
 
     // For `record`, surface the --out path as a sidecar hint so the
     // user knows the in-process inspector doesn't itself spool a
@@ -639,11 +567,19 @@ pub fn dispatch<T: InspectorTalker>(
     // delivers.
     if let Sub::Record(r) = sub {
         if let Some(ref out_path) = r.out {
-            writeln!(
-                out,
-                "# motion trace started; live event stream is on port {port}.",
-            )
-            .map_err(io_err)?;
+            if port == 0 {
+                writeln!(
+                    out,
+                    "# motion trace started on the authenticated inspector session.",
+                )
+                .map_err(io_err)?;
+            } else {
+                writeln!(
+                    out,
+                    "# motion trace started; live event stream is on port {port}.",
+                )
+                .map_err(io_err)?;
+            }
             writeln!(
                 out,
                 "# --out {} is a fixture HINT — the inspector wire does",
@@ -652,26 +588,24 @@ pub fn dispatch<T: InspectorTalker>(
             .map_err(io_err)?;
             writeln!(
                 out,
-                "# not write fixtures itself. Run `pulp motion stop` to",
+                "# not write fixtures itself. Use the exact stop command",
             )
             .map_err(io_err)?;
-            writeln!(
-                out,
-                "# release the trace; use make_fixture_sink(path) in code",
-            )
-            .map_err(io_err)?;
-            writeln!(
-                out,
-                "# for the on-disk JSONL artifact.",
-            )
-            .map_err(io_err)?;
+            writeln!(out, "# printed below; use make_fixture_sink(path) in code",)
+                .map_err(io_err)?;
+            writeln!(out, "# for the on-disk JSONL artifact.",).map_err(io_err)?;
         }
     }
 
     if flags.json {
-        writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
+        let rendered = if matches!(sub, Sub::Record(_)) {
+            crate::cmd::inspector::attach_session_selection(&response, selection.as_ref())
+        } else {
+            response.trim_end().to_owned()
+        };
+        writeln!(out, "{rendered}").map_err(io_err)?;
     } else {
-        write_pretty(out, sub, &response).map_err(io_err)?;
+        write_pretty(out, sub, &response, selection.as_ref()).map_err(io_err)?;
     }
     Ok(())
 }
@@ -683,6 +617,7 @@ fn write_pretty(
     out: &mut impl Write,
     sub: &Sub,
     response: &str,
+    selection: Option<&crate::cmd::inspector::SessionSelection>,
 ) -> std::io::Result<()> {
     let trimmed = response.trim();
     match sub {
@@ -693,7 +628,12 @@ fn write_pretty(
                 writeln!(out, "trace started — trace_id={id}")?;
                 writeln!(
                     out,
-                    "  stop with: pulp motion stop --trace-id {id}"
+                    "  stop with: pulp motion stop --trace-id {id}{}",
+                    crate::cmd::inspector::selection_cli_suffix(
+                        selection.map(|value| value.session_id.as_str()),
+                        selection.map(|value| value.instance_id.as_str()),
+                        selection.map(|value| value.publication_id.as_str()),
+                    )
                 )?;
             } else {
                 writeln!(out, "{trimmed}")?;
@@ -721,10 +661,6 @@ fn write_pretty(
         }
         Sub::ListTraces => {
             writeln!(out, "{trimmed}")?;
-        }
-        Sub::LoadFixture { path } => {
-            writeln!(out, "loaded fixture: {}", path.display())?;
-            writeln!(out, "  raw: {trimmed}")?;
         }
         Sub::Scrub { frame } => {
             writeln!(out, "scrubbed to frame {frame}")?;
@@ -774,30 +710,47 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  list-traces                   Motion.listTraces")?;
     writeln!(
         out,
-        "  load-fixture <PATH>           Load a .motion.jsonl fixture (Motion.loadFixture)"
+        "  scrub <FRAME>                 Move the scrubber playhead (Motion.scrubTo)"
     )?;
     writeln!(
         out,
-        "  scrub <FRAME>                 Move the scrubber playhead (Motion.scrubTo)"
+        "  play                          Resume scrubber playback"
     )?;
-    writeln!(out, "  play                          Resume scrubber playback")?;
-    writeln!(out, "  pause                         Pause scrubber playback")?;
+    writeln!(
+        out,
+        "  pause                         Pause scrubber playback"
+    )?;
     writeln!(
         out,
         "  cost {{enable|disable}}         Toggle cost attribution channel\n"
     )?;
     writeln!(out, "Global flags:")?;
-    writeln!(out, "  --json                        Print the raw inspector JSON response")?;
     writeln!(
         out,
-        "  --port N                      Override the inspector port (default 9147 / $PULP_INSPECTOR_PORT)\n"
+        "  --json                        Print the raw inspector JSON response"
     )?;
     writeln!(
         out,
-        "Example: PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &"
+        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
     )?;
-    writeln!(out, "         pulp motion record --view Card --out card-fade.jsonl")?;
-    writeln!(out, "         pulp motion stop --trace-id 1")?;
+    writeln!(
+        out,
+        "  --session ID --instance ID --publication ID\n\
+                                        Select one exact authenticated publication\n\
+         Required for stop, scrub, play, pause, and cost mutations.\n"
+    )?;
+    writeln!(
+        out,
+        "Example: # after a custom host constructs InspectorServer"
+    )?;
+    writeln!(
+        out,
+        "         pulp motion record --view Card --out card-fade.jsonl"
+    )?;
+    writeln!(
+        out,
+        "         pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION"
+    )?;
     Ok(())
 }
 
@@ -807,425 +760,5 @@ fn io_err(e: std::io::Error) -> CliError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn s(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|x| (*x).to_owned()).collect()
-    }
-
-    #[test]
-    fn parse_empty_yields_help() {
-        let (sub, _g) = parse(&[]).unwrap();
-        assert!(matches!(sub, Sub::Help));
-    }
-
-    #[test]
-    fn parse_help_aliases() {
-        for a in &["help", "--help", "-h"] {
-            let (sub, _) = parse(&s(&[a])).unwrap();
-            assert!(matches!(sub, Sub::Help), "{a}");
-        }
-    }
-
-    #[test]
-    fn parse_global_json_in_any_position() {
-        let (_sub, g) = parse(&s(&["--json", "snapshot"])).unwrap();
-        assert!(g.json);
-        let (_sub, g) = parse(&s(&["snapshot", "--json"])).unwrap();
-        assert!(g.json);
-    }
-
-    #[test]
-    fn parse_port_override() {
-        let (_sub, g) = parse(&s(&["--port", "9200", "snapshot"])).unwrap();
-        assert_eq!(g.port, Some(9200));
-    }
-
-    #[test]
-    fn parse_port_rejects_garbage() {
-        let err = parse(&s(&["--port", "nope", "snapshot"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_unknown_verb_is_unknown() {
-        let err = parse(&s(&["blarg"])).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand));
-    }
-
-    #[test]
-    fn parse_record_default_view_name_is_timestamped() {
-        let (sub, _) = parse(&s(&["record"])).unwrap();
-        let Sub::Record(r) = sub else {
-            panic!("expected record")
-        };
-        assert!(r.view_name.starts_with("motion-"));
-        assert!(r.out.is_none());
-    }
-
-    #[test]
-    fn parse_record_with_out_and_view() {
-        let (sub, _) = parse(&s(&[
-            "record", "--view", "Card", "--out", "card.jsonl",
-        ]))
-        .unwrap();
-        let Sub::Record(r) = sub else {
-            panic!("expected record")
-        };
-        assert_eq!(r.view_name, "Card");
-        assert_eq!(r.out.as_deref(), Some(Path::new("card.jsonl")));
-    }
-
-    #[test]
-    fn parse_record_metrics_collects_multiple() {
-        let (sub, _) = parse(&s(&[
-            "record",
-            "--view",
-            "Card",
-            "--metrics",
-            "geometry:frame:card:minX,minY:window:presentation",
-            "--metrics",
-            "scroll-geometry:scroll:scrollview",
-        ]))
-        .unwrap();
-        let Sub::Record(r) = sub else { panic!() };
-        assert_eq!(r.metrics.len(), 2);
-    }
-
-    #[test]
-    fn parse_stop_with_trace_id() {
-        let (sub, _) = parse(&s(&["stop", "--trace-id", "7"])).unwrap();
-        assert!(matches!(sub, Sub::Stop { trace_id: Some(7) }));
-    }
-
-    #[test]
-    fn parse_stop_without_trace_id_defaults_to_none() {
-        let (sub, _) = parse(&s(&["stop"])).unwrap();
-        assert!(matches!(sub, Sub::Stop { trace_id: None }));
-    }
-
-    #[test]
-    fn parse_scrub_requires_frame_argument() {
-        let err = parse(&s(&["scrub"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_scrub_rejects_non_numeric_frame() {
-        let err = parse(&s(&["scrub", "foo"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_scrub_accepts_negative_frame() {
-        // Inspector itself enforces frame >= 0 — the CLI passes
-        // through whatever the user typed.
-        let (sub, _) = parse(&s(&["scrub", "-1"])).unwrap();
-        assert!(matches!(sub, Sub::Scrub { frame: -1 }));
-    }
-
-    #[test]
-    fn parse_load_fixture_requires_path() {
-        let err = parse(&s(&["load-fixture"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_cost_recognises_enable_disable_aliases() {
-        let (sub, _) = parse(&s(&["cost", "enable"])).unwrap();
-        assert!(matches!(sub, Sub::Cost { enable: true }));
-        let (sub, _) = parse(&s(&["cost", "on"])).unwrap();
-        assert!(matches!(sub, Sub::Cost { enable: true }));
-        let (sub, _) = parse(&s(&["cost", "disable"])).unwrap();
-        assert!(matches!(sub, Sub::Cost { enable: false }));
-        let (sub, _) = parse(&s(&["cost", "off"])).unwrap();
-        assert!(matches!(sub, Sub::Cost { enable: false }));
-    }
-
-    #[test]
-    fn parse_cost_rejects_unknown_action() {
-        let err = parse(&s(&["cost", "toggle"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_list_traces_alias() {
-        let (sub, _) = parse(&s(&["list"])).unwrap();
-        assert!(matches!(sub, Sub::ListTraces));
-        let (sub, _) = parse(&s(&["list-traces"])).unwrap();
-        assert!(matches!(sub, Sub::ListTraces));
-    }
-
-    #[test]
-    fn to_inspector_call_methods_match_protocol() {
-        let mk_record = || {
-            Sub::Record(RecordArgs {
-                view_name: "Card".to_owned(),
-                fps: Some(30),
-                out: None,
-                metrics: vec![],
-            })
-        };
-        assert_eq!(
-            to_inspector_call(&mk_record()).unwrap().0,
-            "Motion.startTrace"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Stop { trace_id: Some(1) })
-                .unwrap()
-                .0,
-            "Motion.stopTrace"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Snapshot).unwrap().0,
-            "Motion.snapshot"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::ListTraces).unwrap().0,
-            "Motion.listTraces"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::LoadFixture {
-                path: PathBuf::from("/tmp/a.jsonl"),
-            })
-            .unwrap()
-            .0,
-            "Motion.loadFixture"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Scrub { frame: 5 }).unwrap().0,
-            "Motion.scrubTo"
-        );
-        assert_eq!(to_inspector_call(&Sub::Play).unwrap().0, "Motion.play");
-        assert_eq!(to_inspector_call(&Sub::Pause).unwrap().0, "Motion.pause");
-        assert_eq!(
-            to_inspector_call(&Sub::Cost { enable: true }).unwrap().0,
-            "Motion.enableCost"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Cost { enable: false }).unwrap().0,
-            "Motion.disableCost"
-        );
-        assert!(to_inspector_call(&Sub::Help).is_none());
-    }
-
-    #[test]
-    fn to_inspector_call_stop_defaults_trace_id_to_zero() {
-        let (_m, p) =
-            to_inspector_call(&Sub::Stop { trace_id: None }).unwrap();
-        assert_eq!(p, "{\"trace_id\":0}");
-    }
-
-    #[test]
-    fn to_inspector_call_load_fixture_escapes_path() {
-        let (_m, p) = to_inspector_call(&Sub::LoadFixture {
-            path: PathBuf::from("/tmp/a\"b.jsonl"),
-        })
-        .unwrap();
-        assert!(p.contains("\\\""), "expected escaped quote in {p}");
-    }
-
-    #[test]
-    fn build_start_trace_params_includes_view_name_and_default_probe() {
-        let r = RecordArgs {
-            view_name: "Card".to_owned(),
-            fps: Some(60),
-            out: None,
-            metrics: vec![],
-        };
-        let p = build_start_trace_params(&r);
-        assert!(p.contains("\"view_name\":\"Card\""));
-        assert!(p.contains("\"fps\":60"));
-        assert!(p.contains("\"kind\":\"geometry\""));
-        assert!(p.contains("\"node_id\":\"Card\""));
-        assert!(p.contains("\"properties\":[\"minX\",\"minY\",\"width\",\"height\"]"));
-    }
-
-    #[test]
-    fn build_start_trace_params_passes_user_metrics_verbatim_when_json() {
-        let r = RecordArgs {
-            view_name: "X".to_owned(),
-            fps: None,
-            out: None,
-            metrics: vec![
-                "{\"kind\":\"value\",\"name\":\"opacity\"}".to_owned(),
-            ],
-        };
-        let p = build_start_trace_params(&r);
-        assert!(p.contains("\"kind\":\"value\""));
-        assert!(p.contains("\"name\":\"opacity\""));
-        // No default geometry probe when user passed at least one
-        // explicit --metrics.
-        assert!(!p.contains("\"properties\":[\"minX\""));
-    }
-
-    #[test]
-    fn metric_spec_short_form_round_trips() {
-        let j = metric_spec_to_json(
-            "geometry:frame:card:minX,minY:window:presentation",
-        );
-        assert!(j.contains("\"kind\":\"geometry\""));
-        assert!(j.contains("\"name\":\"frame\""));
-        assert!(j.contains("\"node_id\":\"card\""));
-        assert!(j.contains("\"properties\":[\"minX\",\"minY\"]"));
-        assert!(j.contains("\"space\":\"window\""));
-        assert!(j.contains("\"source\":\"presentation\""));
-    }
-
-    #[test]
-    fn resolve_port_prefers_explicit_then_env_then_default() {
-        // Explicit wins.
-        let g = GlobalFlags {
-            json: false,
-            port: Some(1234),
-        };
-        assert_eq!(resolve_port(&g), 1234);
-        // Default applies when nothing is set.
-        let g = GlobalFlags::default();
-        // Note: we don't unset `PULP_INSPECTOR_PORT` here — assume CI
-        // doesn't export it. The fallback chain is otherwise covered
-        // by the explicit-port branch above.
-        assert!(matches!(resolve_port(&g), 9147 | _));
-    }
-
-    #[test]
-    fn extract_int_finds_trace_id() {
-        let body = "{\"trace_id\":42,\"other\":7}";
-        assert_eq!(extract_int(body, "trace_id"), Some(42));
-        assert_eq!(extract_int(body, "other"), Some(7));
-        assert_eq!(extract_int(body, "missing"), None);
-    }
-
-    /// Test-only InspectorTalker that records the calls it sees and
-    /// returns canned responses. Lets us exercise `dispatch` without
-    /// a real `pulp-cpp` binary or a live inspector.
-    struct RecordingTalker {
-        responses: std::cell::RefCell<Vec<String>>,
-        calls: std::cell::RefCell<
-            Vec<(u16, String, String)>, // port, method, params
-        >,
-    }
-
-    impl RecordingTalker {
-        fn new(responses: Vec<&str>) -> Self {
-            Self {
-                responses: std::cell::RefCell::new(
-                    responses.into_iter().map(str::to_owned).collect(),
-                ),
-                calls: std::cell::RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl InspectorTalker for RecordingTalker {
-        fn call(
-            &self,
-            port: u16,
-            method: &str,
-            params: &str,
-        ) -> Result<String> {
-            self.calls.borrow_mut().push((
-                port,
-                method.to_owned(),
-                params.to_owned(),
-            ));
-            let mut r = self.responses.borrow_mut();
-            if r.is_empty() {
-                Ok("{}".to_owned())
-            } else {
-                Ok(r.remove(0))
-            }
-        }
-    }
-
-    #[test]
-    fn dispatch_snapshot_passes_method_through() {
-        let t = RecordingTalker::new(vec![
-            "{\"tracing_enabled\":true,\"emitted_events\":4}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Snapshot, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let calls = t.calls.borrow();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1, "Motion.snapshot");
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("tracing_enabled"));
-    }
-
-    #[test]
-    fn dispatch_record_extracts_trace_id_in_pretty_mode() {
-        let t = RecordingTalker::new(vec!["{\"trace_id\":3}"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Record(RecordArgs {
-            view_name: "Card".to_owned(),
-            fps: Some(30),
-            out: None,
-            metrics: vec![],
-        });
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("trace_id=3"), "{out}");
-        assert!(out.contains("pulp motion stop --trace-id 3"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_json_flag_prints_raw_response() {
-        let t = RecordingTalker::new(vec!["{\"trace_ids\":[1,2,3]}"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags {
-            json: true,
-            port: None,
-        };
-        dispatch(&Sub::ListTraces, &flags, &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("{\"trace_ids\":[1,2,3]}"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_record_with_out_prints_sidecar_hint() {
-        let t = RecordingTalker::new(vec!["{\"trace_id\":9}"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Record(RecordArgs {
-            view_name: "Card".to_owned(),
-            fps: None,
-            out: Some(PathBuf::from("/tmp/card.jsonl")),
-            metrics: vec![],
-        });
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("make_fixture_sink"), "{out}");
-        assert!(out.contains("/tmp/card.jsonl"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_help_prints_usage_without_calling_inspector() {
-        let t = RecordingTalker::new(vec![]);
-        let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Help, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("pulp motion — wrappers"));
-        assert!(t.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn inspector_reachable_returns_false_for_unused_port() {
-        // Pick a port unlikely to be bound in CI. Worst case this
-        // flakes if the port IS bound — the assertion is just
-        // "function returns a bool quickly", not the value itself.
-        let _ = inspector_reachable(1);
-    }
-
-    #[test]
-    fn no_inspector_hint_mentions_port_and_env_knob() {
-        let s = no_inspector_hint(9200);
-        assert!(s.contains("port 9200"), "{s}");
-        assert!(s.contains("PULP_MOTION_SERVER=1"));
-    }
-
-    #[test]
-    fn escape_json_handles_quotes_and_backslashes() {
-        assert_eq!(escape_json("a\"b"), "a\\\"b");
-        assert_eq!(escape_json("a\\b"), "a\\\\b");
-    }
-}
+#[path = "motion_tests.rs"]
+mod tests;

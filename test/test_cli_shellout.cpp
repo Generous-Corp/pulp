@@ -1607,6 +1607,7 @@ TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shel
     REQUIRE(enable_flag_value.stderr_output.find("--to requires a value") != std::string::npos);
 }
 
+#if PULP_TEST_INSPECTOR_ENABLED
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) {
@@ -1638,12 +1639,12 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
 
     REQUIRE_FALSE(missing.timed_out);
     REQUIRE(missing.exit_code == 1);
-    REQUIRE(missing.stderr_output.find("no running Pulp inspector found") != std::string::npos);
-    REQUIRE(missing.stderr_output.find("specify --port") != std::string::npos);
+    REQUIRE(missing.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
-TEST_CASE("pulp inspect explicit port failure does not require a server",
+TEST_CASE("pulp inspect explicit port filters discovery without bypassing authentication",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
@@ -1655,6 +1656,12 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     auto base = unique_temp_dir("pulp-inspect-explicit-port");
     fs::create_directories(base);
+#if defined(_WIN32)
+    ScopedEnvVar temp_dir("TEMP");
+#else
+    ScopedEnvVar temp_dir("TMPDIR");
+#endif
+    temp_dir.set(base.string());
     auto output = base / "inspect-response.json";
 
     auto r = run_pulp({"inspect", "--host", "127.0.0.1", "--port", "1", "--command",
@@ -1665,8 +1672,11 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 1);
-    REQUIRE(r.stdout_output.find("Connecting to 127.0.0.1:1") != std::string::npos);
-    REQUIRE(r.stderr_output.find("could not connect to 127.0.0.1:1") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Connecting to") == std::string::npos);
+    REQUIRE(r.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
+    REQUIRE(r.stderr_output.find("requested host 127.0.0.1 port 1") !=
+            std::string::npos);
     REQUIRE_FALSE(wrote_output);
 }
 
@@ -1723,6 +1733,33 @@ TEST_CASE("pulp inspect rejects invalid arguments before networking",
     REQUIRE(unknown.stderr_output.find("unknown inspect argument") != std::string::npos);
     REQUIRE(unknown.stdout_output.find("Connecting to") == std::string::npos);
 }
+#else
+TEST_CASE("pulp inspect fails explicitly when the inspector component is disabled",
+          "[cli][shellout][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const std::string diagnostic =
+        "this Pulp SDK was built without the optional development inspector component "
+        "(PULP_ENABLE_INSPECTOR=OFF)";
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"inspect", "--help"},
+             {"inspect"},
+             {"inspect", "--port"},
+         }) {
+        auto result = run_pulp(args, 10000);
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 1);
+        REQUIRE(result.stderr_output.find(diagnostic) != std::string::npos);
+        REQUIRE(result.stdout_output.empty());
+    }
+}
+#endif
 
 TEST_CASE("pulp create scaffolds a no-build app project with Android files",
           "[cli][shellout][create][issue-643]") {

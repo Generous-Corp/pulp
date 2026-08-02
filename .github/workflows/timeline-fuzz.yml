@@ -1,0 +1,182 @@
+name: Timeline document fuzzing
+
+# Fuzzing over the untrusted-document parse surface: `deserialize_project`,
+# `peek_project_summary`, and `deserialize_commands`.
+#
+# Two lanes over ONE oracle implementation (test/fuzz/timeline_document_oracle.*),
+# because the properties are what makes this a quota fuzzer and two copies of
+# them would drift into disagreeing about what a finding is:
+#
+#   deterministic  Replays a seeded mutation corpus. Runs on every PR that
+#                  touches the parse surface, reproduces any case from its
+#                  (seed, index) pair, and needs no special toolchain.
+#   libfuzzer      Coverage-guided exploration under ASan. Scheduled and
+#                  on-demand only, and Linux-only: `-fsanitize=fuzzer` needs a
+#                  compiler runtime Apple's clang does not ship, so a macOS leg
+#                  would need a Homebrew LLVM and would buy nothing the
+#                  deterministic lane does not already cover.
+#
+# Runner routing: GitHub-hosted throughout. Per the repository's runner-priority
+# contract the self-hosted Macs carry the required `macos` gate, and a
+# high-throughput fuzz loop is exactly the kind of long-running job that must
+# not compete with it.
+#
+# Cost, measured on an arm64 Release build: the replay runs ~37k cases per
+# second, so the PR budget of 20k cases is ~0.5s and the nightly 2M is ~53s.
+# The lane's wall clock is therefore its build, not its fuzzing, which is why
+# the nightly budget is large: raising it is nearly free, and a lane that costs
+# minutes per run is a lane that gets muted. The libFuzzer job is bounded by
+# -max_total_time instead, since coverage-guided exploration has no natural end.
+# Both jobs carry a timeout-minutes ceiling.
+
+on:
+  pull_request:
+    paths:
+      - 'core/timeline/**'
+      - 'test/fuzz/**'
+      - 'test/test_timeline_document_fuzz.cpp'
+      - 'test/fixtures/timeline/**'
+      - 'test/cmake/timeline_tests.cmake'
+      - '.github/workflows/timeline-fuzz.yml'
+  schedule:
+    # Nightly, off the PR path so a long exploration budget costs no review time.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: 'Deterministic replay cases'
+        required: false
+        default: '2000000'
+      libfuzzer_seconds:
+        description: 'libFuzzer wall-clock budget per target, in seconds'
+        required: false
+        default: '900'
+
+concurrency:
+  group: timeline-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    name: Deterministic corpus replay
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # The oracle parses documents, but the target is built out of a whole-repo
+      # configure, and core/audio's `find_package(ALSA REQUIRED)` makes the
+      # native Linux headers a hard prerequisite of that configure — not of the
+      # fuzzing. setup.sh checks for the same headers and exits non-zero without
+      # them, so this step has to come first.
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF
+
+      - name: Build
+        run: |
+          cmake --build build-fuzz \
+            --target pulp-test-timeline-document-fuzz \
+            -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Replay
+        env:
+          # A schedule run rotates the seed so successive nights explore
+          # different inputs; a PR run pins it so a failure a reviewer sees is
+          # the same failure they can reproduce locally.
+          PULP_TIMELINE_FUZZ_SEED: ${{ github.event_name == 'schedule' && github.run_id || 1 }}
+          PULP_TIMELINE_FUZZ_CASES: ${{ inputs.cases || (github.event_name == 'pull_request' && '20000' || '2000000') }}
+        run: |
+          ctest --test-dir build-fuzz --output-on-failure -L fuzz
+
+  libfuzzer:
+    name: Coverage-guided (libFuzzer + ASan)
+    # Skipped on pull_request: the deterministic lane already runs every oracle
+    # on the PR path, and a coverage-guided run whose budget is short enough for
+    # a PR explores too little to justify the build.
+    if: >-
+      (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp')
+      && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure with libFuzzer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-libfuzzer \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_ENABLE_FUZZING=ON
+
+      - name: Build
+        run: |
+          cmake --build build-libfuzzer \
+            --target pulp-fuzz-timeline-document \
+            -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Seed the corpus
+        run: |
+          mkdir -p fuzz-corpus
+          # Only the entries corpus.index declares as timeline JSON. Feeding it
+          # the payload blobs and foreign-format inputs it deliberately excludes
+          # would seed the engine with documents whose rejection means nothing.
+          awk '$1 == "document" || $1 == "fragment" { print $2 }' \
+            test/fixtures/timeline/corpus.index \
+            | while read -r entry; do
+                cp "test/fixtures/timeline/$entry" \
+                   "fuzz-corpus/$(echo "$entry" | tr '/' '_')"
+              done
+          ls -l fuzz-corpus
+
+      - name: Fuzz
+        env:
+          ASAN_OPTIONS: 'detect_leaks=0:halt_on_error=1'
+        run: |
+          ./build-libfuzzer/test/pulp-fuzz-timeline-document \
+            fuzz-corpus \
+            -max_total_time=${{ inputs.libfuzzer_seconds || 900 }} \
+            -max_len=1048576 \
+            -rss_limit_mb=2048 \
+            -timeout=25 \
+            -print_final_stats=1
+
+      - name: Upload reproducers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timeline-fuzz-reproducers
+          path: |
+            crash-*
+            timeout-*
+            oom-*
+          if-no-files-found: ignore

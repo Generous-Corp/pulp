@@ -4,6 +4,8 @@
 #include <pulp/format/reload/processor_hotswap_slot.hpp>
 #include <pulp/midi/message.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -499,8 +501,10 @@ TEST_CASE("HotSwapSlot swap-while-processing is race-free (hammer)",
     // On a slow/loaded host (e.g. a CI VM) thread startup can lag enough that the
     // control thread finishes all 2000 swaps and sets stop before the audio thread
     // runs a single block — leaving blocks==0, so the swap-while-processing
-    // invariant goes untested and REQUIRE(blocks > 0) flakes.
-    while (blocks.load(std::memory_order_relaxed) == 0) std::this_thread::yield();
+    // invariant goes untested and REQUIRE(blocks > 0) flakes. The deadline keeps
+    // that wait from trading the flake for a hang: a slot that genuinely never
+    // renders must reach the REQUIRE below rather than park the suite here.
+    (void)pulp::test::wait_for_progress(blocks);
 
     for (int i = 0; i < 2000; ++i) {
         auto old = slot.swap(std::make_unique<ScaleProc>(

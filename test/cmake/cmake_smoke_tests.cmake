@@ -208,6 +208,25 @@ set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
     LABELS "cmake;sdk;timeline;slow"
     TIMEOUT 180)
 
+# Installed inspector component consumer. This compiles the public headers,
+# links every optional CPU inspector archive through find_package(Pulp), and
+# executes the result outside the source tree.
+if(PULP_ENABLE_INSPECTOR)
+    add_test(NAME cmake-inspector-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_inspector_sdk_consumer.cmake)
+    set_tests_properties(cmake-inspector-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;inspect;slow"
+        TIMEOUT 180)
+endif()
+
 # Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
 # pin the consumer's deployment target when it runs AFTER project() (where the
 # target is a DEFINED-but-empty cache entry), not only when it runs before
@@ -350,6 +369,12 @@ if(UNIX)
     add_test(NAME contributor-check
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
     set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # Builds four throwaway CMake fixtures, so it is slower than a text check
+    # and worth every second: the vacuous-test case is the one that proves the
+    # harness reports a test that cannot fail rather than blessing it.
+    add_test(NAME confirm-failure-harness
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_confirm_failure.sh)
+    set_tests_properties(confirm-failure-harness PROPERTIES TIMEOUT 300)
     add_test(NAME pulp-installer-mcp-contract
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
     # The suite drives the installer once per scenario, so its wall time tracks
@@ -606,6 +631,29 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
     SKIP_RETURN_CODE 77
     LABELS "cmake;examples"
     TIMEOUT 60)
+
+# Inbound link-floor check. The gate itself (tools/cmake/PulpLinkFloor.cmake)
+# runs at configure time over CMake's resolved link graph, so a configure that
+# reached this point is already its verdict — and a verdict is worth nothing
+# without evidence the checker can still say no. The selftest configures fixture
+# projects with known graphs and asserts both the verdict and the reason given;
+# --mutate then weakens the checker itself nine ways and requires each weakening
+# to be caught, so a green run cannot be the walk failing to arrive.
+#
+# Note what the configure-time verdict does and does not cover: the assertion on
+# a plugin lives in that plugin's CMakeLists, so it is evaluated only where
+# examples are configured — the Shipyard mac/windows lanes
+# (PULP_BUILD_EXAMPLES=ON) and ordinary dev builds, not the GitHub-hosted legs
+# of build.yml, which configure with PULP_BUILD_EXAMPLES=OFF. The selftest below
+# runs everywhere.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME cmake-link-floor-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/link_floor_selftest.py --mutate)
+    set_tests_properties(cmake-link-floor-selftest PROPERTIES
+        LABELS "cmake;gate"
+        TIMEOUT 600)
+endif()
 
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)

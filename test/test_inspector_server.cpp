@@ -2,6 +2,7 @@
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/inspector_server.hpp>
+#include "unsafe_legacy_inspector_server.hpp"
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/runtime/socket.hpp>
 
@@ -35,7 +36,8 @@
 using pulp::events::InterprocessConnection;
 using pulp::events::IpcTransport;
 using pulp::inspect::InspectorMessage;
-using pulp::inspect::InspectorServer;
+using InspectorServer =
+    pulp::inspect::test::UnsafeLegacyInspectorServer;
 using pulp::inspect::decode_message;
 using pulp::inspect::encode_message;
 using pulp::inspect::make_error;
@@ -207,6 +209,7 @@ TEST_CASE("InspectorServer starts on an explicit port and writes discovery file"
     REQUIRE(contents == std::to_string(*port));
 
     server.stop();
+    REQUIRE_FALSE(std::filesystem::exists(file));
     server.stop();
     std::filesystem::remove_all(tmp);
 }
@@ -229,7 +232,7 @@ TEST_CASE("InspectorServer pre-start operations are inert",
         make_event("Inspector.noClientsAfterHandler", R"({"ok":true})")));
 }
 
-TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
+TEST_CASE("InspectorServer uses an OS-assigned port and ignores global port state",
           "[inspect][server]") {
     auto candidate = find_bindable_port();
     REQUIRE(candidate.has_value());
@@ -242,21 +245,26 @@ TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
     tmpdir.set(tmp.string());
     port_env.set(std::to_string(*candidate));
 
+    Socket reserved;
+    REQUIRE(reserved.create(SocketType::TCP));
+    REQUIRE(reserved.bind("127.0.0.1", *candidate));
+
     InspectorServer server;
     REQUIRE(server.start(0));
-    REQUIRE(server.port() == *candidate);
+    REQUIRE(server.port() != 0);
+    REQUIRE(server.port() != *candidate);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == std::to_string(*candidate));
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);
 }
 
-TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
+TEST_CASE("InspectorServer ephemeral start is unaffected by malformed port state",
           "[inspect][server]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-invalid-env-test-" +
@@ -268,18 +276,14 @@ TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
     port_env.set("not-a-port");
 
     InspectorServer server;
-    if (!server.start(0)) {
-        std::filesystem::remove_all(tmp);
-        SKIP("default inspector port is already in use");
-    }
-
-    REQUIRE(server.port() == 9147);
+    REQUIRE(server.start(0));
+    REQUIRE(server.port() != 0);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == "9147");
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);
@@ -648,7 +652,7 @@ TEST_CASE("InspectorServer stop disconnects clients and is idempotent after acti
 
     server.stop();
     REQUIRE(server.client_count() == 0);
-    REQUIRE(server.port() == *port);
+    REQUIRE(server.port() == 0);
 }
 
 // ── Transport reachability ───────────────────────────────────────────────────
@@ -685,8 +689,8 @@ std::optional<std::string> first_non_loopback_ipv4() {
 
 } // namespace
 
-TEST_CASE("InspectorServer is reachable on loopback and nowhere else",
-          "[inspect][server][security]") {
+TEST_CASE("unsafe legacy inspector fixture is reachable only on loopback",
+          "[inspect][server][security][legacy]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-bind-test-" + std::to_string(socket_port_seed()));
     std::filesystem::create_directories(tmp);

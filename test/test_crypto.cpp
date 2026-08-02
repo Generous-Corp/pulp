@@ -1,11 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <vector>
 
 using namespace pulp::runtime;
+
+TEST_CASE("secure_zero_memory overwrites every byte",
+          "[runtime][crypto][wipe]") {
+    std::array<std::uint8_t, 32> secret;
+    secret.fill(0x5a);
+    secure_zero_memory(secret.data(), secret.size());
+    CHECK(std::all_of(secret.begin(), secret.end(),
+                      [](auto byte) { return byte == 0; }));
+}
 
 // ── SHA-256 ─────────────────────────────────────────────────────────────
 

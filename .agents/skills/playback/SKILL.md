@@ -398,6 +398,20 @@ remaining-frame count as exact integer arithmetic, the fractional one clamps a
 `long double` that can land past the last frame. Anything that reads the
 authored shape belongs in `fade_gain`, which both call.
 
+The fractional overload narrows progress to `float` before it calls `fade_gain`,
+and that narrowing is load-bearing rather than cosmetic. `fade_gain` is a
+template that deduces its type from the argument, so handing it the `long double`
+position instantiates a double-width sin for `EqualPower` — once per output
+sample on the realtime stretch path — while the gain is narrowed to float on
+return regardless, so the width buys nothing. Nothing guards this: the RT probes
+look for allocation, and a wider sin does not allocate. It is also easy to
+under-read on a Mac, because the lowering is arch-dependent — `long double` is
+`double` on arm64, so the wide call shows up there as `_sin`, where x86_64 gets
+the 80-bit `_sinl`. Verify on the emitted object rather than at the source level,
+since a cast that deduction discards still compiles:
+`nm -u build/core/playback/CMakeFiles/pulp-playback.dir/src/realtime_stretch_renderer.cpp.o | grep -i sin`
+should report `_sinf` and nothing wider.
+
 Fade **progress is measured in frames**, in every shape. The compiler converts
 authored fade endpoints from ticks to frames
 (`audio_renderer.cpp`, the musical branch of the clip lowering); the renderer
@@ -478,6 +492,14 @@ without lanes still compiles — so the guard is not "refuse every MIDI clip" �
 trimmed nested lane-bearing clip still reports the trim code.
 
 ## Validation
+
+Configuring a fresh build dir for these suites needs
+`-DPULP_ENABLE_DESIGN_IMPORT=ON` **passed explicitly** whenever the cache has
+ever held OFF: `PULP_BUILD_TESTS=ON` hard-requires it, and a cached OFF survives
+a reconfigure that does not name the option, so the configure fails on an option
+combination unrelated to anything you changed. Passing it every reconfigure is
+cheaper than recognising the error a second time. (The `ci` skill covers the
+other half of this option — the OFF-side link break the release lane guards.)
 
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
@@ -624,10 +646,11 @@ Three pieces, and the boundaries between them matter:
   refuses a duplicate type rather than overwriting — two renderers disagreeing
   about what a content kind reads would make invalidation depend on registration
   order. An unregistered type reads nothing, which is correct: no renderer
-  compiles it, so there is no program that could go stale. Built-in content
-  (media, notes, empty) is not registered and declares nothing, so the contract
-  cannot change the invalidation of anything that predates it.
-- `ContextSubscriberIndex::build()` is the kind → reader-track reverse index.
+  compiles it, so there is no program that could go stale. Built-in MIDI is the
+  deliberate exception: the program compiler reads its owning sequence groove,
+  so `MidiContent` always subscribes to `Groove` without plugin registration.
+  Media and empty content read none.
+- `CompileInvalidationIndex::build()` is the kind → reader-track reverse index.
   Rebuild it when the document's **structure** changes; a context edit alone does
   not invalidate it, because editing a lane's contents does not change who reads
   it. It walks clips through the exhaustive `ClipContentCases` visitor, so a new
@@ -641,8 +664,37 @@ Three pieces, and the boundaries between them matter:
   trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
   structural sequence edit and also sets `all`.
 
+Production callers construct `ProgramCompileRequest::invalidation` from the
+shared registry and exact `CommitResult`. Its constructor binds the dirty set to
+that result's target snapshot, revision, exact predecessor snapshot, and an
+immutable registry copy. Sparse reuse is allowed only when the predecessor is
+the currently published project; a restored or forked lineage rebuilds in full.
+`submit()` resolves that pinned input and remembers the generation that reached
+publication. A different registry generation forces a full compile, including
+at the same document revision. Do not resolve
+outside the request and then drop the registry generation before submission.
+Completion is keyed by `CompileTicket::submission_epoch` and
+`CompilerStatus::latest_published_epoch`; revision equality is insufficient for
+a same-document registry refresh. Treat the latter as a successful-publication
+watermark: `latest_published_epoch >= submission_epoch` is terminal for a ticket,
+meaning its request published or was superseded by a later successful
+publication. Callers requiring exact-current document identity must also
+require epoch equality and compare the published program identity/revision.
+Epochs are scoped to one compiler instance: destroying the facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+If `busy` is false, an error with the watermark still below the ticket is
+terminal failure.
+
+Built-in note compilation applies the owning sequence groove at the original
+owner-sequence onset. Move note-on/off by one shared displacement, intersect the
+pair with the owning clip's half-open window, scale velocity half-up with
+saturation, then subdivide the retained span for ratchets. Nested leaves carry
+their owner sequence and source onset through lowering; never compose parent and
+child groove. A trimmed nested MIDI leaf with authored groove is refused as
+`TrimmedGrooveUnsupported` until source-window chase semantics are specified.
+
 **Adding a `CompileContextKind` is a data change, with one trap.** Both
-`ContextSubscriberIndex::build()` and the `CompileContextSubscriptions` bitset
+`CompileInvalidationIndex::build()` and the `CompileContextSubscriptions` bitset
 loop over `[0, kCompileContextKindCount)`, so a new kind needs no new case in
 either — but it does need `kCompileContextKindCount` bumped in lockstep with the
 enum. Forget that and the new kind is never indexed, never dirtied, and every
@@ -686,11 +738,112 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   wall-clock lookahead and the largest audio callback, while
   `StreamingSampleSource` independently caps producer read-ahead at the
   declaration's horizon.
+- `GeneratedEventSource` is a bounded push handoff for producer-generated MIDI:
+  keep revisable staging separate from immutable committed SPSC slots, begin a
+  nonzero strictly newer playback epoch quiescently on seek/restart, and commit
+  complete half-open monotonic-tick batches only at the declared quantization
+  grid. Validate each UMP word count from its message type. Audio pulls never
+  regress the permanent elapsed frontier; a missing or discarded span reports
+  exact lag, emits no generated events, and requests active-note flush. A
+  deadline miss selects only the producer-declared fallback policy.
 - A new `core/playback/src/*.cpp` is compiled by
   `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
+
+## Publishing a program across a realm boundary
+
+`PlaybackProgram` is `shared_ptr`-woven and cannot leave the process that built
+it. `pulp/playback/program_wire.hpp` is the crossing form: one contiguous,
+self-describing byte range that carries indices where the program carries
+pointers. Reach for it whenever a consumer does not share the producer's heap —
+a Worker publishing to an AudioWorklet, or a helper process — and never try to
+hand the program itself over some serialization of pointers.
+
+Things worth knowing before changing it:
+
+- **Decode allocates nothing.** Records are native-layout, eight-byte-multiple,
+  eight-byte-aligned structs, so `decode_program_wire` hands back typed spans
+  borrowed straight out of the buffer. That is why the format asserts
+  little-endian at compile time and rejects a misaligned base address instead of
+  falling back to a copy. Adding a field that is not a fixed-size scalar — a
+  string, a variable-length blob — breaks that property; give it its own
+  section with its own `(first, count)` ranges instead.
+- **The encoder refuses rather than drops.** A track with an audio renderer
+  program, or a mixer control pointing at a lane the track does not own, is a
+  typed error and not a silently thinner payload. Preserve that when widening
+  what the wire covers: a lossy encode is indistinguishable downstream from a
+  program that was authored that way.
+- **Deliberate exclusions, and why.** Decoded audio (bulk, already content-hash
+  addressed — a generation wire that inlined it would republish gigabytes per
+  edit), the audio clip programs (derived, and carrying derived-cache pointers),
+  `AudioRendererLimits` (mostly offline-stretch and converter budgets governing
+  the compiler's host), and `AutomationProgram`'s instance token (a
+  producer-process-local counter that a consuming realm has no token space to
+  compare against). Excluding the token is also what makes one document encode
+  to exactly one byte range.
+- **`producer_epoch` is what replaces the token across the boundary, and it is
+  not optional.** The token's in-process job is to stop an equal-generation
+  replacement from masquerading as the active program — `AutomationCursor`
+  decides `Unchanged` on the lane key *and* the token together. Across a realm
+  that guard cannot be the token, so the wire carries a producer epoch instead
+  and a consumer decides on `(producer_epoch, generation)`. Neither half is
+  sufficient alone: `generation` is minted per store and **restarts at 1**, so a
+  producer that is torn down and recreated looks non-monotonic to a surviving
+  consumer and would be refused forever on generation alone; and two producers
+  of one document both minting generation 1 would look like one publication
+  without the epoch. A zero epoch is refused at both ends rather than acting as
+  a wildcard.
+- **Version growth is additive by section, not by version bump.** An unknown
+  section marked `kProgramWireSectionOptional` is skipped; an unknown section
+  without it is rejected. Bump `min_reader_version` only when an older reader
+  would *misread* the bytes, not when it would merely miss data.
+- **The byte golden is the guard that matters.** An encoder and a decoder that
+  are wrong in the same direction still round-trip; only the pinned digest in
+  `test/test_playback_program_wire.cpp` catches a reordered field. If you change
+  the layout on purpose, re-pin it in the same change and say so.
+- The tempo map travels as its editable `TempoPoint`s, because
+  `CompiledTempoMap`'s segments are private and derived. `encode_program_wire`
+  therefore takes the points and refuses any that did not compile the program's
+  map — `CompiledTempoMap::matches()` is what keeps the two honest.
+
+## A refusal of something authorable costs a written reason
+
+`tools/scripts/negative_capability_check.py` (ctest
+`playback-negative-capability`, selftest
+`playback-negative-capability-selftest`) reads the refusal-shaped members of
+`CompileErrorCode` — anything spelled `Unsupported`, `NotSupported`,
+`Rejected`, `Refused`, or `Disallowed` — finds every site that raises one, and
+decides whether the refused construct is reachable from the timeline authoring
+surface. An authorable refusal needs an entry in
+`tools/scripts/negative_capability_allowlist.json` carrying an owner, a
+`status` of `live-defect` or `intended`, and a reason.
+
+The class it guards is worth naming: a construct a user **can** author and the
+compiler then refuses is worse than the construct not existing. The document
+saves, reloads, copies and round-trips, and only playback says no — with
+nothing at authoring time to warn anyone. The gate does not forbid these; it
+forbids adding one for free.
+
+A refusal reads as authorable when the source above the raise reads a symbol
+declared in `core/timeline/include/pulp/timeline/**` or named by
+`core/timeline/schema/timeline_schema.json` — a model accessor, a model type,
+an enum constant, a schema field. A refusal that only inspects internal
+lowering state passes without an entry.
+
+**Three things it cannot see, so do not read a pass as "the compiler accepts
+everything authorable":** a refusal expressed by dropping, clamping, or
+substituting rather than by naming a code; a refusal raised through a different
+error enum, such as an importer's or a renderer's; and an authored read that
+sits further than `AUTHORING_LOOKBACK_LINES` above the raise or arrives through
+an internal struct field that no longer names its model origin.
+
+All three seeded entries are `live-defect` — expression lanes on a clip,
+expression lanes on a trimmed nested clip, and the nested-sequence flattening
+refusals. They are tracked, not resolved. Removing one from the allowlist is
+how you assert the refusal is gone; the gate fails an entry whose raise site no
+longer exists, so a reason cannot outlive its code.
 
 ## Dependency floor
 
@@ -700,6 +853,28 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
 `target_link_libraries` in its `CMakeLists.txt`. Both axes must stay inside the
 declared set, so reaching for a format, host, or view type fails the gate even
 when the build would have linked.
+
+**The link axis is transitive, and playback is the module that shows why.** The
+check follows what a linked library itself links, to a fixed point, so a row
+cannot stay green by depending on a module that breaches it. `core/playback`
+links `pulp::audio`, which links `pulp::state`, `pulp::signal` and
+`pulp::sample-bank-manifest` PUBLIC and, through `pulp::state`, `pulp::events`
+PRIVATE — four modules the row never named. Those are recorded in
+`LINK_CLOSURE_DEBT`, deliberately *not* folded into `MODULE_FLOORS`: a floor row
+also governs which headers the module's sources may include, so widening the row
+would have granted `core/playback` the right to `#include <pulp/state/...>` as a
+side effect of writing down a link fact. An entry there is a debt, not a
+permission — cut the underlying link and delete the entry, and the gate tightens
+with no other edit.
+
+The PUBLIC/PRIVATE split survives the trip and matters for a
+pay-for-what-you-use claim: `state`, `signal` and `sample-bank-manifest` arrive
+PUBLIC, so their include directories propagate and a playback consumer genuinely
+can reach `<pulp/state/...>` today; `events` is PRIVATE and link-only; and
+`signal` is an INTERFACE library, so paying for it costs headers rather than
+object code. Whether playback *should* reach the state store is an open design
+question the debt list does not answer — it exists so the gate can police
+whatever answer is reached.
 
 The table holds every engine-adjacent module, not just playback, and the selftest
 is generic over it. Adding a module there is how a new `core/` target gets the
@@ -725,6 +900,38 @@ direction. An editor learns where the playhead is through
 audio — so a plugin that draws a piano roll over its own engine consumes the
 editor without acquiring a transport.
 
+**The module does not acquire a transport; the plugin binary does.** That row
+governs `core/timeline_editor`'s own includes and links, and it holds. It says
+nothing about what the plugin packaging adds around it, and measuring the other
+direction shows the difference. `tools/cmake/PulpLinkFloor.cmake` walks CMake's
+resolved link graph for a consumer; run over `StepSequencer_CLAP` it reports:
+
+```
+playback: StepSequencer_CLAP -> pulp-view -> pulp-view-script
+            -> pulp-view-core -> pulp-host -> pulp-playback
+```
+
+VST3, CLAP and AU each link `${_PULP_VIEW_TARGET}` unconditionally in
+`PulpPluginFormats.cmake` — drawing or not — and the view stack reaches the
+plugin host and, through it, this module. So every Pulp plugin links `playback`
+today, and the outbound gate is right to stay green about it: nothing in
+`core/playback` or `core/timeline_editor` reached upward to cause it. Cite the
+editor row for what a *module* costs, and a link-floor report for what a
+*binary* costs; they are different claims and only one of them is about the
+artifact a host loads. The inbound side is documented in the `timeline` skill.
+
+Read that report as an upper bound and nothing more. `TIER` proves only that
+nothing outside it is reached, so a tier can name `playback` — or the editor
+rung — while the binary links neither, and still pass. If what you need to show
+is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
+`REQUIRE` list, which fails naming any module that is absent from the measured
+closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
+by it; it does not link `timeline_editor` at all. The positive inbound proof is
+`TimelinePluginProof_CLAP`: it requires `format timeline timeline_editor` under
+the `sequencer-plugin-editor` tier while recording the packaging-driven
+`playback` reach as per-target debt. Its native ruler/playhead view demonstrates
+the host seam without claiming a piano roll.
+
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
 compiled program. That is correct for a block renderer, which consumes the
@@ -734,6 +941,16 @@ Never widen the UI-facing seam by passing a `TransportSnapshot` — project the
 fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_generation`
 is what lets a view tell a stale reading from a live one without holding anything
 a program swap can invalidate.
+
+A value type both rungs genuinely need goes in `core/timebase`, never duplicated
+into each. `timebase` is the whole of what the two floors have in common beyond
+`platform`/`runtime`, so it is the only home that does not require widening a
+row. `LoopRegion` is the worked example: `playback::LoopRegion` is an alias of
+`timebase::LoopRegion` beside the existing `MeterSignature` one, and
+`UiPlayhead::loop` names the same type — a loop set on the transport reaches an
+editor reading with nothing to convert. Do not read this as licence to share the
+*readings* themselves: `TransportPlayhead` and `UiPlayhead` stay separate
+because their fields differ in kind, not merely in spelling.
 
 ### Position leaves the transport in two directions, one SeqLock each
 
@@ -780,3 +997,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

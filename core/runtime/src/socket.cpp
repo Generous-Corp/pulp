@@ -5,15 +5,20 @@
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
 #else
+#include <cerrno>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <poll.h>
 #endif
 
 #include <cstring>
+#include <algorithm>
+#include <climits>
+#include <limits>
 
 namespace pulp::runtime {
 
@@ -65,6 +70,13 @@ bool Socket::create(SocketType type) {
     int sock_type = (type == SocketType::TCP) ? SOCK_STREAM : SOCK_DGRAM;
     int protocol = (type == SocketType::TCP) ? IPPROTO_TCP : IPPROTO_UDP;
     fd_ = static_cast<decltype(fd_)>(::socket(AF_INET, sock_type, protocol));
+#ifdef SO_NOSIGPIPE
+    if (fd_ != kInvalidSocketHandle) {
+        const int enabled = 1;
+        ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_NOSIGPIPE,
+                     &enabled, sizeof(enabled));
+    }
+#endif
     return fd_ != kInvalidSocketHandle;
 }
 
@@ -105,25 +117,173 @@ std::optional<Socket> Socket::accept() {
     Socket client;
     client.fd_ = static_cast<decltype(client.fd_)>(client_fd);
     client.type_ = SocketType::TCP;
+#ifdef SO_NOSIGPIPE
+    const int enabled = 1;
+    ::setsockopt(NATIVE_SOCKET(client.fd_), SOL_SOCKET, SO_NOSIGPIPE,
+                 &enabled, sizeof(enabled));
+#endif
     return client;
 }
 
-bool Socket::connect(std::string_view address, uint16_t port) {
+bool Socket::connect(std::string_view address, uint16_t port,
+                     std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return false;
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     std::string addr_str(address);
-    inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
+    if (inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr) != 1) {
+        struct addrinfo hints {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype =
+            type_ == SocketType::TCP ? SOCK_STREAM : SOCK_DGRAM;
+        hints.ai_protocol =
+            type_ == SocketType::TCP ? IPPROTO_TCP : IPPROTO_UDP;
 
-    return ::connect(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
+        struct addrinfo* results = nullptr;
+        if (::getaddrinfo(addr_str.c_str(), nullptr, &hints, &results) != 0)
+            return false;
+
+        bool resolved = false;
+        for (auto* candidate = results; candidate != nullptr;
+             candidate = candidate->ai_next) {
+            if (candidate->ai_family != AF_INET ||
+                candidate->ai_addr == nullptr ||
+                candidate->ai_addrlen < sizeof(addr)) {
+                continue;
+            }
+            addr.sin_addr = reinterpret_cast<const struct sockaddr_in*>(
+                                candidate->ai_addr)
+                                ->sin_addr;
+            resolved = true;
+            break;
+        }
+        ::freeaddrinfo(results);
+        if (!resolved)
+            return false;
+    }
+
+    if (timeout <= std::chrono::milliseconds(0)) {
+        return ::connect(
+                   NATIVE_SOCKET(fd_),
+                   reinterpret_cast<struct sockaddr*>(&addr),
+                   sizeof(addr)) == 0;
+    }
+
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (::ioctlsocket(
+            NATIVE_SOCKET(fd_), FIONBIO, &nonblocking) != 0) {
+        return false;
+    }
+    const auto restore_blocking = [&] {
+        u_long blocking = 0;
+        return ::ioctlsocket(
+                   NATIVE_SOCKET(fd_), FIONBIO, &blocking) == 0;
+    };
+#else
+    const int original_flags = ::fcntl(NATIVE_SOCKET(fd_), F_GETFL, 0);
+    if (original_flags < 0 ||
+        ::fcntl(
+            NATIVE_SOCKET(fd_), F_SETFL,
+            original_flags | O_NONBLOCK) != 0) {
+        return false;
+    }
+    const auto restore_blocking = [&] {
+        return ::fcntl(
+                   NATIVE_SOCKET(fd_), F_SETFL, original_flags) == 0;
+    };
+#endif
+
+    const int result = ::connect(
+        NATIVE_SOCKET(fd_),
+        reinterpret_cast<struct sockaddr*>(&addr),
+        sizeof(addr));
+    if (result == 0)
+        return restore_blocking();
+
+#ifdef _WIN32
+    const int connect_error = ::WSAGetLastError();
+    const bool pending =
+        connect_error == WSAEWOULDBLOCK ||
+        connect_error == WSAEINPROGRESS ||
+        connect_error == WSAEALREADY;
+#else
+    const bool pending =
+        errno == EINPROGRESS || errno == EWOULDBLOCK ||
+        errno == EAGAIN;
+#endif
+    if (!pending) {
+        (void)restore_blocking();
+        return false;
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    bool connected = false;
+    for (;;) {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started);
+        if (elapsed >= timeout)
+            break;
+        const auto remaining = timeout - elapsed;
+        const int wait_ms = static_cast<int>(
+            std::min<std::int64_t>(
+                std::max<std::int64_t>(remaining.count(), 1),
+                INT_MAX));
+#ifdef _WIN32
+        WSAPOLLFD descriptor{};
+        descriptor.fd = NATIVE_SOCKET(fd_);
+        descriptor.events = POLLWRNORM;
+        const int ready = ::WSAPoll(&descriptor, 1, wait_ms);
+        if (ready == SOCKET_ERROR &&
+            ::WSAGetLastError() == WSAEINTR) {
+            continue;
+        }
+#else
+        struct pollfd descriptor {
+            NATIVE_SOCKET(fd_), POLLOUT, 0
+        };
+        const int ready = ::poll(&descriptor, 1, wait_ms);
+        if (ready < 0 && errno == EINTR)
+            continue;
+#endif
+        if (ready <= 0)
+            break;
+
+        int socket_error = 0;
+#ifdef _WIN32
+        int error_size = sizeof(socket_error);
+        if (::getsockopt(
+                NATIVE_SOCKET(fd_), SOL_SOCKET, SO_ERROR,
+                reinterpret_cast<char*>(&socket_error),
+                &error_size) == 0) {
+            connected = socket_error == 0;
+        }
+#else
+        socklen_t error_size = sizeof(socket_error);
+        if (::getsockopt(
+                NATIVE_SOCKET(fd_), SOL_SOCKET, SO_ERROR,
+                &socket_error, &error_size) == 0) {
+            connected = socket_error == 0;
+        }
+#endif
+        break;
+    }
+
+    const bool restored = restore_blocking();
+    return connected && restored;
 }
 
 int Socket::send(const uint8_t* data, size_t length) {
     if (fd_ == kInvalidSocketHandle) return -1;
+    int flags = 0;
+#ifdef MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif
     return static_cast<int>(::send(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
-                                   static_cast<int>(length), 0));
+                                   static_cast<int>(length), flags));
 }
 
 int Socket::send(std::string_view data) {
@@ -140,8 +300,12 @@ int Socket::send_to(const uint8_t* data, size_t length,
     std::string addr_str(address);
     inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
 
+    int flags = 0;
+#ifdef MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif
     return static_cast<int>(::sendto(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
-                                     static_cast<int>(length), 0,
+                                     static_cast<int>(length), flags,
                                      reinterpret_cast<struct sockaddr*>(&addr),
                                      sizeof(addr)));
 }
@@ -150,6 +314,46 @@ int Socket::receive(uint8_t* buffer, size_t buffer_size) {
     if (fd_ == kInvalidSocketHandle) return -1;
     return static_cast<int>(::recv(NATIVE_SOCKET(fd_), reinterpret_cast<char*>(buffer),
                                    static_cast<int>(buffer_size), 0));
+}
+
+bool Socket::set_write_timeout(std::chrono::milliseconds timeout) {
+    if (fd_ == kInvalidSocketHandle) return false;
+    const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(
+        std::min<std::int64_t>(
+            bounded.count(), std::numeric_limits<DWORD>::max()));
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                        reinterpret_cast<const char*>(&value),
+                        sizeof(value)) == 0;
+#else
+    const struct timeval value {
+        static_cast<time_t>(bounded.count() / 1000),
+        static_cast<suseconds_t>((bounded.count() % 1000) * 1000)
+    };
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                        &value, sizeof(value)) == 0;
+#endif
+}
+
+bool Socket::set_read_timeout(std::chrono::milliseconds timeout) {
+    if (fd_ == kInvalidSocketHandle) return false;
+    const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(
+        std::min<std::int64_t>(
+            bounded.count(), std::numeric_limits<DWORD>::max()));
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_RCVTIMEO,
+                        reinterpret_cast<const char*>(&value),
+                        sizeof(value)) == 0;
+#else
+    const struct timeval value {
+        static_cast<time_t>(bounded.count() / 1000),
+        static_cast<suseconds_t>((bounded.count() % 1000) * 1000)
+    };
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_RCVTIMEO,
+                        &value, sizeof(value)) == 0;
+#endif
 }
 
 int Socket::receive_from(uint8_t* buffer, size_t buffer_size,

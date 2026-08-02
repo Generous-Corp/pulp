@@ -21,9 +21,8 @@ targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
 [repo."Generous-Corp/pulp".pr.linux]
-strategy = "ordered-fallback"
-targets = ["macstudio.linux-arm64-vm", "m5.linux-arm64-vm", "github.linux-x64"]
-github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
+strategy = "github-only"
+targets = ["github.linux-x64"]
 
 [repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"
@@ -53,16 +52,19 @@ targets = ["github.linux-x64", "github.windows-x64"]
 issue_on_failure = true
 
 [targets."macstudio.macos-arm64-vm"]
-runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
 
 [targets."m5.macos-arm64-vm"]
-runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm", "pulp-gate-fast"]
 
 [targets."macstudio.linux-arm64-vm"]
 runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 
 [targets."m5.linux-arm64-vm"]
 runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
+
+[targets."macpro.linux-x64-vm"]
+runs_on_json = ["self-hosted", "Linux", "X64", "pulp-build-linux-x64", "pulp-host-macpro"]
 
 [targets."macstudio.windows-arm64-qemu"]
 runs_on_json = ["self-hosted", "Windows", "ARM64", "pulp-build-windows"]

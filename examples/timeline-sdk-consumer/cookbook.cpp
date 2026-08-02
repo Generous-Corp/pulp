@@ -1,4 +1,5 @@
 #include <pulp/playback/capture_engine.hpp>
+#include <pulp/playback/compile_context_registry.hpp>
 #include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
@@ -110,24 +111,27 @@ bool compile_and_publish(const timeline::CommitResult& committed) {
     playback::DeferredCompileExecutor executor;
     playback::PlaybackProgramCompiler compiler(
         programs, executor, std::chrono::microseconds{0});
+    auto compile_contexts = std::make_shared<playback::CompileContextRegistry>();
 
     playback::ProgramCompileRequest request;
     request.project = committed.snapshot;
     request.sequence_id = committed.snapshot->root_sequence_id();
     request.tempo_map = tempo;
     request.document_revision = committed.revision.value;
-    // A consumer that just wants everything compiled asks for exactly that.
-    // Translating a transaction's dirty set into compiler dirtiness is an
-    // engine-internal path (it needs the compiler's invalidation index), and a
-    // full compile is the honest default for a cookbook example.
+    // This one-shot example publishes in full. A long-lived engine retains the
+    // registry beside the compiler so later commits can resolve exact dirtiness
+    // against the same captured registry generation.
     request.dirty.all = true;
+    request.invalidation = playback::CompileInvalidationInput{compile_contexts, committed};
 
     auto ticket = compiler.submit(std::move(request));
     if (!ticket)
         return false;
     while (compiler.status().busy)
         executor.run_for(std::chrono::milliseconds{1});
-    if (compiler.status().has_error || !programs.has_value())
+    const auto status = compiler.status();
+    if (status.has_error || status.latest_published_epoch < ticket.value().submission_epoch ||
+        !programs.has_value())
         return false;
 
     playback::MasterTransport transport;
@@ -143,10 +147,10 @@ bool compile_and_publish(const timeline::CommitResult& committed) {
     if (!program_block)
         return false;
     audio::Buffer<float> output(2, 128);
-    const auto status = playback::ArrangementAudioRenderer::process(
+    const auto render_status = playback::ArrangementAudioRenderer::process(
         *program_block.program(), transport_block, output.view());
-    return status == playback::AudioRenderStatus::Rendered ||
-           status == playback::AudioRenderStatus::Silent;
+    return render_status == playback::AudioRenderStatus::Rendered ||
+           render_status == playback::AudioRenderStatus::Silent;
 }
 
 bool prepare_capture(timeline::ItemId track_id, timeline::ItemId take_lane_id) {

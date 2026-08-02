@@ -7,6 +7,8 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 
+#include "graphite_image_provider.hpp"
+
 // Dawn C++ API (from Skia's bundled Dawn)
 #include "webgpu/webgpu_cpp.h"
 
@@ -98,6 +100,7 @@ public:
         // Release retained GPU images while their recorder/context are alive.
         canvas_.reset();
         retained_layers_.reset();
+        if (image_provider_) image_provider_->clear();
         if (context_) {
             // Drain any outstanding GpuStats finished-with-stats callbacks
             // before `this` dies — they capture `this` as their context, so a
@@ -135,8 +138,19 @@ public:
             return false;
         }
 
-        recorder_ = context_->makeRecorder();
+        // Graphite drops any draw whose SkImage is not already GPU-backed
+        // unless the Recorder carries an ImageProvider to upload it (Skia's
+        // default provider returns nothing). Skia modules that decode images
+        // internally — SkSVGDOM's `<image href="data:...">` among them — hand
+        // Graphite raster images that no Pulp-side pre-upload can reach, so the
+        // provider is what makes those draws land. See
+        // graphite_image_provider.hpp.
+        image_provider_ = sk_make_sp<GraphiteImageProvider>();
+        skgpu::graphite::RecorderOptions recorder_options;
+        recorder_options.fImageProvider = image_provider_;
+        recorder_ = context_->makeRecorder(recorder_options);
         if (!recorder_) {
+            image_provider_.reset();
             runtime::log_error("SkiaSurface: failed to create recorder");
             return false;
         }
@@ -555,6 +569,11 @@ private:
 
     std::unique_ptr<skgpu::graphite::Context> context_;
     std::unique_ptr<skgpu::graphite::Recorder> recorder_;
+    // Uploads raster images Graphite would otherwise drop. The Recorder holds
+    // its own ref, so declaration order alone does not guarantee the cached
+    // textures are released before the Recorder that provisioned them — the
+    // destructor clears the cache explicitly.
+    sk_sp<GraphiteImageProvider> image_provider_;
 
     // Per-frame surface wrapping the current presentable texture
     sk_sp<SkSurface> frame_surface_;

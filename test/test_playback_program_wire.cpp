@@ -1,0 +1,779 @@
+#include <pulp/playback/program_compiler.hpp>
+#include <pulp/playback/program_wire.hpp>
+#include <pulp/playback/track_automation_program.hpp>
+
+#include "timebase_test_helpers.hpp"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <new>
+#include <utility>
+#include <vector>
+
+using namespace pulp;
+using namespace pulp::playback;
+using namespace pulp::timebase;
+using namespace pulp::timeline;
+
+namespace {
+
+template <typename T, typename E> T take(runtime::Result<T, E> result) {
+    if (!result)
+        std::abort();
+    return std::move(result).value();
+}
+
+const std::array kTempoPoints{TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
+                              TempoPoint{{kTicksPerQuarter * 4}, 96.5}};
+
+/// Fixed rather than minted, so the byte golden stays deterministic. A real
+/// producer uses program_wire_process_epoch() or its own store-lifetime value.
+constexpr std::uint64_t kEpoch = 0xA11CE'0000'0007ull;
+
+std::shared_ptr<const CompiledTempoMap> wire_tempo_map() {
+    return shared_compiled_tempo_map(kTempoPoints, RationalRate{48'000, 1});
+}
+
+AutomationLane device_lane(std::uint64_t lane_id, std::uint64_t placement_id,
+                           std::uint32_t param_id, float value) {
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{lane_id * 10 + 1}, {0}, value, AutomationInterpolation::Continuous,
+                         0.25f},
+         AutomationPoint{{lane_id * 10 + 2},
+                         {kTicksPerQuarter},
+                         value + 0.125f,
+                         AutomationInterpolation::Hold,
+                         0.0f}}));
+    return take(AutomationLane::create({lane_id}, DeviceParameterTarget{{placement_id}, param_id},
+                                       std::move(curve)));
+}
+
+AutomationLane mixer_lane(std::uint64_t lane_id, TrackMixerParameter parameter, float value) {
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{lane_id * 10 + 1}, {0}, value, AutomationInterpolation::Continuous, 0.0f},
+         AutomationPoint{{lane_id * 10 + 2},
+                         {kTicksPerQuarter * 2},
+                         value * 0.5f,
+                         AutomationInterpolation::Continuous,
+                         -0.5f}}));
+    return take(AutomationLane::create({lane_id}, TrackMixerTarget{parameter}, std::move(curve)));
+}
+
+/// Exercises every section the wire carries at once: notes, note modifiers,
+/// clip and device-placement ordering, a device-parameter lane, a track-mixer
+/// lane superseding an authored constant, and a bare second track whose ranges
+/// are all empty, so every `(first, count)` range has both a populated and an
+/// empty case in one payload.
+std::shared_ptr<const Project> wire_project() {
+    std::vector<NoteEvent> notes{
+        {{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0},
+        {{31}, {kTicksPerQuarter}, {kTicksPerQuarter / 2}, 0x4000, 67, 3},
+    };
+    std::vector<NoteModifier> modifiers;
+    NoteModifier chance;
+    chance.note_id = {30};
+    chance.probability = 0x8000;
+    chance.ratchet_count = 3;
+    modifiers.push_back(chance);
+    NoteModifier every_other;
+    every_other.note_id = {31};
+    every_other.condition = NoteConditionKind::EveryNth;
+    every_other.condition_period = 4;
+    every_other.condition_offset = 2;
+    modifiers.push_back(every_other);
+
+    auto content = take(MidiContent::create(std::move(notes), std::move(modifiers), 0xC0FFEEull));
+    TrackInput automated;
+    automated.id = {10};
+    automated.name = "automated";
+    automated.clips.push_back(take(Clip::create({20}, {0}, {kTicksPerQuarter * 4},
+                                                std::move(content))));
+    automated.device_chain = {{{40}}, {{41}}};
+    automated.automation_lanes.push_back(device_lane(50, 41, 7, 0.25f));
+    automated.automation_lanes.push_back(device_lane(51, 40, 9, 0.75f));
+    automated.automation_lanes.push_back(mixer_lane(52, TrackMixerParameter::Gain, 0.5f));
+    automated.mixer = {0.75f, -0.25f};
+
+    auto plain = take(Track::create({11}, "plain", {}));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
+                                          std::vector<Track>{take(Track::create(
+                                                                 std::move(automated))),
+                                                             std::move(plain)}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "wire";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+/// One track playing one audio clip, which is the program shape this version of
+/// the wire deliberately does not represent.
+std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
+    const auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    REQUIRE(hash);
+    MediaAsset asset;
+    asset.id = {60};
+    asset.name = "tone";
+    asset.frame_count = frames;
+    asset.sample_rate = {48'000, 1};
+    asset.content_hash = *hash;
+
+    auto clip = take(Clip::create_absolute({21}, {0}, frames, {48'000, 1},
+                                           MediaRef{{60}, {0}, frames}));
+    auto track = take(Track::create({12}, "audio", {std::move(clip)}));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "audio";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.assets.push_back(std::move(asset));
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+std::shared_ptr<const DecodedAudioAssetPool> audio_pool(std::uint64_t frames) {
+    auto data = std::make_shared<audio::AudioFileData>();
+    data->sample_rate = 48'000;
+    data->channels.assign(1, std::vector<float>(frames, 0.5f));
+    const auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    REQUIRE(hash);
+    return take(DecodedAudioAssetPool::create({DecodedAudioAsset{{60}, std::move(data), *hash}}));
+}
+
+/// Compiles a program and keeps it alive for the duration of a test, since a
+/// decoded view borrows nothing from the program but every comparison does.
+struct CompiledProgram {
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
+
+    explicit CompiledProgram(std::shared_ptr<const Project> project,
+                             std::shared_ptr<const DecodedAudioAssetPool> assets = nullptr) {
+        ProgramCompileRequest request;
+        request.project = std::move(project);
+        request.sequence_id = {2};
+        request.tempo_map = wire_tempo_map();
+        request.document_revision = 7;
+        request.dirty = {.all = true};
+        request.audio_assets = std::move(assets);
+        REQUIRE(compiler.submit(std::move(request)));
+        while (compiler.status().busy)
+            executor.run_for(std::chrono::seconds(1), 64);
+        REQUIRE_FALSE(compiler.status().has_error);
+        REQUIRE(store.has_value());
+    }
+};
+
+/// An eight-byte-aligned byte buffer, which is what the format requires of any
+/// producer or consumer that wants typed spans borrowed out of it.
+class WireBuffer {
+  public:
+    explicit WireBuffer(std::size_t bytes)
+        : storage_(new (std::align_val_t{kProgramWireAlignment}) std::byte[bytes]), size_(bytes) {}
+    ~WireBuffer() {
+        ::operator delete[](storage_, std::align_val_t{kProgramWireAlignment});
+    }
+    WireBuffer(const WireBuffer&) = delete;
+    WireBuffer& operator=(const WireBuffer&) = delete;
+
+    std::span<std::byte> span() noexcept {
+        return {storage_, size_};
+    }
+    std::span<const std::byte> span() const noexcept {
+        return {storage_, size_};
+    }
+
+  private:
+    std::byte* storage_;
+    std::size_t size_;
+};
+
+/// Encodes the shared fixture once, so a corruption test can restore the byte
+/// it damaged and prove the payload was otherwise sound.
+struct EncodedFixture {
+    CompiledProgram compiled{wire_project()};
+    PlaybackProgramStore::ReadGuard program = compiled.store.read();
+    std::size_t size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer buffer{size};
+
+    EncodedFixture() {
+        REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
+        REQUIRE(decode_program_wire(buffer.span()));
+    }
+
+    std::span<std::byte> bytes() noexcept {
+        return buffer.span();
+    }
+    std::span<const std::byte> bytes() const noexcept {
+        return buffer.span();
+    }
+
+    /// Overwrites one field, asserts the decoder's specific typed rejection,
+    /// restores the original bytes, and asserts the payload decodes again. The
+    /// restore is the negative control: without it a "rejection" could be a
+    /// payload that never decoded in the first place.
+    template <typename Field>
+    void corrupt(std::size_t offset, Field replacement, ProgramWireErrorCode expected) {
+        Field original{};
+        std::memcpy(&original, bytes().data() + offset, sizeof(Field));
+        std::memcpy(bytes().data() + offset, &replacement, sizeof(Field));
+        auto rejected = decode_program_wire(bytes());
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == expected);
+        std::memcpy(bytes().data() + offset, &original, sizeof(Field));
+        REQUIRE(decode_program_wire(bytes()));
+    }
+};
+
+constexpr std::size_t kDirectoryAt = sizeof(ProgramWireHeader);
+constexpr std::size_t kPayloadAt =
+    kDirectoryAt + 9 * sizeof(ProgramWireSectionEntry);
+
+/// Rewrites the header's checksum over the current directory and payload, for
+/// tests that mean to corrupt a field rather than the checksum guarding it.
+void reseal(std::span<std::byte> bytes) {
+    ProgramWireHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    header.body_checksum = program_wire_checksum(bytes.subspan(kDirectoryAt));
+    std::memcpy(bytes.data(), &header, sizeof(header));
+}
+
+std::size_t section_entry_at(std::size_t index) {
+    return kDirectoryAt + index * sizeof(ProgramWireSectionEntry);
+}
+
+} // namespace
+
+TEST_CASE("program wire round trips a compiled program to a structurally equal view",
+          "[playback][wire]") {
+    EncodedFixture fixture;
+    auto decoded = decode_program_wire(fixture.bytes());
+    REQUIRE(decoded);
+    const auto& view = decoded.value();
+
+    REQUIRE(program_wire_matches(view, *fixture.program, kTempoPoints, kEpoch));
+
+    // Spot-check the structure the equality walk covers, so a matches() that
+    // silently returned true would still be caught here.
+    REQUIRE(view.header().version == kProgramWireVersion);
+    REQUIRE(view.producer_epoch() == kEpoch);
+    REQUIRE(view.program().generation == fixture.program->generation());
+    REQUIRE(view.program().document_revision == 7);
+    REQUIRE(view.sample_rate() == RationalRate{48'000, 1});
+    REQUIRE(view.automation_limits() == fixture.program->automation_limits());
+    REQUIRE(view.tempo_points().size() == kTempoPoints.size());
+    REQUIRE(view.tempo_points()[1].bpm_bits == std::bit_cast<std::uint64_t>(96.5));
+    REQUIRE(view.tracks().size() == 2);
+
+    const auto& automated = view.tracks()[0];
+    REQUIRE(automated.id == 10);
+    REQUIRE((automated.flags & kProgramWireTrackHasAutomationProgram) != 0);
+    REQUIRE(view.clip_ids_for(automated).size() == 1);
+    REQUIRE(view.clip_ids_for(automated)[0].value == 20);
+    // Note 30 ratchets three times, so it lowers to three on/off pairs.
+    REQUIRE(view.note_events_for(automated).size() == 8);
+    REQUIRE(view.note_modifiers_for(automated).size() == 2);
+    REQUIRE(view.device_placement_ids_for(automated).size() == 2);
+    REQUIRE(view.automation_lanes_for(automated).size() == 3);
+    REQUIRE(automated.mixer_pan == -0.25f);
+    // The authored gain constant travels alongside the lane that supersedes it,
+    // so a reader can tell a superseded constant from an absent one.
+    REQUIRE(automated.mixer_gain_linear == 0.75f);
+    REQUIRE(automated.mixer_gain_lane != kProgramWireNoLane);
+    REQUIRE(automated.mixer_pan_lane == kProgramWireNoLane);
+
+    const auto& gain_lane = view.automation_lanes_for(automated)[automated.mixer_gain_lane];
+    REQUIRE(gain_lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::TrackMixer));
+    REQUIRE(gain_lane.mixer_parameter == static_cast<std::uint8_t>(TrackMixerParameter::Gain));
+    REQUIRE(gain_lane.evaluation_rate ==
+            static_cast<std::uint8_t>(AutomationEvaluationRate::SampleAccurate));
+    REQUIRE_FALSE(view.segments_for(gain_lane).empty());
+
+    // A lane that drives a device parameter carries both domains, which is what
+    // lets the adopting realm place a sample-accurate event without the map.
+    const ProgramWireAutomationLaneRecord* device = nullptr;
+    for (const auto& lane : view.automation_lanes_for(automated))
+        if (lane.target_kind == static_cast<std::uint8_t>(ProgramWireTargetKind::DeviceParameter))
+            device = &lane;
+    REQUIRE(device != nullptr);
+    REQUIRE(device->device_placement_id != 0);
+    const auto segments = view.segments_for(*device);
+    REQUIRE_FALSE(segments.empty());
+    REQUIRE(segments.front().end_sample >= segments.front().start_sample);
+    REQUIRE(segments.front().end_tick >= segments.front().start_tick);
+
+    // A track with no lanes still carries an automation program, just an empty
+    // one. The wire keeps "empty" and "absent" distinguishable rather than
+    // folding them into a lane count of zero, because a producer other than
+    // this compiler can publish either.
+    const auto& plain = view.tracks()[1];
+    REQUIRE(plain.id == 11);
+    REQUIRE((plain.flags & kProgramWireTrackHasAutomationProgram) != 0);
+    REQUIRE(view.automation_lanes_for(plain).empty());
+    REQUIRE(view.note_events_for(plain).empty());
+    REQUIRE(view.clip_ids_for(plain).empty());
+    REQUIRE(plain.mixer_gain_lane == kProgramWireNoLane);
+}
+
+TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire]") {
+    EncodedFixture fixture;
+
+    // The layout is derivable from the record sizes and the counts, so a size
+    // that drifts is a layout change rather than a recorded accident.
+    const auto counted = kPayloadAt + sizeof(ProgramWireProgramRecord) +
+                         2 * sizeof(ProgramWireTempoPointRecord) +
+                         2 * sizeof(ProgramWireTrackRecord) + 1 * sizeof(ProgramWireIdRecord) +
+                         8 * sizeof(ProgramWireNoteEventRecord) +
+                         2 * sizeof(ProgramWireNoteModifierRecord) +
+                         2 * sizeof(ProgramWireIdRecord) +
+                         3 * sizeof(ProgramWireAutomationLaneRecord) +
+                         6 * sizeof(ProgramWireAutomationSegmentRecord);
+    REQUIRE(fixture.size == counted);
+
+    // The header's first bytes are asserted by hand rather than by digest, so
+    // the golden below is anchored to a layout someone decided rather than to
+    // whatever the encoder emitted.
+    const auto bytes = fixture.bytes();
+    REQUIRE(std::to_integer<char>(bytes[0]) == 'P');
+    REQUIRE(std::to_integer<char>(bytes[1]) == 'L');
+    REQUIRE(std::to_integer<char>(bytes[2]) == 'P');
+    REQUIRE(std::to_integer<char>(bytes[3]) == 'W');
+    ProgramWireHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    REQUIRE(header.magic == kProgramWireMagic);
+    REQUIRE(header.version == kProgramWireVersion);
+    REQUIRE(header.min_reader_version == kProgramWireMinReaderVersion);
+    REQUIRE(header.header_bytes == sizeof(ProgramWireHeader));
+    REQUIRE(header.section_count == 9);
+    REQUIRE(header.payload_bytes == fixture.size - kPayloadAt);
+    REQUIRE(header.reserved0 == 0);
+    REQUIRE(header.body_checksum == program_wire_checksum(bytes.subspan(kDirectoryAt)));
+
+    // Sections appear in ascending id order and tile the payload exactly.
+    std::uint64_t tiled = 0;
+    for (std::size_t i = 0; i < 9; ++i) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry, bytes.data() + section_entry_at(i), sizeof(entry));
+        REQUIRE(entry.id == i + 1);
+        REQUIRE(entry.flags == 0);
+        REQUIRE(entry.offset == tiled);
+        REQUIRE(entry.offset % kProgramWireAlignment == 0);
+        tiled = entry.offset + entry.bytes;
+    }
+    REQUIRE(tiled == header.payload_bytes);
+
+    // Re-encoding the same program produces the identical byte range: there is
+    // exactly one encoding of one program, which is what makes the digest below
+    // a guard rather than a record.
+    WireBuffer again(fixture.size);
+    REQUIRE(take(encode_program_wire(*fixture.program, kTempoPoints, kEpoch,
+                                    again.span())) == fixture.size);
+    REQUIRE(std::memcmp(again.span().data(), bytes.data(), fixture.size) == 0);
+
+    // A whole-payload digest for a fixed input. It moves only when the layout,
+    // the field order, or the compiler's lowering does; any of those is a
+    // deliberate change that has to be re-agreed here rather than silently
+    // between the encoder and the decoder.
+    REQUIRE(program_wire_checksum(bytes) == 0xb2f8e42781eb1920ull);
+}
+
+TEST_CASE("program wire rejects a malformed generation header", "[playback][wire]") {
+    EncodedFixture fixture;
+
+    fixture.corrupt(offsetof(ProgramWireHeader, magic), std::uint32_t{0xDEADBEEF},
+                    ProgramWireErrorCode::BadMagic);
+    fixture.corrupt(offsetof(ProgramWireHeader, min_reader_version),
+                    static_cast<std::uint16_t>(kProgramWireVersion + 1),
+                    ProgramWireErrorCode::UnsupportedVersion);
+    fixture.corrupt(offsetof(ProgramWireHeader, header_bytes), std::uint32_t{48},
+                    ProgramWireErrorCode::BadHeaderSize);
+    fixture.corrupt(offsetof(ProgramWireHeader, body_checksum), std::uint64_t{0},
+                    ProgramWireErrorCode::ChecksumMismatch);
+    fixture.corrupt(offsetof(ProgramWireHeader, payload_bytes),
+                    static_cast<std::uint64_t>(fixture.size),
+                    ProgramWireErrorCode::ShortBuffer);
+
+    // The writer's own version may run ahead of this reader, as long as the
+    // writer states this reader can still read the bytes. That asymmetry is the
+    // whole migration story, so it is asserted rather than assumed.
+    const auto ahead = static_cast<std::uint16_t>(kProgramWireVersion + 1);
+    std::memcpy(fixture.bytes().data() + offsetof(ProgramWireHeader, version), &ahead,
+                sizeof(ahead));
+    REQUIRE(decode_program_wire(fixture.bytes()));
+    REQUIRE(decode_program_wire(fixture.bytes()).value().header().version == ahead);
+}
+
+TEST_CASE("program wire rejects truncation and trailing data", "[playback][wire]") {
+    EncodedFixture fixture;
+
+    for (const std::size_t kept : {std::size_t{0}, std::size_t{16}, sizeof(ProgramWireHeader),
+                                   kPayloadAt, fixture.size - 8, fixture.size - 1}) {
+        auto rejected = decode_program_wire(fixture.bytes().first(kept));
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ProgramWireErrorCode::ShortBuffer);
+    }
+
+    WireBuffer longer(fixture.size + 8);
+    std::memcpy(longer.span().data(), fixture.bytes().data(), fixture.size);
+    std::memset(longer.span().data() + fixture.size, 0, 8);
+    auto trailing = decode_program_wire(longer.span());
+    REQUIRE_FALSE(trailing);
+    REQUIRE(trailing.error().code == ProgramWireErrorCode::TrailingData);
+
+    // Negative control for the whole case: the untruncated payload decodes.
+    REQUIRE(decode_program_wire(fixture.bytes()));
+}
+
+TEST_CASE("program wire rejects an inconsistent section directory", "[playback][wire]") {
+    EncodedFixture fixture;
+    const auto bytes = fixture.bytes();
+
+    const auto read_entry = [&](std::size_t index) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry, bytes.data() + section_entry_at(index), sizeof(entry));
+        return entry;
+    };
+    const auto write_entry = [&](std::size_t index, const ProgramWireSectionEntry& entry) {
+        std::memcpy(bytes.data() + section_entry_at(index), &entry, sizeof(entry));
+    };
+
+    // Patches one or two adjacent directory entries, asserts the specific typed
+    // rejection, then restores and asserts the payload decodes again.
+    const auto with_entries = [&](std::size_t index, ProgramWireSectionEntry first,
+                                  const ProgramWireSectionEntry* second,
+                                  ProgramWireErrorCode expected) {
+        const auto original_first = read_entry(index);
+        const auto original_second = second ? read_entry(index + 1) : ProgramWireSectionEntry{};
+        write_entry(index, first);
+        if (second)
+            write_entry(index + 1, *second);
+        reseal(bytes);
+        auto rejected = decode_program_wire(bytes);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == expected);
+        write_entry(index, original_first);
+        if (second)
+            write_entry(index + 1, original_second);
+        reseal(bytes);
+        REQUIRE(decode_program_wire(bytes));
+    };
+
+    // Index 2 is the Tracks section; index 3 is ClipIds, which follows it.
+    const auto tracks = read_entry(2);
+    const auto clips = read_entry(3);
+
+    auto beyond = tracks;
+    beyond.bytes = std::uint64_t{0} - 8;
+    with_entries(2, beyond, nullptr, ProgramWireErrorCode::SectionOutOfBounds);
+
+    // A length that is not a whole number of records is caught on the entry
+    // itself, before the tiling break it would cause in the next one.
+    auto overlong = tracks;
+    overlong.bytes += 8;
+    with_entries(2, overlong, nullptr, ProgramWireErrorCode::BadRecordSize);
+
+    auto gapped = tracks;
+    gapped.offset += 8;
+    with_entries(2, gapped, nullptr, ProgramWireErrorCode::SectionsNotTiled);
+
+    // Dropping a whole record off the last section leaves every entry
+    // individually well formed and the payload short by one record.
+    auto short_tail = read_entry(8);
+    short_tail.bytes -= sizeof(ProgramWireAutomationSegmentRecord);
+    with_entries(8, short_tail, nullptr, ProgramWireErrorCode::SectionsNotTiled);
+
+    auto duplicated = tracks;
+    duplicated.id = 2;
+    with_entries(2, duplicated, nullptr, ProgramWireErrorCode::DuplicateSection);
+
+    auto unknown = tracks;
+    unknown.id = 4242;
+    with_entries(2, unknown, nullptr, ProgramWireErrorCode::UnknownSection);
+
+    // Only an unknown optional section can carry a length that is not a
+    // multiple of eight, so that is the one way a following section's offset
+    // can land unaligned while the payload still tiles.
+    auto opaque = tracks;
+    opaque.id = 9002;
+    opaque.flags = kProgramWireSectionOptional;
+    opaque.bytes -= 4;
+    auto shifted_clips = clips;
+    shifted_clips.offset -= 4;
+    shifted_clips.bytes += 4;
+    with_entries(2, opaque, &shifted_clips, ProgramWireErrorCode::SectionMisaligned);
+}
+
+TEST_CASE("program wire skips an unknown section only when the writer marked it optional",
+          "[playback][wire]") {
+    EncodedFixture fixture;
+    const auto bytes = fixture.bytes();
+
+    // The empty note-modifier-free second track leaves no zero-length section
+    // to borrow, so the clip-id section stands in: renaming it to an unknown id
+    // is exactly the shape a future writer's added section has.
+    ProgramWireSectionEntry original;
+    std::memcpy(&original, bytes.data() + section_entry_at(3), sizeof(original));
+
+    auto optional_unknown = original;
+    optional_unknown.id = 9001;
+    optional_unknown.flags = kProgramWireSectionOptional;
+    std::memcpy(bytes.data() + section_entry_at(3), &optional_unknown, sizeof(optional_unknown));
+    reseal(bytes);
+    auto skipped = decode_program_wire(bytes);
+    // Skipping is not the same as accepting a program with a section missing:
+    // the id it displaced is a known one, so the payload is still incomplete.
+    REQUIRE_FALSE(skipped);
+    REQUIRE(skipped.error().code == ProgramWireErrorCode::MissingSection);
+    REQUIRE(skipped.error().section == static_cast<std::uint32_t>(ProgramWireSection::ClipIds));
+
+    auto required_unknown = original;
+    required_unknown.id = 9001;
+    required_unknown.flags = 0;
+    std::memcpy(bytes.data() + section_entry_at(3), &required_unknown, sizeof(required_unknown));
+    reseal(bytes);
+    auto refused = decode_program_wire(bytes);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == ProgramWireErrorCode::UnknownSection);
+
+    std::memcpy(bytes.data() + section_entry_at(3), &original, sizeof(original));
+    reseal(bytes);
+    REQUIRE(decode_program_wire(bytes));
+}
+
+TEST_CASE("program wire rejects records that index outside their section", "[playback][wire]") {
+    EncodedFixture fixture;
+    const auto bytes = fixture.bytes();
+
+    const std::size_t track_section = kPayloadAt + sizeof(ProgramWireProgramRecord) +
+                                      2 * sizeof(ProgramWireTempoPointRecord);
+    const auto field = [&](std::size_t member) { return track_section + member; };
+
+    const auto with_field = [&](std::size_t offset, auto replacement,
+                                ProgramWireErrorCode expected) {
+        decltype(replacement) original{};
+        std::memcpy(&original, bytes.data() + offset, sizeof(replacement));
+        std::memcpy(bytes.data() + offset, &replacement, sizeof(replacement));
+        reseal(bytes);
+        auto rejected = decode_program_wire(bytes);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == expected);
+        std::memcpy(bytes.data() + offset, &original, sizeof(original));
+        reseal(bytes);
+        REQUIRE(decode_program_wire(bytes));
+    };
+
+    with_field(field(offsetof(ProgramWireTrackRecord, note_event_count)),
+               std::uint32_t{0xFFFF'FFF0}, ProgramWireErrorCode::RangeOutOfBounds);
+    with_field(field(offsetof(ProgramWireTrackRecord, automation_lane_first)),
+               std::uint32_t{99}, ProgramWireErrorCode::RangeOutOfBounds);
+    with_field(field(offsetof(ProgramWireTrackRecord, mixer_gain_lane)), std::uint32_t{7},
+               ProgramWireErrorCode::RangeOutOfBounds);
+    with_field(field(offsetof(ProgramWireTrackRecord, provider_selected)), std::uint8_t{9},
+               ProgramWireErrorCode::InvalidEnum);
+    with_field(field(offsetof(ProgramWireTrackRecord, state_policy)), std::uint8_t{4},
+               ProgramWireErrorCode::InvalidEnum);
+    with_field(field(offsetof(ProgramWireTrackRecord, flags)), std::uint8_t{0x80},
+               ProgramWireErrorCode::InvalidEnum);
+
+    // A record can be individually in range and still describe something no
+    // renderer can act on. These are the two that reach past their own record:
+    // the period the note renderer divides by, and the endpoints an automation
+    // segment is interpolated between.
+    const std::size_t modifier_section =
+        kPayloadAt + sizeof(ProgramWireProgramRecord) +
+        2 * sizeof(ProgramWireTempoPointRecord) + 2 * sizeof(ProgramWireTrackRecord) +
+        1 * sizeof(ProgramWireIdRecord) + 8 * sizeof(ProgramWireNoteEventRecord);
+    with_field(modifier_section + offsetof(ProgramWireNoteModifierRecord, ratchet_count),
+               std::uint16_t{0}, ProgramWireErrorCode::MalformedNoteModifier);
+    // The second modifier is the conditional one, so zeroing its period is the
+    // divisor the note renderer would otherwise take a modulo against.
+    with_field(modifier_section + sizeof(ProgramWireNoteModifierRecord) +
+                   offsetof(ProgramWireNoteModifierRecord, condition_period),
+               std::uint16_t{0}, ProgramWireErrorCode::MalformedNoteModifier);
+
+    const std::size_t segment_section = modifier_section +
+                                        2 * sizeof(ProgramWireNoteModifierRecord) +
+                                        2 * sizeof(ProgramWireIdRecord) +
+                                        3 * sizeof(ProgramWireAutomationLaneRecord);
+    with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, curvature),
+               std::numeric_limits<float>::quiet_NaN(),
+               ProgramWireErrorCode::MalformedSegment);
+    with_field(segment_section + offsetof(ProgramWireAutomationSegmentRecord, end_sample),
+               std::int64_t{-1}, ProgramWireErrorCode::MalformedSegment);
+
+    const std::size_t program_section = kPayloadAt;
+    with_field(program_section + offsetof(ProgramWireProgramRecord, sample_rate_denominator),
+               std::uint64_t{0}, ProgramWireErrorCode::InvalidSampleRate);
+    with_field(program_section + offsetof(ProgramWireProgramRecord, max_lanes_per_track),
+               std::uint32_t{0}, ProgramWireErrorCode::InvalidLimits);
+    with_field(program_section + offsetof(ProgramWireProgramRecord, max_points_per_lane),
+               std::uint32_t{0xFFFF'FFFF}, ProgramWireErrorCode::InvalidLimits);
+}
+
+TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][wire]") {
+    CompiledProgram compiled{wire_project()};
+    const auto program = compiled.store.read();
+
+    // Tempo points that did not compile this map are refused rather than
+    // written, because the wire carries the points and a reader would compile a
+    // different map from them without ever noticing.
+    // The exclusion that matters most: a track carrying audio is refused, not
+    // encoded thinner. A wire that silently dropped it would be
+    // indistinguishable downstream from a project that has no audio at all.
+    constexpr std::uint64_t kAudioFrames = 4'800;
+    CompiledProgram with_audio{audio_project(kAudioFrames), audio_pool(kAudioFrames)};
+    const auto audio = with_audio.store.read();
+    REQUIRE(audio->find_track({12}) != nullptr);
+    REQUIRE(audio->find_track({12})->audio_program() != nullptr);
+    auto refused = program_wire_encoded_size(*audio, kTempoPoints);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == ProgramWireErrorCode::AudioProgramUnsupported);
+    REQUIRE(refused.error().detail == 12);
+    // And the refusal is the encoder's, not this fixture's: the same call on a
+    // program without audio succeeds.
+    REQUIRE(program_wire_encoded_size(*program, kTempoPoints));
+
+    const std::array wrong{TempoPoint{{0}, 140.0}};
+    auto mismatched = program_wire_encoded_size(*program, wrong);
+    REQUIRE_FALSE(mismatched);
+    REQUIRE(mismatched.error().code == ProgramWireErrorCode::TempoMapMismatch);
+    auto empty = program_wire_encoded_size(*program, {});
+    REQUIRE_FALSE(empty);
+    REQUIRE(empty.error().code == ProgramWireErrorCode::TempoMapMismatch);
+
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+
+    WireBuffer small(size - 1);
+    auto cramped = encode_program_wire(*program, kTempoPoints, kEpoch, small.span());
+    REQUIRE_FALSE(cramped);
+    REQUIRE(cramped.error().code == ProgramWireErrorCode::InsufficientCapacity);
+    REQUIRE(cramped.error().detail == size);
+
+    WireBuffer aligned(size + kProgramWireAlignment);
+    auto skewed = encode_program_wire(*program, kTempoPoints, kEpoch,
+                                      aligned.span().subspan(4, size));
+    REQUIRE_FALSE(skewed);
+    REQUIRE(skewed.error().code == ProgramWireErrorCode::MisalignedBuffer);
+
+    // Negative control: the same program at the same size on an aligned buffer
+    // encodes, so the three refusals above are the specific defects and not a
+    // program the encoder could never write.
+    WireBuffer exact(size);
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, exact.span())) == size);
+
+    auto misread = decode_program_wire(aligned.span().subspan(4, size));
+    REQUIRE_FALSE(misread);
+    REQUIRE(misread.error().code == ProgramWireErrorCode::MisalignedBuffer);
+}
+
+TEST_CASE("program wire carries producer identity alongside the generation",
+          "[playback][wire]") {
+    EncodedFixture fixture;
+
+    // The defect this closes: `generation` is minted per store and restarts, so
+    // a producer that is torn down and recreated republishes generation 1 while
+    // a surviving consumer sits at N. Two producers of one document are
+    // therefore indistinguishable on `(project_id, sequence_id, generation)`
+    // alone — every field below matches — and only the epoch separates them.
+    CompiledProgram rebuilt{wire_project()};
+    const auto restarted = rebuilt.store.read();
+    REQUIRE(restarted->generation() == fixture.program->generation());
+    REQUIRE(restarted->project_id() == fixture.program->project_id());
+    REQUIRE(restarted->sequence_id() == fixture.program->sequence_id());
+
+    constexpr std::uint64_t kOtherEpoch = 0xB0B0'0000'0009ull;
+    WireBuffer other(fixture.size);
+    REQUIRE(take(encode_program_wire(*restarted, kTempoPoints, kOtherEpoch, other.span())) ==
+            fixture.size);
+
+    auto first = decode_program_wire(fixture.bytes());
+    auto second = decode_program_wire(other.span());
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(first.value().producer_epoch() != second.value().producer_epoch());
+    REQUIRE(first.value().program().generation == second.value().program().generation);
+
+    // The two payloads differ only in the epoch, which is what makes the epoch
+    // the sole thing standing between "same publication" and "new producer".
+    REQUIRE(std::memcmp(fixture.bytes().data(), other.span().data(), fixture.size) != 0);
+    ProgramWireProgramRecord a{};
+    ProgramWireProgramRecord b{};
+    std::memcpy(&a, fixture.bytes().data() + kPayloadAt, sizeof(a));
+    std::memcpy(&b, other.span().data() + kPayloadAt, sizeof(b));
+    a.producer_epoch = b.producer_epoch;
+    REQUIRE(std::memcmp(&a, &b, sizeof(a)) == 0);
+
+    // A zero epoch would compare equal to every other zero, so it is refused at
+    // both ends rather than acting as a wildcard.
+    WireBuffer unstamped(fixture.size);
+    auto unidentified = encode_program_wire(*fixture.program, kTempoPoints, 0, unstamped.span());
+    REQUIRE_FALSE(unidentified);
+    REQUIRE(unidentified.error().code == ProgramWireErrorCode::InvalidProducerEpoch);
+    // Resealed rather than raw-corrupted: the epoch lives in the checksummed
+    // payload, so without re-sealing this would prove ChecksumMismatch fires
+    // and never reach the epoch check at all.
+    const auto bytes = fixture.bytes();
+    const std::size_t epoch_at =
+        kPayloadAt + offsetof(ProgramWireProgramRecord, producer_epoch);
+    const std::uint64_t zero = 0;
+    std::memcpy(bytes.data() + epoch_at, &zero, sizeof(zero));
+    reseal(bytes);
+    auto zeroed = decode_program_wire(bytes);
+    REQUIRE_FALSE(zeroed);
+    REQUIRE(zeroed.error().code == ProgramWireErrorCode::InvalidProducerEpoch);
+    std::memcpy(bytes.data() + epoch_at, &kEpoch, sizeof(kEpoch));
+    reseal(bytes);
+    REQUIRE(decode_program_wire(bytes));
+
+    // The default source of identity is usable without a caller inventing one:
+    // never zero, and stable within a process so repeated publishes from one
+    // producer are not mistaken for different producers.
+    REQUIRE(program_wire_process_epoch() != 0);
+    REQUIRE(program_wire_process_epoch() == program_wire_process_epoch());
+}
+
+TEST_CASE("program wire equality compares values rather than shared ownership",
+          "[playback][wire]") {
+    EncodedFixture fixture;
+    auto decoded = decode_program_wire(fixture.bytes());
+    REQUIRE(decoded);
+    REQUIRE(program_wire_matches(decoded.value(), *fixture.program, kTempoPoints, kEpoch));
+
+    // Recompiling the same document yields a program that shares no track,
+    // automation, or tempo ownership with the first, and the same bytes still
+    // describe it apart from the generation the compiler advanced.
+    CompiledProgram rebuilt{wire_project()};
+    const auto other = rebuilt.store.read();
+    REQUIRE(other.get() != fixture.program.get());
+    REQUIRE(other->find_track({10}) != fixture.program->find_track({10}));
+    REQUIRE(&other->tempo_map() != &fixture.program->tempo_map());
+    REQUIRE(program_wire_matches(decoded.value(), *other, kTempoPoints, kEpoch));
+
+    // And a real difference is seen: the equality walk is not vacuously true.
+    WireBuffer swapped(fixture.size);
+    std::memcpy(swapped.span().data(), fixture.bytes().data(), fixture.size);
+    const std::size_t track_section = kPayloadAt + sizeof(ProgramWireProgramRecord) +
+                                      2 * sizeof(ProgramWireTempoPointRecord);
+    const std::uint64_t renamed = 999;
+    std::memcpy(swapped.span().data() + track_section + offsetof(ProgramWireTrackRecord, id),
+                &renamed, sizeof(renamed));
+    reseal(swapped.span());
+    auto altered = decode_program_wire(swapped.span());
+    REQUIRE(altered);
+    REQUIRE_FALSE(program_wire_matches(altered.value(), *fixture.program, kTempoPoints, kEpoch));
+
+    const std::array shifted{TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
+                             TempoPoint{{kTicksPerQuarter * 4}, 96.0}};
+    REQUIRE_FALSE(program_wire_matches(decoded.value(), *fixture.program, shifted, kEpoch));
+}

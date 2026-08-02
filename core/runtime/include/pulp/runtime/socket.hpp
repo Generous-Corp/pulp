@@ -7,6 +7,7 @@
 #include <vector>
 #include <optional>
 #include <cstdint>
+#include <chrono>
 
 namespace pulp::runtime {
 
@@ -29,8 +30,10 @@ public:
     /// Accept an incoming connection (TCP only). Returns a new Socket.
     std::optional<Socket> accept();
 
-    /// Connect to a remote address (TCP).
-    bool connect(std::string_view address, uint16_t port);
+    /// Connect to a remote address (TCP). A positive timeout bounds the
+    /// nonblocking connect phase; non-positive preserves blocking behavior.
+    bool connect(std::string_view address, uint16_t port,
+                 std::chrono::milliseconds timeout = {});
 
     /// Send data. Returns bytes sent, or -1 on error.
     int send(const uint8_t* data, size_t length);
@@ -42,6 +45,14 @@ public:
 
     /// Receive data. Returns bytes received, or -1 on error. 0 = connection closed.
     int receive(uint8_t* buffer, size_t buffer_size);
+
+    /// Bound blocking send operations. A non-positive duration clears the
+    /// deadline. Applies to subsequently issued operations.
+    bool set_write_timeout(std::chrono::milliseconds timeout);
+
+    /// Bound blocking receive operations. A non-positive duration clears the
+    /// deadline. Applies to subsequently issued operations.
+    bool set_read_timeout(std::chrono::milliseconds timeout);
 
     /// Receive UDP datagram. Returns bytes received and source address.
     int receive_from(uint8_t* buffer, size_t buffer_size,

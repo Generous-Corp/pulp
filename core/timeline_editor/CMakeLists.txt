@@ -22,7 +22,8 @@
 # tool verb only fails when the verbs live up here.
 
 add_library(pulp-timeline-editor
-    src/edit_intent.cpp)
+    src/edit_intent.cpp
+    src/viewport_projection.cpp)
 add_library(pulp::timeline-editor ALIAS pulp-timeline-editor)
 
 target_compile_features(pulp-timeline-editor PUBLIC cxx_std_20)

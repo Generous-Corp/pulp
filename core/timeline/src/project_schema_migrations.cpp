@@ -9,10 +9,11 @@
 namespace pulp::timeline::detail {
 namespace {
 
-// The session origin is an optional member, so both directions only move the
-// version number: an upgraded payload simply gains permission to carry
-// `session_start`, and a downgrade is refused outright when one is present
-// rather than silently discarding where the session sits on the house clock.
+// The session origin and the tuning are both optional members, so every
+// direction only moves the version number: an upgraded payload simply gains
+// permission to carry the member, and a downgrade is refused outright when one
+// is present rather than silently discarding where the session sits on the
+// house clock, or what the document is tuned to.
 // Everything outside the version span is copied through byte for byte, which is
 // what keeps opaque extension content inside the project intact.
 runtime::Result<SchemaWriteSuccess, PersistenceError> fail() {
@@ -115,6 +116,39 @@ migrate_project_v2_to_v1(std::string_view source, BoundedJsonSink& output, const
         return fail();
     return finish(output,
                   apply_edits(source, {RawEdit{version->begin, version->end, "1"}}, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_project_v2_to_v3(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 2) || !canonical_project_data(*data) ||
+        member(*data, "tuning") || version->begin >= version->end)
+        return fail();
+    return finish(output,
+                  apply_edits(source, {RawEdit{version->begin, version->end, "3"}}, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_project_v3_to_v2(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    // A tuning decides what every pitch in the document sounds like. A v2
+    // reader that silently dropped it would play the whole project in whatever
+    // its default is, so a project that states one refuses to downgrade.
+    if (!data || !version || !version_is(*version, 3) || !canonical_project_data(*data) ||
+        member(*data, "tuning") || version->begin >= version->end)
+        return fail();
+    return finish(output,
+                  apply_edits(source, {RawEdit{version->begin, version->end, "2"}}, output));
 }
 
 } // namespace pulp::timeline::detail

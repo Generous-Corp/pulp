@@ -92,11 +92,9 @@ inline ForgeNodeDescriptor chorus_descriptor() {
         {"juno_ii_bbd", ids[5], {{"voicing", "juno_ii"}, {"bbd_color", "bbd"}}},
         {"juno_i_ii_clean", ids[6], {{"voicing", "juno_i_ii"}, {"bbd_color", "clean"}}},
         {"juno_i_ii_bbd", ids[7], {{"voicing", "juno_i_ii"}, {"bbd_color", "bbd"}}},
-        {"dimension_d_clean", ids[8],
-         {{"voicing", "dimension_d"}, {"bbd_color", "clean"}}},
+        {"dimension_d_clean", ids[8], {{"voicing", "dimension_d"}, {"bbd_color", "clean"}}},
         {"dimension_d_bbd", ids[9], {{"voicing", "dimension_d"}, {"bbd_color", "bbd"}}},
-        {"tri_chorus_clean", ids[10],
-         {{"voicing", "tri_chorus"}, {"bbd_color", "clean"}}},
+        {"tri_chorus_clean", ids[10], {{"voicing", "tri_chorus"}, {"bbd_color", "clean"}}},
         {"tri_chorus_bbd", ids[11], {{"voicing", "tri_chorus"}, {"bbd_color", "bbd"}}},
     };
     d.params = {
@@ -134,8 +132,7 @@ inline ForgeNodeDescriptor phaser_descriptor() {
                 {"eight", "8", 8.0f},
                 {"ten", "10", 10.0f},
                 {"twelve", "12", 12.0f}}}};
-    d.realizations = {
-        {"four", ids[0], {{"stages", "four"}}},
+    d.realizations = {{"four", ids[0], {{"stages", "four"}}},
         {"six", ids[1], {{"stages", "six"}}},
         {"eight", ids[2], {{"stages", "eight"}}},
         {"ten", ids[3], {{"stages", "ten"}}},
@@ -181,12 +178,16 @@ inline ForgeNodeDescriptor phaser_descriptor() {
 namespace pulp::host::modulation::vibrato::delay_line {
 
 inline ForgeNodeDescriptor delay_vibrato_descriptor() {
-    static const std::string id = delay_vibrato_type_id(4.0f);
     ForgeNodeDescriptor d;
     d.key = "delay_vibrato";
     d.label = "Delay Vibrato";
     d.description = "True pitch vibrato produced by a continuously moving delay tap.";
-    d.realizations = {{"default", id}};
+    d.axes = {{"minimum_rate_hz",
+               "Minimum Rate",
+               "Lower bound of the authorable vibrato-rate range.",
+               {{"4", "4 Hz", 4.0f}, {"8", "8 Hz", 8.0f}}}};
+    d.realizations = {{"default", delay_vibrato_type_id(4.0f), {{"minimum_rate_hz", "4"}}},
+                      {"8", delay_vibrato_type_id(8.0f), {{"minimum_rate_hz", "8"}}}};
     d.params = {
         {"rate_hz", kRateHz, "Rate", "Hz", "Pitch-modulation rate.", ForgeParamKind::continuous,
          ForgeParamCurve::logarithmic},

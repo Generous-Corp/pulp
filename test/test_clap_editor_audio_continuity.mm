@@ -20,6 +20,8 @@
 #include <pulp/audio/analysis/audio_metrics.hpp>
 #include <pulp/host/plugin_slot.hpp>
 
+#include "support/thread_progress.hpp"
+
 #import <AppKit/AppKit.h>
 
 #include <atomic>
@@ -321,6 +323,13 @@ TEST_CASE("Audio keeps flowing while the editor opens on another thread",
         slot->destroy_hosted_editor(std::move(ed));
     }
 
+    // Eight editor churns are a work budget, not an ordering guarantee: nothing
+    // puts the audio thread's first block inside them, so a loaded host can
+    // finish the churn before that thread is ever scheduled and leave
+    // audio_blocks at zero — which reads as "the editor wedged audio" when audio
+    // never started. Wait for a block; the deadline turns a slot that genuinely
+    // never renders into a failed REQUIRE rather than a hang.
+    (void)pulp::test::wait_for_progress(audio_blocks);
     stop.store(true);
     audio.join();
 

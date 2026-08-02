@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -127,12 +128,22 @@ struct SetNoteVelocity {
 /// the journal never records a callback invocation. The expected value makes
 /// replay conflict-aware, while swapping expected/replacement is the exact
 /// inverse used by undo.
+///
+/// The modifier arrays are optional. An authoring caller leaves both empty and
+/// the reducer carries the clip's existing modifiers across, dropping only the
+/// ones whose note the replacement removes. A reducer-built inverse fills them
+/// in, because the modifiers of a removed note are exactly what the note array
+/// alone cannot say: `replacement_modifiers` is the complete set to install and
+/// `expected_modifiers` is the set the clip must currently carry, gating the
+/// modifiers the same way the note arrays gate the notes.
 struct ReplaceNoteContent {
     ItemId sequence_id;
     ItemId track_id;
     ItemId clip_id;
     std::vector<NoteEvent> expected;
     std::vector<NoteEvent> replacement;
+    std::vector<NoteModifier> expected_modifiers;
+    std::vector<NoteModifier> replacement_modifiers;
 };
 
 /// Replaces clip-level gain and fade controls under an exact value gate.
@@ -355,6 +366,30 @@ struct RemoveTrack {
     ItemId track_id;
 };
 
+/// Replaces a track's authored name under an exact optimistic-value gate.
+struct SetTrackName {
+    ItemId sequence_id;
+    ItemId track_id;
+    std::string expected;
+    std::string replacement;
+};
+
+/// Moves a track in authored order under an exact optimistic-position gate.
+///
+/// A position names the track the moved track stands before; an empty value
+/// names the last position, matching InsertTrack::before_track_id. Swapping
+/// expected and replacement is the exact inverse used by undo — far cheaper
+/// than RemoveTrack's, which restores a whole owned subtree.
+///
+/// Authored order is all this touches. The identity order behind
+/// Sequence::tracks() and the compiled program both stay as they were.
+struct MoveTrack {
+    ItemId sequence_id;
+    ItemId track_id;
+    std::optional<ItemId> expected_before_track_id = std::nullopt;
+    std::optional<ItemId> replacement_before_track_id = std::nullopt;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
@@ -364,7 +399,7 @@ using Command =
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
                  SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
                  InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer,
-                 InsertTrack, RemoveTrack>;
+                 InsertTrack, RemoveTrack, SetTrackName, MoveTrack>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

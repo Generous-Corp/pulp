@@ -3,6 +3,8 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -340,12 +342,28 @@ TEST_CASE("PDC state carry remains race free during live swaps",
 
     std::uint64_t frame = 0;
     bool continuous = true;
-    for (int block = 0; block < 1000; ++block) {
+    const auto render_one = [&] {
         if (!render_block_matches(fixture.graph, frame)) continuous = false;
         frame += kBlockSize;
         rendered_blocks.fetch_add(1, std::memory_order_release);
         std::this_thread::yield();
-    }
+    };
+    for (int block = 0; block < 1000; ++block) render_one();
+
+    // Every assertion below is about what the editor thread reached, and the
+    // block budget alone does not establish that it reached anything: its first
+    // gate is `rendered_blocks >= 4`, so a budget that ends before it is ever
+    // scheduled stops it with `structural_swap` false and `swaps` zero — a
+    // scheduling artifact that reads as a swap regression. Spend the budget,
+    // then keep rendering until the editor reports an outcome either way. The
+    // deadline turns a graph that genuinely never swaps back into a failed
+    // CHECK instead of a hang.
+    (void)pulp::test::pump_until(
+        [&] {
+            return swaps.load(std::memory_order_relaxed) > 0
+                || failures.load(std::memory_order_relaxed) > 0;
+        },
+        render_one);
     stop.store(true, std::memory_order_relaxed);
     editor.join();
     CHECK(continuous);
