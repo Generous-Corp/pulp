@@ -146,7 +146,8 @@ int main(int argc, char** argv) {
     auto action_executed = std::make_shared<std::atomic<bool>>(false);
     auto held_task_mutex = std::make_shared<std::mutex>();
     auto held_task = std::make_shared<std::function<void()>>();
-    std::jthread held_task_releaser;
+    auto stop_held_task_releaser = std::make_shared<std::atomic<bool>>(false);
+    std::thread held_task_releaser;
     if (!request_arm.empty()) {
         pulp::format::detail::set_standalone_inspector_rpc_post_override_for_testing(
             [request_arm, accepted_marker, quit_on_request, hook_fired, action_executed,
@@ -189,12 +190,13 @@ int main(int argc, char** argv) {
                 }
                 return action_posted;
             });
-        held_task_releaser = std::jthread([action_executed, held_task_mutex,
-                                           held_task](std::stop_token stop) {
-            while (!stop.stop_requested() && !action_executed->load(std::memory_order_acquire)) {
+        held_task_releaser = std::thread([action_executed, held_task_mutex, held_task,
+                                          stop_held_task_releaser] {
+            while (!stop_held_task_releaser->load(std::memory_order_acquire) &&
+                   !action_executed->load(std::memory_order_acquire)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            if (stop.stop_requested())
+            if (stop_held_task_releaser->load(std::memory_order_acquire))
                 return;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             std::function<void()> task;
@@ -206,18 +208,21 @@ int main(int argc, char** argv) {
                 pulp::events::MainThreadDispatcher::call_async(std::move(task));
         });
     }
-    std::jthread app_quit;
+    auto stop_app_quit = std::make_shared<std::atomic<bool>>(false);
+    std::thread app_quit;
     if (app_quit_after_ms > 0) {
-        app_quit = std::jthread([app_quit_after_ms](std::stop_token stop) {
-            while (!stop.stop_requested() && !pulp::events::MainThreadDispatcher::has_backend()) {
+        app_quit = std::thread([app_quit_after_ms, stop_app_quit] {
+            while (!stop_app_quit->load(std::memory_order_acquire) &&
+                   !pulp::events::MainThreadDispatcher::has_backend()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::milliseconds(app_quit_after_ms);
-            while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+            while (!stop_app_quit->load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            if (!stop.stop_requested()) {
+            if (!stop_app_quit->load(std::memory_order_acquire)) {
                 pulp::events::MainThreadDispatcher::call_async([] {
                     [NSApp stop:nil];
                     auto* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
@@ -235,8 +240,12 @@ int main(int argc, char** argv) {
         });
     }
     const bool result = app.run_with_editor(/*use_gpu=*/true);
-    app_quit.request_stop();
-    held_task_releaser.request_stop();
+    stop_app_quit->store(true, std::memory_order_release);
+    stop_held_task_releaser->store(true, std::memory_order_release);
+    if (app_quit.joinable())
+        app_quit.join();
+    if (held_task_releaser.joinable())
+        held_task_releaser.join();
     pulp::format::detail::set_standalone_inspector_rpc_post_override_for_testing({});
     return result ? 0 : 4;
 }
