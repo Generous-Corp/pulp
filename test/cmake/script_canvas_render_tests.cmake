@@ -193,15 +193,16 @@ if(PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-css-gradient-render)
 endif()
 
-# CSS borders judged against the pixel spans Chrome itself paints for the same
-# HTML, read out of a browser capture at dpr 2. Needs the Skia raster path:
-# render_to_rgba returns an empty buffer without it, and every span assertion
-# would then be measuring nothing.
+# CSS gradient geometry against Chrome's own render of the same string. Split
+# from the file above because its oracle is different in kind: those cases
+# assert that two CSS spellings agree with EACH OTHER, which cannot see an
+# arithmetic error both spellings share. These expectations are pixel
+# positions read off Chromium by tools/import-validation/chrome_gradient_oracle.py.
 if(PULP_HAS_SKIA)
-    add_executable(pulp-test-view-border-render test_view_border_render.cpp)
-    target_link_libraries(pulp-test-view-border-render
+    add_executable(pulp-test-css-gradient-geometry test_css_gradient_geometry.cpp)
+    target_link_libraries(pulp-test-css-gradient-geometry
         PRIVATE pulp::view Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-view-border-render)
+    catch_discover_tests(pulp-test-css-gradient-geometry)
 endif()
 
 # CG-degraded gradient + pattern cluster. Apple-only TU: every
