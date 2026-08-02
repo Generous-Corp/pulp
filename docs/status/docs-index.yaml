@@ -284,6 +284,11 @@ docs:
     kind: guide
     summary: Creative Timeline Engine clip-launching session and full DAW-style project worked examples
 
+  - slug: example-timeline-plugin-proof
+    path: examples/timeline-plugin-proof.md
+    kind: guide
+    summary: Loadable CLAP proof of Timeline session ownership, editor-host intents, a native view shell, and canonical plugin state
+
   - slug: timeline-sdk
     path: guides/timeline-sdk.md
     kind: guide
