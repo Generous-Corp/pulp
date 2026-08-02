@@ -825,6 +825,17 @@ uses, or the golden warms a cache the real jobs never touch.
   hostile-state rejection (overflow/CRC/truncation) folded into
   `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
   fails here rather than only in a browser.
+- **`web-plugins.yml` also hosts a non-browser job: `Timeline fixture corpus
+  (WASM)`.** It builds `pulp-fixture-runner` through the Emscripten-only root
+  `core/interchange/wasm` and runs the timeline conformance corpus under node
+  (`tools/ci/wasm-fixture-lane.sh`). It lives in this file only to share the
+  emsdk pin — it needs no Skia slice, no Chrome, no wasi-sdk, no npm, and
+  finishes in about a minute, so it is a sibling JOB and not a step in the lane
+  above. When adding another emsdk-only check, follow that shape rather than
+  appending to the browser lane. The lane script runs the corpus twice on
+  purpose (good corpus green, broken copy red); if you ever "simplify" it to one
+  run, you have deleted the only thing proving the wasm build validates
+  anything.
 - **The GPU-audio proof inside `web-plugins.yml` needs a real GPU, so it is a
   macOS job.** The Linux leg has **no WebGPU adapter at all** (measured:
   `--use-webgpu-adapter=swiftshader` and `forceFallbackAdapter:true` both return
