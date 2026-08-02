@@ -10,8 +10,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <algorithm>
 #include <array>
 #include <functional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -965,6 +968,183 @@ TEST_CASE("the segment cache does not serve one weight's widths to another",
         fresh.prepare("Handgloves 123", family, 20.0f, 700).total_width();
     CHECK_THAT(regular_first, Catch::Matchers::WithinAbs(regular_second, 0.001));
     CHECK_THAT(bold_second, Catch::Matchers::WithinAbs(bold_first, 0.001));
+}
+
+
+// ── Weight selection within one bundled family ─────────────────────────────
+
+#include <pulp/canvas/text_font_context.hpp>
+#include "modules/skparagraph/include/FontCollection.h"
+
+namespace {
+
+// Opaque-pixel count of `text` painted through the SkiaCanvas fill_text path
+// at a given family/weight/size. Black on white, so any non-white pixel is
+// ink. This is the paint path an imported design's Labels actually take —
+// asserting on it is what separates "the resolver returns the right name"
+// from "the right glyphs reach the surface".
+uint32_t painted_ink_px(const std::string& family, int weight, float size,
+                        const std::string& text) {
+    SkBitmap bm;
+    bm.allocPixels(SkImageInfo::Make(900, 120, kN32_SkColorType,
+                                     kPremul_SkAlphaType,
+                                     SkColorSpace::MakeSRGB()));
+    SkCanvas sk(bm);
+    sk.clear(SK_ColorWHITE);
+    pulp::canvas::SkiaCanvas canvas(&sk);
+    canvas.set_font_full(family, size, weight, 0, 0.0f);
+    canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_text(text, 20.0f, 80.0f);
+
+    SkPixmap pm;
+    if (!bm.peekPixels(&pm)) return 0;
+    uint32_t px = 0;
+    for (int y = 0; y < pm.height(); ++y) {
+        for (int x = 0; x < pm.width(); ++x) {
+            const SkColor c = pm.getColor(x, y);
+            if (SkColorGetA(c) > 0 && SkColorGetR(c) < 255) ++px;
+        }
+    }
+    return px;
+}
+
+std::string postscript_name(const sk_sp<SkTypeface>& face) {
+    if (!face) return "<null>";
+    SkString name;
+    face->getPostScriptName(&name);
+    return std::string(name.c_str(), name.size());
+}
+
+} // namespace
+
+// A family is a set of weights, and every one of them reports the same family
+// name — CoreText answers "Jost" for Jost-Regular through Jost-Bold alike.
+// Keying the bundled cache one-face-per-family therefore kept whichever face
+// was declared first and dropped the rest, and the symptom was not a missing
+// font but a WRONG one: `match_bundled_typeface` found only a 400 face, missed
+// every non-400 request, and a 600 heading fell past the bundle to a platform
+// substitute — while the paint path, reading the same cache through
+// `bundled_typefaces_snapshot`, painted the 400 face. Measurement and paint
+// disagreed about the weight as well as the face.
+//
+// The names are asserted, not just the count: a wrong face cannot fake a
+// PostScript name, whereas an ink count alone could coincide.
+TEST_CASE("Every weight of a bundled family survives registration",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    std::vector<int> jost_weights;
+    std::vector<std::string> jost_names;
+    for (const auto& b : pulp::canvas::bundled_typefaces_snapshot()) {
+        if (b.family != "Jost" || !b.typeface) continue;
+        jost_weights.push_back(b.typeface->fontStyle().weight());
+        jost_names.push_back(postscript_name(b.typeface));
+    }
+    std::sort(jost_weights.begin(), jost_weights.end());
+    std::sort(jost_names.begin(), jost_names.end());
+
+    // One entry here is the regression: the bundle ships four Jost faces.
+    REQUIRE(jost_weights == std::vector<int>{400, 500, 600, 700});
+    REQUIRE(jost_names == std::vector<std::string>{
+        "Jost-Bold", "Jost-Medium", "Jost-Regular", "Jost-SemiBold"});
+}
+
+// The three surfaces that must agree on which face a weight means: the
+// bundled cache (what the cascade offers), the FontResolver (what TextShaper
+// measures with), and the SkParagraph FontCollection (what fill_text paints
+// through). A disagreement between the last two is invisible to any single-
+// surface check and lays text out at one weight's metrics while drawing
+// another's.
+TEST_CASE("Measure and paint resolve a bundled family to the same weight",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+    auto collection = pulp::canvas::TextFontContext::shared()->font_collection();
+    REQUIRE(collection != nullptr);
+
+    const std::pair<int, const char*> kExpected[] = {
+        {400, "Jost-Regular"},
+        {500, "Jost-Medium"},
+        {600, "Jost-SemiBold"},
+        {700, "Jost-Bold"},
+    };
+
+    for (const auto& [weight, expected] : kExpected) {
+        INFO("requested weight " << weight);
+        const SkFontStyle style{weight, SkFontStyle::kNormal_Width,
+                                SkFontStyle::kUpright_Slant};
+
+        CHECK(postscript_name(pulp::canvas::match_bundled_typeface(
+                  mgr.get(), "Jost", style)) == expected);
+
+        pulp::canvas::FontOptions opts;
+        opts.family_stack.push_back("Jost");
+        opts.size = 15.0f;
+        opts.weight = static_cast<float>(weight);
+        CHECK(postscript_name(
+                  pulp::canvas::FontResolver::instance()
+                      .resolve_family_list(opts)
+                      .typeface) == expected);
+
+        auto faces = collection->findTypefaces({SkString("Jost")}, style,
+                                               std::nullopt);
+        REQUIRE_FALSE(faces.empty());
+        CHECK(postscript_name(faces[0]) == expected);
+    }
+}
+
+// The ink proof. Resolving the right name is not the same as drawing the
+// right glyphs, so assert on painted pixels: four weights of one family must
+// put strictly more ink on the surface as the weight climbs. Measured at 48px
+// as well as at a UI-realistic 15px, because Regular against Medium is a weak
+// discriminator at small sizes — 400 against 700 at 48px is one no wrong
+// answer can fake, and requiring the whole ladder to be monotonic rules out
+// "every weight painted the same face".
+TEST_CASE("Painted ink tracks the requested weight of a bundled family",
+          "[canvas][skia][fonts][text]") {
+    REQUIRE(pulp::canvas::platform_font_manager() != nullptr);
+
+    for (float size : {15.0f, 48.0f}) {
+        INFO("size " << size);
+        std::vector<uint32_t> ink;
+        for (int weight : {400, 500, 600, 700}) {
+            ink.push_back(painted_ink_px("Jost", weight, size, "Handgloves"));
+        }
+        INFO("ink by weight: " << ink[0] << " " << ink[1] << " " << ink[2]
+                               << " " << ink[3]);
+        REQUIRE(ink[0] > 0);
+        CHECK(ink[0] < ink[1]);
+        CHECK(ink[1] < ink[2]);
+        CHECK(ink[2] < ink[3]);
+    }
+}
+
+// The bound on style matching, from the other side. Selecting the nearest
+// weight within a family must not become "the bundle answers everything":
+// Inter ships at 400 alone, so a 700 request has to miss and let the cascade
+// reach a real system Bold. Without this the bundle would hijack every
+// off-style request and mask the platform's genuine weights.
+TEST_CASE("A bundled family declines a weight it cannot serve",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    const SkFontStyle bold{SkFontStyle::kBold_Weight,
+                           SkFontStyle::kNormal_Width,
+                           SkFontStyle::kUpright_Slant};
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", bold)
+          == nullptr);
+
+    const SkFontStyle italic{SkFontStyle::kNormal_Weight,
+                             SkFontStyle::kNormal_Width,
+                             SkFontStyle::kItalic_Slant};
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", italic)
+          == nullptr);
+
+    // Jost, which does ship the weight, answers the same request.
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Jost", bold)
+          != nullptr);
 }
 
 #endif  // PULP_HAS_SKIA
