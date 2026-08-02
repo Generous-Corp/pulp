@@ -394,10 +394,37 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
                     if (layout_index < 0) continue;
                     const auto resolved = member(run, "resolved");
                     if (!resolved.isArray() || resolved.size() == 0) continue;
-                    // The FIRST face is the one that shaped the run's primary
-                    // text; later entries are per-cluster fallback for
-                    // codepoints it lacked.
-                    const auto face = member(resolved[0], "post_script_name");
+                    // The face that shaped the MOST glyphs, not the first one
+                    // listed. Chrome does not order this array by primacy: in
+                    // every mixed run across the corpus the single-glyph
+                    // fallback is listed FIRST, so reading `resolved[0]` stores
+                    // the face that drew one character as the basis for the
+                    // whole paragraph.
+                    //
+                    // The consequence is not a near-miss, it is a permanent
+                    // refusal. A Jost paragraph containing one `→` — a glyph
+                    // Jost lacks — was stored with LucidaGrande as its basis;
+                    // native resolution of Jost can never equal that, so the
+                    // captured line breaking was rejected on every render, the
+                    // run re-derived its own, and a run resuming mid-line after
+                    // an inline span printed on top of its sibling. One arrow
+                    // in a paragraph was enough, and arrows are everywhere in
+                    // these UIs.
+                    int best_at = 0;
+                    int best_glyphs =
+                        json_int(member(resolved[0], "glyph_count"), 0);
+                    for (uint32_t r = 1; r < resolved.size(); ++r) {
+                        const int glyphs = json_int(
+                            member(resolved[static_cast<int>(r)],
+                                   "glyph_count"),
+                            0);
+                        if (glyphs > best_glyphs) {
+                            best_glyphs = glyphs;
+                            best_at = static_cast<int>(r);
+                        }
+                    }
+                    const auto face =
+                        member(resolved[best_at], "post_script_name");
                     if (!face.isString()) continue;
                     index.layout_resolved_face_[layout_index] =
                         std::string(face.getString());

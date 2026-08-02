@@ -814,3 +814,52 @@ TEST_CASE("a capture with no resolved face says so out loud",
         });
     CHECK(warned);
 }
+
+TEST_CASE("the line-break basis is the face that shaped the text, not the first listed",
+          "[browser-capture][native-lowering][text-metrics]") {
+    // Chrome does not order `resolved` by primacy. Across the corpus, every run
+    // mixing a primary family with a fallback glyph lists the FALLBACK first:
+    // a Jost paragraph containing one `→` reports LucidaGrande with one glyph
+    // ahead of Jost-Regular with the other eighty.
+    //
+    // Reading resolved[0] stored the one-glyph face as the basis for the whole
+    // paragraph. Native resolution of Jost can never equal LucidaGrande, so the
+    // captured line breaking was rejected on every render and the run reflowed —
+    // which on delay drew two lines of an annotation on top of each other.
+    //
+    // The two fixtures differ in exactly one file, so a changed verdict can be
+    // attributed to the ordering and to nothing else.
+    BrowserCaptureIrOptions options;
+    options.native_panel_lowering = true;
+    const auto fallback_first = lower_browser_capture_to_ir(
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+            "browser-capture-text-fallback-first" / "capture.json",
+        options);
+    REQUIRE(fallback_first.design_ir);
+    const auto normal = lower_wrap_fixture();
+    REQUIRE(normal.design_ir);
+
+    std::vector<std::string> expected, actual;
+    const std::function<void(const pulp::view::IRNode&,
+                             std::vector<std::string>&)> collect =
+        [&](const pulp::view::IRNode& node, std::vector<std::string>& out) {
+            if (node.text_layout_basis)
+                out.push_back(node.text_layout_basis->resolved_face);
+            for (const auto& child : node.children) collect(child, out);
+        };
+
+    collect(normal.design_ir->root, expected);
+    collect(fallback_first.design_ir->root, actual);
+    REQUIRE_FALSE(expected.empty());
+    REQUIRE(actual.size() == expected.size());
+
+    // Same answer from both orderings: the rule reads glyph counts, not
+    // position. Asserting only "not LucidaGrande" would pass for an empty
+    // string too, which is the failure this whole basis exists to avoid.
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        INFO("run " << i);
+        CHECK(actual[i] == expected[i]);
+        CHECK(actual[i] != "LucidaGrande");
+        CHECK_FALSE(actual[i].empty());
+    }
+}
