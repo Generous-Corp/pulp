@@ -93,6 +93,41 @@ HANDLE open_relative(HANDLE parent, const std::filesystem::path& component,
     return handle;
 }
 
+HANDLE open_relative_existing(HANDLE parent, const std::filesystem::path& component,
+                              bool directory, ACCESS_MASK access, ULONG share) noexcept {
+    const auto& name = component.native();
+    if (name.empty() || name == L"." || name == L".." ||
+        name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
+        return INVALID_HANDLE_VALUE;
+    UNICODE_STRING unicode_name{};
+    unicode_name.Buffer = const_cast<PWSTR>(name.data());
+    unicode_name.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
+    unicode_name.MaximumLength = unicode_name.Length;
+    OBJECT_ATTRIBUTES attributes{};
+    attributes.Length = sizeof(attributes);
+    attributes.RootDirectory = parent;
+    attributes.ObjectName = &unicode_name;
+    attributes.Attributes = OBJ_CASE_INSENSITIVE | object_dont_reparse;
+    IO_STATUS_BLOCK status_block{};
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    const auto options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
+                         (directory ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE);
+    const auto function = nt_create_file();
+    if (function == nullptr ||
+        function(&handle, access | SYNCHRONIZE, &attributes, &status_block, nullptr,
+                 FILE_ATTRIBUTE_NORMAL, share, FILE_OPEN, options, nullptr, 0) < 0)
+        return INVALID_HANDLE_VALUE;
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool valid = ::GetFileInformationByHandle(handle, &info) != 0 &&
+                       (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
+                       ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+    if (!valid) {
+        ::CloseHandle(handle);
+        return INVALID_HANDLE_VALUE;
+    }
+    return handle;
+}
+
 bool write_all(HANDLE handle, std::span<const std::uint8_t> bytes) noexcept {
     std::size_t offset = 0;
     while (offset < bytes.size()) {
@@ -396,6 +431,40 @@ AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) no
 #endif
 }
 
+std::optional<AnchoredDirectory>
+AnchoredDirectory::open_directory(const std::filesystem::path& relative,
+                                  bool allow_rename) const noexcept {
+    if (native_ == -1 || relative.empty() || relative.is_absolute() ||
+        !relative.parent_path().empty() || relative == "." || relative == "..")
+        return std::nullopt;
+#if defined(_WIN32)
+    const auto sharing =
+        FILE_SHARE_READ | FILE_SHARE_WRITE | (allow_rename ? FILE_SHARE_DELETE : 0);
+    const auto handle = open_relative_existing(
+        reinterpret_cast<HANDLE>(native_), relative, true,
+        FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
+            FILE_READ_ATTRIBUTES,
+        sharing);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
+#else
+    (void)allow_rename;
+    const auto descriptor = ::openat(static_cast<int>(native_), relative.c_str(),
+                                     O_RDONLY | O_CLOEXEC
+#ifdef O_DIRECTORY
+                                         | O_DIRECTORY
+#endif
+#ifdef O_NOFOLLOW
+                                         | O_NOFOLLOW
+#endif
+    );
+    if (descriptor < 0)
+        return std::nullopt;
+    return AnchoredDirectory(descriptor);
+#endif
+}
+
 bool AnchoredDirectory::still_named_by(const std::filesystem::path& path) const noexcept {
     if (native_ == -1)
         return false;
@@ -510,6 +579,79 @@ bool AnchoredDirectory::write_exclusive_and_fence(const std::filesystem::path& r
         invoke_fault_hook(fenced_point);
     const bool closed = ::close(descriptor) == 0;
     return fenced && closed;
+#endif
+}
+
+NoReplaceOutcome AnchoredDirectory::publish_no_replace(
+    const std::filesystem::path& source_name, const AnchoredDirectory& destination_parent,
+    const std::filesystem::path& destination_name, NoReplaceSourceKind kind) const noexcept {
+    const auto direct_name = [](const std::filesystem::path& name) {
+        return !name.empty() && !name.is_absolute() && name.parent_path().empty() && name != "." &&
+               name != "..";
+    };
+    if (native_ == -1 || destination_parent.native_ == -1 || !direct_name(source_name) ||
+        !direct_name(destination_name))
+        return NoReplaceOutcome::Failed;
+#if defined(_WIN32)
+    const auto source = open_relative_existing(
+        reinterpret_cast<HANDLE>(native_), source_name,
+        kind == NoReplaceSourceKind::Directory, DELETE | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if (source == INVALID_HANDLE_VALUE)
+        return NoReplaceOutcome::Failed;
+    const auto& destination = destination_name.native();
+    const auto name_bytes = destination.size() * sizeof(wchar_t);
+    std::vector<std::uint8_t> storage(sizeof(FILE_RENAME_INFO) + name_bytes);
+    auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
+    rename->ReplaceIfExists = FALSE;
+    rename->RootDirectory = reinterpret_cast<HANDLE>(destination_parent.native_);
+    rename->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(rename->FileName, destination.data(), name_bytes);
+    const bool published =
+        ::SetFileInformationByHandle(source, FileRenameInfo, rename,
+                                     static_cast<DWORD>(storage.size())) != 0;
+    const auto error = published ? ERROR_SUCCESS : ::GetLastError();
+    ::CloseHandle(source);
+    if (published)
+        return NoReplaceOutcome::Published;
+    return error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS
+               ? NoReplaceOutcome::DestinationExists
+               : NoReplaceOutcome::Failed;
+#elif defined(__APPLE__)
+    if (::renameatx_np(static_cast<int>(native_), source_name.c_str(),
+                       static_cast<int>(destination_parent.native_), destination_name.c_str(),
+                       RENAME_EXCL) == 0)
+        return NoReplaceOutcome::Published;
+    return errno == EEXIST ? NoReplaceOutcome::DestinationExists : NoReplaceOutcome::Failed;
+#elif defined(__linux__)
+    if (::syscall(SYS_renameat2, static_cast<int>(native_), source_name.c_str(),
+                  static_cast<int>(destination_parent.native_), destination_name.c_str(),
+                  RENAME_NOREPLACE) == 0)
+        return NoReplaceOutcome::Published;
+    if (errno == EEXIST)
+        return NoReplaceOutcome::DestinationExists;
+    if (errno != ENOSYS && errno != EINVAL)
+        return NoReplaceOutcome::Failed;
+    if (kind == NoReplaceSourceKind::Directory)
+        return NoReplaceOutcome::Unsupported;
+    if (::linkat(static_cast<int>(native_), source_name.c_str(),
+                 static_cast<int>(destination_parent.native_), destination_name.c_str(), 0) != 0)
+        return errno == EEXIST ? NoReplaceOutcome::DestinationExists : NoReplaceOutcome::Failed;
+    (void)::unlinkat(static_cast<int>(native_), source_name.c_str(), 0);
+    return NoReplaceOutcome::Published;
+#else
+    (void)kind;
+    return NoReplaceOutcome::Unsupported;
+#endif
+}
+
+bool AnchoredDirectory::fence() const noexcept {
+    if (native_ == -1)
+        return false;
+#if defined(_WIN32)
+    return true;
+#else
+    return ::fsync(static_cast<int>(native_)) == 0;
 #endif
 }
 

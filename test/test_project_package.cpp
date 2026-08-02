@@ -932,6 +932,34 @@ TEST_CASE("Atomic directory publication revalidates its pinned tree after callba
     REQUIRE(read_text(staging / "replacement.txt") == "replacement");
 }
 
+TEST_CASE("Atomic publication remains bound to a renamed destination parent",
+          "[project-package][atomic-publisher][race]") {
+    TemporaryPackage temporary("atomic-parent-rebind");
+    const auto parent = temporary.path / "parent";
+    fs::create_directories(parent);
+    auto publisher = AtomicPublisher::create(parent / "published");
+    REQUIRE(publisher);
+    REQUIRE(publisher->write("original.txt", "original"));
+    const auto displaced = temporary.path / "displaced";
+    g_rebind_source = parent;
+    g_rebind_displaced = displaced;
+    g_rebind_replacement_file.clear();
+    g_rebind_point = pulp::project_package::detail::PackageFaultPoint::PublicationSourceVerified;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        rebind_publication_source);
+
+    const auto committed = publisher->commit_directory();
+
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_rebind_source.clear();
+    g_rebind_displaced.clear();
+    REQUIRE(committed);
+    REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurabilityUncertain);
+    REQUIRE(read_text(displaced / "published" / "original.txt") == "original");
+    REQUIRE(read_text(parent / "replacement.txt") == "replacement");
+    REQUIRE_FALSE(fs::exists(parent / "published"));
+}
+
 TEST_CASE("Package writer anchors a relative root before publication callbacks",
           "[project-package][root][race]") {
     TemporaryPackage temporary("relative-root-anchor");

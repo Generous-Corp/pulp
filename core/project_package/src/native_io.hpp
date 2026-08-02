@@ -36,12 +36,19 @@ class AnchoredDirectory {
 
     static std::optional<AnchoredDirectory> open(const std::filesystem::path& path,
                                                  bool allow_rename = false) noexcept;
+    std::optional<AnchoredDirectory>
+    open_directory(const std::filesystem::path& relative, bool allow_rename = false) const noexcept;
     /// Returns true only while `path` still names this pinned directory.
     bool still_named_by(const std::filesystem::path& path) const noexcept;
     bool write_exclusive_and_fence(const std::filesystem::path& relative,
                                    std::span<const std::uint8_t> bytes,
                                    PackageFaultPoint written_point,
                                    PackageFaultPoint fenced_point) const noexcept;
+    NoReplaceOutcome publish_no_replace(const std::filesystem::path& source_name,
+                                        const AnchoredDirectory& destination_parent,
+                                        const std::filesystem::path& destination_name,
+                                        NoReplaceSourceKind kind) const noexcept;
+    bool fence() const noexcept;
     void close() noexcept;
 
   private:

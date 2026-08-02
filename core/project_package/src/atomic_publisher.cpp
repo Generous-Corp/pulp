@@ -346,6 +346,7 @@ PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
 struct AtomicPublisher::Impl {
     fs::path destination;
     fs::path staging;
+    detail::AnchoredDirectory parent_root;
     detail::AnchoredDirectory staging_root;
     bool committed = false;
 };
@@ -377,6 +378,9 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
         !parent_allows_private_staging(parent))
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath,
                                         absolute_destination.parent_path());
+    auto parent_root = detail::AnchoredDirectory::open(parent);
+    if (!parent_root || !parent_root->still_named_by(parent))
+        return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, parent);
     const auto anchored_destination = parent / absolute_destination.filename();
     const auto status = fs::symlink_status(anchored_destination, error);
     if ((!error && status.type() != fs::file_type::not_found) ||
@@ -390,14 +394,15 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
         auto staging = staging_sibling(anchored_destination, serial.fetch_add(1) + attempt);
         const auto created = create_private_directory(staging);
         if (created == PrivateDirectoryCreate::Created) {
-            auto staging_root = detail::AnchoredDirectory::open(staging, true);
-            if (!staging_root) {
+            auto staging_root = parent_root->open_directory(staging.filename(), true);
+            if (!staging_root || !staging_root->still_named_by(staging)) {
                 fs::remove(staging, error);
                 return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
             }
             auto impl = std::make_unique<Impl>();
             impl->destination = anchored_destination;
             impl->staging = std::move(staging);
+            impl->parent_root = std::move(*parent_root);
             impl->staging_root = std::move(*staging_root);
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
@@ -452,8 +457,10 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     if (!pinned->still_named_by(staged_file) ||
         !impl_->staging_root.still_named_by(impl_->staging))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, staged_file);
-    const auto publication = detail::publish_no_replace(
-        staged_file, impl_->destination, detail::NoReplaceSourceKind::RegularFile);
+    detail::invoke_fault_hook(detail::PackageFaultPoint::PublicationSourceVerified);
+    const auto publication = impl_->staging_root.publish_no_replace(
+        staged_file.filename(), impl_->parent_root, impl_->destination.filename(),
+        detail::NoReplaceSourceKind::RegularFile);
     if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
@@ -467,10 +474,7 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     std::error_code ignored;
     fs::remove(impl_->staging, ignored);
-    auto parent = impl_->destination.parent_path();
-    if (parent.empty())
-        parent = ".";
-    if (!detail::fence_directory(parent))
+    if (!impl_->parent_root.fence())
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     return runtime::Result<AtomicPublishOutcome, PackageError>(
@@ -529,8 +533,10 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         if (!pinned_directories[index].still_named_by(directories[index]))
             return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout,
                                                  directories[index]);
-    const auto publication = detail::publish_no_replace(
-        impl_->staging, impl_->destination, detail::NoReplaceSourceKind::Directory);
+    detail::invoke_fault_hook(detail::PackageFaultPoint::PublicationSourceVerified);
+    const auto publication = impl_->parent_root.publish_no_replace(
+        impl_->staging.filename(), impl_->parent_root, impl_->destination.filename(),
+        detail::NoReplaceSourceKind::Directory);
     if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
@@ -542,10 +548,7 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
-    auto parent = impl_->destination.parent_path();
-    if (parent.empty())
-        parent = ".";
-    if (!detail::fence_directory(parent))
+    if (!impl_->parent_root.fence())
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     return runtime::Result<AtomicPublishOutcome, PackageError>(
