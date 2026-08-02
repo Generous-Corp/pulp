@@ -1404,6 +1404,42 @@ it once the edge is cut tightens the gate with no other edit. The check rejects 
 debt entry that is no longer linked and one that duplicates its tier, so the list
 cannot outlive its subject.
 
+**Debt is declared per target but measured per CONFIGURE, and that asymmetry
+bites.** A closure is whatever *this* configure links, and the project does not
+have one: `core/render` is behind `PULP_ENABLE_GPU`, `core/host` is behind
+`NOT IOS`. Under a narrower configure the modules those guards remove are absent
+by construction — and the plain debt list reads that absence as rot, failing with
+*"debt entry 'render' is no longer linked. Delete it to tighten the bound"*. The
+gate is asking you to delete an entry the wider configure genuinely needs, so
+**taking the advice literally trades a false failure on GPU-less trees for a
+false pass on GPU-enabled ones.** Declare such entries in
+the entry under that same condition instead — `if(PULP_ENABLE_GPU)
+list(APPEND PULP_LINK_FLOOR_DEBT_<target> render)` — so where the condition
+holds the entry is an ordinary debt entry and is still rot-checked, and only the
+configure that cannot have the edge stops asking. Guard on the condition that
+decides whether the module is **built**, never on one edge: `render` has two
+independent edges (`pulp_add_plugin` under `PULP_HAS_SKIA`, and `core/view`'s
+`if(TARGET pulp-render)`), so guarding either leaves it unfalsifiable from one
+side. `playback` and `timeline` are guarded on the same `NOT IOS` for a
+*different* reason worth stating wherever it is written: both **are** built on
+iOS and are guarded because the target's only route to them runs through `host`.
+Establish that by configuring both ways — **not** from the closure report, which
+records one shortest chain per module (`PATHS_OUT`, BFS first-arrival), so a
+second longer edge is invisible in it. Note the
+blast radius before dismissing this as a test failure — the assertion runs at
+configure time from the plugin's `CMakeLists.txt`, so with
+`PULP_BUILD_EXAMPLES=ON` a mismatch kills `cmake --build` at
+`cmake_check_build_system`, and a headers-only `external/skia-build` (an ordinary
+fresh-worktree state) forces `GPU=OFF` on its own.
+
+Two readings that cost real time here: the same assertion text covers different
+failures — an iOS Simulator configure loses `host`, `playback`, `render` and
+`timeline` (the `NOT IOS` guard severs `view-core -> host` and takes the whole
+chain), while a desktop `GPU=OFF` configure loses only `render` — so **match the
+literal entry list, not the first line.** And `cmake-link-floor-selftest` passing
+says nothing about this: its battery configures its own fixture project, so it is
+green on a desktop tree while the real gate is broken on two narrower ones.
+
 **A tier is an upper bound and proves only absence.** `TIER` says nothing outside
 it is reached; it cannot say anything inside it *is*. "Reaches nothing extra" is
 satisfied most easily by reaching nothing at all, so a tier naming a module the
