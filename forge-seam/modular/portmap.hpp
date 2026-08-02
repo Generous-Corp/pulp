@@ -67,6 +67,9 @@ public:
     /// depending on whatever this machine happens to have scanned.
     static PortMap parse(const std::string& json);
 
+    /// The map on disk exists but is not valid JSON.
+    bool unreadable() const { return unreadable_; }
+
     /// What the current scanner records.
     ///
     /// Bumped whenever CARTOG starts measuring something it did not before, so
@@ -150,6 +153,10 @@ public:
 
 private:
     std::map<std::string, MappedModule> by_key_;
+    /// True when a map EXISTED and could not be parsed, as opposed to never
+    /// having been written. The two look the same on screen and need
+    /// opposite advice.
+    bool unreadable_ = false;
 };
 
 }  // namespace forge_modular

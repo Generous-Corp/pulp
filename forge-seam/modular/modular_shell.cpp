@@ -1,6 +1,7 @@
 #include "forge/modular_shell.hpp"
 
 #include "forge/module_catalog.hpp"
+#include "forge/portmap.hpp"
 
 #include "forge/module_summary.hpp"
 
@@ -717,11 +718,24 @@ void ForgeModularShell::show_rack(std::vector<RackModule> modules,
             names += ", " + unmapped[i];
         if (unmapped.size() > 3)
             names += " and " + std::to_string(unmapped.size() - 3) + " more";
+        // Say WHICH of the two states this is. A map that exists and will not
+        // parse produces exactly the same screen as one that was never
+        // written — every vendor module bare, with an UNMAPPED badge — and
+        // "scan again" is the wrong advice for the first: scanning writes the
+        // same broken file. Seen for real: one auto-sizing widget wrote
+        // `"w": inf`, which is not JSON, and took the whole map down.
         unmapped_note_ =
-            names + (unmapped.size() == 1 ? " is drawn" : " are drawn") +
-            " without controls — nothing has measured them. Put "
-            + (unmapped.size() == 1 ? "it" : "them") +
-            " on screen in Rack and press SCAN on the MAP module.";
+            PortMap::shared().unreadable()
+                ? names + (unmapped.size() == 1 ? " is drawn" : " are drawn") +
+                  " without controls because the port map on disk could not be "
+                  "read — it is not valid JSON. Scanning again will not help "
+                  "until it is replaced; delete "
+                  "~/Library/Application Support/Rack2/forge-portmap.json and "
+                  "scan once more."
+                : names + (unmapped.size() == 1 ? " is drawn" : " are drawn") +
+                  " without controls — nothing has measured them. Put "
+                  + (unmapped.size() == 1 ? "it" : "them") +
+                  " on screen in Rack and press SCAN on the MAP module.";
     }
     if (explanation_) {
         explanation_->set_connections(connections, modules);

@@ -1,5 +1,7 @@
 #include "plugin.hpp"
 
+#include <cmath>
+
 #include <pulp/format/rack/module_descriptor.hpp>
 
 #include "portmap_merge.hpp"
@@ -78,6 +80,17 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         forge_modular::place_CARTOG(this, m);
     }
 
+    /// A float as JSON, and whether it can BE JSON.
+    ///
+    /// `std::to_string(INFINITY)` is "inf", which no JSON parser accepts —
+    /// and Rack uses infinite bounds for widgets that size themselves, so a
+    /// single auto-sizing BlankPanel wrote `"w": inf` and the WHOLE port map
+    /// stopped parsing. Not that module's entry: the whole file. Every vendor
+    /// module then drew with no knobs and an UNMAPPED badge, because the app
+    /// could not read the map at all, and nothing said why.
+    static bool finite(float v) { return std::isfinite(v); }
+    static std::string num(float v) { return std::to_string(v); }
+
     /// Walk the rack and write down every module's ports.
     ///
     /// Walk the widget tree, picking out what nothing enumerates.
@@ -105,7 +118,12 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                 dynamic_cast<rack::app::SvgPanel*>(child)) {
                 continue;                                  // chrome, not content
             }
+            const bool geometry_is_real =
+                finite(cx) && finite(cy) &&
+                finite(child->box.size.x) && finite(child->box.size.y);
             if (dynamic_cast<rack::app::ModuleLightWidget*>(child)) {
+                if (!geometry_is_real) { collect(child, at, lights, displays,
+                                                 lights_only); continue; }
                 lights.push_back("{\"x\": " + std::to_string(cx) +
                                  ", \"y\": " + std::to_string(cy) +
                                  ", \"w\": " + std::to_string(child->box.size.x) +
@@ -153,7 +171,9 @@ struct CARTOGWidget : rack::app::ModuleWidget {
             // a scope, a text field. Recorded by bounds and type name, because
             // a rectangle we can say "a display lives here" about beats a
             // blank we say nothing about. Tiny leftovers are layout glue.
-            if (!lights_only &&
+            // `inf >= 6.0f` is true, so the size test alone let an
+            // auto-sizing widget through.
+            if (!lights_only && geometry_is_real &&
                 child->box.size.x >= 6.0f && child->box.size.y >= 6.0f) {
                 displays.push_back("{\"x\": " + std::to_string(cx) +
                                    ", \"y\": " + std::to_string(cy) +
@@ -208,8 +228,9 @@ struct CARTOGWidget : rack::app::ModuleWidget {
             out += "      \"scan\": 3,\n";
             // Panel size lets a preview lay modules out at true width without
             // parsing anyone's artwork.
-            out += "      \"size\": [" + std::to_string(mw->box.size.x) + ", " +
-                   std::to_string(mw->box.size.y) + "],\n";
+            out += "      \"size\": [" +
+                   num(finite(mw->box.size.x) ? mw->box.size.x : 0.0f) + ", " +
+                   num(finite(mw->box.size.y) ? mw->box.size.y : 0.0f) + "],\n";
 
             // Knobs, faders and switches, the same walk as the jacks.
             //
@@ -248,6 +269,9 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                     // box.pos is the widget's top-left.
                     const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
                     const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
+                    if (!finite(cx) || !finite(cy) ||
+                        !finite(pw->box.size.x) || !finite(pw->box.size.y))
+                        continue;
                     out += "\n        {\"index\": " + std::to_string(pw->paramId) +
                            ", \"name\": \"" + esc(name) + "\"" +
                            ", \"x\": " + std::to_string(cx) +
@@ -277,6 +301,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                     // jack, and box.pos is the widget's top-left.
                     const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
                     const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
+                    if (!finite(cx) || !finite(cy)) continue;
                     out += "\n        {\"index\": " + std::to_string(pw->portId) +
                            ", \"name\": \"" + esc(name) + "\"" +
                            ", \"x\": " + std::to_string(cx) +

@@ -67,7 +67,17 @@ PortMap PortMap::parse(const std::string& json) {
         // A map we cannot read means nothing is measured, which the callers
         // already handle -- they draw a plain face. It must not be a crash on
         // the paint path.
-        return PortMap{};
+        //
+        // But it must not be SILENT either. An unreadable map and a map that
+        // was never written look identical on screen -- every vendor module
+        // with no knobs and an UNMAPPED badge -- and the remedies are
+        // opposite: one is "scan", the other is "the file is broken, scanning
+        // again will not help". A single module writing `"w": inf` (Rack uses
+        // infinite bounds for widgets that size themselves) took the whole
+        // file down, and nothing anywhere said so.
+        PortMap bad;
+        bad.unreadable_ = true;
+        return bad;
     }
     return out;
 }

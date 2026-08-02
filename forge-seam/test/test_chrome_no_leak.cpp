@@ -87,6 +87,13 @@ std::string a_real_patch() {
     if (std::filesystem::exists(dir, ec)) {
         for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
             if (e.path().extension() != ".vcv") continue;
+            // `_`-prefixed files are not patches, the same convention the
+            // module manifests use. A CARTOG scan sheet — 52 modules, no
+            // cables, no audio path — was dropped in this directory and became
+            // "the newest patch", and three tests that read the newest one
+            // started failing for a patch nobody generated.
+            if (!e.path().filename().empty() &&
+                e.path().filename().string()[0] == '_') continue;
             const auto when = std::filesystem::last_write_time(e, ec);
             if (newest.empty() || when > best) { newest = e.path(); best = when; }
         }
@@ -6981,4 +6988,35 @@ TEST_CASE("every run writes its own log", "[build][lock]") {
     CHECK(std::filesystem::path(a).parent_path() == dir / "runs");
 
     std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("a port map that will not parse says so, and is not silent",
+          "[portmap][unreadable]") {
+    // What the user saw: every module Rack owns drawn with hollow knobs and an
+    // UNMAPPED badge, while our own modules were fine. The cause was one
+    // widget writing `"w": inf` — Rack uses infinite bounds for widgets that
+    // size themselves, `inf` is not JSON, and the WHOLE file stopped parsing.
+    // Not that module's entry: every entry.
+    //
+    // The reader already failed safe, returning an empty map, which is right.
+    // It failed SILENTLY, which is not: an unreadable map and a map nobody has
+    // written look identical on screen and need opposite advice.
+    const auto good = forge_modular::PortMap::parse(
+        R"({"modules":[{"plugin":"Fundamental","model":"VCO","scan":3,
+            "params":[{"index":0,"x":10,"y":20,"w":8,"h":8}]}]})");
+    CHECK_FALSE(good.unreadable());
+    CHECK(good.find("Fundamental", "VCO") != nullptr);
+
+    // The exact shape that broke it.
+    const auto bad = forge_modular::PortMap::parse(
+        R"({"modules":[{"plugin":"Fundamental","model":"Delay","scan":3,
+            "displays":[{"x": inf, "y": inf, "w": inf, "h": inf}]}]})");
+    CHECK(bad.unreadable());
+    CHECK(bad.find("Fundamental", "Delay") == nullptr);   // still fails safe
+
+    // An absent map is NOT the unreadable state — that distinction is the
+    // whole point, and a version that set the flag unconditionally would pass
+    // every check above.
+    CHECK_FALSE(forge_modular::PortMap::parse("").unreadable());
+    CHECK_FALSE(forge_modular::PortMap::parse(R"({"modules":[]})").unreadable());
 }
