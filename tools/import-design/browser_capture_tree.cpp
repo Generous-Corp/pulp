@@ -564,9 +564,26 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         lowered.name = describe(index, node.node_index);
         CapturedBox box = node.bounds;
         const auto computed = index.styles_for_layout(node.layout_index);
+
+        // `transform` is deliberately not carried into the IR, because the box
+        // this node is placed by is ALREADY the transformed rectangle. That is
+        // true of the box and false of everything inside it: Chrome scales the
+        // glyphs along with the box, so a pre-scaled box filled with the
+        // untransformed `font-size` draws every run `1 / scale` too wide.
+        // Folding the same factor into the type lengths is what puts the two
+        // back in one space. A chain that cannot reduce to one positive
+        // uniform scale is refused and counted, not approximated.
+        const auto type_scale = index.inherited_type_scale(node.node_index);
+        if (!type_scale.ok()) {
+            ++counts.type_scale_refused;
+            lowered.attributes["type_scale_refused"] = type_scale.refused;
+        } else if (type_scale.scale != 1.0) {
+            ++counts.type_scaled;
+        }
         apply_computed_styles(computed, box, lowered.style,
                               is_text ? ComputedStyleScope::text_only
-                                      : ComputedStyleScope::box_and_text);
+                                      : ComputedStyleScope::box_and_text,
+                              type_scale.ok() ? type_scale.scale : 1.0);
 
         // A run whose FIRST line box starts to the right of its own block is
         // continuing a line an earlier inline sibling began — an inline `<span>`

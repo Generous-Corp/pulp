@@ -134,6 +134,24 @@ public:
     /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
     int parent_of(int node_index) const;
 
+    /// The product of every ancestor `transform` scale above `node_index`.
+    ///
+    /// Nested transforms multiply, so a run three levels down inherits the
+    /// product rather than its nearest wrapper's factor. Type carries one
+    /// scalar — a `font-size` — so only a uniform, positive, unrotated scale
+    /// can be folded into it: `scale(0.9, 1.2)` needs two axes and a flip or a
+    /// rotation needs a matrix. Those are REFUSED rather than approximated,
+    /// because a plausible wrong number is harder to find later than a
+    /// recorded refusal.
+    struct InheritedTypeScale {
+        double scale = 1.0;
+        /// Empty when the chain reduced. Otherwise the offending computed
+        /// `transform`, so the refusal names the value that caused it.
+        std::string refused;
+        bool ok() const { return refused.empty(); }
+    };
+    InheritedTypeScale inherited_type_scale(int node_index) const;
+
     /// A node's DOM `nodeType` (1 element, 3 text), or 0 when out of range.
     ///
     /// A doctype carries the same `nodeName` as the root element, so tag name
@@ -202,11 +220,19 @@ enum class ComputedStyleScope {
 /// `display` are deliberately not written, because the caller has already
 /// placed the node from the design's paint box and the page's own layout values
 /// would fight that placement.
+///
+/// `type_scale` is the uniform scale the node's box already carries from an
+/// ancestor `transform` — see `inherited_type_scale`. The snapshot's box is
+/// post-transform while `font-size` and `letter-spacing` are the untransformed
+/// computed values, so placing that box and filling it with unscaled type
+/// draws every run `1 / scale` too wide. Multiplying the type lengths by the
+/// same factor the box already carries is what puts them in one space.
 void apply_computed_styles(
     const std::map<std::string, std::string>& computed,
     const std::optional<CapturedBox>& box,
     pulp::view::IRStyle& style,
-    ComputedStyleScope scope = ComputedStyleScope::box_and_text);
+    ComputedStyleScope scope = ComputedStyleScope::box_and_text,
+    double type_scale = 1.0);
 
 /// Split a CSS list on top-level commas, ignoring commas nested in functions
 /// (`rgba(0, 0, 0, .5)` is one value, not four).

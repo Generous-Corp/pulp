@@ -950,6 +950,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         // census stops counting the affected nodes as faithfully drawn.
         record_if("native_nodes_clip_over_applied", tree.clip_over_applied);
         record_if("native_nodes_clip_lost", tree.clip_lost);
+        record_if("native_nodes_type_scaled", tree.type_scaled);
+        record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
     }
 
     int styled_controls = 0;

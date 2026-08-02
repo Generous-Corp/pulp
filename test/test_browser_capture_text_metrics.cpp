@@ -632,3 +632,141 @@ TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
     WARN("lines with a resolved face: " << with_face << " of "
                                         << samples.size());
 }
+
+// ── Type under an ancestor transform ───────────────────────────────────────
+
+namespace {
+
+fs::path type_scale_dir() {
+    return fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+           "browser-capture-type-scale";
+}
+
+CapturedStyleIndex load_type_scale_fixture() {
+    auto index = CapturedStyleIndex::load(type_scale_dir() / "dom-snapshot.json");
+    REQUIRE(index.has_value());
+    return std::move(*index);
+}
+
+BrowserCaptureIrResult lower_type_scale_fixture() {
+    BrowserCaptureIrOptions options;
+    options.native_panel_lowering = true;
+    return lower_browser_capture_to_ir(type_scale_dir() / "capture.json",
+                                       options);
+}
+
+/// The node index of the Nth painted text run whose text starts with `prefix`.
+int node_of_text(const CapturedStyleIndex& index, const std::string& prefix,
+                 size_t occurrence = 0) {
+    size_t seen = 0;
+    for (const auto& node : index.painted_nodes()) {
+        if (node.node_type != 3 || node.text.rfind(prefix, 0) != 0) continue;
+        if (seen++ == occurrence) return node.node_index;
+    }
+    FAIL("no painted text run number " << occurrence << " starting " << prefix);
+    return -1;
+}
+
+} // namespace
+
+// The fixture is a real capture of one string rendered twice at an identical
+// computed style — `font-size: 40px`, `letter-spacing: 2px` — where the only
+// difference is that one copy sits inside `transform: scale(0.5)`. Chrome
+// reports 143.188px for it and 286.375px for the copy outside, exactly half,
+// because the browser scales the glyphs along with the box.
+//
+// That control is what makes the assertion unfakeable: a lowering that ignores
+// the transform gives both runs the same font-size, and no arithmetic over the
+// computed style alone can tell them apart.
+TEST_CASE("Chrome halves a run's line box under scale(0.5) at one font-size",
+          "[browser-capture][text-metrics][transform]") {
+    const auto index = load_type_scale_fixture();
+    const auto boxes_for = [&](size_t occurrence) {
+        for (const auto& node : index.painted_nodes()) {
+            if (node.node_type != 3 ||
+                node.text.rfind("Hamburgefons", 0) != 0)
+                continue;
+            if (occurrence-- == 0)
+                return index.text_boxes_for_layout(node.layout_index);
+        }
+        FAIL("fixture lost a Hamburgefons run");
+        return std::vector<CapturedTextBox>{};
+    };
+    const auto inside = boxes_for(0);
+    const auto outside = boxes_for(1);
+    REQUIRE(inside.size() == 1);
+    REQUIRE(outside.size() == 1);
+    CHECK_THAT(inside[0].bounds.width * 2.0,
+               WithinAbs(outside[0].bounds.width, 0.01));
+}
+
+TEST_CASE("An ancestor transform chain reduces to one uniform type scale",
+          "[browser-capture][text-metrics][transform]") {
+    const auto index = load_type_scale_fixture();
+
+    const auto scaled =
+        index.inherited_type_scale(node_of_text(index, "Hamburgefons", 0));
+    CHECK(scaled.ok());
+    CHECK_THAT(scaled.scale, WithinAbs(0.5, 1e-6));
+
+    const auto plain =
+        index.inherited_type_scale(node_of_text(index, "Hamburgefons", 1));
+    CHECK(plain.ok());
+    CHECK_THAT(plain.scale, WithinAbs(1.0, 1e-6));
+}
+
+// Refusals, from both shapes that cannot become a font-size. A wrong-but-
+// plausible number here would be invisible; the refusal names the value.
+TEST_CASE("A transform type cannot carry is refused, not approximated",
+          "[browser-capture][text-metrics][transform]") {
+    const auto index = load_type_scale_fixture();
+    const auto squashed =
+        index.inherited_type_scale(node_of_text(index, "Squashed"));
+    CHECK_FALSE(squashed.ok());
+    CHECK(squashed.refused.find("matrix(0.5, 0, 0, 1.5") == 0);
+    // The scale is left at identity rather than half-applied on one axis.
+    CHECK_THAT(squashed.scale, WithinAbs(1.0, 1e-6));
+
+    // A rotation is the other shape, and its own fixture already carries one.
+    auto rotated = CapturedStyleIndex::load(
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+        "browser-capture-clip-transform" / "dom-snapshot.json");
+    REQUIRE(rotated.has_value());
+    const auto label = node_of_text(*rotated, "ROT");
+    const auto spun = rotated->inherited_type_scale(label);
+    CHECK_FALSE(spun.ok());
+    CHECK(spun.refused.rfind("matrix(0.707107", 0) == 0);
+}
+
+TEST_CASE("Lowering folds the ancestor scale into the type lengths",
+          "[browser-capture][text-metrics][transform]") {
+    const auto result = lower_type_scale_fixture();
+    const auto& root = root_of(result);
+
+    const auto* inside = find_text_node(root, "Hamburgefons", 0);
+    const auto* outside = find_text_node(root, "Hamburgefons", 1);
+    REQUIRE(inside != nullptr);
+    REQUIRE(outside != nullptr);
+    REQUIRE(inside->style.font_size.has_value());
+    REQUIRE(outside->style.font_size.has_value());
+
+    // The control keeps the authored size; the scaled copy carries the factor
+    // its box already carried. Both are asserted, so a lowering that scaled
+    // EVERYTHING would fail here rather than look correct on one node.
+    CHECK_THAT(*outside->style.font_size, WithinAbs(40.0f, 0.01f));
+    CHECK_THAT(*inside->style.font_size, WithinAbs(20.0f, 0.01f));
+    REQUIRE(inside->style.letter_spacing.has_value());
+    REQUIRE(outside->style.letter_spacing.has_value());
+    CHECK_THAT(*outside->style.letter_spacing, WithinAbs(2.0f, 0.01f));
+    CHECK_THAT(*inside->style.letter_spacing, WithinAbs(1.0f, 0.01f));
+
+    // And the refused node keeps its authored size, with the reason recorded
+    // on the node rather than only in an aggregate count.
+    const auto* squashed = find_text_node(root, "Squashed");
+    REQUIRE(squashed != nullptr);
+    REQUIRE(squashed->style.font_size.has_value());
+    CHECK_THAT(*squashed->style.font_size, WithinAbs(20.0f, 0.01f));
+    const auto refused = squashed->attributes.find("type_scale_refused");
+    REQUIRE(refused != squashed->attributes.end());
+    CHECK(refused->second.rfind("matrix(0.5, 0, 0, 1.5", 0) == 0);
+}

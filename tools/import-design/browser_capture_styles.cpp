@@ -471,6 +471,61 @@ int CapturedStyleIndex::parent_of(int node_index) const {
     return parent_index_[static_cast<size_t>(node_index)];
 }
 
+CapturedStyleIndex::InheritedTypeScale
+CapturedStyleIndex::inherited_type_scale(int node_index) const {
+    InheritedTypeScale result;
+    // Bounded by the node count for the same reason `is_descendant` is: a
+    // snapshot is a forest of -1-terminated chains only when it is well
+    // formed, and an unbounded walk turns a malformed one into a hang rather
+    // than a wrong answer.
+    int cursor = parent_of(node_index);
+    for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
+         ++steps, cursor = parent_of(cursor)) {
+        const auto layout = layout_for_node(cursor);
+        if (!layout) continue;
+        const auto styles = styles_for_layout(*layout);
+        const auto it = styles.find("transform");
+        if (it == styles.end() || it->second.empty() || it->second == "none")
+            continue;
+
+        // Chrome serializes computed `transform` as a matrix, so the six
+        // numbers are the whole answer — any other spelling (`matrix3d` above
+        // all) is refused rather than guessed at.
+        const auto& value = it->second;
+        if (value.rfind("matrix(", 0) != 0 || value.back() != ')') {
+            result.refused = value;
+            return result;
+        }
+        std::vector<double> n;
+        const std::string body = value.substr(7, value.size() - 8);
+        size_t start = 0;
+        while (start <= body.size()) {
+            const auto comma = body.find(',', start);
+            try {
+                n.push_back(std::stod(body.substr(
+                    start, comma == std::string::npos ? std::string::npos
+                                                      : comma - start)));
+            } catch (const std::exception&) {
+                result.refused = value;
+                return result;
+            }
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+        constexpr double kFlat = 1e-6;
+        // b and c non-zero is a rotation or a skew; a != d is two axes; a
+        // non-positive scale is a flip. A `font-size` is one positive scalar
+        // and can express none of the three.
+        if (n.size() != 6 || std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat ||
+            std::abs(n[0] - n[3]) > kFlat || n[0] <= kFlat) {
+            result.refused = value;
+            return result;
+        }
+        result.scale *= n[0];
+    }
+    return result;
+}
+
 std::string CapturedStyleIndex::attribute(int node_index,
                                           std::string_view name) const {
     if (node_index < 0 ||
@@ -594,7 +649,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
 void apply_computed_styles(const std::map<std::string, std::string>& computed,
                            const std::optional<CapturedBox>& box,
                            pulp::view::IRStyle& style,
-                           ComputedStyleScope scope) {
+                           ComputedStyleScope scope,
+                           double type_scale) {
     const auto lookup = [&computed](const char* name) -> std::string {
         const auto it = computed.find(name);
         return it == computed.end() ? std::string{} : it->second;
@@ -617,9 +673,21 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     const auto color = lookup("color");
     if (!is_absent(color)) style.color = color;
 
+    // A type length is authored in the untransformed space, while the box it
+    // will be drawn into is the post-transform one. Only lengths get the
+    // factor: `font-weight` and the family are unitless, and a percentage
+    // resolves against a reference that already carries the scale.
+    const auto set_type_length = [&](const char* name,
+                                     std::optional<float>& field,
+                                     double reference) {
+        set_length(name, field, reference);
+        if (field && type_scale != 1.0)
+            field = static_cast<float>(*field * type_scale);
+    };
+
     // Typography. Inherited, so it is the half a text run legitimately owns.
     set_string("font-family", style.font_family);
-    set_length("font-size", style.font_size, reference_height);
+    set_type_length("font-size", style.font_size, reference_height);
     const auto weight = lookup("font-weight");
     if (!is_absent(weight)) {
         if (const auto parsed = parse_number(weight))
@@ -628,8 +696,8 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     set_string("font-style", style.font_style);
     const auto align = lookup("text-align");
     if (!is_absent(align) && align != "start") style.text_align = align;
-    set_length("letter-spacing", style.letter_spacing, reference_width);
-    set_length("line-height", style.line_height, reference_height);
+    set_type_length("letter-spacing", style.letter_spacing, reference_width);
+    set_type_length("line-height", style.line_height, reference_height);
     set_string("text-transform", style.text_transform);
     const auto decoration = lookup("text-decoration-line");
     if (!is_absent(decoration)) style.text_decoration = decoration;
