@@ -1064,7 +1064,33 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
         if (!has_ancestor_clip) return;
         const Rect& r = *ancestor_clip_rect();
         canvas.save();
-        canvas.clip_rect(r.x, r.y, r.width, r.height);
+        // CSS clips overflow to the clipper's ROUNDED padding box, so a child
+        // with square corners inside a rounded card is cut to the card's curve.
+        // Clipping to the bare rectangle paints that child square into the
+        // corner and the card reads as unrounded even though its border curves.
+        const auto& cr = ancestor_clip_radii();
+        const float m = 0.5f * std::min(r.width, r.height);
+        const float tl = std::min(cr[0], m), tr = std::min(cr[1], m);
+        const float br = std::min(cr[2], m), bl = std::min(cr[3], m);
+        const bool rounded =
+            (tl > 0.5f || tr > 0.5f || br > 0.5f || bl > 0.5f) &&
+            canvas.supports(canvas::CanvasCapability::clip_path_svg);
+        if (!rounded) {
+            canvas.clip_rect(r.x, r.y, r.width, r.height);
+            return;
+        }
+        const float x = r.x, y = r.y, w = r.width, h = r.height;
+        std::ostringstream d;
+        d << "M " << (x + tl) << " " << y
+          << " H " << (x + w - tr)
+          << " A " << tr << " " << tr << " 0 0 1 " << (x + w) << " " << (y + tr)
+          << " V " << (y + h - br)
+          << " A " << br << " " << br << " 0 0 1 " << (x + w - br) << " " << (y + h)
+          << " H " << (x + bl)
+          << " A " << bl << " " << bl << " 0 0 1 " << x << " " << (y + h - bl)
+          << " V " << (y + tl)
+          << " A " << tl << " " << tl << " 0 0 1 " << (x + tl) << " " << y << " Z";
+        canvas.clip_path_svg(d.str());
     };
     const auto close_ancestor_clip = [&] {
         if (has_ancestor_clip) canvas.restore();
