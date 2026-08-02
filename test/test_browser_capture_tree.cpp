@@ -1779,6 +1779,119 @@ TEST_CASE("a real capture where the clip agrees reports no disagreement",
     CHECK(attribute(*bar, "capture_fallback_reason") == "transform");
 }
 
+// ── Generated content, against Chrome's own capture ─────────────────────────
+//
+// `generated-content/g.html` declares `content` on five pseudo-elements: two
+// strings, one empty, one `counter()`, one `attr()`. Every expected string
+// below is the one CHROME put in the snapshot's layout text, never one this
+// file computed — Chrome resolves counters and attribute references before it
+// serializes, so the resolved forms arrive as ordinary text runs.
+
+TEST_CASE("a pseudo-element's generated text is drawn, not dropped",
+          "[browser-capture][native-lowering][generated-content]") {
+    // A pseudo-element emits one layout row for its box and one more per
+    // generated text run, and EVERY one of them maps back to the pseudo's own
+    // element node. A text run identified by its DOM node type is therefore
+    // never found here, and the string is lowered as an empty frame.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.error.empty());
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* before = find_by_text(root, "BEFORE");
+    REQUIRE(before != nullptr);
+    const auto* after = find_by_text(root, "AFT");
+    REQUIRE(after != nullptr);
+
+    // The text belongs to the pseudo-element, not to the element that carries
+    // the pseudo: the pseudo owns the colour and font the run is drawn with.
+    const auto* label = find_named(root, "div#label");
+    REQUIRE(label != nullptr);
+    CHECK(contains(*label, before));
+    CHECK(before->style.color.value_or("") == "rgb(255, 209, 102)");
+    CHECK(after->style.color.value_or("") == "rgb(6, 214, 160)");
+
+    // Chrome's own box for the run, composed back from the parent-relative
+    // offsets: `[24, 20, 82.25, 23]` in the snapshot.
+    const auto all = composed(root);
+    const auto* placed = placed_for(all, before);
+    REQUIRE(placed != nullptr);
+    CHECK(placed->left == 24.0);
+    CHECK(placed->top == 20.0);
+    CHECK(*before->style.width == 82.25f);
+
+    // A text run does not repaint its element's box — the pseudo's own frame
+    // already drew it, and a second copy is a slab behind every label.
+    CHECK_FALSE(before->style.background_color.has_value());
+}
+
+TEST_CASE("Chrome's resolved counters and attribute text are lowered",
+          "[browser-capture][native-lowering][generated-content]") {
+    // `counter(n) ". "` and `attr(data-tag)` never have to be evaluated here:
+    // Chrome resolved them into text runs before serializing, so lowering the
+    // runs gets both value forms for free. The strings asserted are Chrome's.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // One counter renders as TWO runs — the number and the ". " suffix — so a
+    // pseudo with several runs must yield several text nodes, not just one.
+    REQUIRE(find_by_text(root, "1") != nullptr);
+    REQUIRE(find_by_text(root, "2") != nullptr);
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.type == "text" && node.text_content == ". ";
+          }) == 2);
+    REQUIRE(find_by_text(root, "ATTR-VALUE") != nullptr);
+
+    // Runs of one pseudo-element are separate nodes with separate anchors —
+    // sharing one would apply a stored edit to whichever the walk reached
+    // first.
+    std::set<std::string> unique;
+    int lowered_nodes = 0;
+    for (const auto& entry : composed(root)) {
+        if (entry.node->attributes.count("paint_class") == 0) continue;
+        ++lowered_nodes;
+        REQUIRE(entry.node->stable_anchor_id);
+        unique.insert(*entry.node->stable_anchor_id);
+    }
+    CHECK(static_cast<int>(unique.size()) == lowered_nodes);
+
+    // The anchor names the run as a child of the pseudo that generated it, so
+    // the tweaks layer can select the whole pseudo by prefix.
+    const auto* one = find_by_text(root, "1");
+    CHECK(one->stable_anchor_id->find("/::before[0]/#text[0]") !=
+          std::string::npos);
+}
+
+TEST_CASE("an empty content string generates a box and no text",
+          "[browser-capture][native-lowering][generated-content]") {
+    // The decorative idiom — `content: ""` plus a background — is what almost
+    // every generated-content declaration in a real panel is. It must stay a
+    // painted frame: a predicate that turned pseudo-elements into text nodes
+    // wholesale would lose the dot this design draws. This is the control that
+    // keeps the two cases above from passing by treating every pseudo as text.
+    const auto lowered = lower_capture("browser-capture-generated-content");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* dot = find_named(root, "div#dot");
+    REQUIRE(dot != nullptr);
+    REQUIRE(dot->children.size() == 1);
+    const auto& generated = dot->children.front();
+    CHECK(generated.name == "::before");
+    CHECK(generated.type == "frame");
+    CHECK(generated.text_content.empty());
+    CHECK(generated.style.background_color.value_or("") ==
+          "rgb(239, 71, 111)");
+
+    // And an ordinary element that happens to contain text is still a frame
+    // with a `#text` child, not a text node itself.
+    const auto* list_item = find_named(root, "li");
+    REQUIRE(list_item != nullptr);
+    CHECK(list_item->type == "frame");
+    CHECK(find_by_text(*list_item, "alpha") != nullptr);
+}
+
 TEST_CASE("the reorder audit counts a real inversion and only a visible one",
           "[browser-capture][native-lowering]") {
     // The other cases assert this diagnostic is zero, which a counter wired to

@@ -5505,3 +5505,41 @@ fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome an
 Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
+
+## `content:` in a stylesheet is mostly `justify-content:`
+
+A substring grep for `content:` over a design's CSS counts `justify-content` and
+`align-content` too, and in a flexbox-heavy panel those are the overwhelming
+majority. On the halo panel a reported "`content:` ×42" was **31 flex
+declarations and 13 real ones**, and all 13 were `content: ""`. Match on a word
+boundary before quoting a number:
+
+```bash
+rg -oP '(?<![-a-zA-Z])content\s*:\s*("[^"]*"|'"'"'[^'"'"']*'"'"'|[^;}\n]*)' styles.css
+```
+
+The same mistake sizes the work wrong in both directions. `content: ""` is the
+decorative-pseudo idiom — an empty box positioned and painted with a background
+— and it needs no text support at all, only the pseudo's own box, which the
+snapshot already carries.
+
+## Generated content arrives as text runs on an ELEMENT row
+
+Chrome resolves `content` before it serializes. A `::before` produces one layout
+row for its box and one more **per generated text run**, and every one of them
+maps back to the pseudo's own node, whose `nodeType` is 1 (element) — there is no
+text node. So:
+
+- A lowering that decides "is this a text run?" from the DOM node type drops
+  every generated string, and the run lowers as an empty frame. The predicate has
+  to be **"this layout row carries text"**. No element row in any corpus capture
+  carries text, so widening it that way fires on generated content and nothing
+  else — worth re-checking on a new corpus before assuming it still holds.
+- `counter()` and `attr()` need no evaluation: Chrome already resolved them into
+  the run text (`counter(n) ". "` arrives as two runs, `'1'` and `'. '`). Reading
+  the rows gets both value forms for free. `url()` content does not arrive this
+  way — it is an image with no text.
+- Several runs share one pseudo node, so they share an anchor path unless the
+  run's index is appended (`…/::before[0]/#text[k]`), and DOM parentage points at
+  the pseudo's HOST, not the pseudo — the run has to be parented to its own box
+  slot explicitly or it lands as that box's sibling.

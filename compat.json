@@ -1320,8 +1320,10 @@
       "unsupportedValues": [
         "all"
       ],
-      "tests": [],
-      "notes": "::before/::after not supported (no pseudo-element model).",
+      "tests": [
+        "test/test_browser_capture_tree.cpp [generated-content]"
+      ],
+      "notes": "Still wontfix for THIS lane: Pulp's own CSS shim has no pseudo-element model, so it never creates a ::before / ::after box and there is nothing for `content` to fill. A design that arrives through the browser-capture importer is a different lane and is NOT covered by this row — there Chrome creates the pseudo-element and resolves `content` (including counter() and attr()) into ordinary text runs before the snapshot, and lowering reads those runs. `url()` content is not lowered there either: it is an image the snapshot carries no text for.",
       "issue": ""
     },
     "css/contentVisibility": {
