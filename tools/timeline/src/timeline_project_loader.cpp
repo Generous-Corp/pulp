@@ -135,7 +135,11 @@ std::optional<fs::path> resolve_external_asset(const fs::path& base, std::string
 
 std::optional<fs::path> resolve_package_relative_asset(const fs::path& canonical_base,
                                                        std::string_view hint) {
+#if defined(_WIN32)
     if (!pulp::timeline::package_relative_path_is_portable(hint))
+#else
+    if (!pulp::timeline::package_relative_path_is_lexically_safe(hint))
+#endif
         return std::nullopt;
     try {
         const auto relative = filesystem_path_from_utf8(hint);

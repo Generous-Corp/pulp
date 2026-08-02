@@ -36,7 +36,8 @@ inline bool package_relative_path_is_lexically_safe(std::string_view path) noexc
 /// Returns whether a new package-publication path is portable across supported
 /// filesystems and cannot be reinterpreted as a device or alternate data stream.
 inline bool package_relative_path_is_portable(std::string_view path) noexcept {
-    if (!package_relative_path_is_lexically_safe(path) || !is_valid_utf8(path))
+    if (!package_relative_path_is_lexically_safe(path) || !is_valid_utf8(path) ||
+        path.find('\\') != std::string_view::npos)
         return false;
 
     const auto ascii_upper = [](char value) noexcept {
@@ -89,7 +90,7 @@ inline bool package_relative_path_is_portable(std::string_view path) noexcept {
 
     std::size_t component_begin = 0;
     for (std::size_t index = 0; index <= path.size(); ++index) {
-        if (index != path.size() && path[index] != '/' && path[index] != '\\')
+        if (index != path.size() && path[index] != '/')
             continue;
         if (!windows_component_is_safe(path.substr(component_begin, index - component_begin)))
             return false;

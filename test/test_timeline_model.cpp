@@ -33,6 +33,8 @@ TEST_CASE("Persisted locator compatibility is separate from portable publication
         REQUIRE_FALSE(package_relative_path_is_portable(path));
     }
     REQUIRE(package_relative_path_is_portable("media/take-1.wav"));
+    REQUIRE(package_relative_path_is_lexically_safe("media\\take.wav"));
+    REQUIRE_FALSE(package_relative_path_is_portable("media\\take.wav"));
 }
 
 TEST_CASE("Timeline private identity equality is semantic across insertion histories") {
