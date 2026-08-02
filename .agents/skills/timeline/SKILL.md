@@ -2088,6 +2088,120 @@ sole exception at the source boundary: it deliberately ignores `project` and
 delegates to `writer(options)`. Only the interchange adapter is the
 project-wide consent surface.
 
+### An absent capability row is a decision the generator writes down — and the two directions differ
+
+`capability_emit.py` materializes a closed world, so a concept a format's JSON
+omits still gets a row. It is not a hole, and it does not fail the build. But
+the two directions are **not** symmetric, and only one of them is safe to leave
+implicit:
+
+- **Absent export row** → `ExportLevel::Drop`, `LossClass::Dropped`, and a
+  generated sentence, `"<display name> declares no support for <concept id>"`.
+  Truthful and specific enough to ship. `clip.media-window` on SMF is the
+  committed example.
+- **Absent import row** → `ImportLevel::None` with an **empty** `refusal`
+  string. There is no generated fallback, so the refusal names nothing.
+
+So write the import row even when the level equals the default; the export row
+is a refinement of an already-true sentence rather than a correction of a false
+one. What is genuinely broken without any row at all is a concept that does not
+*exist*: `LossManifest` is keyed by `Concept`, so a construct with no id cannot
+appear in a manifest at any level, and the export reports a clean bill.
+
+### A capability table declares the ADAPTER, not the FORMAT
+
+`smf.json` describes Pulp's bounded Standard MIDI File subset — its reader and
+writer carry exactly the concepts listed in `smf_import.cpp` / `smf_export.cpp`
+— not what a `.mid` file could theoretically hold. The distinction is invisible
+until it bites: a Standard MIDI File carries control change natively, and Pulp's
+writer does not, so a format-worded loss sentence ("Standard MIDI Files have no
+…") would be **false** where the existing rows' phrasing is fine. When the format
+can carry something the adapter cannot, word the loss after the writer.
+
+### Adding a concept regenerates FOUR artifacts, and the fourth is outside `core/interchange`
+
+`concepts.json` is append-only and order-significant because position fixes the
+generated enum ordinal. Three artifacts come from `capability_emit.py`, gated
+separately in `interchange_tests.cmake` — run each individually and unpiped,
+never as one `ctest` sweep whose exit code you read through a pipe:
+
+```
+python3 core/interchange/tools/capability_emit.py --emit concepts > core/interchange/include/pulp/interchange/generated/concepts.hpp
+python3 core/interchange/tools/capability_emit.py --emit tables   > core/interchange/include/pulp/interchange/generated/capability_tables.hpp
+python3 core/interchange/tools/capability_emit.py --emit docs     > docs/reference/interchange-matrix.md
+```
+
+**The fourth has a different generator, in a different module, and it is the one
+that breaks behavior rather than just drifting.** `core/timeline/tools/schema_mcp_emit.py`
+also reads `capabilities/concepts.json`, and projects the vocabulary into
+`pulp_timeline_export`'s `accept_losses` enum and its `x-pulp-loss-concepts`
+list. Consent is per exact concept id with no blanket override, so a concept
+missing from that enum is a loss **no MCP client can ever accept** — every
+export of a document using it is permanently unauthorizable through that path.
+Regenerate it in the same change:
+
+```
+python3 core/timeline/tools/schema_mcp_emit.py --manifest core/timeline/schema/timeline_schema.json > core/timeline/schema/timeline_mcp_tools.json
+```
+
+Gated by `timeline-mcp-drift` **and** `timeline-mcp-selftest` — the selftest
+fails too, with `committed artifact matches a fresh emission`. Neither is run by
+`tools/scripts/gates.sh`, so a fully green `gates.sh` proves nothing here.
+A grep scoped to `core/interchange/` will not find this generator.
+
+There is also a fifth surface that is data rather than code: any
+`test/fixtures/timeline/**/*.json.expect` whose document uses the new concept.
+`pulp-fixture-runner --corpus test/fixtures/timeline --update` rewrites them,
+and `timeline-fixture-corpus` fails with the concept name and observed value
+until you do.
+
+### Naming a new SMF loss takes TWO edits, and each half fails silently on its own
+
+The interchange table only governs exports routed through `interchange::run_export`. The public
+`pulp::timeline::export_smf()` entry point is a *separate* surface that fails closed on shapes it
+cannot carry, and it does not consult the capability table at all. So a concept the table declares
+`drop` is still **silently discarded** by the raw API until you also teach `build_note_track` to
+refuse it. Adding a concept without that leaves an SDK caller receiving a successful `.mid` with the
+content gone — no error, no manifest.
+
+The seam is `SmfExportLossPolicy` in `core/smf/src/smf_export_internal.hpp`. Both edits are
+required, and they defend opposite failure modes:
+
+1. **`smf_export.cpp`** — refuse when the content is present *and* the policy flag is unset. This is
+   what makes the raw entry point fail closed.
+2. **`smf_interchange.cpp`** — set that flag from `loses(plan, Concept::X)`. This is what lets the
+   adapter proceed *after* the loss is accepted by exact concept id.
+
+**Ship only half and the tests can still be green.** Verified by mutation: hardcoding the
+`smf_interchange.cpp` flag to `false` — so consent can never clear the refusal and a lane-bearing
+export becomes impossible through *every* path — left the whole SMF interchange suite passing,
+because every existing test used a project without the new content. A refusal test alone does not
+cover the clearing half; you need one export that **succeeds with the loss accepted** and asserts
+the surviving content, or the second edit is unverified.
+
+### A drift gate whose emit-cmd is a TARGET fails when that target is merely unbuilt
+
+`timeline-schema-drift`'s `--emit-cmd` is `$<TARGET_FILE:pulp-timeline-schema-emit>`,
+not a script. In a build directory where you only built the targets you needed,
+that binary does not exist and the gate fails **with no diff and no useful
+message** — indistinguishable from real drift, and easy to misattribute to
+whatever you just changed. Build the emit target before believing it:
+
+```
+cmake --build build --target pulp-timeline-schema-emit
+```
+
+The interchange gates do not have this failure mode; their emit-cmds are Python.
+
+### The fixture corpus manifest is count-only, so it cannot see owner identity
+
+Measured, not assumed. Changing the census to record a lane concept against the
+**clip** id instead of the **lane** id leaves the count unchanged, so
+`timeline-fixture-corpus` passes (exit 0) while a unit test asserting
+`owners(...)[0]` fails (exit 42). A census row that records per-item evidence
+therefore needs a unit test asserting the owner *values*; the corpus fixture
+alone will not defend it, and `contains(...)` or a bare count will not either.
+
 ## Asset confinement is two layers, and they are not redundant
 
 A `PackageRelative` asset locator is checked twice, by checks with different

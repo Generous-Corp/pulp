@@ -23,3 +23,4 @@ concept.tempo.single 1
 concept.meter.single 1
 concept.clip.note-modifier 1
 concept.clip.note-velocity-quantized 1
+concept.clip.midi-expression-lane 2
