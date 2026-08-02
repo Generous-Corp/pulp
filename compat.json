@@ -639,12 +639,22 @@
         "radial-gradient(...)",
         "conic-gradient(...)"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "radial-gradient(... at <length> ...) \u2014 an `at` position given as a LENGTH is ignored and the shape silently re-centres; only keywords and percentages resolve (css_gradient.cpp axis_frac)",
+        "background-size / background-position on a gradient layer \u2014 both are stored on the View and ignored at paint, so a gradient that CSS sizes into a tile paints once across the whole box instead of tiling",
+        "a named-keyword <color> (e.g. `red`) resolves to opaque WHITE \u2014 parse_css_color has no named-colour table. Captured designs never hit this because Chromium serializes computed styles to rgb()/oklab(); hand-authored CSS does",
+        "a bare <length> colour-stop position (e.g. `#fff 0 1px`) is read as a raw 0..1 parameter instead of being resolved against the gradient line",
+        "an elliptical radial degrades to a circle of its horizontal radius on the CoreGraphics backend; only Skia carries the per-axis local matrix"
+      ],
       "tests": [
         "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
-        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient resolves radial sizing keywords per axis\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\"",
+        "test/test_css_gradient_geometry.cpp::\"an explicitly sized radial gradient is an ellipse over the box\"",
+        "test/test_css_gradient_geometry.cpp::\"a to-corner linear gradient resolves against the laid-out box\"",
+        "test/test_css_gradient_geometry.cpp::\"a fade to transparent keeps its hue\""
       ],
-      "notes": "Background shorthand supports only color OR a single gradient. url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). linear-gradient, radial-gradient, and conic-gradient now parse through setBackgroundGradient; View::paint dispatches them to canvas linear/radial/sweep gradient paint (Skia sweep; CoreGraphics software-rasterized conic image). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern).",
+      "notes": "url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim \u2014 image loading is the orthogonal follow-up). linear-gradient, radial-gradient, and conic-gradient parse through setBackgroundGradient; View::paint dispatches them to canvas linear/radial/sweep gradient paint (Skia sweep; CoreGraphics software-rasterized conic image). MULTIPLE comma-separated layers ARE supported and painted first-on-top; the real limit is that one unreadable layer refuses the WHOLE list rather than painting the rest, so a single url() layer in an otherwise-gradient stack drops the background entirely. Gradient GEOMETRY resolves against the laid-out box at paint time rather than when the CSS is parsed: radial ending shapes follow css-images-3 (circle vs ellipse, all four sizing keywords, explicit %/px radii, off-centre `at`), and linear angles plus `to <corner>` are recomputed per box because both depend on the aspect ratio. Stops interpolate in premultiplied space (css-images-3 \u00a73.4.2), so a fade to transparent fades alpha without darkening toward black.",
       "issue": ""
     },
     "css/backgroundAttachment": {
@@ -708,12 +718,21 @@
         "radial-gradient(...)",
         "conic-gradient(...)"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "radial-gradient(... at <length> ...) — an `at` position given as a LENGTH is ignored and the shape silently re-centres; only keywords and percentages resolve (css_gradient.cpp axis_frac)",
+        "background-size / background-position on a gradient layer — both are stored on the View and ignored at paint, so a gradient that CSS sizes into a tile paints once across the whole box instead of tiling",
+        "a named-keyword <color> (e.g. `red`) resolves to opaque WHITE — parse_css_color has no named-colour table",
+        "a bare <length> colour-stop position (e.g. `#fff 0 1px`) is read as a raw 0..1 parameter instead of being resolved against the gradient line",
+        "an elliptical radial degrades to a circle of its horizontal radius on the CoreGraphics backend; only Skia carries the per-axis local matrix"
+      ],
       "tests": [
         "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient parses linear / radial / conic into the right kind\"",
-        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\""
+        "test/test_widget_bridge_wave2_cheap.cpp::\"setBackgroundGradient resolves radial sizing keywords per axis\"",
+        "test/test_screenshot_compare.cpp::\"radial and conic background gradients render non-flat\"",
+        "test/test_css_gradient_geometry.cpp::\"an explicitly sized radial gradient is an ellipse over the box\"",
+        "test/test_css_gradient_geometry.cpp::\"a fade to transparent keeps its hue\""
       ],
-      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. multiple backgrounds remain arch-single-bg.",
+      "notes": "url() / image() / image-set() backgrounds are not implemented (arch-deferred-image-loader). linear-gradient, radial-gradient, and conic-gradient round-trip through the same setBackgroundGradient path and render as canvas linear/radial/sweep gradients. MULTIPLE comma-separated layers ARE supported and painted first-on-top; the real limit is that one unreadable layer refuses the whole list, so a single url() layer in an otherwise-gradient stack drops the background entirely. Gradient geometry resolves against the laid-out box at paint time — see css/background for the full statement.",
       "issue": ""
     },
     "css/backgroundOrigin": {

@@ -89,6 +89,30 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: score-native-panel
+    path: tools/import-validation/score_native_panel.py
+    category: visual-compare
+    use_when: Measure how much of a natively-rendered panel disagrees with Chrome, attributed per node and per drawing feature.
+    invocation: python3 tools/import-validation/score_native_panel.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--json-out report.json] [--diff-out diff.png]
+    inputs: A browser capture directory (browser.png + dom-snapshot.json) and a native render of the same design.
+    outputs: Area-weighted failing fraction, per-node scores, coverage, and failing area grouped by drawing feature.
+    caveat: "Two traps live in the METRIC, not the code. (1) A blank render scores WELL against a dark design: an empty SPECTR render scored 12.45% failing while the correct one scored 10.99%, because black matches black and the denominator comes from the capture side, so it never notices the render contributed no ink. ALWAYS read coverage beside the failing fraction. (2) It is AREA-weighted while perception is salience-weighted: a gradient fix moved one design 46% with no visible change, while a missing icon or a lost accent fill costs a fraction of a percent. Per-node scores are not usable yet (worst-node 1.0000, ~0% of ink nodes passing everywhere). Never inherit tau from the identity-blit calibration control, which contains no native rasterisation."
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: chrome-gradient-oracle
+    path: tools/import-validation/chrome_gradient_oracle.py
+    category: visual-compare
+    use_when: Get the expected numbers for a CSS gradient geometry test from Chromium rather than from your own formula.
+    invocation: python3 tools/import-validation/chrome_gradient_oracle.py
+    inputs: Nothing; it renders its own hard-edged gradient cases through Chromium.
+    outputs: Measured boundary positions per case, the source of the expected values in test_css_gradient_geometry.cpp.
+    caveat: "Exists because a fixture derived from the same formula as the implementation agrees with it BY CONSTRUCTION, including when both are wrong. Chromium is an independent implementation of the same spec, so it can disagree, which is the only reason those tests can fail for a real cause. Cases use hard-edged stops so a scanline reads the boundary exactly, and a 160x100 box on purpose: a square box makes an ellipse a circle and a 45-degree angle its own reflection, hiding every defect worth testing."
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: diff-against-reference
     path: tools/import-validation/diff_against_reference.py
     category: visual-compare
@@ -133,18 +157,6 @@ tools:
     inputs: Emitted UI artifact, importer reference render, design tokens, and the intended canvas dimensions.
     outputs: Fail-closed similarity, foreign-colour, image-source, renderer-capability, and size verdicts with distinct exit codes.
     caveat: Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: score-native-panel
-    path: tools/import-validation/score_native_panel.py
-    category: visual-compare
-    use_when: Localize a native panel's pixel differences from its Chromium capture to the topmost responsible nodes.
-    invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render <render.png> [--tau 0.01] [--tau-area 0.01] [--json-out report.json] [--diff-out diff.png]
-    inputs: A browser-capture directory containing browser.png plus captured geometry and paint order, and a same-size native composite PNG.
-    outputs: Calibration, worst-node, passing-node, area-weighted, masked-control, and unattributed-pixel measurements; optional JSON and failure-mask PNG artifacts.
-    caveat: Requires NumPy and Pillow, refuses size or colour-calibration mismatches, and measures the supplied Chromium capture rather than independently proving that capture authoritative.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
