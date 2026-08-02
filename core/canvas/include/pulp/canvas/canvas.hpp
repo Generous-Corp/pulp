@@ -362,6 +362,19 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// Radial gradient with an independent radius per axis — the ending shape
+    /// CSS calls an `ellipse`, which is `radial-gradient`'s DEFAULT shape and
+    /// the only one a two-value size (`90% 70%`) can express. Backends that can
+    /// carry a local matrix on the shader override this; the default forwards
+    /// to the circular overload using the horizontal radius, which is the
+    /// pre-existing approximation rather than a blank fill.
+    virtual void set_fill_gradient_radial_elliptical(
+            float cx, float cy, float rx, float ry,
+            const Color* colors, const float* positions, int count) {
+        (void)ry;
+        set_fill_gradient_radial(cx, cy, rx, colors, positions, count);
+    }
+
     /// Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
     /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
     /// is the outer / end circle. Backends with a real two-circle shader

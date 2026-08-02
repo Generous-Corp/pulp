@@ -158,6 +158,64 @@ void build_continuous_corner_rounded_rect_path(
 }
 }  // namespace
 
+// CSS radial sizing (css-images-3 §3.3). The ending shape is measured from the
+// gradient's own centre, not the box's, so an off-centre `at` changes every
+// radius — which is why a constant fraction of the box cannot stand in for any
+// of these keywords.
+//
+// For an ellipse the two corner keywords are NOT the corner distance: the spec
+// gives the ending ellipse the aspect ratio it would have under the matching
+// `-side` keyword and then scales it until it passes through that corner.
+// Substituting (dx, dy) into (dx/rx)^2 + (dy/ry)^2 = 1 with ry/rx = dy/dx makes
+// both terms equal, so the scale factor is exactly sqrt(2) on each axis.
+View::ResolvedRadial View::resolve_radial(const BackgroundGradient& g,
+                                          float w, float h) {
+    const float cx = g.x0 * w;
+    const float cy = g.y0 * h;
+    // Distances from the centre to each side, folded into a nearest and a
+    // farthest per axis.
+    const float near_x = std::min(std::fabs(cx), std::fabs(w - cx));
+    const float near_y = std::min(std::fabs(cy), std::fabs(h - cy));
+    const float far_x = std::max(std::fabs(cx), std::fabs(w - cx));
+    const float far_y = std::max(std::fabs(cy), std::fabs(h - cy));
+    constexpr float kSqrt2 = 1.41421356f;
+
+    float rx = 0.0f, ry = 0.0f;
+    switch (g.radial_size) {
+        case BackgroundGradient::RadialSize::explicit_radii:
+            rx = g.radial_rx * w + g.radial_rx_px;
+            ry = g.radial_ry * h + g.radial_ry_px;
+            break;
+        case BackgroundGradient::RadialSize::closest_side:
+            rx = g.radial_circle ? std::min(near_x, near_y) : near_x;
+            ry = g.radial_circle ? std::min(near_x, near_y) : near_y;
+            break;
+        case BackgroundGradient::RadialSize::farthest_side:
+            rx = g.radial_circle ? std::max(far_x, far_y) : far_x;
+            ry = g.radial_circle ? std::max(far_x, far_y) : far_y;
+            break;
+        case BackgroundGradient::RadialSize::closest_corner:
+            rx = g.radial_circle ? std::sqrt(near_x * near_x + near_y * near_y)
+                                 : near_x * kSqrt2;
+            ry = g.radial_circle ? rx : near_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::farthest_corner:
+            rx = g.radial_circle ? std::sqrt(far_x * far_x + far_y * far_y)
+                                 : far_x * kSqrt2;
+            ry = g.radial_circle ? rx : far_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::max_side:
+            rx = ry = g.radius * std::max(w, h);
+            break;
+    }
+    // A zero radius makes the shader degenerate (Skia returns null, which
+    // paints nothing at all). CSS treats a zero-size ending shape as the
+    // smallest non-zero one, so clamp rather than drop the layer.
+    rx = std::max(rx, 0.001f);
+    ry = std::max(ry, 0.001f);
+    return {cx, cy, rx, ry};
+}
+
 void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     // CSS transforms: translate, rotate, scale, skew — around transform-origin
     bool has_transform = (scale_ != 1.0f || rotation_deg_ != 0 ||
@@ -590,10 +648,10 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
         if (layer->type == 2) {  // radial
-            canvas.set_fill_gradient_radial(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->radius * std::max(bounds_.width, bounds_.height),
-                grad_c, grad_p, grad_n);
+            const ResolvedRadial r =
+                resolve_radial(*layer, bounds_.width, bounds_.height);
+            canvas.set_fill_gradient_radial_elliptical(
+                r.cx, r.cy, r.rx, r.ry, grad_c, grad_p, grad_n);
         } else if (layer->type == 3) {  // conic / sweep
             // One call for both spellings: a plain conic spans a full turn, so
             // the repeating entry point resolves to the same shader for it.
@@ -601,9 +659,39 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                 layer->x0 * bounds_.width, layer->y0 * bounds_.height,
                 layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
         } else {  // linear
+            float lx0 = layer->x0, ly0 = layer->y0;
+            float lx1 = layer->x1, ly1 = layer->y1;
+            if (layer->linear_from != BackgroundGradient::LinearFrom::endpoints) {
+                float radians = layer->linear_angle;
+                if (layer->linear_from == BackgroundGradient::LinearFrom::corner) {
+                    // A corner gradient's line is perpendicular to the OTHER
+                    // diagonal, so its end colour lands exactly on the named
+                    // corner — which makes the angle a function of the box's
+                    // aspect ratio and impossible to bake before layout.
+                    //
+                    // The perpendicular to the bottom-left..top-right diagonal
+                    // (w, -h) is (h, w), so the angle off vertical is
+                    // atan2(HEIGHT, width) — the transposed atan2(w, h) is a
+                    // different angle on any box that is not square, and on a
+                    // 160x100 box it misses Chrome's boundary by 48px.
+                    const float a = std::atan2(bounds_.height, bounds_.width);
+                    radians = layer->corner_y < 0.0f
+                                  ? layer->corner_x * a
+                                  : 3.14159265f - layer->corner_x * a;
+                }
+                // The line runs through the centre; its length is the box's
+                // projection onto it, so the end stops sit on the corners.
+                const float w = bounds_.width, h = bounds_.height;
+                const float dx = std::sin(radians), dy = -std::cos(radians);
+                const float len = std::fabs(w * dx) + std::fabs(h * dy);
+                lx0 = (w * 0.5f - dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly0 = (h * 0.5f - dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+                lx1 = (w * 0.5f + dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly1 = (h * 0.5f + dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+            }
             canvas.set_fill_gradient_linear(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->x1 * bounds_.width, layer->y1 * bounds_.height,
+                lx0 * bounds_.width, ly0 * bounds_.height,
+                lx1 * bounds_.width, ly1 * bounds_.height,
                 grad_c, grad_p, grad_n);
         }
         if (use_per_corner) {

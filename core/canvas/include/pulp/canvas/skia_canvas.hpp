@@ -296,6 +296,10 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
+    /// Per-axis radii via a local matrix on the radial shader.
+    void set_fill_gradient_radial_elliptical(
+        float cx, float cy, float rx, float ry,
+        const Color* colors, const float* positions, int count) override;
     /// True two-circle radial gradient via SkShaders::TwoPointConicalGradient.
     void set_fill_gradient_radial_two_circles(
         float x0, float y0, float r0,
