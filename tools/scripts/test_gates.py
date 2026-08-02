@@ -66,6 +66,8 @@ from test_version_bump_intent import (  # noqa: E402,F401
     StrandedDetectorIntentPendingTests,
 )
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401
+from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
+from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 from test_skill_path_map import NoSilentEmptyPatterns  # noqa: E402,F401
 from test_skill_path_map_lint import (  # noqa: E402,F401
     CoClaimRuleTests,
@@ -75,8 +77,6 @@ from test_skill_path_map_lint import (  # noqa: E402,F401
     SchemaRuleTests,
     SubmoduleRuleTests,
 )
-from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
-from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 
 
 # ── Entry ──────────────────────────────────────────────────────────────

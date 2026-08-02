@@ -176,17 +176,32 @@ class SchemaRuleTests(unittest.TestCase):
         )
         self.assertTrue(any("validates nothing" in e for e in errors))
 
-    def test_dangling_schema_pointer_is_an_error(self) -> None:
-        bad = _map(alpha=_entry("core/a/**"))
-        bad["$schema"] = "./skill_path_map.schema.json"
-        errors = lint.check_schema(
-            REPO, bad, SCHEMA_PATH
-        )
-        self.assertEqual(errors, [])  # resolves today
+    def test_canonical_schema_pointer_resolves_today(self) -> None:
+        declared = _map(alpha=_entry("core/a/**"))
+        declared["$schema"] = "./skill_path_map.schema.json"
+        self.assertEqual(lint.check_schema(REPO, declared, SCHEMA_PATH), [])
 
-        gone = dict(bad, **{"$schema": "./no-such-schema.json"})
-        # A pointer the schema's own const rejects AND that resolves nowhere.
-        self.assertTrue(lint.check_schema(REPO, gone, SCHEMA_PATH))
+    def test_dangling_schema_pointer_is_an_error(self) -> None:
+        """The original defect: canonical pointer, no such file.
+
+        Asserted through a repo root where the schema is absent, so the
+        `$schema` const still passes and only the existence check can be
+        what rejects it.
+        """
+        declared = _map(alpha=_entry("core/a/**"))
+        declared["$schema"] = "./skill_path_map.schema.json"
+        errors = lint.check_schema(
+            Path("/nonexistent-repo"), declared, SCHEMA_PATH
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("resolves to a file that does not exist", errors[0])
+
+    def test_absent_schema_file_is_reported_before_anything_else(self) -> None:
+        errors = lint.check_schema(
+            REPO, _map(alpha=_entry("core/a/**")), REPO / "no-such-schema.json"
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("validates nothing", errors[0])
 
 
 class SubmoduleRuleTests(unittest.TestCase):

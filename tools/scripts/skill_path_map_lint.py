@@ -74,19 +74,19 @@ ALL_RULES = ("schema", "submodule", "empty", "co-claim")
 # ── Repo state ──────────────────────────────────────────────────────────
 
 
-def index_entries(repo: Path, rev: str | None = None) -> tuple[list[str], list[str]]:
-    """Return ``(tracked_files, submodule_paths)`` for ``rev`` (or the index).
+def index_entries(repo: Path) -> tuple[list[str], list[str]]:
+    """Return ``(tracked_files, submodule_paths)`` from the git index.
 
     Submodules appear in the index with mode 160000 and are *excluded*
     from the tracked-file list — no path beneath them is ever tracked
     here, which is what makes a pattern rooted in one unreachable.
     """
-    if rev:
-        cmd = ["git", "ls-tree", "-r", "--full-tree", rev]
-    else:
-        cmd = ["git", "ls-files", "--stage"]
     out = subprocess.run(
-        cmd, cwd=repo, text=True, capture_output=True, check=False
+        ["git", "ls-files", "--stage"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
     )
     if out.returncode != 0:
         return [], []
@@ -382,7 +382,8 @@ def main(argv: list[str]) -> int:
         print("skill-path-map lint: ok")
         return 0
 
-    print(f"skill-path-map lint FAILED ({len(errors)} violation(s)):")
+    verdict = "FAILED" if args.mode == "report" else "(advisory)"
+    print(f"skill-path-map lint {verdict} — {len(errors)} violation(s):")
     for err in errors:
         print(f"  {err}")
     return 0 if args.mode == "hint" else 1
