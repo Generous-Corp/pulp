@@ -1052,6 +1052,44 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
 
 
+class TrustedReleaseControlPlaneRouting(unittest.TestCase):
+    """Only trusted release resolver jobs may reuse persistent Linux capacity."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.release_text = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.sign_text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+        cls.release = yaml.safe_load(cls.release_text)
+        cls.sign = yaml.safe_load(cls.sign_text)
+
+    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+        for workflow in (self.release, self.sign):
+            with self.subTest(workflow=workflow["name"]):
+                runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
+                dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
+                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
+                fallback = runs_on.index('"ubuntu-latest"')
+                self.assertLess(dedicated, existing)
+                self.assertLess(existing, fallback)
+
+    def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
+        for text in (self.release_text, self.sign_text):
+            with self.subTest(workflow=text.splitlines()[0]):
+                trigger_block = text.split("\n# Never cancel", 1)[0]
+                self.assertNotIn("pull_request:", trigger_block)
+                self.assertNotIn("merge_group:", trigger_block)
+
+    def test_release_resolver_checks_out_trusted_main_control_code(self) -> None:
+        steps = self.release["jobs"]["resolve-macos-runner"]["steps"]
+        checkouts = [step for step in steps if "uses" in step]
+        self.assertGreaterEqual(len(checkouts), 1)
+        for checkout in checkouts:
+            self.assertEqual(
+                checkout["with"]["ref"],
+                "${{ github.event.repository.default_branch }}",
+            )
+
+
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
     """sign-and-release.yml must be structurally incapable of gating a release.
 
