@@ -44,6 +44,11 @@ struct PaintedTreeCounts {
     /// `capture_fallback_reason` naming the construct that refused, so the
     /// residual is a list rather than a total.
     int svg_refused = 0;
+    /// Of those, the ones refused because the CAPTURE carries no SVG paint —
+    /// a stale snapshot, not a property of the design. Counted separately
+    /// because it is the only SVG refusal a caller can fix, and the fix is
+    /// "capture again", which nothing about the design tells them.
+    int svg_refused_stale_capture = 0;
     /// Vector nodes emitted from those shape trees. Counted separately from
     /// `native` so "the panel draws more nodes" cannot be read as "the panel
     /// draws more of the design" when the extra nodes are all one icon.

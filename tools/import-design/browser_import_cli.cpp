@@ -640,6 +640,10 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                           : "")
                   << "\n";
         std::cout << "Semantic report → semantic-report.json\n";
+        // Before the visual-contract line, because a warning that a whole
+        // class of content was not drawn changes what that contract means.
+        for (const auto& warning : captured->warnings)
+            std::cout << "Warning: " << warning << "\n";
         std::cout
             << "Visual contract: pixel-exact default frame; interactions are "
                "evidence-only and require a runtime bridge.\n";

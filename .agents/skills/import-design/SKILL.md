@@ -5552,6 +5552,26 @@ before that refuses with `capture_fallback_reason: svg-paint-unavailable`
 rather than defaulting** — see the next trap for why defaulting is worse than
 refusing.
 
+**A design that lowers ZERO vector nodes is almost always a stale CAPTURE, not
+a code failure.** Measured: forge's snapshot has 18 `<svg>` and 38 `<path>`, all
+of them with layout objects and clean paint (no transform, no `url()`, no
+dashes). Lowered from a capture taken WITH the paint properties it produces
+18/18 icons and 40 vector nodes; strip the seven paint columns from that exact
+same snapshot and it produces 0 vector nodes and 18
+`svg-paint-unavailable` refusals. The pre-extension protocol collected **61**
+properties and the current one collects **68** — `len(computedStyleNames)` in
+`dom-snapshot.json` is the fastest way to tell which one you are holding. The
+importer now prints a `Warning: capture predates the SVG paint protocol …` line
+naming the count and the action, and `BrowserCaptureIrResult::warnings` carries
+it for any other caller. **Re-capture before debugging the lowering.**
+
+Two things this rules out, both checked rather than assumed: an icon `<svg>`
+with no background of its own IS in the painted set (every one of forge's 18 has
+a layout object, so sourcing roots from `painted_nodes()` is sound), and the
+lowering is a **pixel-level no-op on a stale capture** — the composite is
+byte-identical to the pre-change one, so a visual difference on an old capture
+came from somewhere else.
+
 **`fill: none` must be STATED, never omitted.** SVG's own default fill is
 opaque black and `SvgPathWidget`'s default matches it, so a lowering that emits
 no `svg_fill` for a stroke-only icon does not leave it unfilled — it fills the

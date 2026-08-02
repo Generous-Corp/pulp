@@ -654,6 +654,8 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 lowered.attributes["capture_fallback_detail"] =
                     svg_subtree.refusal_detail;
             ++counts.svg_refused;
+            if (svg_subtree.refusal == SvgRefusal::paint_unavailable)
+                ++counts.svg_refused_stale_capture;
         } else if (capture_only) {
             paint_class = PaintClass::element_capture_fallback;
             lowered.type = "frame";

@@ -958,6 +958,20 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_svg_lowered", tree.svg_lowered);
         record_if("native_svg_refused", tree.svg_refused);
         record_if("native_svg_shapes", tree.svg_shapes);
+        // A snapshot taken before the capture collected SVG paint holds the
+        // geometry and no colour for it, so every icon in the design falls
+        // back — and a reader sees a panel with no icons and no error, which
+        // is indistinguishable from the bug this lowering exists to fix. The
+        // one refusal a caller can act on gets said out loud, with the action.
+        if (tree.svg_refused_stale_capture > 0) {
+            result.warnings.push_back(
+                "capture predates the SVG paint protocol: " +
+                std::to_string(tree.svg_refused_stale_capture) + " of " +
+                std::to_string(tree.svg_refused + tree.svg_lowered) +
+                " inline <svg> element(s) kept their captured pixels because "
+                "this snapshot carries no resolved fill/stroke. Re-run the "
+                "browser capture to draw them.");
+        }
     }
 
     int styled_controls = 0;
