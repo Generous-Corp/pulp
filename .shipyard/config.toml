@@ -23,6 +23,21 @@ profile   = "solo"
 # validate as advisory GitHub-hosted lanes.
 platforms = ["macos", "linux", "windows"]
 
+# Physical and planned machines that must remain visible even when no runner is
+# registered. Shipyard matches these by label subset, so JIT/ephemeral runner
+# names remain disposable. `active = false` records planned inventory without
+# claiming capacity or raising an availability alert.
+[runner.fleet.expected_host.macpro]
+labels = ["self-hosted", "Linux", "X64", "pulp-host-macpro"]
+min_online = 2
+
+[runner.fleet.expected_host.macmini]
+labels = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
+
+[runner.fleet.expected_host.macbook_air]
+active = false
+labels = ["self-hosted", "Linux", "ARM64", "pulp-host-macbook-air"]
+
 # ── Gate script paths (Shipyard v0.19.1+ path discovery) ───────────────────
 # Pulp keeps the skill-sync, version-bump, and versioning-config files
 # under tools/scripts/. Shipyard v0.19.1+ auto-discovers this layout, but
