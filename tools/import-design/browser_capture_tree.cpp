@@ -568,6 +568,26 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text);
 
+        // A run whose FIRST line box starts to the right of its own block is
+        // continuing a line an earlier inline sibling began. Its box is the
+        // union of lines it shares with those siblings, so wrapping it inside
+        // that box lays its first line where the sibling's text already is and
+        // the two overprint. One Label cannot express "start here, then return
+        // to the left edge" — that needs per-line-box lowering.
+        //
+        // Until then, refuse to wrap exactly those runs rather than wrap them
+        // wrongly: they keep the single-line behaviour they had, which is
+        // incomplete but not overlapping. On the delay capture this is 8 of 277
+        // runs; the other 26 wrapped runs are unaffected.
+        if (is_text) {
+            const auto line_boxes =
+                index.text_boxes_for_layout(node.layout_index);
+            if (line_boxes.size() > 1 &&
+                line_boxes.front().bounds.left > box.left + 1.0) {
+                lowered.style.white_space = "nowrap";
+            }
+        }
+
         PaintClass paint_class = PaintClass::native;
         if (capture_only) {
             paint_class = PaintClass::element_capture_fallback;

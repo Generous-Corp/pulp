@@ -5505,3 +5505,88 @@ fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome an
 Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
+
+## Text: the capture knows more than the IR reads
+
+Three things about captured text that are invisible until you go looking, all
+found while chasing what looked like a wrapping bug and was not one.
+
+**Bundled faces were invisible to the paint path.** `fill_text` resolves an
+`SkFont` through `FontResolver` — correctly, bundled faces and all — and then
+uses it only for a coverage check before painting through SkParagraph, which
+re-resolves from a `FontCollection`. `text_font_context.cpp` bridged the bundled
+faces into that collection ONLY when the platform had no font DB (browser
+builds), so on macOS every family resolved through CoreText and every run in an
+imported panel painted in one system fallback while measuring correctly. Symptom:
+four Labels with four different families measure 253/253/262/317 and paint at an
+identical ink width. If you are chasing "our text is the wrong face", check what
+`fill_text` actually draws with, not what `make_font` returns.
+
+**`font-family` is a request; `platform-fonts.json` is the answer.** The capture
+now writes a sidecar (`tools/import-design/browser_capture/platform_fonts.mjs`,
+via `CSS.getPlatformFontsForNode`) recording, per text run, the face Blink
+actually shaped it with — `family_name`, `post_script_name`, `is_custom_font`,
+and `glyph_count`. Read it before concluding anything about text width. On
+`delay`, 85.6% of glyphs are `Jost-Regular` and 13.9% `JetBrainsMono-Regular`,
+both `is_custom_font: true` — the design carries its own webfonts as inline
+base64 keyed by UUID, which page JS rewires into the `url()`s, so a `@font-face`
+whose `url()` looks like a dangling opaque token is usually **not** dangling.
+Two faces appear at single-digit glyph counts (`Menlo-Regular`, `LucidaGrande`):
+that is Blink's per-cluster fallback for characters the primary face lacks, and
+`glyph_count` is the only thing that makes it visible.
+
+Do not ask that CDP method for a whole-document census. `#document` and `<html>`
+both answer with an **empty list** rather than an error on a page full of text,
+and `<body>` answers on some pages and not others — an empty census is
+indistinguishable from "this page used no fonts". Sum the per-run answers.
+
+**A run's `layout.bounds` is the union of its line boxes, not a line.** Chrome
+returns per-line boxes in `documents[0].textBoxes` (`layoutIndex`, `bounds`,
+`start`, `length`) whenever the capture requested `includeDOMRects`, which it
+always has; `CapturedStyleIndex::text_boxes_for_layout()` reads them. For an
+unwrapped run the box and the bounds coincide **exactly**, so a fixture whose
+runs all fit on one line cannot tell a correct reader from one that returns the
+bounds — `test/fixtures/browser-capture-text-wrap` exists to have a run that
+breaks five ways. A box can also start to the right of its own block, where the
+run continues a line an earlier inline sibling began; no per-node Label expresses
+that.
+
+**Comparing a measured advance to a `textBoxes` width has a systematic residual.**
+Pulp measures ~0.65% wider than Chrome's box on the same string in the same
+face at the same size. It is not segmentation (summed segments equal a single
+whole-string advance to four decimals) and not ink-vs-advance (Skia's ink extent
+is *wider* than its advance, while Chrome is narrower than both). Bound text
+parity **relatively**, and size the bound against what it must distinguish:
+wrong weight in the right face costs ~2%, the wrong face entirely ~10%.
+
+## `is_absent` swallows `normal`, and `white-space: normal` means "wrap"
+
+`browser_capture_styles.cpp`'s `is_absent()` treats `normal` as "this property
+contributes nothing", which is right for `font-style` and `background-blend-mode`
+and wrong for `white-space`: `normal` is the value that turns wrapping ON.
+Swept against a whole capture, `white-space` is the ONLY property where the
+swallowed keyword is meaningful — `text-align: start`, `letter-spacing: normal`
+and `line-height: normal` are all genuine defaults and are correctly dropped,
+so do not "fix" them.
+Chrome serializes it on every wrapping node, `apply_computed_styles` drops it,
+`style.white_space` stays `nullopt`, and so `apply_label_style`'s
+
+```cpp
+if (style.white_space && lower_copy(*style.white_space) != "nowrap")
+    label.set_multi_line(true);
+```
+
+never fires — on `delay`, for all 987 nodes. `Label`'s soft-wrap path is live
+and correct; nothing reaches it, so every paragraph draws its first line and
+drops the rest. Grepping the IR for `"nowrap"` finds none and reads as "nothing
+is set to nowrap, so wrapping should work" — the property is **absent**, not
+permissive. When a captured property seems not to be applied, check whether its value is one
+of `is_absent`'s keywords before looking at the consumer — and assert the
+lowered node CARRIES the property, because an absent field and a permissive one
+render identically and no pixel test can tell them apart.
+
+Enabling wrap then exposes the run that starts mid-line. A run whose first
+`textBoxes` entry begins right of its own block is continuing a line an earlier
+inline sibling began; wrapping it inside its own (union) box lays its first line
+on top of the sibling's text. The lowering marks those `nowrap` until per-line-box
+lowering exists — 8 of 277 runs on `delay`, 13.9% of its text-box area.
