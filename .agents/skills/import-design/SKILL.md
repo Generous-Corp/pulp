@@ -5506,173 +5506,65 @@ Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects famil
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
 
-## A border is drawn INSIDE its box, and its four sides are independent
+## Area weighting cannot see the defects people notice
 
-Rendering a captured panel from its own nodes put borders in the second-largest
-failing class on the design that otherwise works (21.0% of `delay`'s failing
-area). Four separate defects, three of which paint the wrong thing rather than
-nothing, all measured against Chrome's own pixels at dpr 2:
+`score_native_panel.py` reports an area-weighted failing fraction, and the
+defects that make a panel look wrong are small. Measured, not argued: a gradient
+fix moved delay **0.1697 → 0.0919 (−46%)** with no visible change, while a
+person looking at the same renders found five defects the score ranked as noise
+— a button's triangle icon entirely absent, a square icon 2px off-centre in its
+ring, every knob's pointer line gone, every selected state's accent fill turned
+grey, a teal underline dropped from the active tab while boxes were invented
+around the tabs next to it, and a paragraph running past its card. A missing
+knob pointer is a few hundred px on a 16M px panel. **Never read a falling area
+score as a fidelity improvement, and never read a low one as a good panel.**
 
-- **The stroke was centred on the box outline, so half of every border landed
-  OUTSIDE the element.** CSS grows a border inward from the border box, which is
-  the box Chrome reports. Measured: Chrome puts a 4px border at device columns
-  0..7 and 232..239 of a 240-wide box; a centred stroke put it at −4..3 and
-  236..243. **Stroke the rect inset by half the width**, with the corner radius
-  reduced by the same half, and it lands where the browser puts it.
-- **A border on one edge painted nothing.** `View` stored per-side widths and
-  colours, `yoga_layout.cpp` read them for layout, and no paint site read them at
-  all — `has_border_sides()` had exactly two callers, neither of them paint. A
-  one-edge divider is the commonest border in a real panel: 27 of `delay`'s 67
-  bordered nodes are per-side only.
-- **Four edge colours at one width painted a BLACK frame.** The uniform colour
-  slot is never written in that case and `BorderSide::color` default-constructs
-  to opaque black, so the box gained ink the design never had. Paint has to be
-  able to tell "colour never set" from "colour set to black" — that needs a
-  per-edge colour `set` flag, separate from the width flag, because CSS treats
-  the longhands independently.
-- **Four edge widths at one colour painted nothing**, the mirror case: the
-  uniform width slot stays 0, so `border_width_ > 0` short-circuits.
+`tools/import-validation/check_panel_presence.py` asks the questions area
+weighting cannot, over the same capture and render:
 
-**Chrome's dash cadence is 2w on / 1w off for `dashed` and 1w / 1w for
-`dotted`** — measured at 12/6 and 6/6 device px for a 3px border at dpr 2. Blink
-additionally stretches the pattern so a whole number of dashes fits each edge
-(its runs read 12,11,12,12 with gaps 6,6,6,5); a single `SkDashPathEffect`
-cannot, so **assert the cadence and never the phase.**
+```bash
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --json-out presence.json
+# no-regression use: fail only on findings that are NEW
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --baseline presence.json
+```
 
-**Opposite sides that overflow the box: the NEAR side wins the remainder.**
-`border-left: 50px` with `border-right: 50px` on a 60px-wide box paints 50 on
-the left and 10 on the right in Chrome — not 30/30. Without that clamp the inset
-stroke below is handed a NEGATIVE rectangle, which no backend answers sensibly.
+Five checks — ink present per node, ink absent per node, colour present, text
+contained, text runs — each a yes/no question whose answer does not shrink as
+the panel grows. On the four current designs it names every one of those six
+defects, at the node.
 
-**Four abutting fills are not one shape.** Two antialiased edges meeting along a
-mitre composite to ~75% coverage, so a seam of background shows through the
-diagonal — four corner pixels on a hairline, a full diagonal once the sides are
-thick. Where the four colours agree, draw ONE ring (the border box with the
-padding box knocked out, even-odd) instead of four trapezoids; a ring has no
-interior edge to seam.
+Things that cost time here, all of them found by measuring:
 
-Mixed sides cannot be one stroke. Each side is filled as the trapezoid between
-its outer edge and the padding box, which is the 45° mitre a UA draws. A radius
-is applied as a clip on that path rather than followed per side, so the outer arc
-is right and the inner corner is mitred straight.
-
-**The capture records all four `border-*-style`; the C++ reader took only
-`border-top-style`.** So `border-left: 1px dashed` with no top border recorded no
-style at all and painted solid — the JS-side fix for this landed without the
-reader fix, and the two look identical from either side alone. Take the style
-from an edge that actually has width.
-
-**Build the border fixture rather than reading a real design's score.** Borders
-were 21% of `delay`'s failing area before the fix and 20.6% after, which looks
-like the fix did nothing. It is attribution, not cause: `feature_class` charges a
-node's whole failing area to its most suspect property, and `delay`'s wrapped
-paragraphs bleed across bordered boxes. On a Chrome-captured fixture of 14
-bordered boxes and nothing else, the same fix moves area-weighted failing from
-**0.0829 to 0.0037** and failing border nodes from 13/14 to 6/14. **A
-single-feature fixture is the only place a single-feature fix is measurable.**
-
-## An `element_capture_fallback` node paints NOTHING, and a count cannot rank it
-
-Lowering classifies a node `element_capture_fallback` when its pixels cannot come
-from style — a `<canvas>`, an `<svg>`, a non-axis-preserving `transform`. Nothing
-attaches a raster to that node, so the frame it emits paints only whatever
-background the element's own styles carry: for a `<canvas>`, nothing at all. The
-classification is honest and the render is empty, and the census counted the node
-among the lowered — the hole was real and silent at the same time.
-
-**Report the AREA, not the count.** Measured on the corpus:
-
-| design | fallback nodes | tags | unpainted area / root |
-|---|---|---|---|
-| forge | 18 | all `<svg>` | 0.0041 |
-| forge-modular | 16 | all `<svg>` | 0.0032 |
-| delay | 4 | rotated `<div>` | 0.0106 |
-| spectr | 7 | 2 `<canvas>`, 5 `<svg>` | **2.0013** |
-
-Eighteen nodes are 0.4% of a panel; two are the whole panel twice over. The
-count ranks them exactly backwards. `native_nodes_unpainted_area_fraction` on the
-IR root and `unpainted="true"` on each node are the honest statement.
-
-**`<svg>` is the dominant fallback cause, not `<canvas>`** — 39 of the 45
-fallback nodes across the four designs. That is a *paintable* format Pulp already
-rasterises via `SkSVGDOM`, so most of this list is lowering work, not a hole.
-
-**A full-panel `<canvas>` is a generation-time problem, not a rendering one.**
-SPECTR's two canvases are 1280×800 each. A per-element raster there is not a
-small escape hatch; it is the screen-sized photograph the native path exists to
-remove, reintroduced under another name. The area fraction is what makes that
-decidable: **bound it, and refuse a design whose unpainted area crosses the
-bound** rather than quietly rasterising a whole panel.
-
-## `cursor: pointer` turned every clickable thing into a grey box
-
-The single largest visual defect on a captured panel was not a border bug at
-all, and it looked like five unrelated ones: tabs gaining outlines they never
-had, a teal underline vanishing, `STEREO` / `TAPE` / a milestone chip / a
-"Signal on" button all losing their accent fill and rendering as identical grey
-boxes, and four sidebar nav items outlined where Chrome outlines only the
-active one. **Every selected state in the UI was invisible** — a semantic loss,
-not a cosmetic one, at an area-weighted score of 0.10.
-
-One cause: `parse_design_ir_json` runs `promote_interactive_frames`, which
-rewrites any frame with `cursor: pointer` to `type: "button"`. The materializer
-then builds a real widget, and the widget paints its **default chrome** — a
-grey rounded fill — **over** the captured appearance rather than alongside it.
-
-A web design puts `cursor: pointer` on *every* clickable thing — tabs, cards,
-nav items, mode switches — and the browser draws none of them any differently
-for it. **It is a hover affordance, not ink.** Inferring a widget from it is
-right for the authoring lanes (v0 / Figma / Stitch turn a clickable div into a
-control) and wrong for the capture lane, whose entire contract is that the
-panel is reproduced rather than re-designed.
-
-The gate is the `paint_class` attribute, which `lower_painted_tree` stamps on
-every node it lowers: **a node that carries it keeps its own appearance and is
-never promoted**, on any signal including a declared `role="button"` — what
-breaks the panel is default chrome overpainting, whatever prompted it.
-Interactivity on that lane comes from the semantic report, which names its
-controls and lowers them separately.
-
-**Two lessons worth carrying:**
-
-- **Diagnose with a minimal IR, not by reading the render.** Four hand-written
-  nodes — styleless, `cursor`, `color`, `zIndex`, `fontFamily`, a layout block —
-  through `pulp-design-ir-observe` isolated the trigger in one render. Reading
-  the paint path for an invented border would never have found it, because the
-  border code was innocent.
-- **Check the IR before blaming the renderer, and the renderer before blaming
-  the IR.** The IR for those nodes was perfect — `borderWidth: 0`, no fill. The
-  defect was between them. Two plausible mechanisms had been proposed (a border
-  shorthand painting at zero width; accent colours failing to parse) and both
-  were wrong; a five-minute bisect beat both guesses.
-
-## A bordered parent shifts every descendant, and it is a double-count
-
-An absolutely positioned child is placed against its parent's **padding box** —
-that is the containing block — so a layout engine adds the parent's border width
-to every child offset. Chrome's captured boxes already include it once, because
-they are measured from the page origin, so an offset taken from the parent's
-BORDER box gets it counted twice. Every descendant of a bordered node lands one
-border-width down and to the right of where the browser put it.
-
-On a real panel that reads as **a card's fill sliding out from under its own
-frame**: a rounded outline with a band of the card's own background showing
-between it and the content. It is a geometry bug, not a paint bug, so no amount
-of looking at the border code finds it — `lower_painted_tree` must subtract the
-parent's resolved border widths when it computes a child's parent-relative
-offset, mirroring `apply_border_widths`'s per-edge-wins-over-uniform rule.
-
-**A one-pixel misalignment is invisible in a score and obvious to a person.**
-Fixing it moved `delay` 0.0838 → 0.0665 and `forge` 0.1407 → 0.1346, but what
-made it findable was cropping a card corner at 6x and reading the pixel runs
-either side of the border: Chrome plate/border/border/fill with no gap, ours
-plate/border/border/**background/background**/fill.
-
-**Still open: a child is not clipped to its ancestor's `border-radius`.** The
-per-node clip that whole-tree lowering carries is `IRStyle::ClipRect` — a plain
-rectangle — so a card's rounded corner cuts nothing and the fill's square corner
-covers it. Closing it means radii on `ClipRect`, the `CssClipChain` tracking
-which ancestor contributed each edge AND its corner radii, a rounded variant of
-`View::set_ancestor_clip_rect`, the paint-time clip, and the JSON round-trip.
-That is a slice, not a patch — do not half-land it, because a clip model that is
-rounded on some paths and rectangular on others is worse than an honest square.
+- **Run it against the reference as its own render first.** That control must
+  report zero on every design. It is the only thing that separates "this check
+  found a defect" from "this check fires on everything", and it caught two
+  contamination bugs during development.
+- **Ink is measured against each side's OWN modal colour**, which makes the ink
+  checks deliberately blind to colour. A filled chip going grey changes no marks
+  at all — both sides are a flat rectangle with a label on it — so the per-node
+  colour check is what catches selected states going dead, not the ink checks.
+- **A per-node colour check and a panel-wide one catch different things.** The
+  teal underline vanished panel-wide on forge (ratio 0.004); delay's accent
+  survived on sliders while every toggle lost it, so only the per-node question
+  sees that one.
+- **Containment must be asked against a container with room to spare**, never
+  against the run's own box or the reference's own extent. A text node's box is
+  a tight fit around Chrome's glyphs, so a substituted face makes every run on
+  the panel "overflow" — 154 findings on delay, one root cause, no signal. Asked
+  against the nearest ancestor with slack it drops to the runs that genuinely
+  stopped fitting.
+- **Restrict text measurements to pixels the run or its ancestors own.** A tab
+  strip 2px lower in our render read as a caption 80px below it overflowing its
+  card, because the measuring window caught the tab's own text in the same
+  colour.
+- **A blank render is flagged first, panel-wide, before any per-node verdict.**
+  SPECTR renders zero marks and every per-node check fires; saying that once
+  ("the panel is substantially blank") beats saying it 56 times.
+- **What it still cannot see**: a mark present but the wrong shape or a couple
+  of px out of place; a missing glyph inside a gradient tile, where the
+  gradient's own variation counts as ink (forge's logo mark is missed for
+  exactly this reason); and text clipped inside a box whose ink still ends short
+  of the clip edge. Nodes it cannot measure are counted under `unmeasurable` and
+  are never folded into the passing count.

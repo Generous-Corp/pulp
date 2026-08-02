@@ -415,24 +415,6 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 
 ---
 
-## Reporting to the user — absolute paths, and verified claims
-
-**Every path you show the user is a complete absolute path.** Never abbreviate
-with `…/`, never a bare repo-relative path in prose, never a path that assumes
-the reader shares your working directory. They are reading in a terminal or
-opening the file in another app; an elided prefix cannot be clicked or pasted.
-Repeat the full prefix for every entry even when several share one, and even in
-a table. The only exception is a `file:line` code citation, where the
-repo-relative form is the established convention.
-
-**Verify an outcome before reporting it, not the artifact.** "The tests pass"
-and "the build is green" are not evidence that the change does what it claims.
-For anything with a visible or measurable result — a render, a score, a fixed
-defect — check the result itself: render it and look, run the measurement, open
-the image. A task marked complete is a claim, not a fact; treat a subagent's
-report the same way. This repo has repeatedly shipped instruments that could not
-fail in the relevant direction, and every one of them reported success.
-
 ## Repo Standards
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.
@@ -840,8 +822,8 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
-- Get the expected numbers for a CSS gradient geometry test from Chromium rather than from your own formula. → `tools/import-validation/chrome_gradient_oracle.py`
-  - ⚠ **Cannot see:** Exists because a fixture derived from the same formula as the implementation agrees with it BY CONSTRUCTION, including when both are wrong. Chromium is an independent implementation of the same spec, so it can disagree, which is the only reason those tests can fail for a real cause. Cases use hard-edged stops so a scanline reads the boundary exactly, and a 160x100 box on purpose: a square box makes an ellipse a circle and a 45-degree angle its own reflection, hiding every defect worth testing.
+- Catch a feature that vanished, a mark that was invented, an accent that went grey, or text that stopped fitting — the defects an area score ranks as noise. → `tools/import-validation/check_panel_presence.py`
+  - ⚠ **Cannot see:** Presence, not fidelity — a mark that is present but the wrong shape, weight or position by less than a couple of px passes, and a missing mark inside a gradient can hide in the gradient's own variation. Nodes it cannot measure are reported under `unmeasurable`, never counted as passing. It complements score-native-panel; neither replaces the other.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
@@ -862,8 +844,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
-- Measure how much of a natively-rendered panel disagrees with Chrome, attributed per node and per drawing feature. → `tools/import-validation/score_native_panel.py`
-  - ⚠ **Cannot see:** Two traps live in the METRIC, not the code. (1) A blank render scores WELL against a dark design: an empty SPECTR render scored 12.45% failing while the correct one scored 10.99%, because black matches black and the denominator comes from the capture side, so it never notices the render contributed no ink. ALWAYS read coverage beside the failing fraction. (2) It is AREA-weighted while perception is salience-weighted: a gradient fix moved one design 46% with no visible change, while a missing icon or a lost accent fill costs a fraction of a percent. Per-node scores are not usable yet (worst-node 1.0000, ~0% of ink nodes passing everywhere). Never inherit tau from the identity-blit calibration control, which contains no native rasterisation.
+- Score a natively rendered panel against the Chromium capture that is its oracle, per node. → `tools/import-validation/score_native_panel.py`
+  - ⚠ **Cannot see:** Area-weighted. It cannot see a small feature disappear — a missing knob pointer or an absent icon is a few hundred px on a panel of millions, and a change with no visible effect moved it 46%. Pair it with check-panel-presence, which asks the questions area weighting cannot.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 - Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
