@@ -31,7 +31,23 @@ struct Frame {
     }
 };
 
+// A build with no raw-RGBA producer returns an empty buffer for every probe in
+// this file, whatever the code under test does — so the cases below would all
+// report failure while saying nothing about the behaviour they exist to check.
+// That is what the UBSan lane did: nine reds, one cause, none of them a defect.
+//
+// Skipping is keyed on the BUILD, never on an empty result. A build that can
+// rasterize and produced nothing is a real failure and must stay one; deciding
+// from the result would swallow exactly that regression.
+void skip_without_rasterizer() {
+    if (!raw_rgba_render_available()) {
+        SKIP("no raw-RGBA backend compiled in (needs Skia) — pixel probes "
+             "cannot run in this build");
+    }
+}
+
 Frame shoot(View& root, uint32_t w, uint32_t h) {
+    skip_without_rasterizer();
     Frame f;
     f.px = render_to_rgba(root, w, h, 1.0f, &f.w, &f.h);
     return f;
@@ -193,6 +209,7 @@ TEST_CASE("oklab alpha through the style-decl path, differential",
         js += colour;
         js += "'; document.body.appendChild(d);";
         env.run(js);
+        skip_without_rasterizer();
         Frame f;
         f.px = render_to_rgba(env.root, 40, 40, 1.0f, &f.w, &f.h);
         return f;
@@ -257,4 +274,24 @@ TEST_CASE("legacy HTML lane control: does it emit styles at all",
     walk(ir.root);
     WARN("inline-style control: nodes=" << nodes << " bg=" << bg
          << " shadow=" << shadow << " radius=" << radius);
+}
+
+TEST_CASE("the rasterizer-availability guard agrees with the rasterizer",
+          "[web-compat][computed-paint]") {
+    // The guard above lets every pixel case skip itself, so a guard that
+    // wrongly reported "unavailable" would turn this whole file green without
+    // running any of it — the failure mode a skip introduces. This case never
+    // skips: it asserts the claim matches reality in whichever direction the
+    // build actually is.
+    TestEnvironment env(8, 8);
+    env.run("setBackground('', '#00ff00');");
+    uint32_t w = 0, h = 0;
+    const auto px = render_to_rgba(env.root, 8, 8, 1.0f, &w, &h);
+    if (raw_rgba_render_available()) {
+        INFO("guard says a raw-RGBA backend is compiled in");
+        CHECK_FALSE(px.empty());
+    } else {
+        INFO("guard says no raw-RGBA backend is compiled in");
+        CHECK(px.empty());
+    }
 }

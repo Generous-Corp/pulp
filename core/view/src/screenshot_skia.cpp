@@ -154,6 +154,8 @@ std::vector<uint8_t> render_to_rgba(View& root, uint32_t width, uint32_t height,
                          out_width, out_height);
 }
 
+bool raw_rgba_render_available() { return true; }
+
 }  // namespace pulp::view
 
 #endif  // !defined(__APPLE__) && defined(PULP_HAS_SKIA)

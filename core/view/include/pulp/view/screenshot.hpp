@@ -118,6 +118,20 @@ std::vector<uint8_t> render_to_rgba(
     uint32_t* out_height
 );
 
+// Whether this BUILD has a raw-RGBA producer at all — a property of which
+// backend was compiled in, not of any particular render.
+//
+// A pixel test needs to tell two situations apart that look identical from the
+// outside: a build with no raster backend, where every probe returns an empty
+// buffer no matter what the code under test does, and a build that can
+// rasterize but produced nothing, which is a real defect. Deciding from an
+// empty result cannot separate them, and skipping on an empty result would
+// turn a genuine rasterizer regression into a silently green run.
+//
+// So the question is asked of the build, and a test may skip only when the
+// answer is false. When it is true, an empty buffer stays a failure.
+bool raw_rgba_render_available();
+
 // ── Host-registered screenshot provider (#299) ──────────────────────────
 //
 // Non-Apple platforms don't have a built-in screenshot backend in
