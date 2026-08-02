@@ -137,6 +137,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: score-native-panel
+    path: tools/import-validation/score_native_panel.py
+    category: visual-compare
+    use_when: Localize a native panel's pixel differences from its Chromium capture to the topmost responsible nodes.
+    invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render <render.png> [--tau 0.01] [--tau-area 0.01] [--json-out report.json] [--diff-out diff.png]
+    inputs: A browser-capture directory containing browser.png plus captured geometry and paint order, and a same-size native composite PNG.
+    outputs: Calibration, worst-node, passing-node, area-weighted, masked-control, and unattributed-pixel measurements; optional JSON and failure-mask PNG artifacts.
+    caveat: Requires NumPy and Pillow, refuses size or colour-calibration mismatches, and measures the supplied Chromium capture rather than independently proving that capture authoritative.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: importer-differential-lab
     path: tools/import-validation/importer_differential_lab.py
     category: visual-compare
