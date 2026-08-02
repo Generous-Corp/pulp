@@ -78,6 +78,9 @@ TEST_CASE("sealed recording commands replay a content-hashed take without recapt
     REQUIRE(std::string(sealed->wav_bytes.begin(), sealed->wav_bytes.begin() + 4) == "RIFF");
     REQUIRE(sealed->asset.content_hash.to_hex() ==
             runtime::sha256_hex(sealed->wav_bytes.data(), sealed->wav_bytes.size()));
+    REQUIRE(sealed->asset.locators ==
+            std::vector<AssetLocator>{{AssetLocatorKind::PackageRelative,
+                                       "media/" + sealed->asset.content_hash.to_hex()}});
     REQUIRE(sealed->commands.size() == 2);
     REQUIRE(std::holds_alternative<CreateAsset>(sealed->commands[0]));
     REQUIRE(std::holds_alternative<InsertTakeLane>(sealed->commands[1]));
@@ -199,8 +202,7 @@ TEST_CASE("MIDI capture materialization requires the tempo-map sample rate") {
     config.capture_sample_rate = {48'000, 1};
     auto mismatched_rate = materialize_midi_capture(events, config);
     REQUIRE_FALSE(mismatched_rate);
-    REQUIRE(mismatched_rate.error() ==
-            MidiCaptureMaterializationError::SampleRateMismatch);
+    REQUIRE(mismatched_rate.error() == MidiCaptureMaterializationError::SampleRateMismatch);
 
     config.capture_sample_rate = {0, 1};
     auto invalid_rate = materialize_midi_capture(events, config);

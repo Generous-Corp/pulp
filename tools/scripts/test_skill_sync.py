@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 import unittest
 
-from gate_test_support import GateFixtureTestCase, _git
+from gate_test_support import GateFixtureTestCase, REPO_ROOT, _git
 
 
 class SkillSyncTests(GateFixtureTestCase):
@@ -140,6 +140,121 @@ class SkillSyncTests(GateFixtureTestCase):
             self.assertEqual(sys.path[0], scripts)
         finally:
             sys.path[:] = original_path
+
+
+class RealSkillPathMapOwnershipTests(unittest.TestCase):
+    """Ownership boundaries in the shipped ``skill_path_map.json``.
+
+    These run against the real map, not a fixture: the thing under test
+    is which skill a real repo path resolves to, and a synthetic map
+    cannot express that. Resolution goes through the production
+    ``compute_findings`` so the assertions and the gate can never
+    disagree.
+
+    A skill claiming a subsystem it does not document makes the gate
+    fire on changes it has nothing to say about. That is not merely
+    friction: it teaches contributors to reach for
+    ``Skill-Update: skip`` by reflex, and that reflex is how a
+    genuinely missed skill update gets waved through. So every claim
+    here is asserted two-sided — the skill must NOT fire on a
+    subsystem-internal change, and must STILL fire on the surface it
+    genuinely owns.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        scripts = str(REPO_ROOT / "tools" / "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        cls.ssc = __import__("skill_sync_check")
+        cls.skill_map = cls.ssc.load_skill_map(
+            REPO_ROOT / "tools" / "scripts" / "skill_path_map.json"
+        )
+
+    def owners(self, path: str) -> set[str]:
+        findings = self.ssc.compute_findings(
+            changed=[path],
+            skill_map=self.skill_map,
+            skills_dir=REPO_ROOT / ".agents" / "skills",
+            repo=REPO_ROOT,
+            bypasses={},
+        )
+        return {f.skill for f in findings}
+
+    def assert_tracked(self, path: str) -> None:
+        self.assertTrue(
+            (REPO_ROOT / path).exists(),
+            msg=f"{path} is not in the tree — this test asserts on a real "
+                "repo path; update it to the path the file moved to.",
+        )
+
+    # ── Side 1: engine internals must NOT demand web-plugins ──────────
+
+    def test_engine_internal_change_does_not_demand_web_plugins(self) -> None:
+        """timebase / timeline / playback own their own internals.
+
+        ``web-plugins`` documents the browser ABI lanes. An edit to an
+        existing engine translation unit or header changes nothing it
+        teaches, so it must not pull ``web-plugins`` into the gate.
+        """
+        cases = {
+            "core/timeline/src/model.cpp": "timeline",
+            "core/timeline/include/pulp/timeline/model.hpp": "timeline",
+            "core/playback/src/tempo_sync.cpp": "playback",
+            "core/timebase/src/compiled_tempo_map.cpp": "timebase",
+        }
+        for path, expected_owner in cases.items():
+            with self.subTest(path=path):
+                self.assert_tracked(path)
+                owners = self.owners(path)
+                self.assertIn(
+                    expected_owner, owners,
+                    msg=f"{path} lost its own subsystem skill: {sorted(owners)}",
+                )
+                self.assertNotIn(
+                    "web-plugins", owners,
+                    msg=f"{path} has no web surface, but web-plugins claims "
+                        f"it: {sorted(owners)}",
+                )
+
+    # ── Side 2: web surfaces must STILL demand web-plugins ────────────
+
+    def test_web_facing_change_still_demands_web_plugins(self) -> None:
+        """The narrowing is a narrowing, not a deletion.
+
+        Both `Pulp*Sources.cmake` files live *inside* the engine trees
+        and are the shared source lists both web ABI lanes include —
+        adding or splitting an engine TU edits them, and that is the
+        change ``web-plugins`` has guidance about. They must still fire,
+        alongside the plainly web-facing surfaces.
+        """
+        for path in (
+            "core/timeline/PulpTimelineSources.cmake",
+            "core/playback/PulpPlaybackSources.cmake",
+            "tools/cmake/PulpWam.cmake",
+            "tools/cmake/PulpWclap.cmake",
+            "core/view/platform/web/window_host_web.cpp",
+            ".github/workflows/web-plugins.yml",
+        ):
+            with self.subTest(path=path):
+                self.assert_tracked(path)
+                self.assertIn(
+                    "web-plugins", self.owners(path),
+                    msg=f"{path} is web-facing but no longer demands a "
+                        "web-plugins SKILL.md update — the claim was "
+                        "deleted rather than narrowed.",
+                )
+
+    def test_engine_source_closure_files_keep_both_owners(self) -> None:
+        """The closure files are genuinely dual-owned, not reassigned."""
+        self.assertEqual(
+            self.owners("core/timeline/PulpTimelineSources.cmake"),
+            {"timeline", "web-plugins"},
+        )
+        self.assertEqual(
+            self.owners("core/playback/PulpPlaybackSources.cmake"),
+            {"playback", "web-plugins"},
+        )
 
 
 if __name__ == "__main__":

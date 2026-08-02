@@ -111,6 +111,31 @@ Skill-Update: skip skill=<name> reason="mechanical rename, no new lesson"
 
 The script's self-check also fails if any directory under `.agents/skills/` lacks an entry in the map — the map is deliberately explicit so it's reviewed alongside skill changes.
 
+### `skill_path_map_lint.py`
+
+Checks the map itself. The gate above is only as good as its rules, and a
+rule that matches nothing does not report a problem — it reports nothing,
+which is indistinguishable from a clean run. Runs from `gates.sh`, the
+pre-push hook, and the `version-skill-check` workflow; pure stdlib and
+sub-second.
+
+| Rule | Scope | What it rejects | Escape hatch |
+|------|-------|-----------------|--------------|
+| `schema` | whole-tree | The map violating `skill_path_map.schema.json`, or that file being absent. Catches an entry written as a bare array (parses to zero patterns), an unknown key, a malformed pattern, a placeholder annotation. | none |
+| `submodule` | whole-tree | A pattern rooted inside a git submodule. The superproject's diff carries the `planning` gitlink, never a path beneath it, so such a pattern cannot fire for any commit. | none — no annotation makes it reachable |
+| `empty` | whole-tree | A pattern matching no tracked file. Whole-tree because the usual cause is the tree moving out from under a pattern nobody edited. | `_doc.empty-ok`, restricted to `external/` SDK paths and to entries claiming no paths at all |
+| `co-claim` | diff-scoped | *Newly* claiming an entire `<root>/<sub>/**` subsystem another skill already claims. Every edit under it would then demand several SKILL.md updates, which trains reflexive `Skill-Update: skip` trailers. | `_doc.scope` on the entry, saying why |
+
+The schema is validated by `json_schema_lite.py`, a small stdlib
+validator for the JSON Schema subset Pulp's config schemas use. A keyword
+it does not implement raises rather than being skipped, so a schema
+author cannot write a constraint that is silently never checked.
+
+Fixture and real-map tests live in `tools/scripts/test_skill_path_map_lint.py`
+and `tools/scripts/test_skill_path_map.py`, both imported by
+`tools/scripts/test_gates.py` — the module CI's "Gate-script fixture tests"
+step runs. A `TestCase` not imported there runs nowhere.
+
 ---
 
 ## Pre-push hook

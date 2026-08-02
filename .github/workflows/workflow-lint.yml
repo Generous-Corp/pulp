@@ -25,6 +25,8 @@ on:
       - 'tools/scripts/resolve_release_runners.py'
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
+      - 'tools/scripts/resolve_linux_route.py'
+      - 'tools/scripts/test_resolve_linux_route.py'
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
@@ -58,6 +60,8 @@ on:
       - 'tools/scripts/resolve_release_runners.py'
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
+      - 'tools/scripts/resolve_linux_route.py'
+      - 'tools/scripts/test_resolve_linux_route.py'
       - 'tools/scripts/test_windows_runner_policy.py'
       - 'tools/scripts/release_artifact_contents.py'
       - 'tools/scripts/test_release_artifact_contents.py'
@@ -199,6 +203,7 @@ jobs:
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_preamble_python_stable_cwd.py
           python3 tools/scripts/test_advisory_macos_runner_policy.py
+          python3 tools/scripts/test_resolve_linux_route.py
           # Keep the authoritative Windows runtime suite pinned independently
           # from moving latest-toolchain release/coverage/nightly lanes.
           python3 tools/scripts/test_windows_runner_policy.py

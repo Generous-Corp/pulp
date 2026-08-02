@@ -531,11 +531,16 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
-The real boundary must be enforced outside PR-controlled YAML with an
-organization runner group restricted to selected trusted workflow refs (or an
-equivalent trusted dispatcher). Until that exists, do not add another private
-pool to automatic `pull_request` routing. In particular, the Mac Pro Linux pool
-and example-validation advisory macOS selector remain `workflow_dispatch`-only.
+The real boundary must be enforced outside PR-controlled YAML. For the Mac Pro,
+that means a dedicated organization runner group containing only its ephemeral
+runners, repository access granted only to `Generous-Corp/pulp`, and workflow
+access restricted to the protected default-branch copy of
+`.github/workflows/build.yml` (or an equivalent trusted dispatcher). Prove that
+a PR changing its own workflow cannot target the group before enabling
+automatic PR or merge-group routing. Until that exists, do not add another
+private pool to automatic `pull_request` routing. In particular, the Mac Pro
+Linux pool and example-validation advisory macOS selector remain
+`workflow_dispatch`-only.
 The existing fork-routing regression test verifies defense-in-depth behavior;
 it must never be cited as proof that a runner is inaccessible to untrusted
 workflow revisions.
@@ -660,6 +665,29 @@ Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in 
 same change, or the hourly topology check reports an unset lane as having no route
 at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
 it.
+
+The native Intel Mac mini follows this pattern through
+`PULP_NATIVE_INTEL_RUNS_ON_JSON`. Its dedicated selector is
+`self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini`, and the workflow
+falls back to `macos-15-intel` while the variable is unset. The launchd
+supervisor mints one JIT identity per job and cleans its exact work directory;
+never add `pulp-build`, `pulp-build-vm`, or `pulp-gate-fast`, because those would
+let advisory Intel work contend for the required ARM64 gate. FileVault requires
+a human unlock after a cold power cycle; treat the lane as offline until login,
+not as a reason to weaken disk encryption. Preflight verifies through GitHub's
+organization API that the runner group contains only `Generous-Corp/pulp` and
+is workflow-restricted only to `nightly-intel.yml@refs/heads/main`; a numeric
+group ID by itself is not proof of an access boundary. The credentialed
+controller and workflow process also use different OS accounts: `gh`/`ghapp`
+stays in the login account, while `run.sh` executes as non-admin `pulp-ci`
+through the root-owned fixed-operation worker. Never put GitHub auth in the
+build account or let it modify the controller/worker; the one-time hidden
+uid-499 account, Xcode, immutable runner/tool golden, protected read-only warm
+ccache, shim, and sudoers setup is in `docs/guides/local-ci.md`. The worker must
+give each job an ephemeral home/temp root, copy the golden, kill uid-owned
+processes, and remove all uid-owned temp state every cycle; cleaning only
+`_work` leaves attacker-modified runner executables behind. Ccache depend mode
+stays off via `CCACHE_NODEPEND=1` per the decisions contract.
 ## Windows is nightly-only, and that is deliberate
 
 Windows does not run on `pull_request` **or** `merge_group`. It runs on `schedule`
@@ -877,6 +905,13 @@ uses, or the golden warms a cache the real jobs never touch.
   `_ext/` and pass `-DPULP_EXAMPLE_PLUGINS_DIR` / `-DPULP_CLASSIC_EFFECTS_DIR`.
   The lane now asserts a couple of gallery wasms exist right after the build, so
   the cause is reported where it happens rather than downstream.
+  Because this is a required context, the workflow still starts on every PR;
+  `webclap_relevance.py` only skips the expensive setup/build/proof steps for an
+  unrelated diff. Relevance is evaluated with the classifier fetched from the
+  PR's base SHA, includes both names of renamed files, and fails closed at the
+  GitHub API's 3,000-file cap. Keep the workflow and classifier self-changes on
+  the unconditional full-proof path, and never expose `GH_TOKEN` to the
+  PR-controlled checkout while resolving relevance.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
   `tools/scripts/screenshot_sync_check.py` then diffs the manifest's `[trigger].paths`
@@ -1028,6 +1063,29 @@ uses, or the golden warms a cache the real jobs never touch.
   escape), and the parity-registration check requires the test source to appear on
   a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
   a bare mention in a dead variable no longer counts.
+- **Skill-path-map lint (`skill_path_map_lint.py`).** Checks the map that
+  skill-sync reads. A pattern in `skill_path_map.json` that matches nothing does
+  not report a problem — it reports nothing, which reads exactly like a clean
+  run, so three dead patterns sat on main unnoticed while the file's own contract
+  test (`test_skill_path_map.py`) was red *and imported by no CI entrypoint*.
+  Four rules: `schema` (validates against `skill_path_map.schema.json`, which
+  previously did not exist despite the map's `"$schema"` pointer — a bare-array
+  entry, unknown key, or malformed pattern is now rejected); `submodule` (a
+  pattern rooted in a git submodule can never fire, because the superproject's
+  diff carries the `planning` gitlink and never a path beneath it — no
+  annotation unlocks this); `empty` (a pattern matching no tracked file, unless
+  the entry carries `_doc.empty-ok`, which is restricted to `external/` SDK paths
+  and to entries claiming no paths at all); and `co-claim` (diff-scoped —
+  *newly* claiming a whole `<root>/<sub>/**` subsystem another skill already
+  claims needs `_doc.scope`, because otherwise every edit under it demands
+  several SKILL.md updates, which trains reflexive `Skill-Update: skip`
+  trailers). The first three are whole-tree, since the usual cause is the tree
+  moving out from under a pattern nobody edited. Runs in `gates.sh`, the pre-push
+  hook, and the `Versioning & Skill-Sync` workflow. Its schema is enforced by
+  `json_schema_lite.py`, a stdlib validator whose defining property is that an
+  unimplemented keyword *raises* rather than being skipped — so no schema
+  constraint can be silently unchecked. **Adding a gate-script test file is not
+  enough: `test_gates.py` must import its `TestCase`, or it runs nowhere.**
 - **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
   diff-scoped): no tracked file may carry a git conflict marker. Born from the
   incident where a squash-merge's stale side collided with an already-advanced
@@ -1160,7 +1218,11 @@ uses, or the golden warms a cache the real jobs never touch.
   isolates it. Recovery if a worktree was hit: `git config core.bare false`,
   reset the branch off the stray `initial` commit, delete the throwaway branch.
 - The required `macos` alias in `.github/workflows/build.yml` mirrors the
-  macOS matrix leg by polling the Actions jobs API. Keep that poll retry-safe:
+  macOS matrix leg by polling the Actions jobs API. On merge groups it depends
+  on the completed macOS-only build matrix, so it reports in seconds instead of
+  occupying hosted capacity through the native build. The merge-group report
+  uses the short-lived preamble pool so hosted congestion cannot delay a green
+  owned build. Keep the PR-head poll retry-safe:
   API failures or malformed JSON must log and continue the loop, not trip
   `set -euo pipefail` before the macOS leg has a chance to report.
 - **Inline Python in preamble jobs must start from system `/tmp`.** The
@@ -2429,6 +2491,12 @@ authenticating as the same user. Operational rules:
   targets remain after --skip-target filtering").
 - Reduce burst: `git clone --depth 1` instead of recursive tree-API
   dumps; space `gh` calls; never tight-loop `gh` (back off / schedule).
+- The local Shipyard CMake profile must resolve Python through
+  `tools/ci/find_python311.py` and pass the result as
+  `Python3_EXECUTABLE`. Apple's command-line tools still expose Python 3.9,
+  which can configure most of Pulp but cannot run the `tomllib`-based decisions
+  contract tests; allowing CMake to pick it produces a two-test false red after
+  the entire Debug build has completed.
 
 ```bash
 # Primary: Shipyard
@@ -2493,15 +2561,32 @@ shipyard run --resume-from build
 
 ### Linux self-hosted routing (opt-in) and Windows x64 authority
 
-`build.yml`'s `resolve-provider` feeds the Linux leg selector from (in
-precedence): the `linux_runner_selector_json` workflow_dispatch input →
-`PULP_LOCAL_LINUX_RUNS_ON_JSON` repo var → `''` (github-hosted, the default).
-Set the repo var (e.g. `["self-hosted","Linux","ARM64","pulp-build-linux"]`) to
-route that leg to the self-hosted Linux pool, served by
-`tools/ci/tart-runner-linux.sh` (see the `tart-ci` skill) and toggled in the
-Shipyard macOS GUI. The explicit selector has NO capacity fallback, so only set
-it when the pool reliably serves that lane — else legs route to a label with no
-online runner and queue.
+`build.yml`'s `resolve-provider` keeps two Linux selectors visible: the
+configured `PULP_LOCAL_LINUX_RUNS_ON_JSON` value and the selector authorized for
+the current event. A `workflow_dispatch` input has highest precedence; without
+one, the repo variable is authorized only for `workflow_dispatch`. Pull request,
+merge-group, and push events deliberately ignore the configured private selector
+and use the provider fallback (GitHub-hosted by default) until the external
+runner-group boundary above exists.
+
+The Mac Pro selector is
+`["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]`
+and is served by the Proxmox ephemeral pool described in
+`docs/guides/local-ci.md`. `resolve-provider` emits `linux_route_reason` as
+`explicit-dispatch`, `security-hosted`, or `unconfigured-hosted`, and derives
+the displayed Linux provider from the selector that actually resolved. A
+dispatch using the configured selector fails loudly if it resolves hosted; a
+successfully assigned self-hosted job still has no live capacity fallback.
+
+Set the `run_windows=false` dispatch input for a trusted Linux-only Mac Pro
+proof during hosted saturation. Its default remains true so ordinary manual
+dispatches preserve the authoritative hosted Windows leg; automatic events do
+not read this input.
+
+The shared build step uses a literal `--parallel 4`: omitting it makes the
+Makefile-based Mac Pro VMs compile serially, while a bare `--parallel` is
+unbounded. Four fills each VM's assigned cores and remains a bounded share on
+the larger self-hosted macOS machines.
 
 Windows is intentionally different. The required `Windows (x64)` functional
 gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC
@@ -3078,6 +3163,16 @@ shipyard runner watch --kill-hung-workers --json   # structured stream
 Pair with launchd / systemd so the watchdog survives reboots. JSON
 contract: `runner.watch` envelopes with `event=auto_kill_worker`,
 `phase ∈ {attempt, killed, failed, no-pid-found}`.
+
+`shipyard runner fleet-status --repo Generous-Corp/pulp --json` also audits
+registered runner labels, Tart disk-floor/ccache admission health, and expected
+metal hosts declared under `[runner.fleet.expected_host.<name>]` in
+`.shipyard/config.toml`. MacPro requires two online ephemeral Linux runners;
+Mac Mini requires one online native Intel JIT runner even before its first
+registration; the planned MacBook Air is recorded with `active = false` until
+commissioned. Expected hosts match stable label subsets, never disposable runner
+names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
+not an intentional absence.
 
 ### Prevent: build-dir ODR guard (interrupted-build sentinel)
 
@@ -4299,8 +4394,8 @@ three properties when editing that workflow — running anything out of
 
 ### `merge_group` belongs ONLY on workflows that produce a required context
 
-A queue entry re-runs every workflow that declares `merge_group:`, and with
-`max_entries_to_build: 1` the queue validates one batch at a time — so any
+A queue entry re-runs every workflow that declares `merge_group:`. The live
+build window is configurable, so any
 workflow on `merge_group` whose contexts are **not** required sets the drain
 rate while being unable to affect the merge decision. Nine workflows once fired
 per entry when only five could gate; two of the extras (`Validate examples
@@ -4331,6 +4426,21 @@ queue slow, so re-verify rather than believing the comment.
 Dropping `merge_group` costs no PR-time signal: those workflows keep
 `pull_request` and still run on every PR. They just stop re-running against a
 merged result they cannot gate.
+
+### Diagnose a stalled queue from its active build window
+
+`tools/scripts/merge_stall_watchdog.py` treats the merge queue as its own
+failure surface. It reads `maximumEntriesToBuild`, tracks activity only across
+the entries GitHub can currently build, and reports the head's exact synthetic
+merge SHA and unresolved required contexts. Activity from entries outside that
+window must not suppress an alarm; activity from a cumulative follower inside
+it is real progress. If live collection is degraded, preserve prior state and
+fail closed instead of clearing an existing incident from an incomplete sweep.
+
+Use the head-specific blocker list before cancelling anything. A queued
+required context is evidence of capacity pressure, not a disposable run; only
+cancel exact-current advisory work after proving it cannot contribute to a
+required context or another agent's live PR.
 
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
@@ -4373,7 +4483,7 @@ HEAD reporting.
 
 `pulp pr` orchestrates the full shipping flow. CI enforces the fast invariant gates on every PR to `main`:
 
-- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/compat_aggregate.py check`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
+- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/skill_path_map_lint.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/compat_aggregate.py check`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
 - `.shipyard/config.toml` → `[validation.gates]` pipeline — same scripts via `shipyard run --pipeline gates`. Runs with `PULP_ENFORCE_PREPUSH=1` so warnings become errors.
 
 Locally:
@@ -4381,7 +4491,7 @@ Locally:
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
-- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
+- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + skill-path-map lint + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
 **Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:
 

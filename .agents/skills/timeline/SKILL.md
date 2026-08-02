@@ -459,8 +459,12 @@ artifact is needed. Never modify canonical project JSON text directly.
   quota, including take lanes and takes, but does not resolve item or media
   references.
 - `serialize_project()` and `deserialize_project()` do not implement a ZIP or
-  package container. Asset locators describe possible package-relative bytes,
-  but container I/O belongs to a later slice.
+  package container. Asset locators describe possible package-relative bytes.
+  Use `pulp::project-package` to hash-verify, fence, and no-replace publish
+  content-addressed blobs before atomically replacing the stable package root's
+  validated `project.json` generation. Generic file and directory publication
+  is also no-replace, and unpublished staging remains unreachable; archive
+  formats and interchange policy stay in their format/tooling layers.
 - Project and subtree remapping are two-pass: allocate all owned IDs first, then
   rebuild the snapshot and fix references. `MediaRef::asset_id` is external to
   Clip/Track/Sequence remaps and is translated by `ExternalIdFixup`; failure is
@@ -1045,6 +1049,15 @@ all:
   branch order would otherwise resolve silently.
 - `retained_size()` has a `sizeof(T)` fallback and so fails **open** — see the
   section above.
+- each **family reducer** carries a `static_assert(!is_X_command_type<T>, …)` in
+  the `else` of its `std::visit`, so a command claimed by the family with no arm
+  in the reducer is a **compile error**. This closes the rung below the second
+  guard: `transaction.cpp` proves which *family* claims an alternative, but the
+  arms inside that family were a second statement of the same list in a
+  different file, tied to it by nothing. Add a command to `is_note_command_type`,
+  forget the arm, and it used to compile, route, fall off the end and be
+  rejected at runtime as `ModelInvariant` — a command the document should have
+  applied.
 
 The reason the second guard exists: `pulp-timeline` builds `-fno-exceptions`, so
 an alternative that reaches the end of the dispatch chain is not a
@@ -1061,6 +1074,23 @@ alternative is claimed twice and another not at all — the two errors cancel.
 Verified: with `MoveTrack` claimed by both the scene and track families and
 `SetTrackName` claimed by none, the claim total is still 39 and a count check
 passes while the identity check fails. Compare identities, not counts.
+
+**Two lists that must agree is the shape worth recognising here.** Every guard
+above exists because one fact is written down twice — the claim list and the
+arms, the variant and the type-name array, the variant and the envelope batch —
+and nothing forces the copies to match. When you find a runtime rejection
+guarding a pair of lists, the fix is to state the list once and let the compiler
+check it, not to add a test that notices the drift later: a lint over two lists
+can be skipped or can rot, while a `static_assert` in the same translation unit
+cannot. A sweep comparing every family's claim list against its handled arms
+reports zero discrepancies today, so the reducer guard above is regression
+insurance rather than a fix for a live defect.
+
+The distinction that decides whether this generalises: a branch guarding a
+**relationship between two lists** is enumerable, so it can be made a compile
+error. A branch guarding a **value invariant** — an overflow test, a range check
+— is not enumerable and stays review discipline. Do not go looking for a tool
+for the second kind.
 
 Also extend the two coverage guards that pin the vocabulary, and note that
 neither is ordered the way you would guess:
@@ -1143,6 +1173,51 @@ Two things not to do here:
 - **Do not add a verb that lowers to zero commands.** Select, marquee and
   zoom-to-range are deliberately absent: they are view state, and routing them
   through the document channel puts transient selection into undo history.
+
+### An intent lowerer validates the gesture; the model keeps its own rules
+
+`lower_edit_intent` and `lower_track_edit_intent` are pure and hold no `Project`,
+so the only things they can check are properties of the *gesture*: identity
+agreement between the transaction and command ids, the undo-group bracket a
+non-`Single` phase requires, and ids that are structurally invalid. Everything
+that needs the document — does the destination exist, is the track in this
+sequence, does the optimistic gate still hold — belongs to the reducer.
+
+**Resist re-checking a model rule in the lowerer even when it looks cheap.**
+`Sequence::move_track` refuses a track named as its own destination, and says why
+(the track is lifted out before the destination is located, so the request would
+silently land at the end). Copying that check up into the lowerer would put the
+same rule in two places that can drift, and the editing paths enforce the model's
+copy. Pin *where* the refusal comes from with a test that lowers successfully and
+asserts the session rejects it — otherwise a later reader adds the duplicate
+"for a better error message."
+
+The line worth drawing: **a neighbour id that is present but structurally invalid
+is a malformed gesture** (the front-end never resolved it) and belongs in the
+lowerer; **an id that is well-formed but absent from the document** is the
+reducer's `MissingItem`. An `std::optional` destination left empty is neither —
+it is a request for last position.
+
+### A negative control on a compound condition can exercise half of it
+
+Disabling one disjunct of an `if (A || B)` guard and seeing the suite stay green
+does **not** mean the guard is untested — it may mean your case only ever
+exercised `B`. This bit here for real: a control rewritten as
+
+```cpp
+if (false && (expected && !expected->valid()) || (replacement && !replacement->valid()))
+```
+
+parses as `(false && A) || B`, because `&&` binds tighter than `||`. The
+replacement half still fired, the suite passed, and the control looked like a
+false alarm. It was not — it had found a genuine gap, because the test asserted
+only the *destination* neighbour and never the *gate* neighbour.
+
+Two rules from it: **delete the whole condition rather than negating one operand**,
+so a surviving disjunct cannot answer for the one you meant to disable; and
+**assert every disjunct separately**, so the two halves fail at different lines.
+A control that passes is either a blind test or a malformed mutation, and the two
+are indistinguishable until you read the mutated source.
 
 ## Schema codegen & drift gate
 
@@ -1818,8 +1893,14 @@ This subsystem owns authored take/comp state, durable launch scenes, slots, and
 follow actions, the durable `JournalSink` ordering seam, and native
 `FileJournal`, but not package/container I/O, publication, realtime playback,
 launch scheduling or automation delivery, nesting, device implementations,
-routing, audio, format adapters, or UI. Add those in their owning modules
-instead of widening the command and persistence core opportunistically.
+routing, audio, format adapters, or UI. `core/project_package` owns durable
+publication: no-replace content-addressed blobs and generic artifacts, plus
+validated atomic replacement of `project.json` within a stable package root.
+It also owns bounded cleanup of its private staging files without moving
+canonical Timeline serialization or archive-format semantics out of their
+existing owners. Package-wide recovery and reachability GC remain a follow-on
+layer. Add other concerns in their owning modules instead of widening the
+command and persistence core opportunistically.
 
 ## Launch model and follow actions
 
@@ -2061,6 +2142,120 @@ deprecated `dawproject::writer(project, options)` compatibility overload is the
 sole exception at the source boundary: it deliberately ignores `project` and
 delegates to `writer(options)`. Only the interchange adapter is the
 project-wide consent surface.
+
+### An absent capability row is a decision the generator writes down — and the two directions differ
+
+`capability_emit.py` materializes a closed world, so a concept a format's JSON
+omits still gets a row. It is not a hole, and it does not fail the build. But
+the two directions are **not** symmetric, and only one of them is safe to leave
+implicit:
+
+- **Absent export row** → `ExportLevel::Drop`, `LossClass::Dropped`, and a
+  generated sentence, `"<display name> declares no support for <concept id>"`.
+  Truthful and specific enough to ship. `clip.media-window` on SMF is the
+  committed example.
+- **Absent import row** → `ImportLevel::None` with an **empty** `refusal`
+  string. There is no generated fallback, so the refusal names nothing.
+
+So write the import row even when the level equals the default; the export row
+is a refinement of an already-true sentence rather than a correction of a false
+one. What is genuinely broken without any row at all is a concept that does not
+*exist*: `LossManifest` is keyed by `Concept`, so a construct with no id cannot
+appear in a manifest at any level, and the export reports a clean bill.
+
+### A capability table declares the ADAPTER, not the FORMAT
+
+`smf.json` describes Pulp's bounded Standard MIDI File subset — its reader and
+writer carry exactly the concepts listed in `smf_import.cpp` / `smf_export.cpp`
+— not what a `.mid` file could theoretically hold. The distinction is invisible
+until it bites: a Standard MIDI File carries control change natively, and Pulp's
+writer does not, so a format-worded loss sentence ("Standard MIDI Files have no
+…") would be **false** where the existing rows' phrasing is fine. When the format
+can carry something the adapter cannot, word the loss after the writer.
+
+### Adding a concept regenerates FOUR artifacts, and the fourth is outside `core/interchange`
+
+`concepts.json` is append-only and order-significant because position fixes the
+generated enum ordinal. Three artifacts come from `capability_emit.py`, gated
+separately in `interchange_tests.cmake` — run each individually and unpiped,
+never as one `ctest` sweep whose exit code you read through a pipe:
+
+```
+python3 core/interchange/tools/capability_emit.py --emit concepts > core/interchange/include/pulp/interchange/generated/concepts.hpp
+python3 core/interchange/tools/capability_emit.py --emit tables   > core/interchange/include/pulp/interchange/generated/capability_tables.hpp
+python3 core/interchange/tools/capability_emit.py --emit docs     > docs/reference/interchange-matrix.md
+```
+
+**The fourth has a different generator, in a different module, and it is the one
+that breaks behavior rather than just drifting.** `core/timeline/tools/schema_mcp_emit.py`
+also reads `capabilities/concepts.json`, and projects the vocabulary into
+`pulp_timeline_export`'s `accept_losses` enum and its `x-pulp-loss-concepts`
+list. Consent is per exact concept id with no blanket override, so a concept
+missing from that enum is a loss **no MCP client can ever accept** — every
+export of a document using it is permanently unauthorizable through that path.
+Regenerate it in the same change:
+
+```
+python3 core/timeline/tools/schema_mcp_emit.py --manifest core/timeline/schema/timeline_schema.json > core/timeline/schema/timeline_mcp_tools.json
+```
+
+Gated by `timeline-mcp-drift` **and** `timeline-mcp-selftest` — the selftest
+fails too, with `committed artifact matches a fresh emission`. Neither is run by
+`tools/scripts/gates.sh`, so a fully green `gates.sh` proves nothing here.
+A grep scoped to `core/interchange/` will not find this generator.
+
+There is also a fifth surface that is data rather than code: any
+`test/fixtures/timeline/**/*.json.expect` whose document uses the new concept.
+`pulp-fixture-runner --corpus test/fixtures/timeline --update` rewrites them,
+and `timeline-fixture-corpus` fails with the concept name and observed value
+until you do.
+
+### Naming a new SMF loss takes TWO edits, and each half fails silently on its own
+
+The interchange table only governs exports routed through `interchange::run_export`. The public
+`pulp::timeline::export_smf()` entry point is a *separate* surface that fails closed on shapes it
+cannot carry, and it does not consult the capability table at all. So a concept the table declares
+`drop` is still **silently discarded** by the raw API until you also teach `build_note_track` to
+refuse it. Adding a concept without that leaves an SDK caller receiving a successful `.mid` with the
+content gone — no error, no manifest.
+
+The seam is `SmfExportLossPolicy` in `core/smf/src/smf_export_internal.hpp`. Both edits are
+required, and they defend opposite failure modes:
+
+1. **`smf_export.cpp`** — refuse when the content is present *and* the policy flag is unset. This is
+   what makes the raw entry point fail closed.
+2. **`smf_interchange.cpp`** — set that flag from `loses(plan, Concept::X)`. This is what lets the
+   adapter proceed *after* the loss is accepted by exact concept id.
+
+**Ship only half and the tests can still be green.** Verified by mutation: hardcoding the
+`smf_interchange.cpp` flag to `false` — so consent can never clear the refusal and a lane-bearing
+export becomes impossible through *every* path — left the whole SMF interchange suite passing,
+because every existing test used a project without the new content. A refusal test alone does not
+cover the clearing half; you need one export that **succeeds with the loss accepted** and asserts
+the surviving content, or the second edit is unverified.
+
+### A drift gate whose emit-cmd is a TARGET fails when that target is merely unbuilt
+
+`timeline-schema-drift`'s `--emit-cmd` is `$<TARGET_FILE:pulp-timeline-schema-emit>`,
+not a script. In a build directory where you only built the targets you needed,
+that binary does not exist and the gate fails **with no diff and no useful
+message** — indistinguishable from real drift, and easy to misattribute to
+whatever you just changed. Build the emit target before believing it:
+
+```
+cmake --build build --target pulp-timeline-schema-emit
+```
+
+The interchange gates do not have this failure mode; their emit-cmds are Python.
+
+### The fixture corpus manifest is count-only, so it cannot see owner identity
+
+Measured, not assumed. Changing the census to record a lane concept against the
+**clip** id instead of the **lane** id leaves the count unchanged, so
+`timeline-fixture-corpus` passes (exit 0) while a unit test asserting
+`owners(...)[0]` fails (exit 42). A census row that records per-item evidence
+therefore needs a unit test asserting the owner *values*; the corpus fixture
+alone will not defend it, and `contains(...)` or a bare count will not either.
 
 ## Asset confinement is two layers, and they are not redundant
 
