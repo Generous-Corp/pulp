@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: #111; }
+  #panel { position:relative; width:400px; height:400px; }
+  /* static + overflow:hidden -> clips normal flow, but NOT an abs-positioned
+     descendant whose containing block is #panel. */
+  #clip { position:static; overflow:hidden; width:100px; height:100px;
+          margin:40px 0 0 40px; background:#345; }
+  #esc { position:absolute; left:120px; top:220px; width:200px; height:40px;
+         background:#e33; }
+</style>
+<div id="panel">
+  <div id="clip"><div id="esc"></div></div>
+</div>

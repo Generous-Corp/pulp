@@ -118,6 +118,19 @@ struct IRStyle {
     // consume these; sources that carry them — and Figma mask
     // layers once the extractor emits a clip-path — survive the IR.
     std::optional<std::string> clip_path;
+    // The clip an importer resolved for THIS node, in the node's own
+    // coordinate space (origin at its top-left, same space as `clip_path`).
+    //
+    // Carried per node rather than inherited from a clipping parent, because
+    // CSS clips along the containing-block chain while a tree clips by
+    // parentage, and the two disagree in both directions: an absolutely
+    // positioned node can escape an `overflow: hidden` ancestor it sits inside,
+    // and a node moved to a new parent must keep the clip its old one gave it.
+    // A rectangle attached to the node travels with the node, so re-parenting
+    // cannot change what it clips. The engine (View::set_ancestor_clip_rect)
+    // applies it to the node's OWN ink only — every descendant carries its own.
+    struct ClipRect { float x = 0, y = 0, width = 0, height = 0; };
+    std::optional<ClipRect> clip_rect;
     std::optional<std::string> mask;                   // `mask` shorthand
     std::optional<std::string> mask_image;
     std::optional<std::string> mask_size;
