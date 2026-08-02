@@ -113,6 +113,10 @@
         "tools/scripts/hotspot_size_guard.json",
         "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
+        "tools/scripts/skill_path_map_lint.py",
+        "tools/scripts/skill_path_map.schema.json",
+        "tools/scripts/json_schema_lite.py",
+        "tools/scripts/test_skill_path_map_lint.py",
         "tools/scripts/scheduled_workflow_fork_guard_check.py",
         "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
         "tools/scripts/host_vitals.sh",
@@ -166,7 +170,6 @@
         "tools/kits/**",
         "fixtures/packages/basic-content-pack/**",
         "tools/cli/content_commands.*",
-        "planning/2026-06-11-pulp-package-format-proposal.md",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml"
       ]
@@ -215,7 +218,12 @@
         "tools/cmake/PulpFaust.cmake"
       ]
     },
-    "friction-report": [],
+    "friction-report": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "friction-report is a cross-session process skill for turning a moment of friction into a routed report; it owns no source path, so no diff triggers a required update (same pattern as code-comments and handoff)."
+      }
+    },
     "handoff": {
       "paths": [],
       "_doc": {
@@ -229,7 +237,8 @@
         "test/**/*sample_heritage*",
         "tools/audio/quality-lab/**/*sampler_heritage*",
         "tools/cli/**/*heritage*",
-        "docs/**/*heritage*"
+        "docs/research/sample-heritage/**",
+        "docs/validation/sample-heritage/**"
       ]
     },
     "hosting": {
@@ -296,7 +305,6 @@
         "tools/kits/**",
         "fixtures/packages/**",
         "tools/cli/kit_commands.*",
-        "planning/2026-06-11-pulp-package-format-proposal.md",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml"
       ]
