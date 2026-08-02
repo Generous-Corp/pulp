@@ -508,3 +508,34 @@ TEST_CASE("Remapping rewrites modulation identities and both of a route's refere
     REQUIRE(remapped_project.project.locate(route_id)->parent_id ==
             *remapped_project.ids.find({4}));
 }
+
+TEST_CASE("A track carrying both a tuning and modulation reads both back",
+          "[timeline][modulation][migration]") {
+    // Tuning and the three modulation collections were added by two independent
+    // slices that each APPENDED a member to the preflight's positionally-indexed
+    // request array. Neither slice's own tests can catch the two being wired to
+    // each other's span, because each exercises a track that carries only its
+    // own member. This is the case that separates them: if the indices crossed,
+    // the tuning walk would run over an array and refuse, or a modulation
+    // collection would be scored against an object.
+    auto input = base_track({Modulator{{30}, ModulatorKind::Lfo, "wobble"}},
+                            {MacroControl{{31}, "brightness", 0.25f}},
+                            {device_route({40}, {30}, ModulationSourceKind::Modulator, 3, 0.75f),
+                             device_route({41}, {31}, ModulationSourceKind::Macro, 4, -0.5f)});
+    input.tuning = TuningReference{TuningSystem::EqualTemperament, 432'000, std::nullopt,
+                                   std::nullopt};
+    const auto document = serialized(project_of(take_result(make_track(std::move(input)))));
+    REQUIRE(document.find("\"tuning\":") != std::string::npos);
+    REQUIRE(document.find("\"modulators\":") != std::string::npos);
+    REQUIRE(document.find("\"macros\":") != std::string::npos);
+    REQUIRE(document.find("\"modulation_routes\":") != std::string::npos);
+
+    const auto restored = take_result(deserialize_project(document, registry()));
+    const auto& track = track_of(restored);
+    REQUIRE(track.tuning().has_value());
+    REQUIRE(track.tuning()->reference_pitch_millihertz == 432'000);
+    REQUIRE(track.modulators().size() == 1);
+    REQUIRE(track.macros().size() == 1);
+    REQUIRE(track.modulation_routes().size() == 2);
+    REQUIRE(serialized(restored) == document);
+}
