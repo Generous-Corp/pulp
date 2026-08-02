@@ -82,6 +82,15 @@ What it does **not** cover is GCC *behavior* — nothing is executed, so a
 construct both compilers accept but implement differently is still only caught
 by the Clang test lanes.
 
+Release-path configurations use `PULP_ENABLE_INSPECTOR=ON` starting at the
+`inspector_sdk_floor` in `release_product_matrix.json`; earlier marker-era
+backfills keep it OFF. The option controls whether the optional inspector SDK
+archive family is built, while release runtime endpoints still default off.
+Keep
+`release-cli.yml`, `release-path-pr-gate.yml`, and the Windows MSVC
+release-path configure in `build.yml` aligned; forcing the option OFF makes the
+tag build succeed but the archive verifier fail after the expensive build.
+
 **It also guards one option combination, for free.** The lane configures with
 `PULP_ENABLE_DESIGN_IMPORT=OFF` — the option's own documented "release/ship"
 setting — and that configuration was once unlinkable: `tools/import-design` was

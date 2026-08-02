@@ -1818,6 +1818,11 @@ and Visual Studio generation do not move underneath the complete runtime
 suite. The standalone MSVC release-path, MIDI 2, and BLE compile gates remain
 on `windows-latest`; release builds and the nightly Intel safety net also keep
 tracking the newest hosted image.
+The MSVC release-path configure intentionally enables
+`PULP_ENABLE_INSPECTOR` while keeping runtime inspector endpoints off. Starting
+at the release product matrix's `inspector_sdk_floor`, published SDKs promise
+the split inspector archive family, so the Windows compile gate must match the
+tagged release configuration or it can miss an expensive packaging failure.
 `tools/scripts/test_windows_runner_policy.py` enforces this split across the
 actual build, release, coverage, and nightly workflows plus the release runner
 resolver and Shipyard mirror. It runs in `workflow-lint`, including when the
