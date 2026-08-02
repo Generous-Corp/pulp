@@ -521,11 +521,71 @@ def check_layout() -> int:
     return bad, ran
 
 
+
+def check_buildable_from_parts() -> tuple:
+    """A capability you can PATCH is not a capability you must buy.
+
+    Reported with a screenshot: "a melodic arpeggiator ... quantized to key of
+    g" was refused with "install one in Rack's Library, then ask again", on a
+    machine with four sequencers, a quantizer and three clock dividers already
+    installed. An arpeggiator is a thing you patch, not a thing you buy, and
+    refusing to patch it is the wrong answer from a patching tool.
+    """
+    bad, ran = 0, 0
+    inv = {"Vendor": {"modules": {
+        "Seq":  {"tags": ["Sequencer"]},
+        "Quant": {"tags": ["Quantizer"]},
+        "Del":  {"tags": ["Delay"]},
+        "Lfo":  {"tags": ["Low-frequency oscillator"]},
+    }}}
+    empty = {}
+
+    ran += 1
+    pf = P.preflight("a melodic arpeggiator quantized to the key of g", inv, {}, {})
+    if not pf["ok"] or "Arpeggiator" not in (pf.get("from_parts") or {}):
+        print(f"  WRONG  an arpeggiator was refused with a sequencer and a "
+              f"quantizer installed: {pf}")
+        bad += 1
+    else:
+        print("  ok     an arpeggiator is patched from a sequencer + quantizer")
+
+    # And it must say WHICH parts, or the model is told nothing useful.
+    ran += 1
+    if (pf.get("from_parts") or {}).get("Arpeggiator") != ["Sequencer", "Quantizer"]:
+        print("  WRONG  it did not name the parts it would build from")
+        bad += 1
+    else:
+        print("  ok     and it names the parts")
+
+    # The half that carries the weight: a real device must STILL be refused.
+    # A version that waved everything through would pass every check above.
+    ran += 1
+    pf2 = P.preflight("a lush granular reverb", inv, {}, {})
+    if pf2["ok"]:
+        print("  WRONG  granular + reverb passed with neither installed")
+        bad += 1
+    else:
+        print("  ok     a granular reverb is still refused — parts cannot fake it")
+
+    # Missing the parts means missing the capability.
+    ran += 1
+    thin = {"Vendor": {"modules": {"Seq": {"tags": ["Sequencer"]}}}}
+    pf3 = P.preflight("an arpeggiator", thin, {}, {})
+    if pf3["ok"]:
+        print("  WRONG  an arpeggiator passed with no quantizer installed")
+        bad += 1
+    else:
+        print("  ok     without a quantizer it is still a gap")
+    return bad, ran
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
     # without Fundamental and reports success anyway.
     layout_bad, layout_ran = check_layout()
+    parts_bad, parts_ran = check_buildable_from_parts()
+    layout_bad += parts_bad; layout_ran += parts_ran
 
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:

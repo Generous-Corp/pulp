@@ -19,6 +19,14 @@ std::string lowered(std::string s) {
 
 }  // namespace
 
+namespace {
+std::string lower_of(const std::string& s) {
+    std::string out = s;
+    for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+}  // namespace
+
 BuildLine::Kind BuildMonitor::classify(const std::string& line) {
     const auto lower = lowered(line);
 
@@ -182,6 +190,30 @@ std::vector<BuildLine> BuildMonitor::poll() {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.find_first_not_of(" \t") == std::string::npos) continue;
         BuildLine bl{classify(line), line};
+        // A refusal is a BLOCK, not a line.
+        //
+        // The generator prints a header, then the modules that would satisfy
+        // the request, then what to do:
+        //
+        //   hold on — this asks for something you don't have installed:
+        //   no arpeggiator module is installed. These would do it:
+        //       free  Ahornberg/Tracker            Tracker
+        //       free  AmalgamatedHarmonics/Arp31   Arp 3.1 - Chord
+        //   install one in Rack's Library, then ask again —
+        //
+        // Only the first and last lines matched a rule, so the app showed
+        // "you don't have something" and "go install one" with the three free
+        // downloads in between silently dropped. A refusal with no options is
+        // a dead end; the options are the whole value of it. Everything from
+        // the header to the closing line is carried as part of the refusal.
+        if (in_refusal_ && bl.kind != BuildLine::Kind::refusal)
+            bl.kind = BuildLine::Kind::refusal;
+        if (bl.kind == BuildLine::Kind::refusal) {
+            in_refusal_ = true;
+            if (contains(lower_of(line), "then ask again") ||
+                contains(lower_of(line), "install one in rack"))
+                in_refusal_ = false;          // the closing line ends the block
+        }
         lines_.push_back(bl);
         added.push_back(bl);
     }

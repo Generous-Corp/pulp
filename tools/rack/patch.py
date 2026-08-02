@@ -1187,6 +1187,27 @@ TAG_WORDS = {
 }
 
 
+# Capabilities that are PATTERNS, not devices, and what builds each one.
+#
+# An arpeggiator is a sequencer, a quantizer and a clock — it is a thing you
+# patch, not a thing you buy. Refusing a request for one because no installed
+# module carries the "Arpeggiator" TAG turned a completely buildable patch into
+# "install one in Rack's Library, then ask again", on a machine with four
+# sequencers, a quantizer and three clock dividers already installed. That is
+# the wrong answer from a tool whose entire job is patching primitives
+# together, and it is what a user saw.
+#
+# Deliberately short. A reverb, a vocoder, a granular engine and a sampler
+# genuinely cannot be faked from an oscillator, and pretending otherwise would
+# produce a patch that quietly is not what was asked for — which is worse than
+# saying so. Only entries where the parts really do make the thing belong here.
+BUILDABLE_FROM = {
+    "Arpeggiator": ["Sequencer", "Quantizer"],
+    "Chorus": ["Delay", "Low-frequency oscillator"],
+    "Flanger": ["Delay", "Low-frequency oscillator"],
+}
+
+
 def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
     """Before spending anything, decide whether this request is buildable.
 
@@ -1221,10 +1242,22 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
                "Envelope generator": {"adsr", "envelope"},
                "Low-frequency oscillator": {"lfo"},
                "Voltage-controlled amplifier": {"vca"}}
-    missing = {t for t in wanted
-               if t.lower() not in have_lc and not (ALIASES.get(t, set()) & have_lc)}
+    def installed(tag: str) -> bool:
+        return tag.lower() in have_lc or bool(ALIASES.get(tag, set()) & have_lc)
+
+    missing = {t for t in wanted if not installed(t)}
+
+    # Before calling anything missing, ask whether it can be PATCHED from what
+    # is here. When it can, it is not a gap — it is an instruction.
+    from_parts = {}
+    for tag in sorted(missing):
+        parts = BUILDABLE_FROM.get(tag)
+        if parts and all(installed(p) for p in parts):
+            from_parts[tag] = parts
+    missing -= set(from_parts)
+
     if not missing:
-        return {"ok": True, "missing": {}}
+        return {"ok": True, "missing": {}, "from_parts": from_parts}
 
     # What would provide each gap, cheapest first: a free plugin the user can
     # install right now beats a premium one they may not own.
@@ -1741,15 +1774,42 @@ def main(argv):
         # Stop before the model call, not after it.
         pf = preflight(argv[2], inv, module_index(), catalog())
         if not pf["ok"] and "--anyway" not in argv:
+            # Free first, and with the link. A refusal whose remedy is a free
+            # download should cost one click, not a search: the options were
+            # already printed but had to be found by hand in Rack's Library,
+            # and the app dropped them entirely on the way to the screen.
             print("  hold on — this asks for something you don't have installed:\n")
+            only_paid = True
             for tag, opts in pf["missing"].items():
-                print(f"  no {tag.lower()} module is installed. These would do it:")
-                for o in opts:
-                    mark = "PREMIUM" if o["premium"] else "free"
-                    print(f"      {mark:8} {o['plugin']}/{o['module']:16} "
+                free = [o for o in opts if not o["premium"]]
+                paid = [o for o in opts if o["premium"]]
+                if free:
+                    only_paid = False
+                    print(f"  no {tag.lower()} module is installed. "
+                          f"{len(free)} FREE one(s) would do it:")
+                    for o in free:
+                        print(f"      free     {o['plugin']}/{o['module']:16} "
+                              f"{o['name']}  ({o['brand']})")
+                        print(f"               https://library.vcvrack.com/"
+                              f"{o['plugin']}/{o['module']}")
+                else:
+                    print(f"  no {tag.lower()} module is installed, and every "
+                          f"option is paid:")
+                for o in paid[:3]:
+                    print(f"      PREMIUM  {o['plugin']}/{o['module']:16} "
                           f"{o['name']}  ({o['brand']})")
+                    print(f"               https://library.vcvrack.com/"
+                          f"{o['plugin']}/{o['module']}")
                 print()
-            print("  install one in Rack's Library, then ask again —")
+            if only_paid:
+                # The one case that genuinely is a dead end: nothing free to
+                # fetch, and not patchable from what is here.
+                print("  nothing free covers this and it cannot be patched from")
+                print("  what you have, so it needs a purchase — or a different")
+                print("  way of asking.")
+            else:
+                print("  open a link above, click Add, then relaunch Rack —")
+                print("  it downloads on the next launch. Then ask again.")
             print("  or pass --anyway: Rack keeps missing modules as")
             print("  placeholders and offers to fetch them when you open it.")
             return 3

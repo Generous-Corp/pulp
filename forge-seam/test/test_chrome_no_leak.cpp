@@ -7020,3 +7020,61 @@ TEST_CASE("a port map that will not parse says so, and is not silent",
     CHECK_FALSE(forge_modular::PortMap::parse("").unreadable());
     CHECK_FALSE(forge_modular::PortMap::parse(R"({"modules":[]})").unreadable());
 }
+
+TEST_CASE("a refusal carries the options, not just the bad news",
+          "[monitor][refusal]") {
+    // What a user saw: "hold on — this asks for something you don't have
+    // installed" followed immediately by "install one in Rack's Library, then
+    // ask again". The three FREE modules that would have satisfied the request
+    // were printed between those two lines and never reached the screen,
+    // because only the first and last matched a rule. A refusal with no
+    // options is a dead end; the options are the whole value of it.
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-refusal-block";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto log = dir / "run.log";
+    {
+        std::ofstream f(log);
+        f << "  reading the installed library\n"
+             "  hold on \xE2\x80\x94 this asks for something you don't have installed:\n"
+             "\n"
+             "  no arpeggiator module is installed. These would do it:\n"
+             "      free     Ahornberg/Tracker       Tracker  (Ahornberg)\n"
+             "      free     AmalgamatedHarmonics/Arp31  Arp 3.1 - Chord\n"
+             "      PREMIUM  Vendor/FancyArp         Fancy Arp\n"
+             "\n"
+             "  install one in Rack's Library, then ask again \xE2\x80\x94\n";
+    }
+
+    forge_modular::BuildMonitor mon;
+    mon.watch(log.string());
+    mon.poll();
+
+    int refusal_lines = 0;
+    bool saw_free = false, saw_premium = false, saw_header = false;
+    for (const auto& l : mon.lines()) {
+        if (l.kind != forge_modular::BuildLine::Kind::refusal) continue;
+        ++refusal_lines;
+        if (l.text.find("Ahornberg/Tracker") != std::string::npos) saw_free = true;
+        if (l.text.find("Vendor/FancyArp") != std::string::npos) saw_premium = true;
+        if (l.text.find("hold on") != std::string::npos) saw_header = true;
+    }
+    INFO("refusal lines carried: " << refusal_lines);
+    CHECK(saw_header);
+    CHECK(saw_free);        // the thing the user can actually act on
+    CHECK(saw_premium);
+    CHECK(refusal_lines >= 5);
+
+    // And the block ENDS: an ordinary line after it is not swallowed, or every
+    // later line of the run would be painted as a refusal.
+    {
+        std::ofstream f(log, std::ios::app);
+        f << "  reading the module index\n";
+    }
+    mon.poll();
+    const auto& all = mon.lines();
+    CHECK(all.back().kind != forge_modular::BuildLine::Kind::refusal);
+
+    std::filesystem::remove_all(dir, ec);
+}

@@ -90,6 +90,9 @@ private:
     std::string path_;
     std::uint64_t offset_ = 0;
     std::vector<BuildLine> lines_;
+    /// Inside a refusal block: its option lines match no rule of their own and
+    /// would otherwise be dropped, leaving a refusal with nothing to act on.
+    bool in_refusal_ = false;
 };
 
 }  // namespace forge_modular
