@@ -1866,9 +1866,12 @@ TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
 
     const auto* fill = first_meter_fill_rect(same_edge_canvas);
     REQUIRE(fill != nullptr);
-    REQUIRE(fill->f[0] == 1.0f);
+    // The level snaps to whole pixels along the growth axis (y/height) and
+    // spans the track's full cross axis (x/width) — track and fill cover the
+    // same box, so a cross-axis inset would leave a rail of track colour.
+    REQUIRE(fill->f[0] == 0.0f);
     REQUIRE(fill->f[1] == 16.0f);
-    REQUIRE(fill->f[2] == 6.0f);
+    REQUIRE(fill->f[2] == 8.0f);
     REQUIRE(fill->f[3] == 40.0f);
     REQUIRE(same_edge_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 0);
 
@@ -1890,9 +1893,10 @@ TEST_CASE("standard meter snaps fill edge and suppresses duplicate peak line",
         }
     }
     REQUIRE(peak_line != nullptr);
-    REQUIRE(peak_line->f[0] == 1.0f);
+    // Same box edge as the fill.
+    REQUIRE(peak_line->f[0] == 0.0f);
     REQUIRE(peak_line->f[1] == 14.0f);
-    REQUIRE(peak_line->f[2] == 7.0f);
+    REQUIRE(peak_line->f[2] == 8.0f);
     REQUIRE(peak_line->f[3] == 14.0f);
 }
 

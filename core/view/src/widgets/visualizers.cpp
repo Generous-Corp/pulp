@@ -528,12 +528,19 @@ void Meter::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(rms_color);
     float fill = level_to_pixels(rms_level);
 
+    // The fill spans the track's FULL cross axis. The track and the fill are
+    // two rects covering the same box, so they must agree on where that box
+    // ends: a cross-axis inset here leaves a 1px rail of track colour down
+    // both sides of the lit bar, which reads as a rasterisation seam rather
+    // than as housing — most visibly on a wide meter, where the rail is the
+    // only thing separating fill from background. The unlit part of the
+    // track is what shows the level; the sides are not.
     if (vert) {
         if (fill > 0.0f)
-            canvas.fill_rect(1, b.height - fill, b.width - 2, fill);
+            canvas.fill_rect(0, b.height - fill, b.width, fill);
     } else {
         if (fill > 0.0f)
-            canvas.fill_rect(0, 1, fill, b.height - 2);
+            canvas.fill_rect(0, 0, fill, b.height);
     }
 
     // Peak indicator line
@@ -545,11 +552,12 @@ void Meter::paint(canvas::Canvas& canvas) {
             canvas.set_stroke_color(peak_color);
             canvas.set_line_width(1.0f);
 
+            // Same box edge as the fill and the held-peak tick below.
             if (vert) {
                 float y = b.height - peak_pos;
-                canvas.stroke_line(1, y, b.width - 1, y);
+                canvas.stroke_line(0, y, b.width, y);
             } else {
-                canvas.stroke_line(peak_pos, 1, peak_pos, b.height - 1);
+                canvas.stroke_line(peak_pos, 0, peak_pos, b.height);
             }
         }
     }
