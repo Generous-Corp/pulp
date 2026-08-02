@@ -723,7 +723,7 @@ TEST_CASE("Atomic project-package publisher anchors a symlinked destination pare
 
     auto publisher = AtomicPublisher::create(parent_link / "published");
     REQUIRE(publisher);
-    REQUIRE(publisher->staging_directory().parent_path() == fs::canonical(first));
+    REQUIRE(publisher->staging_directory().parent_path().parent_path() == fs::canonical(first));
     const auto written = publisher->write("value.txt", "anchored");
     REQUIRE(written);
     REQUIRE(written.value());
@@ -764,7 +764,40 @@ TEST_CASE("Atomic project-package publisher creates owner-private staging",
     const auto status = fs::status(publisher->staging_directory(), error);
     REQUIRE_FALSE(error);
     REQUIRE(status.type() == fs::file_type::directory);
-    REQUIRE((status.permissions() & fs::perms::all) == fs::perms::owner_all);
+    REQUIRE((status.permissions() & fs::perms::all) == fs::perms::all);
+    const auto guard_status = fs::status(publisher->staging_directory().parent_path(), error);
+    REQUIRE_FALSE(error);
+    REQUIRE((guard_status.permissions() & fs::perms::all) == fs::perms::owner_all);
+}
+
+TEST_CASE("Atomic project-package publication preserves ordinary umask permissions",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-final-permissions");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    struct UmaskRestore {
+        mode_t previous = ::umask(0027);
+        ~UmaskRestore() {
+            ::umask(previous);
+        }
+    } restore;
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    REQUIRE(publisher->write("nested/value.txt", "value"));
+    const auto committed = publisher->commit_directory();
+    REQUIRE(committed);
+    REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
+    std::error_code error;
+    REQUIRE((fs::status(destination, error).permissions() & fs::perms::all) ==
+            (fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec));
+    REQUIRE_FALSE(error);
+    REQUIRE((fs::status(destination / "nested", error).permissions() & fs::perms::all) ==
+            (fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec));
+    REQUIRE_FALSE(error);
+    REQUIRE((fs::status(destination / "nested" / "value.txt", error).permissions() &
+             fs::perms::all) ==
+            (fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read));
+    REQUIRE_FALSE(error);
 }
 #endif
 

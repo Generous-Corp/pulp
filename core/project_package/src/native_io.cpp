@@ -553,7 +553,7 @@ bool AnchoredDirectory::write_exclusive_and_fence(const std::filesystem::path& r
     const auto root = static_cast<int>(native_);
     auto current = root;
     for (std::size_t index = 0; index + 1 < components.size(); ++index) {
-        if (::mkdirat(current, components[index].c_str(), 0700) != 0 && errno != EEXIST) {
+        if (::mkdirat(current, components[index].c_str(), 0777) != 0 && errno != EEXIST) {
             if (current != root)
                 ::close(current);
             return false;
@@ -579,7 +579,7 @@ bool AnchoredDirectory::write_exclusive_and_fence(const std::filesystem::path& r
                                          | O_NOFOLLOW
 #endif
                                      ,
-                                     0600);
+                                     0666);
     if (current != root)
         ::close(current);
     if (descriptor < 0)
