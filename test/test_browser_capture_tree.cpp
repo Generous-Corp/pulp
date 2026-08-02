@@ -14,6 +14,7 @@
 // does, so "the node is present" cannot prove the structure survived.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "tools/import-design/browser_capture_ir.hpp"
@@ -190,6 +191,11 @@ struct SnapshotSpec {
     std::string texts;
     /// The property list every style row is parallel to.
     std::string computed_names = R"(["background-image","display"])";
+    /// The string table every index above resolves through. Empty takes the
+    /// shared one below; a case needing values the shared table does not hold
+    /// supplies its own rather than appending to a table whose indices a
+    /// hundred other cases already depend on.
+    std::string strings;
 };
 
 /// The shared string table, in index order:
@@ -260,7 +266,10 @@ std::string build_snapshot(const SnapshotSpec& spec) {
         texts += "]";
     }
     std::string json;
-    json += R"({"strings":[)" + std::string(kSnapshotStrings) + "],";
+    json += R"({"strings":[)" +
+            (spec.strings.empty() ? std::string(kSnapshotStrings)
+                                  : spec.strings) +
+            "],";
     json += R"("computedStyleNames":)" + spec.computed_names + ",";
     json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents +
             R"(,"nodeType":)" + spec.node_types +
@@ -809,8 +818,14 @@ TEST_CASE("a control over a native panel restates its body contract",
 // above pin snapshot DECODING against what Chrome really serializes, and these
 // pin the tree logic layered on top of the same loader.
 
-TEST_CASE("an svg subtree pools into one capture-fallback node",
-          "[browser-capture][native-lowering]") {
+TEST_CASE("an svg with no captured paint refuses rather than inventing one",
+          "[browser-capture][native-lowering][svg]") {
+    // A capture taken before the protocol collected `fill` / `stroke` carries
+    // the geometry and no colour for it. SVG's own default fill is black, so
+    // defaulting would paint a black icon on a dark panel — a wrong picture
+    // that reads as a rendering bug rather than as a stale capture. The subtree
+    // stays pooled and the reason says which of the two it is.
+    //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path, 5 path
     const auto lowered = lower_snapshot(
         {
@@ -841,6 +856,7 @@ TEST_CASE("an svg subtree pools into one capture-fallback node",
     });
     REQUIRE(svg != nullptr);
     CHECK(attribute(*svg, "capture_fallback_element") == "svg");
+    CHECK(attribute(*svg, "capture_fallback_reason") == "svg-paint-unavailable");
     // Pooling removes the shape children; it must not also strip the ancestry
     // that says WHERE the artwork sits.
     const auto* body = find_named(root, "body");
@@ -915,6 +931,227 @@ TEST_CASE("pooling reaches through a plain element inside the capture",
               const auto tag = attribute(node, "source_tag");
               return tag == "g" || tag == "path";
           }) == 0);
+}
+
+// ── Inline <svg> ────────────────────────────────────────────────────────────
+// An icon is geometry, not a picture: its shapes lower to vector nodes drawn
+// from path data, so the panel scales, recolours, and carries no raster.
+//
+// Every case below reads ONE real Chromium capture
+// (test/fixtures/browser-capture-svg-icons) rather than a hand-built snapshot,
+// because the whole premise is that the browser resolved the paint —
+// `currentColor`, a stylesheet rule, an opacity — and a fixture written by hand
+// would agree with the parser by construction about what it resolved to. The
+// page is deliberately awkward: non-square viewBoxes, a stroke AND a fill on
+// one path, a compound even-odd ring, and two icons that must REFUSE.
+
+namespace {
+
+/// Vector nodes, in composed order, under the whole tree.
+std::vector<const IRNode*> vector_nodes(const IRNode& root) {
+    std::vector<const IRNode*> found;
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (child.type == "path" && child.attributes.count("path_data"))
+                found.push_back(&child);
+            walk(child);
+        }
+    };
+    walk(root);
+    return found;
+}
+
+const IRNode* vector_from(const IRNode& root, std::string_view path_data) {
+    for (const auto* node : vector_nodes(root))
+        if (attribute(*node, "path_data") == path_data) return node;
+    return nullptr;
+}
+
+}  // namespace
+
+TEST_CASE("an svg icon's shapes lower to vector nodes, not to a capture",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // Four of the six icons draw; the last two refuse for reasons the case
+    // below pins by name.
+    CHECK(attribute(root, "native_svg_lowered") == "4");
+    CHECK(attribute(root, "native_svg_refused") == "2");
+
+    // The stroke-only waveform: authored `d` reaches the node verbatim, and
+    // the stroke Chrome resolved on it comes with the width it was authored in
+    // — in the viewBox's user units, which is the space the path data is in.
+    const auto* wave = vector_from(root, "M1 15 L5 3 L9 13 L13 1 L17 11 L23 6");
+    REQUIRE(wave != nullptr);
+    CHECK(attribute(*wave, "svg_stroke") == "rgb(232, 181, 82)");
+    CHECK(attribute(*wave, "svg_stroke_width") == "1.8");
+    // A shape with no fill must SAY so. SVG's own default fill is opaque
+    // black and the renderer's default matches it, so an absent `svg_fill`
+    // here does not mean unfilled — it paints a solid black slab inside the
+    // stroke that is meant to be the whole icon. Measured, not reasoned: the
+    // first render of this fixture did exactly that.
+    CHECK(attribute(*wave, "svg_fill") == "none");
+    // The viewBox is what turns user units into the icon's box, and it is NOT
+    // square — a square one would let a wrong axis pass unnoticed.
+    CHECK(attribute(*wave, "svg_viewbox") == "0 0 24 16");
+
+    // One path carrying BOTH roles at once, which is the case a fill-only or
+    // stroke-only reader gets half right.
+    const auto* filled = vector_from(root, "M2 18 L10 2 L18 18 Z");
+    REQUIRE(filled != nullptr);
+    CHECK(attribute(*filled, "svg_fill") == "rgb(74, 144, 212)");
+    CHECK(attribute(*filled, "svg_stroke") == "rgb(255, 255, 255)");
+    CHECK(attribute(*filled, "svg_stroke_width") == "1.2");
+}
+
+TEST_CASE("the browser's resolved paint is what reaches a vector node",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // `fill="currentColor"` on a `<rect>`: the colour lives on the DIV around
+    // the icon, so nothing in the SVG markup names it. Reading the authored
+    // attribute back would carry the literal string `currentColor` into the
+    // IR, where it parses as no colour at all.
+    const auto* themed = find_node(root, [](const IRNode& node) {
+        return node.type == "path" &&
+               attribute(node, "svg_fill") == "rgb(124, 214, 193)";
+    });
+    INFO("currentColor must arrive as the .cell colour #7cd6c1");
+    REQUIRE(themed != nullptr);
+    CHECK(attribute(*themed, "source_tag") == "rect");
+
+    // A stylesheet rule (`.themed path { fill: … }`) with no presentation
+    // attribute anywhere on the element.
+    const auto* styled = vector_from(root, "M2 13 L10 2 L18 13 Z");
+    REQUIRE(styled != nullptr);
+    CHECK(attribute(*styled, "svg_fill") == "rgb(200, 106, 208)");
+    CHECK(attribute(*styled, "svg_stroke") == "rgb(245, 240, 255)");
+
+    // `fill-opacity` is a separate property from the colour; folded into the
+    // alpha so a consumer that only understands a CSS colour still gets the
+    // right pixel. Its sibling above shares the same rule at full opacity, so
+    // the two differ ONLY in the alpha — a fold that silently dropped would
+    // make them identical.
+    const auto* faded = vector_from(root, "M6 13 L10 7 L14 13 Z");
+    REQUIRE(faded != nullptr);
+    CHECK(attribute(*faded, "svg_fill") == "rgba(200, 106, 208, 0.45)");
+}
+
+TEST_CASE("svg primitives lower through the same path data as a <path>",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto by_tag = [&root](std::string_view tag) -> const IRNode* {
+        for (const auto* node : vector_nodes(root))
+            if (attribute(*node, "source_tag") == tag) return node;
+        return nullptr;
+    };
+
+    // `<circle cx="13" cy="1" r="1.6">`. Two half-arcs, because one full-turn
+    // arc is degenerate — its start and end coincide, so no ellipse is
+    // determined and it renders as nothing.
+    const auto* circle = by_tag("circle");
+    REQUIRE(circle != nullptr);
+    CHECK(attribute(*circle, "path_data") ==
+          "M11.4 1 A1.6 1.6 0 0 1 14.6 1 A1.6 1.6 0 0 1 11.4 1 Z");
+    CHECK(attribute(*circle, "svg_fill") == "rgb(212, 84, 74)");
+
+    // `<rect x="21" y="5" width="9" height="10" rx="2">`: a missing `ry` takes
+    // `rx`, and the corners become arcs rather than being dropped square.
+    const auto* rect = by_tag("rect");
+    REQUIRE(rect != nullptr);
+    CHECK(attribute(*rect, "path_data") ==
+          "M23 5 H28 A2 2 0 0 1 30 7 V13 A2 2 0 0 1 28 15 H23 A2 2 0 0 1 21 13"
+          " V7 A2 2 0 0 1 23 5 Z");
+
+    // `<polygon points="3,22 8,14 13,22">` closes; a `<polyline>` would not.
+    const auto* polygon = by_tag("polygon");
+    REQUIRE(polygon != nullptr);
+    CHECK(attribute(*polygon, "path_data") == "M3 22 L8 14 L13 22 Z");
+
+    // The compound ring: outer circle plus an inner contour wound the same
+    // way. Under nonzero winding the hole fills solid and the icon is a disc,
+    // so the rule has to survive the lowering.
+    const auto* ring = find_node(root, [](const IRNode& node) {
+        return attribute(node, "svg_fill_rule") == "evenodd";
+    });
+    REQUIRE(ring != nullptr);
+    CHECK(attribute(*ring, "svg_fill") == "rgb(99, 179, 237)");
+}
+
+TEST_CASE("an svg the vector lowering cannot draw says which construct refused",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // The residual is meant to be a LIST, not a total: a design's remaining
+    // can't-draw work is "one paint server and one group transform", which is
+    // actionable, where "two SVGs failed" is not.
+    std::vector<std::string> reasons;
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg")
+                reasons.push_back(attribute(child, "capture_fallback_reason"));
+            walk(child);
+        }
+    };
+    walk(root);
+    std::sort(reasons.begin(), reasons.end());
+    CHECK(reasons ==
+          std::vector<std::string>{"svg-paint-reference", "svg-transform"});
+
+    // A refused subtree must not leak half of itself: the `<rect>` filled from
+    // `<defs>` and the one inside the rotated `<g>` are both still pooled, so
+    // nothing paints on top of the captured element.
+    for (const auto* node : vector_nodes(root)) {
+        INFO("vector node " << attribute(*node, "path_data"));
+        CHECK(attribute(*node, "svg_fill") != "rgb(143, 214, 148)");
+    }
+}
+
+TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
+          "[browser-capture][native-lowering][svg]") {
+    const auto lowered = lower_capture("browser-capture-svg-icons");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    const auto* wave = vector_from(root, "M1 15 L5 3 L9 13 L13 1 L17 11 L23 6");
+    REQUIRE(wave != nullptr);
+
+    // Containment, so an editor grabbing the icon moves its geometry with it.
+    const auto* icon = find_node(root, [wave](const IRNode& node) {
+        return attribute(node, "source_tag") == "svg" &&
+               std::any_of(node.children.begin(), node.children.end(),
+                           [wave](const IRNode& child) {
+                               return &child == wave;
+                           });
+    });
+    REQUIRE(icon != nullptr);
+    CHECK(attribute(*icon, "svg_shapes") == "2");
+    CHECK(attribute(*icon, "paint_class") == "native");
+
+    // The shapes share ONE user-coordinate space, so they share ONE box: the
+    // `<svg>`'s. Sized to its own bounds instead, each path would rescale by a
+    // different factor and the icon would come apart. Offsets are relative to
+    // that parent, so the vector node sits exactly on it.
+    REQUIRE(wave->style.width);
+    REQUIRE(wave->style.height);
+    CHECK(*wave->style.width == Catch::Approx(54.0));
+    CHECK(*wave->style.height == Catch::Approx(36.0));
+    REQUIRE(wave->style.left);
+    REQUIRE(wave->style.top);
+    CHECK(*wave->style.left == Catch::Approx(0.0));
+    CHECK(*wave->style.top == Catch::Approx(0.0));
+
+    // The geometry is drawn, so it must not ALSO be counted as pooled away.
+    CHECK(attribute(root, "native_svg_shapes") == "8");
 }
 
 TEST_CASE("canvas and image elements classify away from native",

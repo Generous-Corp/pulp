@@ -85,6 +85,23 @@ export const COMPUTED_STYLES = [
   "content",
   "cursor",
   "pointer-events",
+  // SVG paint. An inline `<svg>` icon carries its colour three different ways —
+  // a presentation attribute, a stylesheet rule, or `currentColor` inherited
+  // from the box around it — and only the browser knows which one won. Reading
+  // the authored attribute back off the DOM gets a CSS-styled icon wrong and
+  // gets `currentColor` wrong every time, so the resolved value is the only
+  // usable input. `fill` / `stroke` are `none` on a non-SVG box, which costs a
+  // shared string.
+  "fill",
+  "fill-opacity",
+  "fill-rule",
+  "stroke",
+  "stroke-opacity",
+  "stroke-width",
+  // Not drawn by the vector lowering, but READ by it: a dashed or dotted stroke
+  // rendered solid is a wrong picture, so its presence sends the subtree to the
+  // element fallback instead.
+  "stroke-dasharray",
 ];
 
 export function semanticExpression(snapshotClickableIndexes = []) {

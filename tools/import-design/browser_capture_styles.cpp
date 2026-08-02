@@ -424,6 +424,18 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for_layout(
     return computed;
 }
 
+bool CapturedStyleIndex::has_property(std::string_view name) const {
+    return std::find(property_names_.begin(), property_names_.end(), name) !=
+           property_names_.end();
+}
+
+std::map<std::string, std::string> CapturedStyleIndex::styles_for_node(
+    int node_index) const {
+    const auto layout = node_to_layout_.find(node_index);
+    if (layout == node_to_layout_.end()) return {};
+    return styles_for_layout(layout->second);
+}
+
 std::vector<CapturedPaintNode> CapturedStyleIndex::painted_nodes() const {
     std::vector<CapturedPaintNode> painted;
     painted.reserve(layout_to_node_.size());

@@ -38,6 +38,16 @@ struct PaintedTreeCounts {
     int element_capture_fallback = 0;
     int text = 0;                  ///< of the lowered, how many carry a string
     int pooled_into_fallback = 0;  ///< descendants of a captured element
+    /// `<svg>` elements whose whole shape tree became vector nodes.
+    int svg_lowered = 0;
+    /// `<svg>` elements that still arrive as a captured element. Each carries
+    /// `capture_fallback_reason` naming the construct that refused, so the
+    /// residual is a list rather than a total.
+    int svg_refused = 0;
+    /// Vector nodes emitted from those shape trees. Counted separately from
+    /// `native` so "the panel draws more nodes" cannot be read as "the panel
+    /// draws more of the design" when the extra nodes are all one icon.
+    int svg_shapes = 0;
     int skipped_empty_box = 0;     ///< zero-area layout objects
     int skipped_blank_text = 0;    ///< collapsed whitespace runs
     int skipped_non_visual = 0;    ///< the document node, doctype, comments
