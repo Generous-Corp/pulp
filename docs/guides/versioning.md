@@ -396,7 +396,15 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.80.2 — the merge queue made it load-bearing
+### Why the pin sits at v0.81.0 — fleet health and the merge queue are load-bearing
+
+v0.81.0 makes `runner fleet-status` account for the full registered-runner
+inventory and configured expected metal hosts, including machines that have not
+registered yet. It also fails visibly when Tart disk headroom falls below its
+admission floor, ccache exceeds its configured maximum, or a merge-group Linux
+job remains on `ubuntu-latest` while compatible self-hosted capacity is idle.
+Pulp relies on these checks for the MacPro Linux pool and unfinished Mac Mini
+Intel lane, so `.shipyard/config.toml` must not land ahead of this pin.
 
 The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
 **Shipyard's post-tag hook could no longer push.**
