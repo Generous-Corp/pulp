@@ -25,6 +25,13 @@ Or run a single cluster module directly:
     python3 tools/scripts/test_version_bump_force_fixfeat.py
     python3 tools/scripts/test_compose_release_notes.py
     python3 tools/scripts/test_skill_sync.py
+    python3 tools/scripts/test_skill_path_map.py
+    python3 tools/scripts/test_skill_path_map_lint.py
+
+Not every module here uses a throwaway repo: the skill-path-map suites
+assert against the real `tools/scripts/skill_path_map.json` and the real
+`.agents/skills/` tree, because the defect they cover is the map drifting
+away from the tree, which no synthetic fixture reproduces.
 """
 
 from __future__ import annotations
@@ -59,6 +66,15 @@ from test_version_bump_intent import (  # noqa: E402,F401
     StrandedDetectorIntentPendingTests,
 )
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401
+from test_skill_path_map import NoSilentEmptyPatterns  # noqa: E402,F401
+from test_skill_path_map_lint import (  # noqa: E402,F401
+    CoClaimRuleTests,
+    EmptyRuleTests,
+    JsonSchemaLiteTests,
+    RealSkillPathMapLintTests,
+    SchemaRuleTests,
+    SubmoduleRuleTests,
+)
 from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
 from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 
