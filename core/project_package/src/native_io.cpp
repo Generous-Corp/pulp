@@ -20,6 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <aclapi.h>
+#include <sddl.h>
 #include <windows.h>
 #include <winternl.h>
 #else
@@ -1120,9 +1121,15 @@ bool write_exclusive_and_fence(const std::filesystem::path& path,
                                std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,
                                PackageFaultPoint fenced_point) noexcept {
 #if defined(_WIN32)
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
+        return false;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
     const auto handle =
-        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &attributes,
                       CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    LocalFree(descriptor);
     if (handle == INVALID_HANDLE_VALUE)
         return false;
     const bool written = write_all(handle, bytes);

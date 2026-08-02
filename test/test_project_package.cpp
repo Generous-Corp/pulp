@@ -73,17 +73,17 @@ std::atomic<std::uint64_t> g_blob_verifications{0};
 constexpr wchar_t kPrivatePublicationDirectoryDacl[] =
     L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)";
 constexpr wchar_t kPrivatePublicationFileDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)";
+bool dacl_matches_sddl(const fs::path& path, const wchar_t* expected_sddl) noexcept;
 fs::path g_published_permission_observation_path;
 bool g_published_permission_observation_is_directory = false;
 bool g_published_permission_observed = false;
 bool g_published_permission_was_private = false;
-#else
+#endif
 fs::path g_private_stage_directory;
 pulp::project_package::detail::PackageFaultPoint g_private_stage_point =
     pulp::project_package::detail::PackageFaultPoint::StagedFileWritten;
 bool g_private_stage_observed = false;
 bool g_private_stage_was_private = false;
-#endif
 
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified &&
@@ -99,7 +99,6 @@ void count_blob_verification(pulp::project_package::detail::PackageFaultPoint po
         g_blob_verifications.fetch_add(1, std::memory_order_relaxed);
 }
 
-#if !defined(_WIN32)
 void observe_private_package_stage(
     pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != g_private_stage_point)
@@ -109,14 +108,18 @@ void observe_private_package_stage(
          !error && iterator != end; iterator.increment(error)) {
         if (!iterator->path().filename().string().starts_with(".pulp-stage-"))
             continue;
-        struct stat status{};
         g_private_stage_observed = true;
+#if defined(_WIN32)
+        g_private_stage_was_private =
+            dacl_matches_sddl(iterator->path(), kPrivatePublicationFileDacl);
+#else
+        struct stat status{};
         g_private_stage_was_private =
             ::stat(iterator->path().c_str(), &status) == 0 && (status.st_mode & 0777) == 0600;
+#endif
         return;
     }
 }
-#endif
 
 void append_during_blob_hash(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != pulp::project_package::detail::PackageFaultPoint::BlobHashSnapshot)
@@ -1282,6 +1285,66 @@ TEST_CASE("Atomic publication matches Windows DACL inheritance for trees and fil
     REQUIRE(dacl_sddl(published_directory / "nested" / "value.txt") ==
             dacl_sddl(control_directory / "nested" / "value.txt"));
     REQUIRE(dacl_sddl(published_file) == dacl_sddl(control_file));
+}
+
+TEST_CASE("Package writer keeps Windows stages private and adopts direct-child DACLs",
+          "[project-package][package-writer][permissions]") {
+    TemporaryPackage temporary("writer-windows-acl-inheritance");
+    fs::create_directories(temporary.path);
+
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
+    const auto first_hash = hash_bytes(first_media);
+    REQUIRE(writer->stage_blob(BlobStore::Media, first_hash, first_media));
+    REQUIRE(writer->publish(make_project("first", "first", first_hash)));
+
+    std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> marker_storage{};
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    const auto marker_sid = reinterpret_cast<PSID>(marker_storage.data());
+    REQUIRE(InitializeSid(marker_sid, &authority, 2));
+    *GetSidSubAuthority(marker_sid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
+    *GetSidSubAuthority(marker_sid, 1) = 0x00f0f0f2u;
+    REQUIRE(add_read_ace(temporary.path, marker_sid, OBJECT_INHERIT_ACE));
+    REQUIRE(add_read_ace(temporary.path / "media", marker_sid, OBJECT_INHERIT_ACE));
+
+    const auto control_project = temporary.path / "control-project.json";
+    const auto control_blob = temporary.path / "media" / "control-blob";
+    std::ofstream(control_project) << "control";
+    std::ofstream(control_blob) << "control";
+
+    const std::vector<std::uint8_t> second_media{'s', 'e', 'c', 'o', 'n', 'd'};
+    const auto second_hash = hash_bytes(second_media);
+    g_private_stage_directory = temporary.path / "media";
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::StagedFileWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto staged = writer->stage_blob(BlobStore::Media, second_hash, second_media);
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(staged);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    g_private_stage_directory = temporary.path;
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::GenerationWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto published = writer->publish(make_project("second", "second", second_hash));
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(published);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    const auto published_project = temporary.path / "project.json";
+    const auto published_blob = temporary.path / "media" / second_hash.to_hex();
+    REQUIRE(dacl_has_allowed_sid(published_project, marker_sid));
+    REQUIRE(dacl_has_allowed_sid(published_blob, marker_sid));
+    REQUIRE(dacl_sddl(published_project) == dacl_sddl(control_project));
+    REQUIRE(dacl_sddl(published_blob) == dacl_sddl(control_blob));
 }
 #endif
 
