@@ -891,8 +891,11 @@ This applies to both `.github/workflows/release-cli.yml` and the local
 helper `tools/scripts/release-cli-local.sh`. If one changes without the
 other, GitHub releases and local release drills diverge.
 
-Release/SDK builds also pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and
-standalone artifacts do not ship the dev audio-probe surface. Keep
+Release/SDK builds pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and standalone
+artifacts do not ship the dev audio-probe surface, and
+`-DPULP_ENABLE_INSPECTOR=ON` because the release product matrix promises the
+optional inspector SDK archive family. That build-time component does not
+enable runtime inspector endpoints; those remain off by default. Keep
 `.github/workflows/release-cli.yml`, `.github/workflows/sign-and-release.yml`,
 and `tools/scripts/release-cli-local.sh` in sync when changing release
 configure flags.
@@ -900,11 +903,12 @@ configure flags.
 Starting at `tools/scripts/release_product_matrix.json`'s
 `sdk_provenance_floor`, the SDK tarballs also require
 `sdk-provenance.json`: a positive `official-release` marker bound to the exact
-release tag commit and archive platform, with a clean Release source and both
-audio probes and the inspector disabled. `release-cli.yml` stamps the selected
-install prefix, and its downloaded-asset finalizer re-verifies the exact tag
-SHA/platform before publication. Marker-era manual backfills must build the tag
-itself; `source_ref` substitution is reserved for pre-marker history.
+release tag commit and archive platform, with a clean Release source, audio
+probes disabled, and the inspector SDK component enabled. `release-cli.yml`
+stamps the selected install prefix, and its downloaded-asset finalizer
+re-verifies the exact tag SHA/platform before publication. Marker-era manual
+backfills must build the tag itself; `source_ref` substitution is reserved for
+pre-marker history.
 
 ### Shipyard pin drift between local tooling and tag sync
 
