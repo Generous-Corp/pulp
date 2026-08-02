@@ -1495,14 +1495,14 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
 // sprite disc is a body too.
 bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (attr(node, "asset_path")) return false;  // captured art owns its skin
-    // A control lowered from a browser capture carries no body of its own: its
-    // body is the captured bitmap it sits on. It fails the has_body test below
-    // for the very reason it most needs this skin — without it the widget paints
-    // an opaque default body straight over the design it was placed on.
-    const bool body_is_the_capture = attr(node, "designed_body").value_or("") == "capture";
+    // A control whose body is drawn by the layer beneath it — the capture
+    // bitmap (`capture`) or a lowered native node (`underlay`) — has none of
+    // its own, so without this skin it paints an opaque default body over the
+    // design; the bitmap's EXISTENCE used to be what enforced that.
+    const auto body = attr(node, "designed_body").value_or("");
     const bool has_body = node.style.background_gradient || node.style.background_color ||
                           node.style.border_width || !node.style.box_shadow.empty();
-    if (!has_body && !body_is_the_capture) return false;
+    if (!has_body && body != "capture" && body != "underlay") return false;
 
     // Colours come from the DESIGN's tokens when the importer carried them.
     // A default-constructed skin has a hardcoded teal accent, which is how a

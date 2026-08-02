@@ -25,6 +25,14 @@ struct BrowserCaptureIrOptions {
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     std::string source_file;
     bool require_interaction_report = false;
+    /// Draw the panel instead of photographing it: lower every painted node
+    /// from the DOM snapshot at its absolute solved box, and emit no
+    /// `faithful_capture` backdrop.
+    ///
+    /// Off by default on purpose. The capture is the A-side of an A/B and the
+    /// permanent CI oracle — native ships per panel only once it has been shown
+    /// to pass against the picture, so the picture cannot be removed first.
+    bool native_panel_lowering = false;
 };
 
 /// Parse and validate a capture envelope, reject sidecar paths that escape its

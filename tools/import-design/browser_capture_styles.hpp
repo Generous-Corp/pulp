@@ -20,6 +20,26 @@ struct CapturedBox {
     double height = 0.0;
 };
 
+/// One node Chrome actually laid out and painted, in the order it painted it.
+///
+/// The DOM snapshot's layout array holds exactly the nodes that produced a
+/// layout object, so it is already the painted set — an element hidden by
+/// `display: none` never appears, and neither does anything inside `<head>`.
+struct CapturedPaintNode {
+    int layout_index = -1;
+    int node_index = -1;
+    int backend_node_id = -1;
+    /// Chrome's own paint order for this layout object. Ties are common (a
+    /// paint order groups everything painted in the same phase of the same
+    /// stacking context), so a consumer must break them by document order
+    /// rather than treat the value as a unique rank.
+    int paint_order = -1;
+    int node_type = 0;              ///< DOM nodeType: 1 element, 3 text
+    std::string tag_name;           ///< lowercase, e.g. "div"; "#text" for text
+    std::string text;               ///< laid-out text run, empty for elements
+    CapturedBox bounds;
+};
+
 /// Chrome's solved appearance for the captured document, indexed for lookup by
 /// backend node id.
 ///
@@ -49,23 +69,66 @@ public:
         int backend_node_id,
         const std::optional<CapturedBox>& paint_box) const;
 
+    /// Computed declarations for one layout node, addressed directly.
+    ///
+    /// `styles_for` resolves an *element* through its semantic identity; whole
+    /// -tree lowering already holds the layout index it wants, and going back
+    /// through the backend id would re-run the paint-box search for a node that
+    /// is its own answer.
+    std::map<std::string, std::string> styles_for_layout(
+        int layout_index) const;
+
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
+
+    /// Every laid-out node, in Chrome's paint order, ties broken by document
+    /// order. This is the set a native renderer has to draw.
+    std::vector<CapturedPaintNode> painted_nodes() const;
+
+    /// An element's authored attribute value, or empty when absent.
+    std::string attribute(int node_index, std::string_view name) const;
+
+    /// A node's lowercase tag name, for any node in the document — not only the
+    /// ones that were laid out. Ancestry questions have to reach elements that
+    /// never painted themselves.
+    std::string tag_name(int node_index) const;
+
+    /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
+    int parent_of(int node_index) const;
 
     bool empty() const noexcept { return style_rows_.empty(); }
 
 private:
     std::optional<int> layout_for_node(int node_index) const;
     bool is_descendant(int node_index, int ancestor_index) const;
+    std::string string_at(int index) const;
 
     std::vector<std::string> property_names_;
     std::vector<std::string> strings_;
     std::vector<int> parent_index_;                  ///< node index → parent
+    std::vector<int> node_type_;                     ///< node index → nodeType
+    std::vector<int> node_name_;                     ///< node index → string
+    std::vector<std::vector<int>> node_attributes_;  ///< node index → name/value
     std::unordered_map<int, int> backend_to_node_;
+    std::vector<int> node_to_backend_;               ///< node index → backend
     std::unordered_map<int, int> node_to_layout_;
     std::vector<int> layout_to_node_;                ///< layout index → node
+    std::vector<int> layout_text_;                   ///< layout index → string
+    std::vector<int> layout_paint_order_;            ///< layout index → order
     std::vector<std::vector<int>> style_rows_;       ///< layout index → strings
     std::vector<CapturedBox> layout_bounds_;
+};
+
+/// Which half of an element's appearance to fold onto a node.
+///
+/// A text run's computed style IS its parent element's, so writing the box half
+/// onto a text node repaints the parent's background, border and shadow inside
+/// the text's own rectangle — a second, smaller copy of the panel's every
+/// surface. Naming the scope keeps one owner of the property list; clearing the
+/// fields afterwards would silently leak every property added later.
+enum class ComputedStyleScope {
+    box_and_text,  ///< an element: fills, borders, effects, and typography
+    text_only,     ///< a text run: typography and colour, no box decoration
 };
 
 /// Fold Chrome's computed declarations onto an IR node's style.
@@ -77,7 +140,8 @@ private:
 void apply_computed_styles(
     const std::map<std::string, std::string>& computed,
     const std::optional<CapturedBox>& box,
-    pulp::view::IRStyle& style);
+    pulp::view::IRStyle& style,
+    ComputedStyleScope scope = ComputedStyleScope::box_and_text);
 
 /// Split a CSS list on top-level commas, ignoring commas nested in functions
 /// (`rgba(0, 0, 0, .5)` is one value, not four).
