@@ -344,27 +344,42 @@ PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
 bool create_publication_payload(const fs::path& path,
                                 const fs::path& destination_parent) noexcept {
 #if defined(_WIN32)
-    if (CreateDirectoryW(path.c_str(), nullptr) == 0)
-        return false;
-    PACL parent_dacl = nullptr;
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    PSECURITY_DESCRIPTOR parent_descriptor = nullptr;
     const auto read_error = GetNamedSecurityInfoW(
-        const_cast<PWSTR>(destination_parent.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-        nullptr, nullptr, &parent_dacl, nullptr, &descriptor);
-    const auto write_error =
-        read_error == ERROR_SUCCESS && parent_dacl != nullptr
-            ? SetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
-                                    DACL_SECURITY_INFORMATION |
-                                        PROTECTED_DACL_SECURITY_INFORMATION,
-                                    nullptr, nullptr, parent_dacl, nullptr)
-            : ERROR_INVALID_SECURITY_DESCR;
-    if (descriptor != nullptr)
-        LocalFree(descriptor);
-    if (write_error == ERROR_SUCCESS)
-        return true;
-    std::error_code ignored;
-    fs::remove(path, ignored);
-    return false;
+        const_cast<PWSTR>(destination_parent.c_str()), SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        nullptr, nullptr, nullptr, nullptr, &parent_descriptor);
+    if (read_error != ERROR_SUCCESS || parent_descriptor == nullptr) {
+        if (parent_descriptor != nullptr)
+            LocalFree(parent_descriptor);
+        return false;
+    }
+
+    HANDLE token = nullptr;
+    bool token_opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token) != 0;
+    if (!token_opened && GetLastError() == ERROR_NO_TOKEN)
+        token_opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0;
+
+    GENERIC_MAPPING file_mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
+                                 FILE_ALL_ACCESS};
+    PSECURITY_DESCRIPTOR child_descriptor = nullptr;
+    const bool descriptor_created =
+        token_opened &&
+        CreatePrivateObjectSecurityEx(parent_descriptor, nullptr, &child_descriptor, nullptr, TRUE,
+                                      SEF_DACL_AUTO_INHERIT, token, &file_mapping) != 0;
+    if (token != nullptr)
+        CloseHandle(token);
+    LocalFree(parent_descriptor);
+    if (!descriptor_created || child_descriptor == nullptr) {
+        if (child_descriptor != nullptr)
+            DestroyPrivateObjectSecurity(&child_descriptor);
+        return false;
+    }
+
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), child_descriptor, FALSE};
+    const bool created = CreateDirectoryW(path.c_str(), &attributes) != 0;
+    DestroyPrivateObjectSecurity(&child_descriptor);
+    return created;
 #else
     (void)destination_parent;
     return ::mkdir(path.c_str(), 0777) == 0;
