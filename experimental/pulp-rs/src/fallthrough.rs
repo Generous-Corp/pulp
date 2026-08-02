@@ -78,18 +78,15 @@ impl BinaryResolver for SystemResolver {
     fn resolve(&self, name: &str) -> Option<PathBuf> {
         if let Ok(self_exe) = std::env::current_exe() {
             if let Some(dir) = self_exe.parent() {
-                let sibling = dir.join(name);
-                if is_file_executable(&sibling) {
-                    return Some(sibling);
+                for sibling in executable_candidates(dir, name, cfg!(windows)) {
+                    if is_file_executable(&sibling) {
+                        return Some(sibling);
+                    }
                 }
-                let source_build_delegate = dir.join("tools").join("cli").join(name);
-                if is_file_executable(&source_build_delegate) {
-                    return Some(source_build_delegate);
-                }
-                #[cfg(windows)]
+                let source_build_dir = dir.join("tools").join("cli");
+                for source_build_delegate in
+                    executable_candidates(&source_build_dir, name, cfg!(windows))
                 {
-                    let source_build_delegate =
-                        dir.join("tools").join("cli").join(format!("{name}.exe"));
                     if is_file_executable(&source_build_delegate) {
                         return Some(source_build_delegate);
                     }
@@ -98,21 +95,22 @@ impl BinaryResolver for SystemResolver {
         }
         let path = std::env::var_os("PATH")?;
         for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(name);
-            if is_file_executable(&candidate) {
-                return Some(candidate);
-            }
-            // Windows: also try with `.exe`.
-            #[cfg(windows)]
-            {
-                let exe_candidate = dir.join(format!("{name}.exe"));
-                if is_file_executable(&exe_candidate) {
-                    return Some(exe_candidate);
+            for candidate in executable_candidates(&dir, name, cfg!(windows)) {
+                if is_file_executable(&candidate) {
+                    return Some(candidate);
                 }
             }
         }
         None
     }
+}
+
+fn executable_candidates(dir: &Path, name: &str, windows: bool) -> Vec<PathBuf> {
+    let mut candidates = vec![dir.join(name)];
+    if windows && !name.to_ascii_lowercase().ends_with(".exe") {
+        candidates.push(dir.join(format!("{name}.exe")));
+    }
+    candidates
 }
 
 fn is_file_executable(path: &Path) -> bool {
@@ -373,5 +371,18 @@ mod tests {
         let spawner = RecordingSpawner::with_codes(vec![0]);
         delegate_with(&["doctor".to_owned()], &resolver, &spawner).unwrap();
         assert_eq!(probed.borrow().as_deref(), Some("pulp-legacy"));
+    }
+
+    #[test]
+    fn packaged_windows_sibling_candidates_include_exe_suffix() {
+        let dir = Path::new("C:/pulp/bin");
+        assert_eq!(
+            executable_candidates(dir, "pulp-cpp", true),
+            vec![dir.join("pulp-cpp"), dir.join("pulp-cpp.exe")]
+        );
+        assert_eq!(
+            executable_candidates(dir, "pulp-cpp.exe", true),
+            vec![dir.join("pulp-cpp.exe")]
+        );
     }
 }

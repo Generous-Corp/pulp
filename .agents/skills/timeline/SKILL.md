@@ -414,8 +414,22 @@ artifact is needed. Never modify canonical project JSON text directly.
   breakage appears only when the two branches meet on main — neither PR's CI can
   see it alone. Check `corpus.index` covers the tree before merging a
   fixture-adding branch.
+- **The corpus runs twice per PR: natively under ctest, and compiled to WASM.**
+  `core/interchange/wasm/CMakeLists.txt` is an Emscripten-only root that builds
+  the runner from the portable sources, and `tools/ci/wasm-fixture-lane.sh`
+  drives it (job `Timeline fixture corpus (WASM)` in `web-plugins.yml`). Two
+  things follow. The wasm root **hand-lists** its sources, because linking
+  `pulp::timeline` would drag in `pulp::runtime`'s mbedTLS/HTTP — so a source
+  the desktop build gains is one the wasm build can silently miss; the root
+  fails its configure when `core/interchange/src` drifts from its list, but the
+  timeline list it borrows from `PulpTimelineSources.cmake` is shared and stays
+  honest on its own. And the lane deliberately runs the corpus a second time
+  against a broken copy and requires red, so a wasm build that validated
+  nothing cannot pass. Run it locally with
+  `source ~/emsdk/emsdk_env.sh && tools/ci/wasm-fixture-lane.sh <build-dir> 6`.
 - A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
-  also emitted by `collect_summary()` in `test/fixture_runner_main.cpp`, which
+  also emitted by `collect_summary()` in
+  `core/interchange/tools/fixture_runner_main.cpp`, which
   lists the counts one by one and is not generated. Add the count and skip that
   list and every manifest regenerates clean while the new entity goes uncounted
   in every fixture — the corpus reports green on a document whose new structure
@@ -1270,7 +1284,7 @@ permission list. Pair the two whenever the criterion is about what the artifact
 *contains*: the upper bound stops the editing stack leaking in, the lower bound
 stops the claim being satisfied by the module quietly disappearing.
 
-**What `StepSequencer_CLAP` actually proves today.** Measured on a macOS
+**What the two sequencer plugins prove.** Measured on a macOS
 configure, it reaches eighteen modules, and `timeline_editor` is not among them —
 `pulp-timeline-editor` is a live target in that same configure and this plugin
 does not link it. `timeline` it reaches only through
@@ -1280,8 +1294,15 @@ recorded as debt rather than claimed by the tier. Its `REQUIRE format state` is
 correspondingly narrow: this plugin's own code contributes no module edge beyond
 the adapter it is packaged as. So the honest reading of a green run here is "a
 step sequencer packaged as a CLAP, carrying no editing stack" — **not** "a piano
-roll inside a plugin". Nothing in the repo demonstrates the latter yet; the tier
-that would express it, `sequencer-editor`, has no claimant.
+roll inside a plugin".
+
+`TimelinePluginProof_CLAP` is the positive counterpart. Its processor owns a
+`Project` and `DocumentSession`, implements `EditIntentHost`, returns a native
+view from `create_view()`, and stores canonical Timeline JSON in plugin-owned
+state. It claims `sequencer-plugin-editor` and requires `format timeline
+timeline_editor`, so configure fails if any of those three disappears. Its view
+is deliberately only a ruler/playhead shell: the target proves the integration
+boundary, not a piano-roll interaction surface.
 
 **Know where the verdict runs.** The assertion lives in the consumer's own
 `CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
