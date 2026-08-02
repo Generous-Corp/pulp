@@ -879,6 +879,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                     basis.width = static_cast<float>(box.width);
                     basis.resolved_face =
                         index.resolved_face_for_layout(node.layout_index);
+                    // Boxes without the face they were broken against are
+                    // boxes the renderer will refuse, so this run reflows and
+                    // any mid-line resume it needed is lost. Counted here
+                    // rather than inferred later, because by the time it shows
+                    // up it looks like a text-layout bug rather than a capture
+                    // that is missing a field.
+                    if (basis.resolved_face.empty())
+                        ++counts.text_line_boxes_without_face;
                     lowered.text_layout_basis = std::move(basis);
                 }
             }

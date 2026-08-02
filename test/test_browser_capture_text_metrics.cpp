@@ -421,3 +421,47 @@ TEST_CASE("a single-line run is cached too", "[browser-capture][text-metrics]") 
     REQUIRE(unwrapped->text_layout_basis.has_value());
     CHECK(unwrapped->text_layout_basis->resolved_face == "Inter-Regular");
 }
+
+TEST_CASE("a capture with no resolved face says so out loud",
+          "[browser-capture][native-lowering][text-metrics]") {
+    // The same capture, byte-identical, with ONLY platform-fonts.json removed —
+    // the shape of a snapshot taken before the capture collected resolved
+    // faces. The runs still carry their line boxes, so nothing about the output
+    // looks incomplete; but the renderer refuses a basis with no face, so every
+    // run re-derives its own line breaking and a run resuming mid-line after an
+    // inline <span> prints over its sibling. That happened on the delay panel
+    // and read as a text-layout bug for a whole debugging round.
+    //
+    // Held against the LIVE fixture in the same case: the claim is a difference
+    // between two inputs, and asserting one alone would pass just as well if
+    // the signal had stopped working entirely.
+    BrowserCaptureIrOptions options;
+    options.native_panel_lowering = true;
+    const auto stale = lower_browser_capture_to_ir(
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) /
+            "browser-capture-text-stale-face" / "capture.json",
+        options);
+    REQUIRE(stale.design_ir);
+    const auto live = lower_wrap_fixture();
+    REQUIRE(live.design_ir);
+
+    // Live: no signal, and nothing warned about.
+    CHECK(live.design_ir->root.attributes.count("native_text_stale_capture") ==
+          0);
+
+    // Stale: counted, and counted per RUN rather than as a bare flag, so a
+    // reader can tell one unlucky node from a whole panel.
+    const auto& attrs = stale.design_ir->root.attributes;
+    REQUIRE(attrs.count("native_text_stale_capture") == 1);
+    CHECK(std::stoi(attrs.at("native_text_stale_capture")) > 0);
+
+    // The warning has to name the ACTION. Nothing about the design tells a
+    // reader that re-capturing is the fix.
+    const bool warned = std::any_of(
+        stale.warnings.begin(), stale.warnings.end(),
+        [](const std::string& w) {
+            return w.find("resolved-font-face") != std::string::npos &&
+                   w.find("Re-run the browser capture") != std::string::npos;
+        });
+    CHECK(warned);
+}

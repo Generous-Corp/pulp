@@ -56,6 +56,19 @@ struct PaintedTreeCounts {
     /// because it is the only SVG refusal a caller can fix, and the fix is
     /// "capture again", which nothing about the design tells them.
     int svg_refused_stale_capture = 0;
+
+    /// Text runs that carry captured line boxes but no resolved FACE.
+    ///
+    /// The renderer refuses such a basis on purpose — a font family is a
+    /// request, and without the face the capture broke against there is no way
+    /// to know the cache still describes this machine's text. So every one of
+    /// these runs silently re-derives its own line breaking, and a run that
+    /// resumes mid-line after an inline `<span>` loses the horizontal offset
+    /// that placed it, printing on top of its own sibling.
+    ///
+    /// Same shape as the SVG case and the same one-line fix — capture again —
+    /// which nothing about the design tells a reader.
+    int text_line_boxes_without_face = 0;
     /// Vector nodes emitted from those shape trees. Counted separately from
     /// `native` so "the panel draws more nodes" cannot be read as "the panel
     /// draws more of the design" when the extra nodes are all one icon.

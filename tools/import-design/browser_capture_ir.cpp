@@ -997,6 +997,22 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                 "this snapshot carries no resolved fill/stroke. Re-run the "
                 "browser capture to draw them.");
         }
+
+        // Same failure, different field. A basis with no resolved face is one
+        // the renderer refuses, so the run re-derives its own line breaking —
+        // and a run that resumes mid-line after an inline `<span>` loses the
+        // offset that placed it and prints over its own sibling. That reads as
+        // a text-layout bug, and it is a capture missing one column.
+        if (tree.text_line_boxes_without_face > 0) {
+            ir.root.attributes["native_text_stale_capture"] =
+                std::to_string(tree.text_line_boxes_without_face);
+            result.warnings.push_back(
+                "capture predates the resolved-font-face protocol: " +
+                std::to_string(tree.text_line_boxes_without_face) +
+                " text run(s) carry captured line boxes with no face, so their "
+                "line breaking is re-derived rather than reproduced. Re-run the "
+                "browser capture to use the browser's own line breaks.");
+        }
     }
 
     int styled_controls = 0;
