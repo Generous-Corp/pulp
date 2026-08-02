@@ -228,8 +228,16 @@ done
 if [ "$found" = 1 ]; then
     echo "  Spotlight can find it (after ${i}s)"
 else
-    echo "  SPOTLIGHT CANNOT FIND IT after 20s — open it from /Applications in Finder,"
-    echo "  or run: mdimport -r /Applications/\"Forge Modular.app\""
+    # Not a blocker, and worth saying so: the app is installed and launchable
+    # either way. Seen on m5 after many replace cycles — sibling Forge apps in
+    # /Applications index fine, this one will not, and touch + mdimport,
+    # mdimport -r, and moving the bundle out and back all failed to shift it.
+    # Cause unknown; the index appears to hold something stale for this path.
+    echo "  SPOTLIGHT CANNOT FIND IT after 20s — it is installed and launchable,"
+    echo "  just not searchable. Any of these work:"
+    echo "      open -a \"Forge Modular\""
+    echo "      double-click it in /Applications in Finder"
+    echo "  To try again: mdimport -r /Applications/\"Forge Modular.app\""
 fi'
 
 # A UI proof that runs ON this machine, as one command.
