@@ -1732,6 +1732,28 @@ public:
 
 protected:
     float font_size_ = 14.0f;  ///< Current font size (set by set_font)
+
+  public:
+    /// Set a REPEATING conic gradient (CSS `repeating-conic-gradient`). The
+    /// stop list spans `sweep_turns` of a full turn — positions are normalized
+    /// to 0..1 across that band — and the band tiles around the circle.
+    ///
+    /// Declared LAST, and as its own virtual rather than a wider
+    /// set_fill_gradient_conic, on both of the usual grounds: a signature
+    /// change would reorder this vtable under every prebuilt SDK consumer, and
+    /// the Canvas2D command recorders would have to grow a field to carry the
+    /// span. The default paints the band ONCE and clamps the rest, which is
+    /// what a backend that cannot tile should show — recognisably the right
+    /// colours in the wrong places, rather than nothing or a silent
+    /// full-circle stretch.
+    virtual void set_fill_gradient_conic_repeating(float cx, float cy, float start_angle,
+                                                    float sweep_turns,
+                                                    const Color* colors, const float* positions,
+                                                    int count) {
+        (void)sweep_turns;
+        set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
+    }
+
 };
 
 } // namespace pulp::canvas

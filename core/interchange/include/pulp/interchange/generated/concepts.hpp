@@ -61,9 +61,15 @@ enum class Concept : std::uint16_t {
     TempoValueQuantized = 47,
     ClipMediaWindow = 48,
     ClipFadeShape = 49,
+    SequenceSectionRole = 50,
+    ContextChordBass = 51,
+    ContextChordExtension = 52,
+    ContextChordVoicing = 53,
+    TuningProject = 54,
+    TuningInstrument = 55,
 };
 
-inline constexpr std::size_t kConceptCount = 50;
+inline constexpr std::size_t kConceptCount = 56;
 
 namespace detail {
 struct ConceptRecord {
@@ -123,6 +129,12 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"tempo.value-quantized", "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation.", true},
     {"clip.media-window", "A media clip that plays a source subrange rather than the referenced asset's complete frame range.", true},
     {"clip.fade-shape", "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like.", true},
+    {"sequence.section-role", "A region that names the structural part it spans, beyond its free-text name.", true},
+    {"context.chord-bass", "A chord statement naming the pitch class in the bass, rather than sounding root position.", true},
+    {"context.chord-extension", "A chord statement carrying added scale degrees beyond its quality.", true},
+    {"context.chord-voicing", "A chord statement carrying a hint for how a generator should spread its tones.", true},
+    {"tuning.project", "A document-wide statement of the tuning every instrument plays in.", true},
+    {"tuning.instrument", "One instrument overriding the document-wide tuning with its own.", true},
 };
 } // namespace detail
 

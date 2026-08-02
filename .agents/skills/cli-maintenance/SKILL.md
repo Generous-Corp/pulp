@@ -201,13 +201,13 @@ compare` is an advisory *judgment*, never a gate.
 `127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
 general-purpose class (a deliberate capability it tests, via
 `start_socket_server_on_any_interface`), which is the wrong one here: the
-inspector transport has no authentication and its protocol exposes
-`Runtime.evaluate`, so binding it where the network can reach it publishes
-arbitrary code execution in the host process. `pulp inspect --host` is the
-*client* side and stays — it is how you reach a remote machine's loopback
-through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
-this: loopback must connect (the control) and the host's real IPv4 must be
-refused.
+inspector transport mutually authenticates with nonce/HMAC proof backed by an
+owner-private per-session credential, but its protocol can still expose
+high-authority operations. Loopback is a separate, non-negotiable
+defense-in-depth boundary. `pulp inspect --host` is the *client* side and
+stays — it is how you reach a remote machine's loopback through an SSH tunnel.
+`test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
+(the control) and the host's real IPv4 must be refused.
 
 Normal Pulp standalone and plugin-format launches do **not** construct this
 server. `pulp inspect` is currently an experimental client for an explicitly
@@ -219,7 +219,8 @@ surface as an installed-user or ordinary `pulp run` workflow. Keep
 `docs/reference/cli.md`, and
 `docs/reference/development-inspector-capabilities.md` aligned; the
 `inspector_truth_check.py` mutation gate protects selected documentation and
-client-description claims, but does not prove runtime construction sites.
+client-description claims, including these shipped agent workflows, but does
+not prove runtime construction sites.
 
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT

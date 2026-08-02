@@ -182,12 +182,12 @@ TEST_CASE("Timeline sequence v4 scene migration is lossless only for an empty sc
     REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4,
                                   fixture_upgrade, limits)) == legacy_fixture);
 
-    // A saved sequence is current-version, and its authored order is the
-    // identity order, so the step down to v5 is lossless and leaves the scene
-    // list as the only thing v4 cannot represent.
+    // A saved sequence is current-version, its chord lane states no detail, and
+    // its authored order is the identity order, so the steps down to v5 are
+    // lossless and leave the scene list as the only thing v4 cannot represent.
     const auto saved = only_sequence(take(serialize_project(session_project(), registry)).json);
     const auto current = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 5, saved, limits));
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, saved, limits));
     auto refused =
         registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4, current, limits);
     REQUIRE_FALSE(refused);
@@ -244,7 +244,7 @@ TEST_CASE("Timeline sequence without a recorded order loads with its identity or
     const auto at = legacy.find(current_sequence);
     REQUIRE(at != std::string::npos);
     legacy.replace(at, current_sequence.size(),
-                   take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 5,
+                   take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5,
                                          current_sequence, limits)));
     REQUIRE(legacy.find(R"("track_order")") == std::string::npos);
 
@@ -271,7 +271,7 @@ TEST_CASE("Timeline sequence v5 track order migration is lossless only for the i
     // The upgrade records no authored order, which is exactly how a v5 reader
     // already understood the document.
     const auto legacy = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 5, identity, limits));
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, identity, limits));
     const auto upgraded = take(
         registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 6, legacy, limits));
     REQUIRE(upgraded.find(R"("scenes":[],"track_order":[],"tracks":[)") != std::string::npos);
@@ -283,7 +283,7 @@ TEST_CASE("Timeline sequence v5 track order migration is lossless only for the i
     // field to the identity order, so dropping it would rewrite what the user
     // arranged rather than losing something inert.
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 5, authored, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 5, authored, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -350,7 +350,7 @@ TEST_CASE("Timeline snapshot decode rejects an authored track order that is not 
 TEST_CASE("Timeline sequence decode pins the track order to the versions that declare it") {
     const auto registry = builtins();
     const auto snapshot = take(serialize_project(reordered_tracks_project(), registry)).json;
-    constexpr std::string_view current = R"("type_name":"pulp.timeline.sequence","version":6)";
+    constexpr std::string_view current = R"("type_name":"pulp.timeline.sequence","version":7)";
 
     // A v5 envelope carrying an authored order, and a v6 envelope missing one,
     // are both contradictions rather than hints about what the writer meant.

@@ -65,6 +65,13 @@ pulp_add_test_suite(pulp-test-playback-production
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
+# The arranger rung. It links pulp::timeline-view and nothing from playback or
+# project_package: the acceptance vehicle here is a serialize round trip, which
+# is what makes the editor stack usable without a package format underneath it.
+pulp_add_test_suite(pulp-test-timeline-arranger-view
+    SOURCES test_timeline_arranger_view.cpp
+    LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
+        pulp::canvas)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -272,6 +279,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_persistence_registry.cpp
         test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
+        test_timeline_tuning.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
@@ -565,3 +573,6 @@ endif()
 
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.
 include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
+
+# Keep focused Timeline submodule registrations beneath this owner hub.
+include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")

@@ -16,11 +16,7 @@
     "in the same change that teaches the walker to find it."
   ],
   "concepts": [
-    {
-      "id": "unknown",
-      "detect": "format",
-      "summary": "A construct the reader could not classify. No format lists it, so it always refuses."
-    },
+    { "id": "unknown", "detect": "format", "summary": "A construct the reader could not classify. No format lists it, so it always refuses." },
     { "id": "track.flat", "detect": "model", "summary": "A track holding clips directly, with no children." },
     { "id": "track.group", "detect": "format", "summary": "A track that contains other tracks (folder/group/nested scope)." },
     { "id": "track.video", "detect": "format", "summary": "A track whose content is picture rather than audio or notes." },
@@ -82,6 +78,12 @@
     { "id": "clip.note-velocity-quantized", "detect": "model", "summary": "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value." },
     { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." },
     { "id": "clip.media-window", "detect": "model", "summary": "A media clip that plays a source subrange rather than the referenced asset's complete frame range." },
-    { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." }
+    { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." },
+    { "id": "sequence.section-role", "detect": "model", "summary": "A region that names the structural part it spans, beyond its free-text name." },
+    { "id": "context.chord-bass", "detect": "model", "summary": "A chord statement naming the pitch class in the bass, rather than sounding root position." },
+    { "id": "context.chord-extension", "detect": "model", "summary": "A chord statement carrying added scale degrees beyond its quality." },
+    { "id": "context.chord-voicing", "detect": "model", "summary": "A chord statement carrying a hint for how a generator should spread its tones." },
+    { "id": "tuning.project", "detect": "model", "summary": "A document-wide statement of the tuning every instrument plays in." },
+    { "id": "tuning.instrument", "detect": "model", "summary": "One instrument overriding the document-wide tuning with its own." }
   ]
 }

@@ -208,6 +208,25 @@ set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
     LABELS "cmake;sdk;timeline;slow"
     TIMEOUT 180)
 
+# Installed inspector component consumer. This compiles the public headers,
+# links every optional CPU inspector archive through find_package(Pulp), and
+# executes the result outside the source tree.
+if(PULP_ENABLE_INSPECTOR)
+    add_test(NAME cmake-inspector-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_inspector_sdk_consumer.cmake)
+    set_tests_properties(cmake-inspector-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;inspect;slow"
+        TIMEOUT 180)
+endif()
+
 # Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
 # pin the consumer's deployment target when it runs AFTER project() (where the
 # target is a DEFINED-but-empty cache entry), not only when it runs before
@@ -618,8 +637,14 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
 # reached this point is already its verdict — and a verdict is worth nothing
 # without evidence the checker can still say no. The selftest configures fixture
 # projects with known graphs and asserts both the verdict and the reason given;
-# --mutate then weakens the checker itself nine ways and requires each weakening
-# to be caught, so a green run cannot be the walk failing to arrive.
+# --mutate then weakens the checker itself eleven ways and requires each
+# weakening to be caught, so a green run cannot be the walk failing to arrive.
+#
+# What this selftest does NOT cover is the configuration axis: it configures its
+# own fixture projects, so it stays green on a desktop tree while the real gate
+# is failing under a narrower configure (iOS, or PULP_ENABLE_GPU=OFF) that
+# reaches fewer modules than a debt list was recorded against. Reading a green
+# selftest as "the link floor is healthy everywhere" is the mistake it invites.
 #
 # Note what the configure-time verdict does and does not cover: the assertion on
 # a plugin lives in that plugin's CMakeLists, so it is evaluated only where

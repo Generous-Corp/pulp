@@ -2,12 +2,21 @@
 """Emit the interchange concept vocabulary and per-format capability tables.
 
 Three pure projections of the committed JSON under
-`core/interchange/capabilities/`, each printed to stdout and each guarded by the
-shared `tools/scripts/schema_drift_check.py` gate:
+`core/interchange/capabilities/`, each printed to stdout:
 
     capability_emit.py --emit concepts   # generated/concepts.hpp
     capability_emit.py --emit tables     # generated/capability_tables.hpp
     capability_emit.py --emit docs       # docs/reference/interchange-matrix.md
+
+Each projection is guarded by its OWN registration of the shared
+`tools/scripts/schema_drift_check.py` gate in `test/cmake/interchange_tests.cmake`
+(`interchange-concepts-drift`, `interchange-tables-drift`,
+`interchange-matrix-docs-drift`), each passing the matching `--artifact` and
+`--emit-cmd`. A bare `schema_drift_check.py` run does NOT cover any of them --
+it guards only that script's own `DEFAULT_ARTIFACT`, which belongs to the
+timeline schema. So after editing `capabilities/*.json`, regenerate all three
+projections; refreshing one and running the bare gate reports success while the
+other two stay stale.
 
 The tables projection materializes the closed world: every concept gets a row
 for every format. A concept a format's JSON does not list is emitted as `none`
