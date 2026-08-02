@@ -228,6 +228,13 @@ Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot
 what provisions the next clone. Add a slot by enabling `@3` — but check the governor
 first.
 
+The three clone VMIDs have deterministic network identities: `200..202` map to
+`192.168.86.251..253` and stable locally administered MAC addresses. Do not return
+to random clone MACs. Each short-lived MAC retains a DHCP lease after its VM is
+destroyed, and normal CI volume exhausted the LAN lease pool on 2026-08-02.
+The GitHub runner registration remains unique per invocation; stable network
+identity must not become a static Actions runner name.
+
 **Resource governance**, mirroring the tiers in `CLAUDE.md`:
 
 - *Tier 0* — per-VM `cores=4 cpulimit=4 cpuunits=50 balloon=0`, hypervisor-enforced.
