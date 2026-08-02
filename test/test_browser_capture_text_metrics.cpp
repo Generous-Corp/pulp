@@ -490,7 +490,7 @@ TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
         std::string text, family, face;
         double size = 0, spacing = 0;
         int weight = 400, glyphs = 0;
-        double chrome = 0, ours = 0, ours_per_gap = 0;
+        double chrome = 0, ours = 0, ours_per_gap = 0, scale = 1.0;
     };
     std::vector<Sample> samples;
 
@@ -561,7 +561,7 @@ TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
             samples.push_back(Sample{
                 line, family, index.resolved_face_for_layout(node.layout_index),
                 size, spacing, weight, glyphs, box.bounds.width / scale,
-                base + spacing * glyphs, base + spacing * (glyphs - 1)});
+                base + spacing * glyphs, base + spacing * (glyphs - 1), scale});
         }
     }
     REQUIRE_FALSE(samples.empty());
@@ -608,7 +608,7 @@ TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
         std::ofstream tsv(out, std::ios::binary);
         REQUIRE(tsv.good());
         tsv << "err_pct\terr_pct_per_gap\tchrome\tours\tweight\tsize"
-               "\tspacing\tglyphs\tface\tfamily\ttext\n";
+               "\tspacing\tglyphs\tscale\tface\tfamily\ttext\n";
         for (const auto& s2 : samples) {
             std::string flat = s2.text;
             for (auto& c : flat)
@@ -617,6 +617,7 @@ TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
                 << 100.0 * (s2.ours_per_gap / s2.chrome - 1.0) << '\t'
                 << s2.chrome << '\t' << s2.ours << '\t' << s2.weight << '\t'
                 << s2.size << '\t' << s2.spacing << '\t' << s2.glyphs << '\t'
+                << s2.scale << '\t'
                 << (s2.face.empty() ? "<none>" : s2.face) << '\t' << s2.family
                 << '\t' << flat << '\n';
         }
