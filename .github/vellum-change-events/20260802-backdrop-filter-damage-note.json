@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-backdrop-filter-damage-note",
+  "kind": "change",
+  "created_at": "2026-08-02T17:22:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Comment-only change to repaint_damage.cpp's is_sampling_hazard, recording why the new backdrop-filter chain needs no case of its own: its blur is the only spatial part and is already stored as backdrop_blur, which the function tests above, and its remaining colour operations are point-wise on pixels already inside the damage rect. No behaviour changes and no code path is added or removed; the note exists so the next reader does not add a redundant hazard case when they see backdrop_filter_chain appear on View. Pulp-only: the accompanying backdrop-filter work originates here, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-view-repaint-damage"
+  ],
+  "disposition": "pulp-only"
+}
