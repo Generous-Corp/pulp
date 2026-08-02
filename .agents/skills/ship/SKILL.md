@@ -1325,6 +1325,15 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 **Fluidity invariant:** every variable unset == today's GitHub-hosted routing. If the
 local pool is down, `github <leg>` is a full revert in one command.
 
+The lightweight resolver jobs for `release-cli.yml` and
+`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
+without moving artifact builds or publication there. Their selector priority is
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
+to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
+pinned to the repository default branch; never expose the persistent pool to
+`pull_request` or `merge_group` code through this fallback.
+
 Facts worth keeping (measured):
 
 - The local macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**.
