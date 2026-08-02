@@ -22,6 +22,12 @@ headless-run, and validation commands. External SDK consumers should pair it
 with the [Timeline SDK guide](timeline-sdk.md) and the standalone
 `examples/timeline-sdk-consumer/` project.
 
+For the loadable-plugin boundary, see
+[`examples/timeline-plugin-proof/`](../examples/timeline-plugin-proof.md). It
+owns a `DocumentSession`, submits editor intents through `SequencerUiHost`, and
+persists canonical Timeline JSON as plugin-owned state. Its native view is a
+ruler/playhead proof shell rather than a piano roll.
+
 ## PulpGain
 
 **Path**: `examples/pulp-gain/`

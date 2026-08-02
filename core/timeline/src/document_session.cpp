@@ -254,7 +254,7 @@ struct DocumentSession::Impl {
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
         auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
 
-        CommitResult result{published, next_revision, reduced->dirty, {}};
+        CommitResult result{published, next_revision, reduced->dirty, {}, current->snapshot};
         result.applied_commands.reserve(transaction.commands.size());
         for (const auto& envelope : transaction.commands)
             result.applied_commands.push_back(envelope.id);

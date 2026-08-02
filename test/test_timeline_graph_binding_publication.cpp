@@ -2,6 +2,8 @@
 
 #include <pulp/playback/realtime_stretch_renderer.hpp>
 
+#include "support/thread_progress.hpp"
+
 TEST_CASE("timeline automation exact ingress stays pinned across stable plugin nodes") {
     const auto map = tempo_map();
     auto empty_assets = take(DecodedAudioAssetPool::create({}));
@@ -109,13 +111,43 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
         allocations.store(probe.allocation_count(), std::memory_order_relaxed);
     });
 
-    for (int iteration = 0; iteration < 64; ++iteration) {
+    // Recorded rather than asserted inline: a Catch2 assertion here throws past
+    // audio_thread.join(), which destroys a joinable thread and terminates the
+    // process instead of reporting the failure.
+    bool all_reprepares_succeeded = true;
+    int iteration = 0;
+    const auto reprepare_one = [&] {
         const auto& route = (iteration & 1) == 0 ? route_two : route_one;
-        REQUIRE(binding.prepare(*program, route, config(1), 48'000.0, 32));
-    }
-    for (int spin = 0; spin < 10'000 && two_blocks.load(std::memory_order_relaxed) == 0; ++spin) {
-        std::this_thread::yield();
-    }
+        all_reprepares_succeeded =
+            binding.prepare(*program, route, config(1), 48'000.0, 32)
+            && all_reprepares_succeeded;
+        ++iteration;
+    };
+    for (int i = 0; i < 64; ++i) reprepare_one();
+
+    // Both counters must be non-zero, and 64 reprepares do not establish that:
+    // nothing orders the audio thread's first block inside them. Nor can a wait
+    // that only re-polls help — the loop ends on route_one, so route_two is
+    // never published again and `two_blocks` could not move no matter how long
+    // it spun. Keep alternating routes until both have been observed, under a
+    // deadline so a binding that genuinely never publishes one fails the REQUIRE
+    // instead of hanging.
+    //
+    // The pump is deliberately slow and the deadline short: tearing down the
+    // reprepared bindings costs superlinearly in their count, so a full-rate
+    // 10s wait would spend 10s waiting and then ~30s in teardown — long enough
+    // to present as a CTest timeout instead of the failure it is.
+    (void)pulp::test::pump_until(
+        [&] {
+            return one_blocks.load(std::memory_order_relaxed) > 0
+                && two_blocks.load(std::memory_order_relaxed) > 0;
+        },
+        [&] {
+            reprepare_one();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        },
+        std::chrono::seconds(2));
+    REQUIRE(all_reprepares_succeeded);
     stop.store(true, std::memory_order_release);
     audio_thread.join();
 

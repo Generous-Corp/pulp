@@ -136,7 +136,25 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
     if (!config.screenshot_path.empty())
         config.headless = true;
 
+    if (standalone_env_truthy("PULP_SCREENSHOT_KEEP_AUDIO"))
+        config.screenshot_keeps_audio = true;
+
     return config;
+}
+
+// True when this launch is a pure screenshot capture and therefore needs no
+// audio backend at all: it paints a few frames, writes a PNG, and exits, so the
+// device callback could only ever push silence at the user's speakers. Any
+// readout that reads the live render path (probe JSON, scope JSON, capture WAV)
+// keeps audio, as does an explicit `screenshot_keeps_audio` opt-in.
+inline bool standalone_capture_skips_audio(const StandaloneConfig& config) {
+    if (config.screenshot_path.empty()) return false;
+    if (config.screenshot_keeps_audio) return false;
+    if (!config.audio_probe_json_path.empty()) return false;
+    if (!config.audio_scope_json_path.empty()) return false;
+    if (!config.audio_capture_wav_path.empty()) return false;
+    if (!config.audio_capture_rolling_path.empty()) return false;
+    return true;
 }
 
 inline bool standalone_headless_requires_screenshot(const StandaloneConfig& config) {

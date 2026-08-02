@@ -1,5 +1,6 @@
 #include "browser_capture_ir.hpp"
 #include "browser_capture_limits.hpp"
+#include "browser_capture_styles.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
@@ -224,6 +225,8 @@ int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
                             double dx, double dy,
                             pulp::view::IRNode& root,
+                            const CapturedStyleIndex* styles,
+                            int& styled_controls,
                             int& undeclared_paint_boxes,
                             std::string& error) {
     std::ifstream input(path, std::ios::binary);
@@ -327,6 +330,28 @@ int lower_semantic_controls(const fs::path& path,
             static_cast<float>(number_member(box, "top", 0.0) + dy);
         control.style.width = static_cast<float>(number_member(box, "width", 0.0));
         control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        // Chrome already solved this element's appearance; record it so the
+        // node carries the gradient, radius, and shadow stack that make it look
+        // like the designed control instead of only a transparent hit box.
+        // Applied after the geometry above and confined to appearance
+        // properties, so the design's paint box stays the placement authority.
+        if (styles != nullptr) {
+            const auto backend_node_id = static_cast<int>(
+                number_member(candidate, "backend_node_id", -1.0));
+            if (backend_node_id >= 0) {
+                CapturedBox paint_box;
+                paint_box.left = number_member(box, "left", 0.0);
+                paint_box.top = number_member(box, "top", 0.0);
+                paint_box.width = number_member(box, "width", 0.0);
+                paint_box.height = number_member(box, "height", 0.0);
+                const auto computed =
+                    styles->styles_for(backend_node_id, paint_box);
+                if (!computed.empty()) {
+                    apply_computed_styles(computed, paint_box, control.style);
+                    ++styled_controls;
+                }
+            }
+        }
         // The value layer's colours come from the DESIGN's tokens, not the
         // widget defaults. DesignedControlSkin's header says exactly this, but
         // its call site passes a default-constructed skin whose accent is a
@@ -826,11 +851,33 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double control_dx = crop_to_surface ? -surface_left : 0.0;
     const double control_dy = crop_to_surface ? -surface_top : 0.0;
     int undeclared_paint_boxes = 0;
+    // The DOM snapshot is optional evidence: a capture that predates the
+    // computed-style request, or names its snapshot by asset id rather than by
+    // file, still lowers to a faithful capture. It just gains no appearance,
+    // which is strictly what the pipeline did before.
+    std::optional<CapturedStyleIndex> captured_styles;
+    const std::string snapshot_asset =
+        string_member(documents[static_cast<int>(0)], "snapshot_asset");
+    if (!snapshot_asset.empty()) {
+        std::string ignored;
+        if (const auto snapshot_path =
+                contained_sidecar(envelope_path, snapshot_asset, ignored)) {
+            captured_styles = CapturedStyleIndex::load(*snapshot_path);
+        }
+    }
+
+    int styled_controls = 0;
     const int lowered = lower_semantic_controls(
         *semantic_report, ir, control_dx, control_dy, ir.root,
+        captured_styles ? &*captured_styles : nullptr, styled_controls,
         undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
+    // Recorded so a capture that silently lost its solved appearance is
+    // visible as a number rather than as a flat-looking panel nobody can
+    // attribute.
+    ir.root.attributes["controls_with_captured_style"] =
+        std::to_string(styled_controls);
     // Surfaced rather than swallowed: an undeclared paint box means the widget
     // was placed on the component box, which for a captioned control paints its
     // value geometry low. Correct for a meter, wrong for a knob, and nothing

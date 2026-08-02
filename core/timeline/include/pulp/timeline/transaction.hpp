@@ -150,12 +150,15 @@ struct ReducedTransaction {
 /// Immutable state published by a successful session commit.
 ///
 /// snapshot and revision are an atomic pair and remain valid independently of
-/// later commits. applied_commands lists IDs in transaction order.
+/// later commits. predecessor_snapshot is the exact immutable snapshot reduced
+/// by this commit, allowing downstream incremental consumers to prove lineage.
+/// applied_commands lists IDs in transaction order.
 struct CommitResult {
     std::shared_ptr<const Project> snapshot;
     DocumentRevision revision;
     DirtySet dirty;
     std::vector<CommandId> applied_commands;
+    std::shared_ptr<const Project> predecessor_snapshot;
 };
 
 /// Purely applies a transaction to a project without session publication.

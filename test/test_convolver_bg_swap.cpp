@@ -21,6 +21,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+#include "support/thread_progress.hpp"
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_messages.hpp>
 
@@ -213,16 +214,35 @@ TEST_CASE("PartitionedConvolver: concurrent stage + try_swap_ir is race-free",
 
     const auto input = make_sine_block(block, 7.0f / static_cast<float>(block));
     std::vector<float> out(block);
-    for (int i = 0; i < iterations; ++i) {
+    // Recorded rather than asserted inline: a Catch2 assertion here throws past
+    // producer.join(), which destroys a joinable thread and terminates the
+    // process instead of reporting the failure.
+    bool saw_unbounded = false;
+    const auto consume_one = [&] {
         if (conv.try_swap_ir(swapper))
             swaps_seen.fetch_add(1, std::memory_order_relaxed);
         conv.process(input.data(), out.data(), block);
         // Output must stay bounded — any |out[i]| > 4 would indicate
         // either a torn buffer or a wrong IR partition count slipped
         // through. Identity → |out| <= 1; half → |out| <= 0.5.
-        for (std::size_t k = 0; k < block; ++k)
-            REQUIRE(std::abs(out[k]) <= 4.0f);
-    }
+        for (std::size_t k = 0; k < block; ++k) {
+            if (std::abs(out[k]) > 4.0f) {
+                saw_unbounded = true;
+                break;
+            }
+        }
+    };
+    for (int i = 0; i < iterations; ++i) consume_one();
+
+    // A swap can only be seen once the producer has staged an IR, and the
+    // iteration budget does not order its first stage_ir() before this loop
+    // ends: on a loaded host the whole budget can be spent before the producer
+    // is scheduled, leaving swaps_seen at zero. Keep consuming until a swap
+    // lands; the deadline turns a swapper that genuinely never publishes into a
+    // failed REQUIRE rather than a hang.
+    (void)pulp::test::pump_until(
+        [&] { return swaps_seen.load(std::memory_order_relaxed) > 0; }, consume_one);
+    REQUIRE_FALSE(saw_unbounded);
 
     stop.store(true, std::memory_order_release);
     producer.join();

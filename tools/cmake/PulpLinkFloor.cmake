@@ -75,6 +75,12 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
     platform runtime timebase audio midi format)
 
+# A loadable sequencer plugin that owns both the document and editor rungs.
+# This is the union of the two bounds above, not a larger application tier: a
+# plugin claiming it still has to name timeline and timeline_editor in REQUIRE.
+set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
+    platform runtime timebase timeline timeline_editor audio midi format)
+
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.
 # An entry is a fact about the artifact, not a permission to build on: it says
@@ -111,6 +117,10 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
     canvas events graph host native-components playback render
     sample_bank_manifest signal state timeline view)
+
+set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
+    canvas events graph host native-components playback render
+    sample_bank_manifest signal state view)
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 

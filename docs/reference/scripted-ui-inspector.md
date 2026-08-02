@@ -110,9 +110,17 @@ handler.set_runtime_eval_enabled(true);           // opt in to evaluate (dev/loo
 ```
 
 **Teardown ordering:** the bridge lives as long as the `ScriptedUiSession`, but
-its methods are called from the inspector's background reader thread. Before
-destroying the session, stop the `InspectorServer` reader thread and call
-`handler.set_script_inspector(nullptr)` so no background call outlives the bridge.
+its methods are called from inspector worker threads. Ordinary owner-thread
+teardown destroys `InspectorServer` synchronously, then calls
+`handler.set_script_inspector(nullptr)` before destroying the session. If a
+publication or domain callback may destroy the server wrapper, capture
+`server.shutdown_fence()` first. Retain the bridge and other attached sources,
+then wait on that fence from a non-callback thread before clearing them or
+unloading the module. The fence remains closed through any causal server
+callback still unwinding after deferred teardown and until the dispatcher
+releases every accepted main-thread RPC callable. A custom dispatcher must
+therefore destroy cancelled queued callables even though they are inert.
+Waiting on the cleanup worker itself returns `false` instead of deadlocking.
 
 `ScriptInspectorBridge` re-attaches to the engine across hot reloads, so the
 debug console survives a reload. Without this wiring, `Runtime.evaluate` /
@@ -122,12 +130,14 @@ returns `attached:false`.
 ## Security
 
 Evaluate is remote code execution against the plugin UI's JS context, and the
-inspector transport is unauthenticated. Two consequences:
+authenticated inspector transport therefore treats it as a separately gated,
+high-risk capability. Two consequences:
 
 - Evaluate/interrupt are **off by default** — a host must explicitly
   `set_runtime_eval_enabled(true)`, and should only do so for a trusted, local
   dev session. Read-only surfaces (logs, DOM, state) are unaffected.
-- The TCP server binds loopback only, but it is currently unauthenticated and
-  uses a discoverable port-file hint. Do not enable eval outside a controlled
-  custom-host fixture. Evaluation is serialized and never runs on the audio
-  thread.
+- The production TCP server binds loopback only and requires a fresh
+  nonce/HMAC proof in each direction, with role-separated transcripts using
+  an owner-private per-session credential discovered through an ephemeral
+  record/token pair. Do not enable eval outside a controlled custom-host
+  fixture. Evaluation is serialized and never runs on the audio thread.

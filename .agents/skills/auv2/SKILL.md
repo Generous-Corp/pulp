@@ -995,3 +995,24 @@ things follow:
   `dlclose` runs freed code.
 
 No-op unless the build is configured `PULP_TRACING=ON`.
+
+### A publish-race test must bound its own wait
+
+`test_au_v2_effect.cpp` proves the MIDI-output callback pair publishes
+atomically: a reader thread snapshots `(callback, userdata)` while a writer
+republishes 200k times, and the test asserts the reader never saw a crossed
+pair. That assertion is only meaningful if the reader actually read, so the
+test waits for `reads` to reach a floor before stopping it.
+
+Bound that wait. An unbounded `while (reads < N) {}` closes the flake — a
+loaded host can otherwise spend the entire writer loop before the reader is
+scheduled, leaving `reads == 0` — but it replaces the flake with a **hang**:
+if the publish path genuinely stopped handing the reader a value, the loop
+never exits and the suite parks instead of reporting. Removing the reader's
+counter increment ran the unbounded version past a 30s cap with no verdict;
+the deadline-bounded form (`pulp::test::wait_for_condition`, in
+`test/support/thread_progress.hpp`) fails the REQUIRE in ~10s.
+
+The rule generalizes to any adapter test asserting a worker thread reached a
+specific call: wait for the outcome, never for a fixed budget, and always
+under a deadline.

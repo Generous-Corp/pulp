@@ -1543,7 +1543,13 @@ public:
 
     // Sample the skin gradient at normalized position t (0=low/bottom,
     // 1=high/top). Linear interpolation across the supplied stops.
-    canvas::Color gradient_color_at(float t) const;
+    //
+    // Nothing when no stops were set: a meter with no gradient has no colour
+    // to give, and the caller must draw nothing rather than receive one. This
+    // used to answer a built-in green, which is a colour from nowhere on any
+    // design that never chose it — and returning a transparent Color instead
+    // would be no safer, since a caller that ignores alpha paints it black.
+    std::optional<canvas::Color> gradient_color_at(float t) const;
 
 private:
     // Drive the ballistic path from the frame the View base snapshotted for us.
