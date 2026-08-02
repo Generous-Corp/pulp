@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.80.4`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.0`,
 which provides it, so the pinned binary is sufficient.
 
 Use these commands as the normal agent loop:
@@ -2094,7 +2094,11 @@ envelope carries `status` and `merge_error`, and a malformed-request failure exi
 `8` rather than masquerading as success. See the Shipyard `ci` skill's
 status/exit-code table.
 
-Shipyard v0.80.4 is the fleet floor for queue throughput: the scheduler refills
+Shipyard v0.81.0 is the fleet floor for queue throughput and capacity health:
+fleet status observes complete registered and expected-host inventories, Tart
+disk/ccache admission problems, accidental hosted Linux routing, and stale
+releases whose bounded commit scan lacks an oldest timestamp. The earlier
+scheduler guarantee still refills
 newly free worker slots as each target finishes instead of waiting for the whole
 batch, and the release-version surface covers root-level `src/*.rs` so scheduler
 fixes cannot merge without producing the CLI release the fleet pin expects. It
