@@ -1,0 +1,80 @@
+{
+  "schema": "pulp-browser-platform-fonts-v1",
+  "version": 1,
+  "summary": {
+    "text_runs": 3,
+    "interrogated": 3,
+    "resolved": 3,
+    "truncated": false
+  },
+  "faces_by_glyph_count": [
+    {
+      "family_name": "Helvetica",
+      "post_script_name": "Helvetica",
+      "is_custom_font": false,
+      "glyph_count": 32
+    }
+  ],
+  "runs": [
+    {
+      "layout_index": 6,
+      "node_index": 14,
+      "owner_node_index": 13,
+      "backend_node_id": 15,
+      "requested": {
+        "font_family": "Inter, sans-serif",
+        "font_size": "40px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica",
+          "post_script_name": "Helvetica",
+          "is_custom_font": false,
+          "glyph_count": 12
+        }
+      ]
+    },
+    {
+      "layout_index": 8,
+      "node_index": 17,
+      "owner_node_index": 16,
+      "backend_node_id": 18,
+      "requested": {
+        "font_family": "Inter, sans-serif",
+        "font_size": "40px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica",
+          "post_script_name": "Helvetica",
+          "is_custom_font": false,
+          "glyph_count": 12
+        }
+      ]
+    },
+    {
+      "layout_index": 11,
+      "node_index": 21,
+      "owner_node_index": 20,
+      "backend_node_id": 22,
+      "requested": {
+        "font_family": "Inter, sans-serif",
+        "font_size": "20px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Helvetica",
+          "post_script_name": "Helvetica",
+          "is_custom_font": false,
+          "glyph_count": 8
+        }
+      ]
+    }
+  ]
+}

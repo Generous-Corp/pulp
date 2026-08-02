@@ -103,6 +103,17 @@ struct PaintedTreeCounts {
     /// disjoint boxes freely — that is unobservable — so this is the honest
     /// measure of whether nesting cost any fidelity. Zero is the claim.
     int overlapping_reorders = 0;
+    /// Nodes whose type lengths were multiplied by the scale their box already
+    /// carried from an ancestor `transform`. Chrome scales glyphs along with
+    /// the box; the snapshot reports the box post-transform and `font-size`
+    /// pre-transform, so without this a run under `scale(.9)` draws 11% wide.
+    int type_scaled = 0;
+    /// Nodes under a transform chain that does not reduce to one positive
+    /// uniform scale — two axes, a flip, a rotation, or a `matrix3d`. Type
+    /// carries a single scalar and cannot express any of those, so the factor
+    /// is NOT applied and the node records the value that refused it. A
+    /// recorded refusal is findable; a plausible wrong number is not.
+    int type_scale_refused = 0;
 };
 
 /// Lower every painted node in the captured document into a TREE under `root`

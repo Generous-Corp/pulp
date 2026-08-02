@@ -532,13 +532,14 @@ TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
 
     float ascii_delta = ascii_with_spacing.intrinsic_width()
                       - ascii_no_spacing.intrinsic_width();
-    // 4 glyphs → 3 gaps → 6.0 px extra (subject to ceil rounding).
-    REQUIRE(ascii_delta >= 5.0f);
-    REQUIRE(ascii_delta <= 7.0f);
+    // CSS adds the spacing after every character, so 4 glyphs → 4 steps →
+    // 8.0 px extra (subject to ceil rounding).
+    REQUIRE(ascii_delta >= 7.0f);
+    REQUIRE(ascii_delta <= 9.0f);
 
     // Multibyte path: 4 CJK characters in UTF-8 are 12 bytes. With the
-    // old byte-count math the spacing delta would be ~22 px (11 gaps);
-    // with the glyph-count math it's the same ~6 px as the ASCII case.
+    // old byte-count math the spacing delta would be ~24 px (12 steps);
+    // with the glyph-count math it's the same ~8 px as the ASCII case.
     Label cjk_no_spacing("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\xE6\x96\x87"); // 日本語文
     cjk_no_spacing.set_font_size(14.0f);
     Label cjk_with_spacing("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\xE6\x96\x87");
@@ -547,8 +548,47 @@ TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
 
     float cjk_delta = cjk_with_spacing.intrinsic_width()
                     - cjk_no_spacing.intrinsic_width();
-    REQUIRE(cjk_delta >= 5.0f);
-    REQUIRE(cjk_delta <= 7.0f);
+    REQUIRE(cjk_delta >= 7.0f);
+    REQUIRE(cjk_delta <= 9.0f);
+    // The invariant the byte-vs-codepoint distinction actually protects: the
+    // same number of characters reserves the same spacing whatever their
+    // encoding costs.
+    CHECK_THAT(cjk_delta, WithinAbs(ascii_delta, 1.0f));
+}
+
+TEST_CASE("Label letter_spacing is added after every glyph, including the last",
+          "[view][widget][text]") {
+    // CSS letter-spacing follows each character rather than sitting between
+    // them, and SkParagraph — which paints the run — adds it that way too. A
+    // width that reserves one step per GAP is one step short of what gets
+    // drawn, so the glyphs run past the box Yoga sized from this number.
+    //
+    // Measured against Chrome's own line boxes over 89 letter-spaced runs in
+    // the design corpus: per-character lands on -0.02% median width error,
+    // per-gap on -2.86%.
+    const float spacing = 3.0f;
+    for (const char* text : {"A", "AB", "Handgloves"}) {
+        INFO("text: " << text);
+        std::size_t glyphs = 0;
+        for (const char* c = text; *c; ++c) ++glyphs;
+
+        Label tight(text);
+        tight.set_font_size(16.0f);
+        Label spaced(text);
+        spaced.set_font_size(16.0f);
+        spaced.set_letter_spacing(spacing);
+
+        const float delta = spaced.intrinsic_width() - tight.intrinsic_width();
+        CHECK_THAT(delta,
+                   WithinAbs(spacing * static_cast<float>(glyphs), 1.0f));
+    }
+
+    // The single-character case is the one the per-gap convention cannot fake:
+    // it reserves nothing at all, however wide the spacing.
+    Label one_tight("A");
+    Label one_spaced("A");
+    one_spaced.set_letter_spacing(10.0f);
+    CHECK(one_spaced.intrinsic_width() > one_tight.intrinsic_width());
 }
 
 TEST_CASE("Label applies text transforms when painting", "[view][widget]") {

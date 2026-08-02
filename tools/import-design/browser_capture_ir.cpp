@@ -1013,6 +1013,8 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
                 "line breaking is re-derived rather than reproduced. Re-run the "
                 "browser capture to use the browser's own line breaks.");
         }
+        record_if("native_nodes_type_scaled", tree.type_scaled);
+        record_if("native_nodes_type_scale_refused", tree.type_scale_refused);
     }
 
     int styled_controls = 0;
