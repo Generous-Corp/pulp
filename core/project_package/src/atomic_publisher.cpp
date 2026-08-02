@@ -436,26 +436,8 @@ bool create_publication_payload(const fs::path& path, const fs::path& destinatio
 #endif
 }
 
-bool create_publication_file(const fs::path& path) noexcept {
-#if defined(_WIN32)
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
-        return false;
-    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
-    const auto file =
-        CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &attributes,
-                    CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    LocalFree(descriptor);
-    return file != INVALID_HANDLE_VALUE && CloseHandle(file) != 0;
-#else
-    int flags = O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC;
-#ifdef O_NOFOLLOW
-    flags |= O_NOFOLLOW;
-#endif
-    const int file = ::open(path.c_str(), flags, 0666);
-    return file >= 0 && ::close(file) == 0;
-#endif
+std::optional<detail::PinnedFile> create_publication_file(const fs::path& path) noexcept {
+    return detail::PinnedFile::create_empty_private(path);
 }
 
 } // namespace
@@ -467,6 +449,7 @@ struct AtomicPublisher::Impl {
     detail::AnchoredDirectory parent_root;
     detail::AnchoredDirectory guard_root;
     detail::AnchoredDirectory staging_root;
+    detail::PinnedFile staging_file;
     bool file = false;
     bool committed = false;
 };
@@ -528,10 +511,12 @@ AtomicPublisher::create_impl(const fs::path& destination, bool file) noexcept {
         if (created == PrivateDirectoryCreate::Created) {
             auto guard_root = parent_root->open_directory(staging.filename());
             const auto payload = staging / (file ? "file-payload" : "payload");
+            std::optional<detail::PinnedFile> staging_file;
+            if (file)
+                staging_file = create_publication_file(payload);
             if (!guard_root || !guard_root->still_named_by(staging) ||
                 !configure_guard_inheritance(staging, parent) ||
-                (file ? !create_publication_file(payload)
-                      : !create_publication_payload(payload, parent))) {
+                (file ? !staging_file : !create_publication_payload(payload, parent))) {
                 if (guard_root)
                     guard_root->close();
                 fs::remove_all(staging, error);
@@ -555,6 +540,8 @@ AtomicPublisher::create_impl(const fs::path& destination, bool file) noexcept {
             impl->guard_root = std::move(*guard_root);
             if (staging_root)
                 impl->staging_root = std::move(*staging_root);
+            if (staging_file)
+                impl->staging_file = std::move(*staging_file);
             impl->file = file;
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
@@ -604,19 +591,25 @@ runtime::Result<bool, PackageError> AtomicPublisher::write(std::string_view rela
 runtime::Result<AtomicPublishOutcome, PackageError>
 AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     if (!impl_ || !impl_->file || impl_->committed || staged_file != impl_->staging ||
-        !detail::regular_file_no_links(staged_file))
+        !impl_->staging_file.still_named_by(staged_file))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidPath, staged_file);
-    auto pinned = detail::PinnedFile::open(staged_file, true, true, true);
+    auto pinned = impl_->staging_file.reopen_for_publication();
     if (!pinned || !pinned->fence() || !pinned->still_named_by(staged_file) ||
+        !impl_->staging_file.still_named_by(staged_file) ||
         !impl_->guard_root.still_named_by(impl_->guard))
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::StagedFileFenced);
     if (!pinned->still_named_by(staged_file) || !impl_->guard_root.still_named_by(impl_->guard))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::PublicationSourceVerified);
+#if defined(_WIN32)
+    const auto publication =
+        pinned->publish_no_replace(impl_->parent_root, impl_->destination.filename());
+#else
     const auto publication = impl_->guard_root.publish_no_replace(
         staged_file.filename(), impl_->parent_root, impl_->destination.filename(),
         detail::NoReplaceSourceKind::RegularFile);
+#endif
     if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
@@ -624,6 +617,7 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
         publication != detail::NoReplaceOutcome::PublishedSourceRetained)
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
+    impl_->staging_file.close();
     if (publication == detail::NoReplaceOutcome::PublishedSourceRetained) {
         std::error_code cleanup_error;
         if (!fs::remove(staged_file, cleanup_error) || cleanup_error)
@@ -719,17 +713,21 @@ void AtomicPublisher::cancel() noexcept {
     if (!impl_ || impl_->committed || impl_->staging.empty())
         return;
     std::error_code ignored;
-    const bool source_stable = impl_->file ? detail::regular_file_no_links(impl_->staging)
+    const bool source_stable = impl_->file ? impl_->staging_file.still_named_by(impl_->staging)
                                            : impl_->staging_root.still_named_by(impl_->staging);
     if (source_stable && impl_->guard_root.still_named_by(impl_->guard)) {
-        if (!impl_->file)
+        if (impl_->file)
+            impl_->staging_file.close();
+        else
             impl_->staging_root.close();
         impl_->guard_root.close();
         fs::remove_all(impl_->guard, ignored);
     } else {
         // Leaking an unreachable private stage is safer than recursively deleting
         // an unrelated object that has rebound to the old staging pathname.
-        if (!impl_->file)
+        if (impl_->file)
+            impl_->staging_file.close();
+        else
             impl_->staging_root.close();
         impl_->guard_root.close();
     }

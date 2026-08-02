@@ -6,7 +6,9 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -1124,7 +1126,7 @@ std::optional<PinnedFile> PinnedFile::write_exclusive_and_fence(
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
-        return false;
+        return std::nullopt;
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
     const auto handle = ::CreateFileW(
         path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -1165,6 +1167,85 @@ std::optional<PinnedFile> PinnedFile::write_exclusive_and_fence(
         return std::nullopt;
     }
     return PinnedFile(descriptor);
+#endif
+}
+
+std::optional<PinnedFile>
+PinnedFile::create_empty_private(const std::filesystem::path& path) noexcept {
+#if defined(_WIN32)
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
+        return std::nullopt;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
+    const auto handle =
+        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &attributes,
+                      CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    LocalFree(descriptor);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
+#else
+    int flags = O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    const int descriptor = ::open(path.c_str(), flags, 0666);
+    if (descriptor < 0)
+        return std::nullopt;
+    return PinnedFile(descriptor);
+#endif
+}
+
+std::optional<PinnedFile> PinnedFile::reopen_for_publication() const noexcept {
+    if (native_ == -1)
+        return std::nullopt;
+#if defined(_WIN32)
+    const auto handle = ::ReOpenFile(reinterpret_cast<HANDLE>(native_),
+                                     GENERIC_READ | GENERIC_WRITE | WRITE_DAC | DELETE,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
+#else
+    const auto descriptor = ::dup(static_cast<int>(native_));
+    if (descriptor < 0)
+        return std::nullopt;
+    return PinnedFile(descriptor);
+#endif
+}
+
+NoReplaceOutcome
+PinnedFile::publish_no_replace(const AnchoredDirectory& destination_parent,
+                               const std::filesystem::path& destination_name) const noexcept {
+    if (native_ == -1 || destination_parent.native_ == -1 || destination_name.empty() ||
+        destination_name.is_absolute() || !destination_name.parent_path().empty() ||
+        destination_name == "." || destination_name == "..")
+        return NoReplaceOutcome::Failed;
+#if defined(_WIN32)
+    const auto& native_name = destination_name.native();
+    const auto name_bytes = native_name.size() * sizeof(wchar_t);
+    if (name_bytes > (std::numeric_limits<DWORD>::max)())
+        return NoReplaceOutcome::Failed;
+    std::vector<std::byte> storage(offsetof(FILE_RENAME_INFO, FileName) + name_bytes);
+    auto* info = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
+    info->ReplaceIfExists = FALSE;
+    info->RootDirectory = reinterpret_cast<HANDLE>(destination_parent.native_);
+    info->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(info->FileName, native_name.data(), name_bytes);
+    if (::SetFileInformationByHandle(reinterpret_cast<HANDLE>(native_), FileRenameInfo, info,
+                                     static_cast<DWORD>(storage.size())) != 0)
+        return NoReplaceOutcome::Published;
+    const auto error = ::GetLastError();
+    return error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS
+               ? NoReplaceOutcome::DestinationExists
+               : NoReplaceOutcome::Failed;
+#else
+    (void)destination_parent;
+    (void)destination_name;
+    return NoReplaceOutcome::Unsupported;
 #endif
 }
 
