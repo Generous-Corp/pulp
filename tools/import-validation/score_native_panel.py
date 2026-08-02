@@ -270,7 +270,7 @@ def load_nodes(snapshot_path: Path):
         ink, why = False, []
         if parse_alpha(st.get("background-color", "")) > 0:
             ink, _ = True, why.append("bg")
-        if st.get("background-image", "none") != "none":
+        if not all_layers_initial(st.get("background-image", "none"), "none"):
             ink, _ = True, why.append("bgimg")
         for side in ("top", "right", "bottom", "left"):
             try:
@@ -280,7 +280,7 @@ def load_nodes(snapshot_path: Path):
             if bw > 0 and parse_alpha(st.get(f"border-{side}-color", "")) > 0:
                 ink, _ = True, why.append("border")
                 break
-        if st.get("box-shadow", "none") != "none":
+        if not all_layers_initial(st.get("box-shadow", "none"), "none"):
             ink, _ = True, why.append("shadow")
         if text.strip():
             ink, _ = True, why.append("text")
@@ -309,12 +309,115 @@ FEATURE_ORDER = ("image", "blend", "filter", "gradient", "text", "shadow",
                  "border", "radius", "fill")
 
 
+def ink_coverage(ref, ren, thresh: int = 8):
+    """Did the render put ink where the reference has ink?
+
+    The area-weighted failing fraction cannot answer this. Its denominator comes
+    from the CAPTURE side, so it never notices that the RENDER contributed
+    nothing — and on a mostly-flat reference, matching that flat value scores
+    well. A blank SPECTR render scored 12.45% failing, better than the correct
+    one, purely because black "matches" a mostly-black panel. Any diff-based
+    oracle has this failure whenever the reference is dominated by one value,
+    and a dark panel is the common case in this domain.
+
+    "Ink" is a pixel further than `thresh` from the REFERENCE's modal colour,
+    measured on both images against that same modal colour so the two are
+    directly comparable.
+
+    Both returned numbers are needed. `covered` alone rewards a render that
+    floods ink everywhere — a solid-black render against SPECTR reads
+    covered=1.00, and only inkRatio=26 catches it. `ink_ratio` alone rewards one
+    that puts the right AMOUNT of ink in the wrong place.
+    """
+    np = _np()
+    quant = (ref.astype(np.uint32) >> 3)
+    key = (quant[:, :, 0] << 10) | (quant[:, :, 1] << 5) | quant[:, :, 2]
+    vals, counts = np.unique(key, return_counts=True)
+    modal_sel = key == int(vals[np.argmax(counts)])
+    modal = np.array([float(ref[:, :, c][modal_sel].mean()) for c in range(3)],
+                     dtype=np.float32)
+
+    ref_ink = np.max(np.abs(ref.astype(np.float32) - modal), axis=2) > thresh
+    ren_ink = np.max(np.abs(ren.astype(np.float32) - modal), axis=2) > thresh
+    n_ref = int(ref_ink.sum())
+    return {
+        "reference_ink_px": n_ref,
+        "render_ink_px": int(ren_ink.sum()),
+        "covered": float((ref_ink & ren_ink).sum()) / max(n_ref, 1),
+        "ink_ratio": float(ren_ink.sum()) / max(n_ref, 1),
+        "reference_modal_rgb": [int(v) for v in modal],
+    }
+
+
+def split_layers(value: str):
+    """Split a computed value on its TOP-LEVEL commas.
+
+    A comma inside `linear-gradient(...)` separates colour stops, not layers, so
+    a naive `.split(",")` shreds one gradient into several bogus layers. Only
+    depth-0 commas divide the list.
+    """
+    parts, cur, depth = [], [], 0
+    for ch in value:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth <= 0:
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur).strip())
+    return parts
+
+
+def is_zero_length(token: str) -> bool:
+    """A CSS length token that resolves to zero, in any unit or as a percent."""
+    try:
+        return float(token.rstrip("%").rstrip("abcdefghijklmnopqrstuvwxyz")) == 0.0
+    except ValueError:
+        return False
+
+
+def all_layers_initial(value: str, *initials: str) -> bool:
+    """True when EVERY layer of a per-layer value is one of `initials`.
+
+    A whole family of CSS properties serializes ONE VALUE PER BACKGROUND LAYER
+    (`background-image`, `-size`, `-position`, `-repeat`, `-blend-mode`,
+    `-clip`, `-origin`, `-attachment`) or per transition / animation / mask.
+    Comparing the whole computed value against a single keyword is therefore
+    wrong for all of them: a node with two layers and nothing interesting set
+    computes to `"normal, normal"` or `"none, none"`, neither of which equals
+    the scalar initial, so the test fires on a node that is doing nothing.
+
+    That is not a hypothetical. `background-blend-mode` compared this way
+    classified every 2+ layer background as a blend, which mislabelled the
+    single LARGEST node on three of four captured designs and produced a
+    confident "59-70% of failing area is background-blend-mode" for a corpus
+    that contains no non-normal blend mode at all.
+
+    The inverse error matters just as much: a real `"normal, overlay"` must
+    still register, so this asks whether every layer is initial rather than
+    whether the first one is.
+    """
+    return all(layer in initials for layer in split_layers(value))
+
+
+def blends(st) -> bool:
+    """Does this node actually blend?"""
+    if not all_layers_initial(st.get("background-blend-mode", "normal"),
+                              "normal", ""):
+        return True
+    # mix-blend-mode is NOT per-layer — it is one value for the whole element —
+    # so it is compared as a scalar on purpose.
+    return st.get("mix-blend-mode", "normal").strip() not in ("normal", "")
+
+
 def feature_class(n) -> str:
     st = n["styles"]
     if n["tag"].upper() in ("IMG", "SVG", "CANVAS", "VIDEO"):
         return "image"
-    if (st.get("mix-blend-mode", "normal") not in ("normal", "")
-            or st.get("background-blend-mode", "normal") not in ("normal", "")):
+    if blends(st):
         return "blend"
     if (st.get("filter", "none") != "none"
             or st.get("backdrop-filter", "none") != "none"):
@@ -323,14 +426,18 @@ def feature_class(n) -> str:
         return "gradient"
     if n["text"].strip():
         return "text"
-    if st.get("background-image", "none") != "none":
+    if not all_layers_initial(st.get("background-image", "none"), "none"):
         return "image"
-    if st.get("box-shadow", "none") != "none":
+    if not all_layers_initial(st.get("box-shadow", "none"), "none"):
         return "shadow"
     if "border" in n["ink_reasons"]:
         return "border"
-    radius = st.get("border-radius", "0px")
-    if radius and radius.strip("0pxrem% ") or (radius and radius != "0px"):
+    # border-radius is not a layer list, but it has the same shape of trap: it
+    # serializes as up to four corners (plus an optional `/` for the vertical
+    # radii), so an unrounded box computes to `"0px 0px 0px 0px"`, which is not
+    # equal to the scalar initial `"0px"`. Every component has to be zero.
+    if any(not is_zero_length(part)
+           for part in st.get("border-radius", "0px").replace("/", " ").split()):
         return "radius"
     return "fill"
 
@@ -610,6 +717,9 @@ def main() -> int:
         fail(EX_SIZE, f"{label}: reference is {W}px wide but capture.json "
                       f"declares {lw} logical x{dpr}; refusing to score")
 
+    # --- 2b. coverage: did the render contribute any ink at all? ------------
+    coverage = ink_coverage(ref, ren)
+
     # --- 3. one full-resolution diff mask -----------------------------------
     lab_ref = linear_to_lab(srgb_to_linear(ref))
     lab_ren = linear_to_lab(srgb_to_linear(ren))
@@ -720,6 +830,9 @@ def main() -> int:
         "worst_node_score": worst,
         "pct_ink_nodes_passing": (100.0 * passing / len(per_node)) if per_node else 100.0,
         "area_weighted_failing_fraction": area_weighted,
+        # Read this WITH the fraction above, never instead of it. The fraction
+        # alone cannot distinguish a better render from a blanker one.
+        "coverage": coverage,
         "control_bound": {"nodes": len(mask_ids), "area_px": masked_area,
                           "failing_px": masked_fail,
                           "failing_fraction": (masked_fail / masked_area) if masked_area else 0.0},
