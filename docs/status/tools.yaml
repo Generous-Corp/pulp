@@ -89,6 +89,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: verify-rendered-panel
+    path: tools/import-validation/verify_rendered_panel.py
+    category: visual-compare
+    use_when: Prove the *emitted artifact* renders what the importer claimed — before installing a panel or reporting a score.
+    invocation: python3 tools/import-validation/verify_rendered_panel.py --artifact <ui.js> --reference <importer-render.png> [--threshold 0.85] [--tokens <tokens.json>]
+    inputs: The emitted UI script on disk, the importer's own render as reference, and optionally the design's colour tokens.
+    outputs: A similarity score plus a foreign-colour assertion, with distinct exit codes — 5 below threshold, 6 assertion failed, 7 the harness could not execute the artifact.
+    caveat: Scores the artifact that ships, not the pipeline that made it — that distinction is the point, since scoring the pipeline is how a panel at 0.13 was certified at 0.98. Refuses to score on a size mismatch (exit 4) rather than comparing the intersection and returning a plausible number. Exit 7 is a harness fault, never reportable as a low score — a stale pulp-screenshot silently no-ops the artifact's theme calls and reads as a catastrophic regression.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: diff-against-reference
     path: tools/import-validation/diff_against_reference.py
     category: visual-compare
