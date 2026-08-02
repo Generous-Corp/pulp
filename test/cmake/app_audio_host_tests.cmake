@@ -115,6 +115,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_coreaudio_input_only.mm
         LIBRARIES pulp::audio)
     target_link_libraries(pulp-test-coreaudio-input-only PRIVATE "-framework CoreAudio")
+    # The RT-safety case reads the device source to assert the render callback
+    # actually USES the clamp — arithmetic alone would keep passing if the call
+    # site went back to requesting the raw frame count, which is the bug.
+    target_include_directories(pulp-test-coreaudio-input-only PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/audio/platform/mac)
+    target_compile_definitions(pulp-test-coreaudio-input-only PRIVATE
+        PULP_COREAUDIO_DEVICE_SOURCE="${CMAKE_SOURCE_DIR}/core/audio/platform/mac/coreaudio_device.mm")
 endif()
 
 # Plugin matrix tests (sample rate/buffer size/edge case sweep)
