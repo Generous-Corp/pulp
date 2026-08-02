@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 
 #include <iostream>
@@ -2736,7 +2737,9 @@ TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (n
 namespace {
 
 bool node_available() {
-    return pulp::platform::find_on_path("node").has_value();
+    // Matches what the fig lane itself resolves, so these cases are not
+    // skipped on a machine whose Node.js lives off PATH.
+    return pulp::import_design::browser_capture::resolve_node().ok();
 }
 
 // Point the CLI at the in-tree decoder regardless of the runner's cwd.
@@ -2761,6 +2764,16 @@ TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
+
+    // Private temp root, same as the scratch-sweep case below. Every emit
+    // section spawns the CLI, and each spawn sweeps its temp root for stale
+    // scratch dirs — so on the shared system temp dir the cost of this case is
+    // set by however many entries the whole machine happens to have there, not
+    // by anything the decode does. On a developer box that had grown to ~148k
+    // entries each spawn took tens of seconds against a 30s harness timeout and
+    // the case failed with exit_code -1, in a different section each run. A
+    // private root keeps the sweep proportional to this case's own scratch.
+    ScopedTempRoot private_tmp("fig-decode-root");
 
     SECTION("--outline lists pages and frames") {
         auto r = run_import_design({"--from", "fig", "--file", fixture, "--outline"});

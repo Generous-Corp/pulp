@@ -182,6 +182,17 @@ target_compile_definitions(pulp-test-canvas-fonts PRIVATE
     "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
 catch_discover_tests(pulp-test-canvas-fonts)
 
+# CSS gradient strings judged by the pixels they produce. Every defect this
+# covers was a value the parser ACCEPTED and painted wrong, so a string
+# assertion cannot see any of them — each case renders the CSS beside a
+# hand-written equivalent and requires the two images to agree.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-css-gradient-render test_css_gradient_render.cpp)
+    target_link_libraries(pulp-test-css-gradient-render
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-css-gradient-render)
+endif()
+
 # CG-degraded gradient + pattern cluster. Apple-only TU: every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
 # fallback honours the canvas2d spec — conic / two-circle

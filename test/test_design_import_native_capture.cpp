@@ -50,10 +50,20 @@ TEST_CASE("native materializer renders faithful_capture through the shared image
     ir.root.style.width = 956.0f;
     ir.root.style.height = 636.0f;
 
+    // Real bytes on disk: the materializer only emits a `file://` image source
+    // for a file that exists, so a synthetic capture path would materialize the
+    // unresolved-asset placeholder instead of the shared image path under test.
+    TemporaryDirectory capture_directory;
+    const auto capture = capture_directory.path / "browser.png";
+    {
+        std::ofstream output(capture, std::ios::binary);
+        output << "pulp-test-capture-bytes";
+    }
+
     IRAssetRef asset;
     asset.asset_id = "reference:browser";
     asset.original_uri = "pulp-capture:///browser.png";
-    asset.local_path = "/capture/browser.png";
+    asset.local_path = capture.string();
     asset.mime = "image/png";
     asset.width = 1912;
     asset.height = 1272;
@@ -63,7 +73,8 @@ TEST_CASE("native materializer renders faithful_capture through the shared image
     REQUIRE(root != nullptr);
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
-    REQUIRE(image->image_source() == "file:///capture/browser.png");
+    REQUIRE(image->image_source() ==
+            "file://" + capture.lexically_normal().generic_string());
 }
 
 TEST_CASE("serialized DesignIR resolves portable capture assets from its document directory",

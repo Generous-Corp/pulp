@@ -879,6 +879,17 @@ uses, or the golden warms a cache the real jobs never touch.
   hostile-state rejection (overflow/CRC/truncation) folded into
   `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
   fails here rather than only in a browser.
+- **`web-plugins.yml` also hosts a non-browser job: `Timeline fixture corpus
+  (WASM)`.** It builds `pulp-fixture-runner` through the Emscripten-only root
+  `core/interchange/wasm` and runs the timeline conformance corpus under node
+  (`tools/ci/wasm-fixture-lane.sh`). It lives in this file only to share the
+  emsdk pin — it needs no Skia slice, no Chrome, no wasi-sdk, no npm, and
+  finishes in about a minute, so it is a sibling JOB and not a step in the lane
+  above. When adding another emsdk-only check, follow that shape rather than
+  appending to the browser lane. The lane script runs the corpus twice on
+  purpose (good corpus green, broken copy red); if you ever "simplify" it to one
+  run, you have deleted the only thing proving the wasm build validates
+  anything.
 - **The GPU-audio proof inside `web-plugins.yml` needs a real GPU, so it is a
   macOS job.** The Linux leg has **no WebGPU adapter at all** (measured:
   `--use-webgpu-adapter=swiftshader` and `forceFallbackAdapter:true` both return
@@ -5714,3 +5725,24 @@ with `unbound variable` under `set -u`, and the failure looks like the new gate
 itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
 the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
 Pass the same value through to a script that takes a root argument.
+
+## Apple's clang ships no libFuzzer runtime — fuzzing cannot live on the macOS lanes
+
+`libclang_rt.fuzzer_osx.a` is **absent from the Xcode toolchain** (Homebrew LLVM has it). Pulp's
+sanitizer lane runs on GitHub-hosted `macos-15` with Apple clang, so **a `-fsanitize=fuzzer`
+target would not build there at all** — a libFuzzer-only fuzzing design runs nowhere in this
+repo's CI.
+
+The shape that works, and the one `timeline-fuzz.yml` uses:
+
+- **Oracles live outside the fuzzer** and are toolchain-independent, so both lanes share them.
+- A **deterministic seeded replay** is the always-on lane — plain Catch2, runs on every platform,
+  and a failure is reproducible from a `(seed, index)` pair rather than a corpus artifact.
+- The **libFuzzer target is opt-in** behind a CMake option and **Linux-only** in CI, with a
+  configure-time probe that fails naming the missing runtime instead of dying at link with an
+  unresolved-symbol error that reads like a code bug.
+
+**A fuzz job's wall clock is usually its build, not its fuzzing** — measured here at ~37k
+cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
+almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
+plus `-max_total_time` on libFuzzer.

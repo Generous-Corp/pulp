@@ -493,6 +493,14 @@ trimmed nested lane-bearing clip still reports the trim code.
 
 ## Validation
 
+Configuring a fresh build dir for these suites needs
+`-DPULP_ENABLE_DESIGN_IMPORT=ON` **passed explicitly** whenever the cache has
+ever held OFF: `PULP_BUILD_TESTS=ON` hard-requires it, and a cached OFF survives
+a reconfigure that does not name the option, so the configure fails on an option
+combination unrelated to anything you changed. Passing it every reconfigure is
+cheaper than recognising the error a second time. (The `ci` skill covers the
+other half of this option — the OFF-side link break the release lane guards.)
+
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
 `pulp-test-playback-track-automation-renderer`, `pulp-test-playback-program`,
@@ -638,10 +646,11 @@ Three pieces, and the boundaries between them matter:
   refuses a duplicate type rather than overwriting — two renderers disagreeing
   about what a content kind reads would make invalidation depend on registration
   order. An unregistered type reads nothing, which is correct: no renderer
-  compiles it, so there is no program that could go stale. Built-in content
-  (media, notes, empty) is not registered and declares nothing, so the contract
-  cannot change the invalidation of anything that predates it.
-- `ContextSubscriberIndex::build()` is the kind → reader-track reverse index.
+  compiles it, so there is no program that could go stale. Built-in MIDI is the
+  deliberate exception: the program compiler reads its owning sequence groove,
+  so `MidiContent` always subscribes to `Groove` without plugin registration.
+  Media and empty content read none.
+- `CompileInvalidationIndex::build()` is the kind → reader-track reverse index.
   Rebuild it when the document's **structure** changes; a context edit alone does
   not invalidate it, because editing a lane's contents does not change who reads
   it. It walks clips through the exhaustive `ClipContentCases` visitor, so a new
@@ -655,8 +664,37 @@ Three pieces, and the boundaries between them matter:
   trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
   structural sequence edit and also sets `all`.
 
+Production callers construct `ProgramCompileRequest::invalidation` from the
+shared registry and exact `CommitResult`. Its constructor binds the dirty set to
+that result's target snapshot, revision, exact predecessor snapshot, and an
+immutable registry copy. Sparse reuse is allowed only when the predecessor is
+the currently published project; a restored or forked lineage rebuilds in full.
+`submit()` resolves that pinned input and remembers the generation that reached
+publication. A different registry generation forces a full compile, including
+at the same document revision. Do not resolve
+outside the request and then drop the registry generation before submission.
+Completion is keyed by `CompileTicket::submission_epoch` and
+`CompilerStatus::latest_published_epoch`; revision equality is insufficient for
+a same-document registry refresh. Treat the latter as a successful-publication
+watermark: `latest_published_epoch >= submission_epoch` is terminal for a ticket,
+meaning its request published or was superseded by a later successful
+publication. Callers requiring exact-current document identity must also
+require epoch equality and compare the published program identity/revision.
+Epochs are scoped to one compiler instance: destroying the facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+If `busy` is false, an error with the watermark still below the ticket is
+terminal failure.
+
+Built-in note compilation applies the owning sequence groove at the original
+owner-sequence onset. Move note-on/off by one shared displacement, intersect the
+pair with the owning clip's half-open window, scale velocity half-up with
+saturation, then subdivide the retained span for ratchets. Nested leaves carry
+their owner sequence and source onset through lowering; never compose parent and
+child groove. A trimmed nested MIDI leaf with authored groove is refused as
+`TrimmedGrooveUnsupported` until source-window chase semantics are specified.
+
 **Adding a `CompileContextKind` is a data change, with one trap.** Both
-`ContextSubscriberIndex::build()` and the `CompileContextSubscriptions` bitset
+`CompileInvalidationIndex::build()` and the `CompileContextSubscriptions` bitset
 loop over `[0, kCompileContextKindCount)`, so a new kind needs no new case in
 either — but it does need `kCompileContextKindCount` bumped in lockstep with the
 enum. Forget that and the new kind is never indexed, never dirtied, and every
@@ -713,6 +751,62 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
+
+## Publishing a program across a realm boundary
+
+`PlaybackProgram` is `shared_ptr`-woven and cannot leave the process that built
+it. `pulp/playback/program_wire.hpp` is the crossing form: one contiguous,
+self-describing byte range that carries indices where the program carries
+pointers. Reach for it whenever a consumer does not share the producer's heap —
+a Worker publishing to an AudioWorklet, or a helper process — and never try to
+hand the program itself over some serialization of pointers.
+
+Things worth knowing before changing it:
+
+- **Decode allocates nothing.** Records are native-layout, eight-byte-multiple,
+  eight-byte-aligned structs, so `decode_program_wire` hands back typed spans
+  borrowed straight out of the buffer. That is why the format asserts
+  little-endian at compile time and rejects a misaligned base address instead of
+  falling back to a copy. Adding a field that is not a fixed-size scalar — a
+  string, a variable-length blob — breaks that property; give it its own
+  section with its own `(first, count)` ranges instead.
+- **The encoder refuses rather than drops.** A track with an audio renderer
+  program, or a mixer control pointing at a lane the track does not own, is a
+  typed error and not a silently thinner payload. Preserve that when widening
+  what the wire covers: a lossy encode is indistinguishable downstream from a
+  program that was authored that way.
+- **Deliberate exclusions, and why.** Decoded audio (bulk, already content-hash
+  addressed — a generation wire that inlined it would republish gigabytes per
+  edit), the audio clip programs (derived, and carrying derived-cache pointers),
+  `AudioRendererLimits` (mostly offline-stretch and converter budgets governing
+  the compiler's host), and `AutomationProgram`'s instance token (a
+  producer-process-local counter that a consuming realm has no token space to
+  compare against). Excluding the token is also what makes one document encode
+  to exactly one byte range.
+- **`producer_epoch` is what replaces the token across the boundary, and it is
+  not optional.** The token's in-process job is to stop an equal-generation
+  replacement from masquerading as the active program — `AutomationCursor`
+  decides `Unchanged` on the lane key *and* the token together. Across a realm
+  that guard cannot be the token, so the wire carries a producer epoch instead
+  and a consumer decides on `(producer_epoch, generation)`. Neither half is
+  sufficient alone: `generation` is minted per store and **restarts at 1**, so a
+  producer that is torn down and recreated looks non-monotonic to a surviving
+  consumer and would be refused forever on generation alone; and two producers
+  of one document both minting generation 1 would look like one publication
+  without the epoch. A zero epoch is refused at both ends rather than acting as
+  a wildcard.
+- **Version growth is additive by section, not by version bump.** An unknown
+  section marked `kProgramWireSectionOptional` is skipped; an unknown section
+  without it is rejected. Bump `min_reader_version` only when an older reader
+  would *misread* the bytes, not when it would merely miss data.
+- **The byte golden is the guard that matters.** An encoder and a decoder that
+  are wrong in the same direction still round-trip; only the pinned digest in
+  `test/test_playback_program_wire.cpp` catches a reordered field. If you change
+  the layout on purpose, re-pin it in the same change and say so.
+- The tempo map travels as its editable `TempoPoint`s, because
+  `CompiledTempoMap`'s segments are private and derived. `encode_program_wire`
+  therefore takes the points and refuses any that did not compile the program's
+  map — `CompiledTempoMap::matches()` is what keeps the two honest.
 
 ## A refusal of something authorable costs a written reason
 
@@ -832,7 +926,11 @@ rung — while the binary links neither, and still pass. If what you need to sho
 is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
 `REQUIRE` list, which fails naming any module that is absent from the measured
 closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
-by it; it does not link `timeline_editor` at all.
+by it; it does not link `timeline_editor` at all. The positive inbound proof is
+`TimelinePluginProof_CLAP`: it requires `format timeline timeline_editor` under
+the `sequencer-plugin-editor` tier while recording the packaging-driven
+`playback` reach as per-target debt. Its native ruler/playhead view demonstrates
+the host seam without claiming a piano roll.
 
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
@@ -899,3 +997,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

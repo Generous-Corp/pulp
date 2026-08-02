@@ -58,24 +58,29 @@ inline sk_sp<SkShader> make_radial(SkPoint center,
 #endif
 }
 
+/// `tile` decides what happens OUTSIDE [start_degrees, end_degrees]. A full-turn
+/// window never leaves anything outside, so kClamp is right for a plain conic;
+/// a sub-turn window plus kRepeat is what makes a repeating-conic tile its band
+/// around the circle, and Skia does the repetition itself.
 inline sk_sp<SkShader> make_sweep(SkPoint center,
                                   float start_degrees,
                                   float end_degrees,
                                   const SkColor4f* colors,
                                   const float* positions,
-                                  int count) {
+                                  int count,
+                                  SkTileMode tile = SkTileMode::kClamp) {
 #if PULP_SKIA_HAS_GRADIENT_OBJECT
     SkGradient::Colors stops(SkSpan<const SkColor4f>(colors, static_cast<size_t>(count)),
                              positions ? SkSpan<const float>(positions, static_cast<size_t>(count))
                                        : SkSpan<const float>(),
-                             SkTileMode::kClamp,
+                             tile,
                              SkColorSpace::MakeSRGB());
     SkGradient grad(stops, SkGradient::Interpolation{});
     return SkShaders::SweepGradient(center, start_degrees, end_degrees, grad);
 #else
     return SkGradientShader::MakeSweep(center.x(), center.y(), colors,
                                        SkColorSpace::MakeSRGB(), positions, count,
-                                       SkTileMode::kClamp, start_degrees, end_degrees,
+                                       tile, start_degrees, end_degrees,
                                        SkGradientShader::Interpolation{}, nullptr);
 #endif
 }

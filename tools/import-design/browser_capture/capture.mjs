@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
 import { createHash } from "node:crypto";
-import { writeSync } from "node:fs";
+import { mkdirSync, writeFileSync, writeSync } from "node:fs";
 import {
   mkdir,
   readFile,
@@ -34,6 +34,7 @@ import {
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureDocumentExtent,
+  resumeDynamicTime,
   validateCaptureDimensions,
   waitForStable,
 } from "./settle.mjs";
@@ -58,7 +59,10 @@ import {
   executeInteractionPlan,
 } from "./interaction_executor.mjs";
 import { readInteractionPlan } from "./interaction_plan.mjs";
-import { armCleanupDeadline } from "./lifecycle.mjs";
+import {
+  armCleanupDeadline,
+  createCaptureProgress,
+} from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
 
 function parseArguments(argv) {
@@ -110,15 +114,55 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function exitAfterCleanupDeadline() {
+function exitAfterCleanupDeadline(expiry, outputDir, browser) {
+  const diagnostic = {
+    schema: "pulp-browser-capture-error-v1",
+    code: "browser-capture-timeout",
+    phase: expiry.phase,
+    message: `browser capture timed out; ${expiry.summary}`,
+    ...(browser ? { browser } : {}),
+  };
+  if (outputDir) {
+    try {
+      mkdirSync(outputDir, { recursive: true });
+      writeFileSync(
+        path.join(outputDir, "capture-error.json"), serializeJson(diagnostic));
+    } catch {
+      // stderr below remains the authoritative error channel.
+    }
+  }
   try {
     writeSync(
-      process.stderr.fd,
-      "browser-capture-timeout: browser capture timed out\n");
+      process.stderr.fd, `${diagnostic.code}: ${diagnostic.message}\n`);
   } catch {
     // The parent still sees exit 124 if its stderr pipe has already closed.
   }
   process.exit(124);
+}
+
+// The resolved browser identity belongs in every capture record, including the
+// records of captures that never produce an envelope. Browser behaviour around
+// screenshots and virtual time changes between Chromium releases, so a failure
+// report that does not name the browser cannot be triaged.
+function reportBrowser(version) {
+  const product = String(version?.product ?? "");
+  const [name, release] = product.split("/");
+  const browser = {
+    product: name || "Chromium",
+    version: release || "",
+    protocol_version: version?.protocolVersion ?? "",
+    build_hash: version?.revision ?? "",
+  };
+  try {
+    writeSync(
+      process.stderr.fd,
+      `[browser-capture] browser=${browser.product}/${browser.version} ` +
+      `protocol=${browser.protocol_version} ` +
+      `build=${browser.build_hash}\n`);
+  } catch {
+    // A closed stderr pipe must not fail an otherwise healthy capture.
+  }
+  return browser;
 }
 
 function withTimeout(promise, milliseconds, label) {
@@ -133,12 +177,13 @@ function withTimeout(promise, milliseconds, label) {
 }
 
 class Cdp {
-  constructor(webSocketUrl, timeoutMs) {
+  constructor(webSocketUrl, timeoutMs, progress = createCaptureProgress()) {
     if (typeof WebSocket !== "function") {
       throw new Error("Node.js 22 or newer is required (WebSocket unavailable)");
     }
     this.socket = new WebSocket(webSocketUrl);
     this.timeoutMs = timeoutMs;
+    this.progress = progress;
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
@@ -161,6 +206,9 @@ class Cdp {
         if (!pending) return;
         this.pending.delete(message.id);
         clearTimeout(pending.timer);
+        // A protocol error is still a completed round trip: the browser
+        // answered. Only an abandoned call leaves the step uncompleted.
+        pending.settle();
         if (message.error) {
           pending.reject(new Error(
             `${pending.method}: ${message.error.message}`));
@@ -176,6 +224,7 @@ class Cdp {
     this.socket.addEventListener("close", () => {
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer);
+        pending.settle(false);
         pending.reject(new Error("CDP WebSocket closed"));
       }
       this.pending.clear();
@@ -184,12 +233,14 @@ class Cdp {
 
   call(method, params = {}, sessionId = undefined) {
     const id = this.nextId++;
+    const settle = this.progress.begin(method);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        settle(false);
         reject(new Error(`${method} timed out`));
       }, this.timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, method });
+      this.pending.set(id, { resolve, reject, settle, timer, method });
       this.socket.send(JSON.stringify({
         id,
         method,
@@ -300,9 +351,11 @@ async function runProbe(options) {
     options.values, "--timeout-ms", 15000);
   const profileDir = await createEmptyProfile(
     options.values.get("--profile-dir"));
+  const progress = createCaptureProgress("browser-launch");
   let launched;
   let browserChild;
   let cdp;
+  let browser;
   let cleanupPromise;
   const cleanup = () => {
     cleanupPromise ??= (async () => {
@@ -318,10 +371,15 @@ async function runProbe(options) {
     return cleanupPromise;
   };
   activeCleanup = cleanup;
+  const expiry = { phase: progress.phase, summary: "" };
   const cancelDeadline = armCleanupDeadline({
     timeoutMs,
     cleanup,
-    onExpired: exitAfterCleanupDeadline,
+    onExpiring: () => {
+      expiry.phase = progress.phase;
+      expiry.summary = progress.describe();
+    },
+    onExpired: () => exitAfterCleanupDeadline(expiry, "", browser),
   });
   try {
     launched = await launchBrowser(
@@ -330,10 +388,13 @@ async function runProbe(options) {
         browserChild = child;
       });
     const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs);
+    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
     await cdp.open();
-    await configurePage(cdp, 320, 240, 1);
+    progress.enterPhase("page-configuration");
     const version = await cdp.call("Browser.getVersion");
+    browser = reportBrowser(version);
+    await configurePage(cdp, 320, 240, 1);
+    progress.enterPhase("probe-capture");
     const snapshot = await cdp.call("DOMSnapshot.captureSnapshot", {
       computedStyles: ["display"],
       includePaintOrder: true,
@@ -353,6 +414,9 @@ async function runProbe(options) {
       protocolVersion: version.protocolVersion,
       revision: version.revision,
     })}\n`);
+  } catch (error) {
+    error.phase = error.phase || progress.phase;
+    throw error;
   } finally {
     cancelDeadline();
     await cleanup();
@@ -394,12 +458,13 @@ async function runCapture(options) {
     options.values.get("--profile-dir"));
   await mkdir(outputDir, { recursive: true });
 
-  let phase = "loopback-server";
+  const progress = createCaptureProgress("loopback-server");
   let server;
   let denyProxy;
   let launched;
   let browserChild;
   let cdp;
+  let browser;
   let cleanupPromise;
   const cleanup = () => {
     cleanupPromise ??= (async () => {
@@ -417,10 +482,15 @@ async function runCapture(options) {
     return cleanupPromise;
   };
   activeCleanup = cleanup;
+  const expiry = { phase: progress.phase, summary: "" };
   const cancelDeadline = armCleanupDeadline({
     timeoutMs,
     cleanup,
-    onExpired: exitAfterCleanupDeadline,
+    onExpiring: () => {
+      expiry.phase = progress.phase;
+      expiry.summary = progress.describe();
+    },
+    onExpired: () => exitAfterCleanupDeadline(expiry, outputDir, browser),
   });
   try {
     server = await serveAuthorizedRoot(
@@ -428,7 +498,7 @@ async function runCapture(options) {
     if (!allowNetwork || resolvedExternalOrigins.size === 0) {
       denyProxy = await serveDenyProxy();
     }
-    phase = "browser-launch";
+    progress.enterPhase("browser-launch");
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
       (child) => {
@@ -449,10 +519,11 @@ async function runCapture(options) {
               hostResolverRules(resolvedExternalOrigins)}`,
           ]);
     const target = await pageTarget(launched.endpoint.port, timeoutMs);
-    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs);
+    cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
     await cdp.open();
 
-    phase = "page-configuration";
+    progress.enterPhase("page-configuration");
+    browser = reportBrowser(await cdp.call("Browser.getVersion"));
     await configurePage(cdp, initialWidth, initialHeight, dpr);
     await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
@@ -470,7 +541,7 @@ async function runCapture(options) {
       pendingNetwork.delete(requestId);
     });
 
-    phase = "navigation";
+    progress.enterPhase("navigation");
     const loaded = cdp.waitFor("Page.loadEventFired");
     const navigation = await cdp.call("Page.navigate", {
       url: server.entryUrl,
@@ -480,7 +551,7 @@ async function runCapture(options) {
     }
     await loaded;
 
-    phase = "page-settle";
+    progress.enterPhase("page-settle");
     await disableMotion(cdp);
     const firstSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
@@ -499,7 +570,7 @@ async function runCapture(options) {
     let interactionNavigationGuard = null;
     let interactionSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
     if (interactionPlan) {
-      phase = "browser-interactions";
+      progress.enterPhase("browser-interactions");
       interactionNavigationGuard =
         await createMainFrameNavigationGuard(cdp);
       const settleAfterInteraction = async () => {
@@ -522,7 +593,7 @@ async function runCapture(options) {
         rendererHooks, await finalizeKnownRenderers(cdp));
       await settleAfterInteraction();
       await interactionNavigationGuard.assertUnchanged();
-      phase = "page-settle";
+      progress.enterPhase("page-settle");
     }
     // Keep the viewport that authored the responsive layout. Resizing it to the
     // measured document extent creates a feedback loop for 100vh/min-height
@@ -613,7 +684,7 @@ async function runCapture(options) {
       returnByValue: true,
     });
 
-    phase = "same-frame-capture";
+    progress.enterPhase("same-frame-capture");
     await interactionNavigationGuard?.assertUnchanged();
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
@@ -663,8 +734,13 @@ async function runCapture(options) {
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
     await networkGuard.awaitProvenance();
+    // Every sidecar above is read from the DOM while virtual time is paused.
+    // Pixels are different: the compositor cannot present a new frame with
+    // virtual time paused, so the screenshot loop below runs with virtual time
+    // released again.
+    await resumeDynamicTime(cdp);
     // Compositor-backed pages can need several post-freeze presentation
-    // boundaries even after DOM/timer motion is paused. Always observe the
+    // boundaries even after DOM/timer motion is frozen. Always observe the
     // complete bounded horizon, then require a byte-identical trailing run;
     // an early A,A plateau must not hide a later B,B presentation.
     const screenshotBytes =
@@ -686,7 +762,7 @@ async function runCapture(options) {
       throw error;
     }
 
-    phase = "artifact-write";
+    progress.enterPhase("artifact-write");
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
     const interactionReportBytes = interactionReport
@@ -697,7 +773,15 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
-      writeJson(path.join(outputDir, "dom-snapshot.json"), sanitizedSnapshot),
+      // `layout.styles` rows are positional: entry N is the Nth property of
+      // the request. Recording the request order alongside the data keeps the
+      // snapshot self-describing, so a consumer never has to hardcode a
+      // parallel copy of COMPUTED_STYLES that would silently map a background
+      // into a border the first time this list changes.
+      writeJson(path.join(outputDir, "dom-snapshot.json"), {
+        ...sanitizedSnapshot,
+        computedStyleNames: COMPUTED_STYLES,
+      }),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       ...(interactionReport
@@ -707,20 +791,18 @@ async function runCapture(options) {
         : []),
     ]);
 
-    const browserVersion = await cdp.call("Browser.getVersion");
     const browserProductArg = options.values.get("--browser-product") ?? "";
     const browserVersionArg = options.values.get("--browser-version") ?? "";
-    const actualProductParts = String(browserVersion.product ?? "").split("/");
     const envelope = {
       schema: "pulp-browser-capture-v1",
       version: 1,
       provenance: {
         capture_method: "chromium-cdp",
         browser: {
-          product: browserProductArg || actualProductParts[0] || "Chromium",
-          version: browserVersionArg || actualProductParts[1] || "",
-          protocol_version: browserVersion.protocolVersion ?? "",
-          build_hash: browserVersion.revision ?? "",
+          product: browserProductArg || browser.product,
+          version: browserVersionArg || browser.version,
+          protocol_version: browser.protocol_version,
+          build_hash: browser.build_hash,
           origin: options.values.get("--browser-origin") ?? "system",
         },
         source: {
@@ -837,7 +919,8 @@ async function runCapture(options) {
       semantic_candidates: semanticReport.summary.candidates,
     })}\n`);
   } catch (error) {
-    error.phase = error.phase || phase;
+    error.phase = error.phase || progress.phase;
+    error.browser = browser;
     const sanitized =
       sanitizeCaptureError(error, server?.privatePrefix ?? "");
     error.message = sanitized.message;
@@ -897,6 +980,7 @@ try {
     message: sanitized.message,
   };
   if (sanitized.health) diagnostic.health = sanitized.health;
+  if (error.browser) diagnostic.browser = error.browser;
   if (outputDir) {
     try {
       await mkdir(outputDir, { recursive: true });

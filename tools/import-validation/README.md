@@ -18,6 +18,7 @@ submodule) for the full design.
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
 | `reference-labels-spectr.txt` | Ground-truth list of UI labels that must appear in any successful Spectr import. |
+| `verify_rendered_panel.py` | Renders an **emitted `ui.js`** and scores it against the render its importer claimed to produce. Not Spectr-specific and not part of the roundtrip: the subject is the artifact that ships, so it catches a pipeline reporting 0.98 for an artifact that renders at 0.13. See [RENDERED-PANEL-GATE.md](RENDERED-PANEL-GATE.md). |
 
 ## Semantic probes
 

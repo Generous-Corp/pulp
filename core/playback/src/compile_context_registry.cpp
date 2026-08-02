@@ -21,6 +21,33 @@ std::size_t kind_index(timeline::CompileContextKind kind) noexcept {
     return static_cast<std::size_t>(kind);
 }
 
+timeline::CompileContextSubscriptions
+subscriptions_for_content(const timeline::ClipContent& content,
+                          const CompileContextRegistry& registry) noexcept {
+    return std::visit(
+        timeline::ClipContentCases{
+            [](const timeline::EmptyContent&) {
+                return timeline::CompileContextSubscriptions::none();
+            },
+            [](const timeline::MediaRef&) { return timeline::CompileContextSubscriptions::none(); },
+            [](const timeline::MidiContent&) {
+                auto subscriptions = timeline::CompileContextSubscriptions::none();
+                subscriptions.subscribe(timeline::CompileContextKind::Groove);
+                return subscriptions;
+            },
+            [&](const timeline::RegisteredContent& registered) {
+                return registry.subscriptions_for(registered.schema().type_name);
+            },
+            [](const timeline::OpaqueContent&) {
+                return timeline::CompileContextSubscriptions::none();
+            },
+            [](const timeline::SequenceRef&) {
+                return timeline::CompileContextSubscriptions::none();
+            },
+        },
+        content);
+}
+
 } // namespace
 
 CompileContextRegistry::CompileContextRegistry()
@@ -89,6 +116,10 @@ CompileContextRegistry::subscriptions_for(std::string_view content_type_name) co
                : timeline::CompileContextSubscriptions::none();
 }
 
+std::uint64_t CompileContextRegistry::revision() const noexcept {
+    return generation_->revision;
+}
+
 CompileInvalidationIndex CompileInvalidationIndex::build(const timeline::Project& project,
                                                          timeline::ItemId sequence_id,
                                                          const CompileContextRegistry& registry) {
@@ -131,13 +162,9 @@ CompileInvalidationIndex CompileInvalidationIndex::build(const timeline::Project
             const std::array direct_track{track.id()};
             const auto root_tracks =
                 root_owner ? std::span<const timeline::ItemId>(direct_track) : nested_tracks;
-            for (const auto& clip : track.clips()) {
-                const auto* content = std::get_if<timeline::RegisteredContent>(&clip.content());
-                if (!content)
-                    continue;
-                append(owner_sequence.id(), registry.subscriptions_for(content->schema().type_name),
+            for (const auto& clip : track.clips())
+                append(owner_sequence.id(), subscriptions_for_content(clip.content(), registry),
                        root_tracks);
-            }
         }
     }
     for (auto& subscribers : data->context_by_kind) {
