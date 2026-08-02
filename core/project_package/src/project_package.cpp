@@ -68,6 +68,13 @@ fs::path blob_path(const fs::path& root, const BlobReference& reference) {
     return root / store_name(reference.store) / name;
 }
 
+fs::path blob_name(const BlobReference& reference) {
+    auto name = reference.hash.to_hex();
+    if (reference.store == BlobStore::Receipt)
+        name += ".json";
+    return path_from_utf8(name);
+}
+
 bool is_real_directory(const fs::path& path) {
     std::error_code error;
     return fs::symlink_status(path, error).type() == fs::file_type::directory && !error;
@@ -84,6 +91,17 @@ bool hash_matches(const fs::path& path, const timeline::ContentHash& expected,
         return false;
     detail::invoke_fault_hook(detail::PackageFaultPoint::BlobReferenceVerified);
     return file->still_named_by(path);
+}
+
+bool hash_matches(const detail::AnchoredDirectory& parent, const fs::path& name,
+                  const timeline::ContentHash& expected, std::uint64_t maximum) {
+    if (!expected.valid())
+        return false;
+    auto file = detail::PinnedFile::open(parent, name, false, true);
+    if (!file || !file->hash_matches(expected.to_hex(), maximum))
+        return false;
+    detail::invoke_fault_hook(detail::PackageFaultPoint::BlobReferenceVerified);
+    return file->still_named_by(parent, name);
 }
 
 std::uint64_t next_serial() noexcept {
@@ -142,16 +160,68 @@ bool validate_project_references(const fs::path& root, const timeline::Project& 
     return true;
 }
 
-runtime::Result<std::vector<std::uint8_t>, PackageError> read_file(const fs::path& path,
-                                                                   std::uint64_t maximum) {
+bool validate_canonical_blob(const detail::AnchoredDirectory& media,
+                             const timeline::ContentHash& expected, std::uint64_t maximum,
+                             std::set<timeline::ContentHash>& verified) {
+    if (verified.contains(expected))
+        return true;
+    const auto name = path_from_utf8(expected.to_hex());
+    if (!hash_matches(media, name, expected, maximum))
+        return false;
+    verified.insert(expected);
+    return true;
+}
+
+bool validate_locator(const detail::AnchoredDirectory& media, const timeline::AssetLocator& locator,
+                      const timeline::ContentHash& expected, std::uint64_t maximum,
+                      std::set<timeline::ContentHash>& verified) {
+    if (locator.kind != timeline::AssetLocatorKind::PackageRelative)
+        return true;
+    if (!timeline::package_relative_path_is_portable(locator.hint))
+        return false;
+    const auto canonical = std::string("media/") + expected.to_hex();
+    return locator.hint == canonical && validate_canonical_blob(media, expected, maximum, verified);
+}
+
+bool validate_project_references(const detail::AnchoredDirectory& media,
+                                 const timeline::Project& project, std::uint64_t maximum) {
+    std::set<timeline::ContentHash> verified;
+    for (const auto& asset : project.assets()) {
+        const bool embedded = asset.storage_policy == timeline::AssetStoragePolicy::Embedded;
+        if (embedded && !validate_canonical_blob(media, asset.content_hash, maximum, verified))
+            return false;
+        for (const auto& locator : asset.locators)
+            if (!validate_locator(media, locator, asset.content_hash, maximum, verified))
+                return false;
+        for (const auto& representation : asset.representations) {
+            const bool representation_embedded =
+                representation.storage_policy == timeline::AssetStoragePolicy::Embedded;
+            if (representation_embedded &&
+                !validate_canonical_blob(media, representation.content_hash, maximum, verified))
+                return false;
+            for (const auto& locator : representation.locators)
+                if (!validate_locator(media, locator, representation.content_hash, maximum,
+                                      verified))
+                    return false;
+        }
+    }
+    return true;
+}
+
+runtime::Result<std::vector<std::uint8_t>, PackageError>
+read_file(const detail::AnchoredDirectory& parent, const fs::path& relative,
+          const fs::path& display_path, std::uint64_t maximum) {
+    auto file = detail::PinnedFile::open(parent, relative, false, true);
+    if (!file)
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::IoError, display_path);
     std::vector<std::uint8_t> bytes;
-    const auto outcome = detail::read_file_bounded(path, maximum, bytes);
+    const auto outcome = file->read_bounded(maximum, bytes);
     if (outcome == detail::NativeReadOutcome::InvalidFile)
-        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, path);
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, display_path);
     if (outcome == detail::NativeReadOutcome::LimitExceeded)
-        return failure<std::vector<std::uint8_t>>(PackageErrorCode::LimitExceeded, path);
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::LimitExceeded, display_path);
     if (outcome != detail::NativeReadOutcome::Ok)
-        return failure<std::vector<std::uint8_t>>(PackageErrorCode::IoError, path);
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::IoError, display_path);
     return runtime::Result<std::vector<std::uint8_t>, PackageError>(runtime::Ok(std::move(bytes)));
 }
 
@@ -465,30 +535,48 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
     const auto canonical_root = fs::canonical(anchored_root, error);
     if (error || !is_real_directory(canonical_root))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
+    auto root_anchor = detail::AnchoredDirectory::open(canonical_root, true);
+    if (!root_anchor || !root_anchor->still_named_by(canonical_root))
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, canonical_root);
+    detail::invoke_fault_hook(detail::PackageFaultPoint::ReaderRootAnchored);
     constexpr std::string_view required[] = {"media", "state", "artifacts", "receipts", "journal"};
-    for (const auto directory : required)
-        if (!is_real_directory(canonical_root / directory))
+    std::vector<std::pair<fs::path, detail::AnchoredDirectory>> required_anchors;
+    required_anchors.reserve(std::size(required));
+    for (const auto directory : required) {
+        const auto relative = path_from_utf8(directory);
+        auto anchor = root_anchor->open_directory(relative, true, false, false);
+        if (!anchor)
             return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout,
                                               canonical_root / directory);
+        required_anchors.emplace_back(relative, std::move(*anchor));
+    }
+    const auto media = std::find_if(required_anchors.begin(), required_anchors.end(),
+                                    [](const auto& entry) { return entry.first == "media"; });
+    if (media == required_anchors.end())
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout,
+                                          canonical_root / "media");
     bool cache_recreated = false;
     const auto cache = canonical_root / "cache";
-    if (!is_real_directory(cache)) {
-        error.clear();
-        const bool created = fs::create_directory(cache, error);
-        if ((!created && error) || !is_real_directory(cache) ||
-            (created && !detail::fence_directory(canonical_root)))
-            return failure<OpenPackageResult>(PackageErrorCode::IoError, cache);
-        cache_recreated = created;
-    }
-    auto encoded = read_file(canonical_root / kProjectFile, limits.max_project_bytes);
+    auto cache_anchor =
+        root_anchor->open_or_create_directory(path_from_utf8("cache"), cache_recreated);
+    if (!cache_anchor || (cache_recreated && !root_anchor->fence()))
+        return failure<OpenPackageResult>(PackageErrorCode::IoError, cache);
+    auto encoded = read_file(*root_anchor, path_from_utf8(kProjectFile),
+                             canonical_root / kProjectFile, limits.max_project_bytes);
     if (!encoded)
         return failure<OpenPackageResult>(encoded.error().code, encoded.error().path);
     const std::string_view json(reinterpret_cast<const char*>(encoded->data()), encoded->size());
     auto decoded = timeline::deserialize_project(json, registry);
     if (!decoded ||
-        !validate_project_references(canonical_root, decoded.value(), limits.max_blob_bytes))
+        !validate_project_references(media->second, decoded.value(), limits.max_blob_bytes))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidGeneration,
                                           canonical_root / kProjectFile);
+    if (!root_anchor->still_named_by(canonical_root) || !cache_anchor->still_named_by(cache))
+        return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout, canonical_root);
+    for (const auto& [relative, anchor] : required_anchors)
+        if (!anchor.still_named_by(canonical_root / relative))
+            return failure<OpenPackageResult>(PackageErrorCode::InvalidLayout,
+                                              canonical_root / relative);
     return runtime::Result<OpenPackageResult, PackageError>(runtime::Ok(OpenPackageResult{
         std::move(decoded).value(), canonical_root / "journal", cache, cache_recreated}));
 }
@@ -506,14 +594,26 @@ read_blob(const fs::path& root, const BlobReference& reference,
     if (!is_real_directory(anchored_root))
         return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
     const auto canonical_root = fs::canonical(anchored_root, error);
-    if (error || !is_real_directory(canonical_root / store_name(reference.store)))
+    if (error)
         return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
+    auto root_anchor = detail::AnchoredDirectory::open(canonical_root, true);
+    if (!root_anchor || !root_anchor->still_named_by(canonical_root))
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
+    detail::invoke_fault_hook(detail::PackageFaultPoint::ReaderRootAnchored);
+    const auto store_relative = path_from_utf8(store_name(reference.store));
+    auto store_anchor = root_anchor->open_directory(store_relative, true, false, false);
+    if (!store_anchor)
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout,
+                                                  canonical_root / store_relative);
     const auto path = blob_path(canonical_root, reference);
-    auto bytes = read_file(path, maximum_bytes);
+    auto bytes = read_file(*store_anchor, blob_name(reference), path, maximum_bytes);
     if (!bytes)
         return bytes;
     if (runtime::sha256_hex(bytes->data(), bytes->size()) != reference.hash.to_hex())
         return failure<std::vector<std::uint8_t>>(PackageErrorCode::HashMismatch, path);
+    if (!root_anchor->still_named_by(canonical_root) ||
+        !store_anchor->still_named_by(canonical_root / store_relative))
+        return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidLayout, anchored_root);
     return bytes;
 }
 

@@ -42,9 +42,12 @@ class AnchoredDirectory {
 
     static std::optional<AnchoredDirectory> open(const std::filesystem::path& path,
                                                  bool allow_rename = false) noexcept;
-    std::optional<AnchoredDirectory>
-    open_directory(const std::filesystem::path& relative, bool allow_rename = false,
-                   bool permissions_mutable = false) const noexcept;
+    std::optional<AnchoredDirectory> open_directory(const std::filesystem::path& relative,
+                                                    bool allow_rename = false,
+                                                    bool permissions_mutable = false,
+                                                    bool writable = true) const noexcept;
+    std::optional<AnchoredDirectory> open_or_create_directory(const std::filesystem::path& relative,
+                                                              bool& created) const noexcept;
     /// Returns true only while `path` still names this pinned directory.
     bool still_named_by(const std::filesystem::path& path) const noexcept;
     bool write_exclusive_and_fence(const std::filesystem::path& relative,
@@ -75,19 +78,25 @@ class PinnedFile {
     PinnedFile(const PinnedFile&) = delete;
     PinnedFile& operator=(const PinnedFile&) = delete;
 
-    static std::optional<PinnedFile> open(const std::filesystem::path& path,
-                                          bool fence_capable,
+    static std::optional<PinnedFile> open(const std::filesystem::path& path, bool fence_capable,
                                           bool allow_rename = false,
                                           bool permissions_mutable = false) noexcept;
+    static std::optional<PinnedFile> open(const AnchoredDirectory& parent,
+                                          const std::filesystem::path& relative, bool fence_capable,
+                                          bool allow_rename = false) noexcept;
     /// Creates or opens a single-linked regular file beneath `parent` without following reparses.
     /// The returned handle is exclusive and remains the lock for its lifetime.
     static std::optional<PinnedFile> acquire_lock(const AnchoredDirectory& parent,
                                                   const std::filesystem::path& relative) noexcept;
+    NativeReadOutcome read_bounded(std::uint64_t maximum_bytes,
+                                   std::vector<std::uint8_t>& bytes) const noexcept;
     bool hash_matches(std::string_view expected_hex, std::uint64_t maximum_bytes) const noexcept;
     bool fence() const noexcept;
     bool adopt_inherited_permissions_from(const AnchoredDirectory& parent) const noexcept;
     /// Returns true only while `path` still names this single-linked regular file.
     bool still_named_by(const std::filesystem::path& path) const noexcept;
+    bool still_named_by(const AnchoredDirectory& parent,
+                        const std::filesystem::path& relative) const noexcept;
     void close() noexcept;
 
   private:

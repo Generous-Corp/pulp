@@ -590,8 +590,7 @@ TEST_CASE("Project package lock rejects symbolic-link redirection",
     REQUIRE(read_text(target) == "sentinel");
 }
 
-TEST_CASE("Project package lock rejects multi-linked files",
-          "[project-package][lock][hardlink]") {
+TEST_CASE("Project package lock rejects multi-linked files", "[project-package][lock][hardlink]") {
     TemporaryPackage temporary("lock-hardlink");
     TemporaryPackage external("lock-hardlink-external");
     fs::create_directories(temporary.path);
@@ -608,6 +607,64 @@ TEST_CASE("Project package lock rejects multi-linked files",
     REQUIRE_FALSE(writer);
     REQUIRE(writer.error().code == PackageErrorCode::AlreadyOpen);
     REQUIRE(read_text(target) == "sentinel");
+}
+
+TEST_CASE("Project package readers reject redirected layout entries",
+          "[project-package][open][path]") {
+    const std::vector<std::uint8_t> media{'r', 'e', 'a', 'd'};
+    const auto hash = hash_bytes(media);
+
+    SECTION("project.json symbolic link") {
+        TemporaryPackage temporary("reader-project-symlink");
+        TemporaryPackage external("reader-project-symlink-external");
+        publish_baseline(temporary.path, hash, media, make_project("reader", "media", hash));
+        fs::create_directories(external.path);
+        const auto target = external.path / "project.json";
+        fs::rename(temporary.path / "project.json", target);
+        std::error_code error;
+        fs::create_symlink(target, temporary.path / "project.json", error);
+        if (error)
+            SKIP("file symlink creation is unavailable: " << error.message());
+
+        const auto opened = open_package(temporary.path, registry());
+
+        REQUIRE_FALSE(opened);
+    }
+
+    SECTION("cache directory symbolic link") {
+        TemporaryPackage temporary("reader-cache-symlink");
+        TemporaryPackage external("reader-cache-symlink-external");
+        publish_baseline(temporary.path, hash, media, make_project("reader", "media", hash));
+        REQUIRE(fs::remove_all(temporary.path / "cache") > 0);
+        fs::create_directories(external.path);
+        std::error_code error;
+        fs::create_directory_symlink(external.path, temporary.path / "cache", error);
+        if (error)
+            SKIP("directory symlink creation is unavailable: " << error.message());
+
+        const auto opened = open_package(temporary.path, registry());
+
+        REQUIRE_FALSE(opened);
+        REQUIRE(fs::is_empty(external.path));
+    }
+
+    SECTION("blob hard link") {
+        TemporaryPackage temporary("reader-blob-hardlink");
+        TemporaryPackage external("reader-blob-hardlink-external");
+        publish_baseline(temporary.path, hash, media, make_project("reader", "media", hash));
+        fs::create_directories(external.path);
+        const auto blob = temporary.path / "media" / hash.to_hex();
+        const auto target = external.path / "blob";
+        fs::rename(blob, target);
+        std::error_code error;
+        fs::create_hard_link(target, blob, error);
+        if (error)
+            SKIP("hard-link creation is unavailable: " << error.message());
+
+        const auto bytes = read_blob(temporary.path, {BlobStore::Media, hash}, 1024);
+
+        REQUIRE_FALSE(bytes);
+    }
 }
 
 TEST_CASE("Project package treats cache loss as recoverable derived-state loss",
@@ -679,6 +736,63 @@ TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
     REQUIRE(fs::is_empty(temporary.path / "media"));
     std::error_code ignored;
     fs::remove_all(displaced, ignored);
+}
+
+TEST_CASE("Package readers reject root rebinding without touching the replacement",
+          "[project-package][root][race]") {
+    const std::vector<std::uint8_t> media{'p', 'i', 'n', 'n', 'e', 'd'};
+    const auto hash = hash_bytes(media);
+
+    SECTION("open anchors layout validation and cache recovery") {
+        TemporaryPackage temporary("reader-open-root-rebind");
+        publish_baseline(temporary.path, hash, media, make_project("reader", "media", hash));
+        REQUIRE(fs::remove_all(temporary.path / "cache") > 0);
+        const auto displaced =
+            temporary.path.parent_path() / (temporary.path.filename().string() + "-displaced");
+        g_rebind_source = temporary.path;
+        g_rebind_displaced = displaced;
+        g_rebind_replacement_file.clear();
+        g_rebind_point = pulp::project_package::detail::PackageFaultPoint::ReaderRootAnchored;
+        pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+            rebind_publication_source);
+
+        const auto opened = open_package(temporary.path, registry());
+
+        pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+        g_rebind_source.clear();
+        g_rebind_displaced.clear();
+        REQUIRE_FALSE(opened);
+        REQUIRE(opened.error().code == PackageErrorCode::InvalidLayout);
+        REQUIRE_FALSE(fs::exists(temporary.path / "cache"));
+        REQUIRE(fs::is_directory(displaced / "cache"));
+        std::error_code ignored;
+        fs::remove_all(displaced, ignored);
+    }
+
+    SECTION("blob reads stay beneath the pinned store") {
+        TemporaryPackage temporary("reader-blob-root-rebind");
+        publish_baseline(temporary.path, hash, media, make_project("reader", "media", hash));
+        const auto displaced =
+            temporary.path.parent_path() / (temporary.path.filename().string() + "-displaced");
+        g_rebind_source = temporary.path;
+        g_rebind_displaced = displaced;
+        g_rebind_replacement_file.clear();
+        g_rebind_point = pulp::project_package::detail::PackageFaultPoint::ReaderRootAnchored;
+        pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+            rebind_publication_source);
+
+        const auto blob = read_blob(temporary.path, {BlobStore::Media, hash}, 1024);
+
+        pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+        g_rebind_source.clear();
+        g_rebind_displaced.clear();
+        REQUIRE_FALSE(blob);
+        REQUIRE(blob.error().code == PackageErrorCode::InvalidLayout);
+        REQUIRE_FALSE(fs::exists(temporary.path / "media"));
+        REQUIRE(fs::is_regular_file(displaced / "media" / hash.to_hex()));
+        std::error_code ignored;
+        fs::remove_all(displaced, ignored);
+    }
 }
 
 TEST_CASE("Generation publication revalidates verified blobs before replacement",

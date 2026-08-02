@@ -54,8 +54,10 @@ NtCreateFileFunction nt_create_file() noexcept {
     return function;
 }
 
-HANDLE open_relative(HANDLE parent, const std::filesystem::path& component,
-                     bool directory) noexcept {
+HANDLE open_relative(HANDLE parent, const std::filesystem::path& component, bool directory,
+                     bool* created = nullptr) noexcept {
+    if (created != nullptr)
+        *created = false;
     const auto& name = component.native();
     if (name.empty() || name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
         return INVALID_HANDLE_VALUE;
@@ -95,6 +97,8 @@ HANDLE open_relative(HANDLE parent, const std::filesystem::path& component,
         ::CloseHandle(handle);
         return INVALID_HANDLE_VALUE;
     }
+    if (created != nullptr)
+        *created = status_block.Information == FILE_CREATED;
     return handle;
 }
 
@@ -149,18 +153,18 @@ HANDLE acquire_relative_lock(HANDLE parent, const std::filesystem::path& compone
     attributes.Attributes = OBJ_CASE_INSENSITIVE | object_dont_reparse;
     IO_STATUS_BLOCK status_block{};
     HANDLE handle = INVALID_HANDLE_VALUE;
-    const auto options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
-                         FILE_NON_DIRECTORY_FILE;
+    const auto options =
+        FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | FILE_NON_DIRECTORY_FILE;
     const auto function = nt_create_file();
     if (function == nullptr ||
         function(&handle, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attributes, &status_block,
                  nullptr, FILE_ATTRIBUTE_HIDDEN, 0, FILE_OPEN_IF, options, nullptr, 0) < 0)
         return INVALID_HANDLE_VALUE;
     BY_HANDLE_FILE_INFORMATION info{};
-    const bool valid = ::GetFileInformationByHandle(handle, &info) != 0 &&
-                       (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
-                                                 FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
-                       info.nNumberOfLinks == 1;
+    const bool valid =
+        ::GetFileInformationByHandle(handle, &info) != 0 &&
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+        info.nNumberOfLinks == 1;
     if (!valid) {
         ::CloseHandle(handle);
         return INVALID_HANDLE_VALUE;
@@ -435,9 +439,46 @@ std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path, bo
 #endif
 }
 
-std::optional<PinnedFile>
-PinnedFile::acquire_lock(const AnchoredDirectory& parent,
-                         const std::filesystem::path& relative) noexcept {
+std::optional<PinnedFile> PinnedFile::open(const AnchoredDirectory& parent,
+                                           const std::filesystem::path& relative,
+                                           bool fence_capable, bool allow_rename) noexcept {
+    if (parent.native_ == -1 || relative.empty() || relative.is_absolute() ||
+        !relative.parent_path().empty() || relative == "." || relative == "..")
+        return std::nullopt;
+#if defined(_WIN32)
+    const auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    const auto sharing = FILE_SHARE_READ | (allow_rename ? FILE_SHARE_DELETE : 0);
+    const auto handle = open_relative_existing(reinterpret_cast<HANDLE>(parent.native_), relative,
+                                               false, access, sharing);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileInformationByHandle(handle, &info) == 0 || info.nNumberOfLinks > 1) {
+        ::CloseHandle(handle);
+        return std::nullopt;
+    }
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
+#else
+    (void)allow_rename;
+    const auto descriptor = ::openat(static_cast<int>(parent.native_), relative.c_str(),
+                                     (fence_capable ? O_RDWR : O_RDONLY) | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                         | O_NOFOLLOW
+#endif
+    );
+    if (descriptor < 0)
+        return std::nullopt;
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink > 1) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    return PinnedFile(descriptor);
+#endif
+}
+
+std::optional<PinnedFile> PinnedFile::acquire_lock(const AnchoredDirectory& parent,
+                                                   const std::filesystem::path& relative) noexcept {
     if (parent.native_ == -1 || relative.empty() || relative.is_absolute() ||
         !relative.parent_path().empty() || relative == "." || relative == "..")
         return std::nullopt;
@@ -465,6 +506,92 @@ PinnedFile::acquire_lock(const AnchoredDirectory& parent,
     }
     return PinnedFile(descriptor);
 #endif
+}
+
+NativeReadOutcome PinnedFile::read_bounded(std::uint64_t maximum_bytes,
+                                           std::vector<std::uint8_t>& bytes) const noexcept {
+    bytes.clear();
+    if (native_ == -1)
+        return NativeReadOutcome::IoError;
+#if defined(_WIN32)
+    const auto handle = reinterpret_cast<HANDLE>(native_);
+    BY_HANDLE_FILE_INFORMATION before{};
+    if (::GetFileInformationByHandle(handle, &before) == 0 ||
+        (before.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+            0 ||
+        before.nNumberOfLinks > 1)
+        return NativeReadOutcome::InvalidFile;
+    const auto size =
+        (static_cast<std::uint64_t>(before.nFileSizeHigh) << 32u) | before.nFileSizeLow;
+    if (size > maximum_bytes || size > static_cast<std::uint64_t>(SIZE_MAX))
+        return NativeReadOutcome::LimitExceeded;
+    LARGE_INTEGER beginning{};
+    if (::SetFilePointerEx(handle, beginning, nullptr, FILE_BEGIN) == 0)
+        return NativeReadOutcome::IoError;
+    bytes.resize(static_cast<std::size_t>(size));
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto request = static_cast<DWORD>(
+            (std::min)(bytes.size() - offset, static_cast<std::size_t>(0x7ffff000u)));
+        DWORD count = 0;
+        if (!::ReadFile(handle, bytes.data() + offset, request, &count, nullptr) || count == 0) {
+            bytes.clear();
+            return NativeReadOutcome::IoError;
+        }
+        offset += count;
+    }
+    std::uint8_t trailing = 0;
+    DWORD trailing_count = 0;
+    BY_HANDLE_FILE_INFORMATION after{};
+    if (::ReadFile(handle, &trailing, 1, &trailing_count, nullptr) == 0 || trailing_count != 0 ||
+        ::GetFileInformationByHandle(handle, &after) == 0 || after.nNumberOfLinks > 1 ||
+        before.nFileSizeHigh != after.nFileSizeHigh || before.nFileSizeLow != after.nFileSizeLow ||
+        before.ftLastWriteTime.dwHighDateTime != after.ftLastWriteTime.dwHighDateTime ||
+        before.ftLastWriteTime.dwLowDateTime != after.ftLastWriteTime.dwLowDateTime) {
+        bytes.clear();
+        return NativeReadOutcome::InvalidFile;
+    }
+#else
+    const auto descriptor = static_cast<int>(native_);
+    struct stat before{};
+    if (::fstat(descriptor, &before) != 0 || !S_ISREG(before.st_mode) || before.st_nlink > 1)
+        return NativeReadOutcome::InvalidFile;
+    if (before.st_size < 0 || static_cast<std::uint64_t>(before.st_size) > maximum_bytes ||
+        static_cast<std::uint64_t>(before.st_size) > static_cast<std::uint64_t>(SIZE_MAX))
+        return NativeReadOutcome::LimitExceeded;
+    if (::lseek(descriptor, 0, SEEK_SET) < 0)
+        return NativeReadOutcome::IoError;
+    bytes.resize(static_cast<std::size_t>(before.st_size));
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto count = ::read(descriptor, bytes.data() + offset, bytes.size() - offset);
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0) {
+            bytes.clear();
+            return NativeReadOutcome::IoError;
+        }
+        offset += static_cast<std::size_t>(count);
+    }
+    std::uint8_t trailing = 0;
+    const auto trailing_count = ::read(descriptor, &trailing, 1);
+    struct stat after{};
+    const bool stat_after = ::fstat(descriptor, &after) == 0;
+#if defined(__APPLE__)
+    const bool timestamps_match = stat_after &&
+                                  before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec &&
+                                  before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec;
+#else
+    const bool timestamps_match = stat_after && before.st_mtim.tv_sec == after.st_mtim.tv_sec &&
+                                  before.st_mtim.tv_nsec == after.st_mtim.tv_nsec;
+#endif
+    if (trailing_count != 0 || !stat_after || after.st_nlink > 1 ||
+        before.st_size != after.st_size || !timestamps_match) {
+        bytes.clear();
+        return NativeReadOutcome::InvalidFile;
+    }
+#endif
+    return NativeReadOutcome::Ok;
 }
 
 bool PinnedFile::hash_matches(std::string_view expected_hex,
@@ -629,6 +756,40 @@ bool PinnedFile::still_named_by(const std::filesystem::path& path) const noexcep
 #endif
 }
 
+bool PinnedFile::still_named_by(const AnchoredDirectory& parent,
+                                const std::filesystem::path& relative) const noexcept {
+    if (native_ == -1 || parent.native_ == -1 || relative.empty() || relative.is_absolute() ||
+        !relative.parent_path().empty() || relative == "." || relative == "..")
+        return false;
+#if defined(_WIN32)
+    const auto named = open_relative_existing(
+        reinterpret_cast<HANDLE>(parent.native_), relative, false, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if (named == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION pinned_info{};
+    BY_HANDLE_FILE_INFORMATION named_info{};
+    const bool matches =
+        ::GetFileInformationByHandle(reinterpret_cast<HANDLE>(native_), &pinned_info) != 0 &&
+        ::GetFileInformationByHandle(named, &named_info) != 0 && pinned_info.nNumberOfLinks == 1 &&
+        named_info.nNumberOfLinks == 1 &&
+        pinned_info.dwVolumeSerialNumber == named_info.dwVolumeSerialNumber &&
+        pinned_info.nFileIndexHigh == named_info.nFileIndexHigh &&
+        pinned_info.nFileIndexLow == named_info.nFileIndexLow;
+    ::CloseHandle(named);
+    return matches;
+#else
+    struct stat pinned_status{};
+    struct stat named_status{};
+    return ::fstat(static_cast<int>(native_), &pinned_status) == 0 && pinned_status.st_nlink == 1 &&
+           ::fstatat(static_cast<int>(parent.native_), relative.c_str(), &named_status,
+                     AT_SYMLINK_NOFOLLOW) == 0 &&
+           S_ISREG(named_status.st_mode) && named_status.st_nlink == 1 &&
+           pinned_status.st_dev == named_status.st_dev &&
+           pinned_status.st_ino == named_status.st_ino;
+#endif
+}
+
 void PinnedFile::close() noexcept {
     if (native_ == -1)
         return;
@@ -679,15 +840,16 @@ std::optional<AnchoredDirectory> AnchoredDirectory::open(const std::filesystem::
 
 std::optional<AnchoredDirectory>
 AnchoredDirectory::open_directory(const std::filesystem::path& relative, bool allow_rename,
-                                  bool permissions_mutable) const noexcept {
+                                  bool permissions_mutable, bool writable) const noexcept {
     if (native_ == -1 || relative.empty() || relative.is_absolute() ||
         !relative.parent_path().empty() || relative == "." || relative == "..")
         return std::nullopt;
 #if defined(_WIN32)
     const auto sharing =
         FILE_SHARE_READ | FILE_SHARE_WRITE | (allow_rename ? FILE_SHARE_DELETE : 0);
-    auto access = FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
-                  FILE_READ_ATTRIBUTES | READ_CONTROL;
+    auto access = FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL;
+    if (writable)
+        access |= FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY;
     if (permissions_mutable)
         access |= WRITE_DAC;
     const auto handle =
@@ -698,6 +860,40 @@ AnchoredDirectory::open_directory(const std::filesystem::path& relative, bool al
 #else
     (void)allow_rename;
     (void)permissions_mutable;
+    (void)writable;
+    const auto descriptor = ::openat(static_cast<int>(native_), relative.c_str(),
+                                     O_RDONLY | O_CLOEXEC
+#ifdef O_DIRECTORY
+                                         | O_DIRECTORY
+#endif
+#ifdef O_NOFOLLOW
+                                         | O_NOFOLLOW
+#endif
+    );
+    if (descriptor < 0)
+        return std::nullopt;
+    return AnchoredDirectory(descriptor);
+#endif
+}
+
+std::optional<AnchoredDirectory>
+AnchoredDirectory::open_or_create_directory(const std::filesystem::path& relative,
+                                            bool& created) const noexcept {
+    created = false;
+    if (native_ == -1 || relative.empty() || relative.is_absolute() ||
+        !relative.parent_path().empty() || relative == "." || relative == "..")
+        return std::nullopt;
+#if defined(_WIN32)
+    const auto handle = open_relative(reinterpret_cast<HANDLE>(native_), relative, true, &created);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
+#else
+    if (::mkdirat(static_cast<int>(native_), relative.c_str(), 0777) == 0) {
+        created = true;
+    } else if (errno != EEXIST) {
+        return std::nullopt;
+    }
     const auto descriptor = ::openat(static_cast<int>(native_), relative.c_str(),
                                      O_RDONLY | O_CLOEXEC
 #ifdef O_DIRECTORY
