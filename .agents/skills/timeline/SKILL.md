@@ -28,6 +28,11 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   `sample_rate` explicitly and carry a `CompiledTempoMap` built at the same
   normalized `RationalRate`; omission or disagreement is a synchronous invalid
   request rather than an inferred default.
+- Link `Pulp::timeline-agent-view` when an agent or remote client needs a
+  bounded, deterministic projection of one pinned `DocumentView`. `AgentView`
+  exposes a committed outline, cursor-paged clip regions, and a projection of
+  one adjacent commit's `DirtySet` without widening the dependency-minimal
+  `Pulp::timeline` model.
 - Link the optional `Pulp::dawproject-import` SDK target only when ingesting
   DAWproject XML, and `Pulp::smf-interop` only when reading or writing Standard
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
@@ -468,6 +473,33 @@ artifact is needed. Never modify canonical project JSON text directly.
   points. Lane and point IDs remap as owned identities, target placement IDs
   remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
+
+### AgentView is a bounded projection of one immutable pin
+
+`pulp::timeline_agent_view::AgentView` is created from one non-null
+`DocumentView` and never follows a live `DocumentSession`. Every read therefore
+requires the pin's exact revision; a caller that needs freshness must pin the
+session again after a commit. `outline()` returns deterministic sequence,
+track, and clip rows plus the complete `ProjectSnapshotCounts` census. Bounded
+details are fail-closed commitments, not silent truncation: each omitted row
+set carries a count and SHA-256, and the outline carries a commitment to the
+canonical project snapshot.
+
+`region()` pages clips in canonical `(start, ItemId)` order over one half-open
+start-position window `[start, end)`. A continuation cursor is valid only for
+the exact version, revision, sequence, anchor, and original window that issued
+it; changing either bound while retaining an in-range cursor key is still
+`InvalidCursor`. The request limit must be non-zero and no larger than
+`Limits::max_page_items`.
+
+`diff()` projects an already-produced `DirtySet` into deterministic outline
+changes. Its `DirtyRevisionRange` must be exactly one adjacent transition ending
+at the pin (`after != 0`, `before == after - 1`); stale, non-adjacent, and
+underflow-shaped ranges fail with `InvalidProvenance`. This adjacency check does
+not authenticate the `DirtySet`: the public type has no session-issued origin
+token, so callers must pair it with the exact `CommitResult` that produced it.
+Do not present AgentView as an arbitrary since-revision diff or as a substitute
+for session provenance.
 
 ### Widening `ClipContent` is guarded, and the two guards are not interchangeable
 
