@@ -79,6 +79,10 @@ class PinnedFile {
                                           bool fence_capable,
                                           bool allow_rename = false,
                                           bool permissions_mutable = false) noexcept;
+    /// Creates or opens a single-linked regular file beneath `parent` without following reparses.
+    /// The returned handle is exclusive and remains the lock for its lifetime.
+    static std::optional<PinnedFile> acquire_lock(const AnchoredDirectory& parent,
+                                                  const std::filesystem::path& relative) noexcept;
     bool hash_matches(std::string_view expected_hex, std::uint64_t maximum_bytes) const noexcept;
     bool fence() const noexcept;
     bool adopt_inherited_permissions_from(const AnchoredDirectory& parent) const noexcept;

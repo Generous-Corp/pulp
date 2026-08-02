@@ -15,17 +15,6 @@
 #include <system_error>
 #include <utility>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
-#endif
-
 namespace pulp::project_package {
 namespace fs = std::filesystem;
 
@@ -65,6 +54,11 @@ fs::path path_from_utf8(std::string_view value) {
 #else
     return fs::path(value);
 #endif
+}
+
+bool path_has_embedded_nul(const fs::path& path) noexcept {
+    const auto& native = path.native();
+    return std::find(native.begin(), native.end(), fs::path::value_type{}) != native.end();
 }
 
 fs::path blob_path(const fs::path& root, const BlobReference& reference) {
@@ -162,47 +156,11 @@ runtime::Result<std::vector<std::uint8_t>, PackageError> read_file(const fs::pat
 }
 
 struct PackageLock {
-#if defined(_WIN32)
-    HANDLE handle = INVALID_HANDLE_VALUE;
-#else
-    int descriptor = -1;
-#endif
-    PackageLock() = default;
-    PackageLock(const PackageLock&) = delete;
-    PackageLock& operator=(const PackageLock&) = delete;
-    PackageLock(PackageLock&& other) noexcept {
-#if defined(_WIN32)
-        handle = std::exchange(other.handle, INVALID_HANDLE_VALUE);
-#else
-        descriptor = std::exchange(other.descriptor, -1);
-#endif
-    }
-    ~PackageLock() {
-#if defined(_WIN32)
-        if (handle != INVALID_HANDLE_VALUE)
-            ::CloseHandle(handle);
-#else
-        if (descriptor >= 0) {
-            ::flock(descriptor, LOCK_UN);
-            ::close(descriptor);
-        }
-#endif
-    }
-    bool acquire(const fs::path& path) noexcept {
-#if defined(_WIN32)
-        handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
-                               FILE_ATTRIBUTE_HIDDEN, nullptr);
-        return handle != INVALID_HANDLE_VALUE;
-#else
-        descriptor = ::open(path.c_str(),
-                            O_CREAT | O_RDWR | O_CLOEXEC
-#ifdef O_NOFOLLOW
-                                | O_NOFOLLOW
-#endif
-                            ,
-                            0600);
-        return descriptor >= 0 && ::flock(descriptor, LOCK_EX | LOCK_NB) == 0;
-#endif
+    std::optional<detail::PinnedFile> file;
+
+    bool acquire(const detail::AnchoredDirectory& root) noexcept {
+        file = detail::PinnedFile::acquire_lock(root, path_from_utf8(kLockFile));
+        return file.has_value();
     }
 };
 
@@ -267,7 +225,8 @@ PackageWriter& PackageWriter::operator=(PackageWriter&&) noexcept = default;
 runtime::Result<PackageWriter, PackageError>
 PackageWriter::create(const fs::path& root, timeline::SchemaRegistry registry,
                       const PackageLimits& limits) noexcept {
-    if (root.empty() || limits.max_blob_bytes == 0 || limits.max_project_bytes == 0)
+    if (root.empty() || path_has_embedded_nul(root) || limits.max_blob_bytes == 0 ||
+        limits.max_project_bytes == 0)
         return failure<PackageWriter>(PackageErrorCode::InvalidPath, root);
     std::error_code error;
     const auto anchored_root = fs::absolute(root, error).lexically_normal();
@@ -318,7 +277,7 @@ PackageWriter::create(const fs::path& root, timeline::SchemaRegistry registry,
     impl->registry = std::move(registry);
     impl->limits = limits;
     impl->root_anchor = std::move(*root_anchor);
-    if (!impl->lock.acquire(impl->root / kLockFile))
+    if (!impl->lock.acquire(impl->root_anchor))
         return failure<PackageWriter>(PackageErrorCode::AlreadyOpen, impl->root);
     if (!impl->root_anchor.still_named_by(impl->root))
         return failure<PackageWriter>(PackageErrorCode::InvalidLayout, impl->root);
@@ -495,7 +454,7 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
 runtime::Result<OpenPackageResult, PackageError>
 open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
              const PackageLimits& limits) noexcept {
-    if (root.empty())
+    if (root.empty() || path_has_embedded_nul(root))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidPath, root);
     std::error_code error;
     const auto anchored_root = fs::absolute(root, error).lexically_normal();
@@ -537,7 +496,8 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
 runtime::Result<std::vector<std::uint8_t>, PackageError>
 read_blob(const fs::path& root, const BlobReference& reference,
           std::uint64_t maximum_bytes) noexcept {
-    if (root.empty() || !valid_store(reference.store) || !reference.hash.valid())
+    if (root.empty() || path_has_embedded_nul(root) || !valid_store(reference.store) ||
+        !reference.hash.valid())
         return failure<std::vector<std::uint8_t>>(PackageErrorCode::InvalidPath, root);
     std::error_code error;
     const auto anchored_root = fs::absolute(root, error).lexically_normal();

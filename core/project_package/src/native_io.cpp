@@ -24,6 +24,7 @@
 #include <winternl.h>
 #else
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__APPLE__)
@@ -125,6 +126,41 @@ HANDLE open_relative_existing(HANDLE parent, const std::filesystem::path& compon
     const bool valid = ::GetFileInformationByHandle(handle, &info) != 0 &&
                        (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
                        ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+    if (!valid) {
+        ::CloseHandle(handle);
+        return INVALID_HANDLE_VALUE;
+    }
+    return handle;
+}
+
+HANDLE acquire_relative_lock(HANDLE parent, const std::filesystem::path& component) noexcept {
+    const auto& name = component.native();
+    if (name.empty() || name == L"." || name == L".." || !component.parent_path().empty() ||
+        name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
+        return INVALID_HANDLE_VALUE;
+    UNICODE_STRING unicode_name{};
+    unicode_name.Buffer = const_cast<PWSTR>(name.data());
+    unicode_name.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
+    unicode_name.MaximumLength = unicode_name.Length;
+    OBJECT_ATTRIBUTES attributes{};
+    attributes.Length = sizeof(attributes);
+    attributes.RootDirectory = parent;
+    attributes.ObjectName = &unicode_name;
+    attributes.Attributes = OBJ_CASE_INSENSITIVE | object_dont_reparse;
+    IO_STATUS_BLOCK status_block{};
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    const auto options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
+                         FILE_NON_DIRECTORY_FILE;
+    const auto function = nt_create_file();
+    if (function == nullptr ||
+        function(&handle, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attributes, &status_block,
+                 nullptr, FILE_ATTRIBUTE_HIDDEN, 0, FILE_OPEN_IF, options, nullptr, 0) < 0)
+        return INVALID_HANDLE_VALUE;
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool valid = ::GetFileInformationByHandle(handle, &info) != 0 &&
+                       (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
+                                                 FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+                       info.nNumberOfLinks == 1;
     if (!valid) {
         ::CloseHandle(handle);
         return INVALID_HANDLE_VALUE;
@@ -392,6 +428,38 @@ std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path, bo
         return std::nullopt;
     struct stat status{};
     if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 1) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    return PinnedFile(descriptor);
+#endif
+}
+
+std::optional<PinnedFile>
+PinnedFile::acquire_lock(const AnchoredDirectory& parent,
+                         const std::filesystem::path& relative) noexcept {
+    if (parent.native_ == -1 || relative.empty() || relative.is_absolute() ||
+        !relative.parent_path().empty() || relative == "." || relative == "..")
+        return std::nullopt;
+#if defined(_WIN32)
+    const auto handle = acquire_relative_lock(reinterpret_cast<HANDLE>(parent.native_), relative);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
+#else
+    const auto descriptor = ::openat(static_cast<int>(parent.native_), relative.c_str(),
+                                     O_CREAT | O_RDWR | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                         | O_NOFOLLOW
+#endif
+                                     ,
+                                     0600);
+    if (descriptor < 0)
+        return std::nullopt;
+    struct stat status{};
+    const bool valid = ::fstat(descriptor, &status) == 0 && S_ISREG(status.st_mode) &&
+                       status.st_nlink == 1 && ::flock(descriptor, LOCK_EX | LOCK_NB) == 0;
+    if (!valid) {
         ::close(descriptor);
         return std::nullopt;
     }
