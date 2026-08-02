@@ -459,8 +459,12 @@ artifact is needed. Never modify canonical project JSON text directly.
   quota, including take lanes and takes, but does not resolve item or media
   references.
 - `serialize_project()` and `deserialize_project()` do not implement a ZIP or
-  package container. Asset locators describe possible package-relative bytes,
-  but container I/O belongs to a later slice.
+  package container. Asset locators describe possible package-relative bytes.
+  Use `pulp::project-package` to hash-verify, fence, and no-replace publish
+  content-addressed blobs before atomically replacing the stable package root's
+  validated `project.json` generation. Generic file and directory publication
+  is also no-replace, and unpublished staging remains unreachable; archive
+  formats and interchange policy stay in their format/tooling layers.
 - Project and subtree remapping are two-pass: allocate all owned IDs first, then
   rebuild the snapshot and fix references. `MediaRef::asset_id` is external to
   Clip/Track/Sequence remaps and is translated by `ExternalIdFixup`; failure is
@@ -1889,8 +1893,14 @@ This subsystem owns authored take/comp state, durable launch scenes, slots, and
 follow actions, the durable `JournalSink` ordering seam, and native
 `FileJournal`, but not package/container I/O, publication, realtime playback,
 launch scheduling or automation delivery, nesting, device implementations,
-routing, audio, format adapters, or UI. Add those in their owning modules
-instead of widening the command and persistence core opportunistically.
+routing, audio, format adapters, or UI. `core/project_package` owns durable
+publication: no-replace content-addressed blobs and generic artifacts, plus
+validated atomic replacement of `project.json` within a stable package root.
+It also owns bounded cleanup of its private staging files without moving
+canonical Timeline serialization or archive-format semantics out of their
+existing owners. Package-wide recovery and reachability GC remain a follow-on
+layer. Add other concerns in their owning modules instead of widening the
+command and persistence core opportunistically.
 
 ## Launch model and follow actions
 

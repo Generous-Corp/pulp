@@ -51,40 +51,43 @@ pulp_add_test_suite(pulp-test-audio-excerpt LIBRARIES pulp::audio)
 # Repo-level audio tooling tests
 pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
-# MCP server protocol tests
-add_executable(pulp-test-mcp-server test_mcp_server.cpp)
-target_link_libraries(pulp-test-mcp-server PRIVATE
-    pulp-mcp-core
-    Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-mcp-server PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_include_directories(pulp-test-mcp-server PRIVATE
-    "${CMAKE_SOURCE_DIR}/inspect/include")
-catch_discover_tests(pulp-test-mcp-server)
+if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
+    # MCP server protocol tests
+    add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+    target_link_libraries(pulp-test-mcp-server PRIVATE
+        pulp-mcp-core
+        Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-mcp-server PRIVATE
+        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_include_directories(pulp-test-mcp-server PRIVATE
+        "${CMAKE_SOURCE_DIR}/inspect/include")
+    catch_discover_tests(pulp-test-mcp-server
+        PROPERTIES LABELS "mcp-server")
 
-# Timeline MCP operations have their own bounded suite so media/render fixtures
-# do not keep expanding the legacy protocol test translation unit.
-# Links pulp-mcp-core rather than compiling mcp_timeline_tools.cpp directly:
-# the agent loop hands its rendered variants to pulp_audio_compare, whose
-# handler lives in the same library, and compiling one of its translation units
-# a second time here would duplicate those symbols.
-add_executable(pulp-test-mcp-timeline-tools
-    test_mcp_timeline_sessions.cpp
-    test_mcp_timeline_tools.cpp)
-target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
-    pulp-mcp-core
-    pulp::audio
-    pulp::interchange
-    pulp::playback
-    pulp::timeline
-    pulp::tool-timeline
-    Catch2::Catch2WithMain)
-# pulp_audio_compare resolves its delegated CLI from a project root.
-target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_include_directories(pulp-test-mcp-timeline-tools PRIVATE
-    ${CMAKE_SOURCE_DIR}/external/miniz)
-catch_discover_tests(pulp-test-mcp-timeline-tools)
+    if(PULP_ENABLE_PROJECT_PACKAGE)
+        # Timeline MCP operations have their own bounded suite so media/render
+        # fixtures do not keep expanding the legacy protocol test translation
+        # unit. Package-stripped MCP keeps its independent tools but omits this
+        # package-publishing surface.
+        add_executable(pulp-test-mcp-timeline-tools
+            test_mcp_timeline_sessions.cpp
+            test_mcp_timeline_tools.cpp)
+        target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
+            pulp-mcp-core
+            pulp::audio
+            pulp::interchange
+            pulp::playback
+            pulp::timeline
+            pulp::tool-timeline
+            Catch2::Catch2WithMain)
+        # pulp_audio_compare resolves its delegated CLI from a project root.
+        target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
+            PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        target_include_directories(pulp-test-mcp-timeline-tools PRIVATE
+            ${CMAKE_SOURCE_DIR}/external/miniz)
+        catch_discover_tests(pulp-test-mcp-timeline-tools)
+    endif()
+endif()
 
 # MIDI tests
 pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)

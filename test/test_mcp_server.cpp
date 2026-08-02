@@ -20,7 +20,9 @@
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
 #include "pulp_mcp_version.h"
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 #include "timeline_mcp_tools.h"
+#endif
 
 #include <pulp/inspect/agent_request_queue.hpp>
 #include <pulp/inspect/capabilities.hpp>
@@ -662,6 +664,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_content_rescan")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_remove")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_reveal")JSON");
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
     require_tool_name(tools, "pulp_timeline_project_open");
     require_tool_name(tools, "pulp_timeline_command_apply");
     require_tool_name(tools, "pulp_timeline_diff");
@@ -673,6 +676,9 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_tool_name(tools, "pulp_timeline_export");
     require_tool_name(tools, "pulp_timeline_import");
     require_contains(tools, "pulp.timeline.command.set_clip_playback_properties");
+#else
+    REQUIRE(tools.find("pulp_timeline_") == std::string::npos);
+#endif
 
     auto unknown = handle_request(tool_call("5", "pulp_does_not_exist"));
     require_contains(unknown, R"JSON("id":5)JSON");
@@ -680,6 +686,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(unknown, "Unknown tool: pulp_does_not_exist");
 }
 
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
     const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":41,"method":"tools/list"})JSON");
     for (const auto name : pulp_mcp::kTimelineMcpToolNames) {
@@ -751,6 +758,7 @@ TEST_CASE("generated timeline bindings preserve protocol apply undo redo lifecyc
     require_contains(redone, "protocol-marker");
     require_contains(redone, R"JSON("can_undo":true)JSON");
 }
+#endif
 
 // pulp #1997 — gap 1: every advertised MCP tool is named in tools/list.
 // One missing entry = one silently broken tool, so the list-membership
@@ -831,6 +839,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_simulate_click",
         "pulp_status",
         "pulp_test",
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
         "pulp_timeline_command_apply",
         "pulp_timeline_diff",
         "pulp_timeline_explain",
@@ -841,6 +850,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_timeline_render",
         "pulp_timeline_undo",
         "pulp_timeline_validate",
+#endif
         "pulp_validate",
     };
     for (const char* name : expected) {
@@ -877,6 +887,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_kit_pack", "Error: path is required"},
         std::pair{"pulp_kit_publish_check", "Error: path is required"},
         std::pair{"pulp_kit_init", "Error: kind and id are required"},
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
         std::pair{"pulp_timeline_project_open", "Error: project is required"},
         std::pair{"pulp_timeline_command_apply",
                   "Error: exactly one of project or session_id is required"},
@@ -888,6 +899,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_timeline_render", "Error: project and output are required"},
         std::pair{"pulp_timeline_export", "Error: project and format are required"},
         std::pair{"pulp_timeline_import", "Error: input, format, and output are required"},
+#endif
     };
 
     int id = 10;

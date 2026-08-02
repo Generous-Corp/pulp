@@ -1040,6 +1040,104 @@ and launch slots are durable document state. The compiler accepts Arrangement
 only; the embedding application owns runtime launcher interpretation and
 scene-to-track arbitration.
 
+## project_package
+
+Crash-consistent publication for stable project-package roots and generic
+files or directories. `AtomicPublisher::create()` creates a private sibling
+directory stage, accepts only safe package-relative paths through `write()`,
+and publishes it with `commit_directory()`. File publication instead uses
+`create_file()`, which returns one pre-created `staging_file()` that an external
+producer may truncate and fill before `commit_file()`. Both modes publish a
+previously absent destination without replacing it. `PackageWriter` instead maintains one
+stable package root: `stage_blob()` hash-verifies and fences content-addressed
+blobs before publishing them no-replace, while `publish()` validates every
+package-relative asset reference before atomically replacing the root's
+`project.json` generation and fencing the root directory. An interrupted stage
+remains unreachable and cannot expose a durable reference to unfenced content;
+package-wide abandoned-stage recovery and reachability GC belong to the
+follow-on recovery layer.
+
+Writer exclusion is cooperative. All package writers must honor the package
+lock, and callers must not concurrently rename or replace package or private
+staging entries out of band from another process running as the same account.
+Any external producer using `staging_directory()` or `staging_file()` must
+finish and release the stage before commit or cancellation begins. On Windows,
+staged objects retain a private DACL until the rename succeeds; the still-open
+published handle then adopts the destination parent's inheritance. A crash
+before or during that adoption can leave the published object or some
+descendants owner-private instead of broadly inherited; callers must treat
+final permissions as incomplete.
+The implementation pins and revalidates identities to reject detected
+rebinding, but POSIX does not provide a portable operation that renames an
+already-open directory by identity.
+
+**Link:** `pulp::project-package` · **Include prefix:**
+`<pulp/project_package/...>`
+
+```cpp
+#include <pulp/project_package/atomic_publisher.hpp>
+
+using namespace pulp::project_package;
+
+auto publisher = AtomicPublisher::create(destination);
+if (!publisher)
+    return;
+auto staged = publisher->write("render-manifest.json", manifest_json);
+if (!staged || !staged.value())
+    return;
+
+auto outcome = publisher->commit_directory();
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+```
+
+Use `PackageWriter` when the destination is a stable project-package root.
+Stage each referenced blob first, then publish the Project that references it;
+opening the package revalidates both the generation and its references:
+
+```cpp
+#include <pulp/project_package/project_package.hpp>
+
+using namespace pulp::project_package;
+using pulp::timeline::make_builtin_timeline_registry;
+
+auto registry = make_builtin_timeline_registry();
+if (!registry)
+    return;
+auto writer = PackageWriter::create(package_root, registry.value());
+if (!writer)
+    return;
+
+auto blob = writer.value().stage_blob(BlobStore::Media, media_hash, media_bytes);
+if (!blob)
+    return;
+// `project` contains the matching package-relative asset reference.
+auto outcome = writer.value().publish(project);
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+
+auto opened = open_package(package_root, registry.value());
+if (!opened)
+    return;
+```
+
+`PublishedDurabilityUncertain` means the new `project.json` may already be
+visible even though final permission adoption or the directory fence did not
+complete; callers must not report that outcome as a definite rollback.
+
+Source builds may set `PULP_ENABLE_PROJECT_PACKAGE=OFF` to omit this component
+and the dependent Timeline authoring tools. The resulting installed SDK does
+not export `Pulp::project-package`, so requesting the `project-package`
+component with `find_package(Pulp REQUIRED COMPONENTS ...)` fails.
+
+The module owns publication and bounded exact-prefix cleanup of its private
+staging files, not package-wide recovery, reachability GC, a project schema, or
+an archive format. Timeline remains the authority for canonical project JSON;
+DAWproject ZIP admission and interchange loss accounting stay in their format
+and tooling layers rather than entering this dependency floor.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## interchange
 
 Format-neutral interchange machinery shared by every exporter and importer.
