@@ -122,11 +122,14 @@ std::optional<ItemId> take_identity_collision(const Clip& clip,
 }
 
 bool compile_relevant(const Clip& clip) noexcept {
-    return std::holds_alternative<SequenceRef>(clip.content()) ||
+    return std::holds_alternative<MidiContent>(clip.content()) ||
+           std::holds_alternative<SequenceRef>(clip.content()) ||
            std::holds_alternative<RegisteredContent>(clip.content());
 }
 
 bool same_compile_structure(const Clip& lhs, const Clip& rhs) noexcept {
+    if (std::holds_alternative<MidiContent>(lhs.content()))
+        return std::holds_alternative<MidiContent>(rhs.content());
     if (const auto* left = std::get_if<SequenceRef>(&lhs.content())) {
         const auto* right = std::get_if<SequenceRef>(&rhs.content());
         return right && left->sequence_id == right->sequence_id;

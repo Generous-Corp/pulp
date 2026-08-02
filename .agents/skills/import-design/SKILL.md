@@ -1260,6 +1260,39 @@ diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
 from IR attributes.
 
+**A manifest `local_path` is a HINT, not an address — resolve it, don't trust
+it.** Runtime lanes must go through `resolved_asset_uri()` /
+`resolve_asset_file()` (`core/view/src/design_ir_helpers.hpp`), never
+`"file://" + *asset.local_path`. A writer can persist a bare
+`<content_hash>.<ext>` filename, which then resolves against the DesignIR
+document's own directory while the bytes actually sit in a shared
+`design-assets/` folder BESIDE that directory (Forge's project store does
+exactly this). Because the same node also carries an absolute `asset_path`, the
+web-compat lane reads the node and renders correctly while the native lane
+reads the manifest and drops the image — the two lanes disagree, and the native
+one is silently wrong. Diagnosing that from a screenshot costs hours.
+
+The resolver tries: the recorded `local_path`, then a `file://` `original_uri`,
+then `<content_hash><ext>` under the document directory, a `design-assets/`
+inside it, and a `design-assets/` beside it. Recovery-by-hash logs a warning,
+and an asset that resolves to nothing returns `""` plus a logged line — the
+materializer then emits `native-materialize-unresolved-asset` and a placeholder
+instead of an ImageView pointed at nothing.
+
+Two consequences when writing code or tests here:
+
+- Pass a search root. `NativeMaterializeOptions::asset_base_directory` must be
+  the directory the DesignIR was loaded from (`pulp-design-ir-observe` and the
+  standalone import example do this). Without it, relative paths fall back to
+  process CWD and hash recovery has nowhere to look.
+- A test that asserts on a resolved image must write real bytes where the
+  manifest points. A synthetic path (`/resolved/cache/logo.png`) now
+  materializes the placeholder, so `dynamic_cast<ImageView*>` returns null.
+
+`asset_uri()` in the same header is deliberately NOT existence-checked: it is
+the codegen lowering, naming where bytes are supposed to be for a generated
+program that runs elsewhere. Do not "fix" it to check the filesystem.
+
 **Self-contained JS export (relative asset paths).** The emitted `ui.js`
 never references decode-time locations: after `resolve_sprite_skins` stamps
 absolute paths, `localize_ir_assets` (`sprite_skins.cpp`) copies every
@@ -3890,6 +3923,41 @@ Spec + design:
 [`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
 
 ## Automated Validation Loop
+
+### Score the artifact that ships, not the render beside it
+
+The importer's own A/B — the `Similarity: 98% — Validation: PASS` in a
+design-import log — measures the **DesignIR render it built in memory**. It
+does not measure the emitted `ui.js`, which is what a plugin loads. Those
+diverge, and when they do the log certifies the panel anyway: a panel scoring
+**0.13** was reported at **0.98** by that gate, twice, to a user looking at
+an "IMG" placeholder.
+
+`tools/import-validation/verify_rendered_panel.py` closes that hole. It renders
+the artifact on disk and scores it against the importer's own reference render.
+Run it on the emitted artifact after a design import, and prefer the
+**installed** copy over the freshly generated one — an asset path that resolves
+during the run can be gone by the time the plugin opens.
+
+```bash
+tools/import-validation/verify_rendered_panel.py \
+  --artifact <project>/build.ui.js \
+  --reference <capture>/validation-proof/render/render.png \
+  --tokens <capture>/tokens.json --width 900 --height 602 --scale 2
+```
+
+Two things that decide whether its number means anything, both enforced:
+the render must have `PULP_SHOT_NO_RECONCILE=1` (the viewport clamp rescales a
+capture backdrop out from under its controls, and errs in *both* directions —
+0.33/0.44 clamped where the truth was 0.13/0.98), and the renderer must come
+from the same tree as the importer (a stale one no-ops the artifact's token
+calls and scores near zero, looking exactly like a broken design).
+
+Its similarity is blind to palette regressions — an artifact whose tokens never
+reach the widget theme keys renders blue knobs on a cream faceplate and still
+scores **0.940**. The `--tokens` foreign-colour check is the only thing that
+catches that class. Full rationale, thresholds and the acceptance record:
+[`tools/import-validation/RENDERED-PANEL-GATE.md`](../../../tools/import-validation/RENDERED-PANEL-GATE.md).
 
 ### Freshness check (MUST run first)
 

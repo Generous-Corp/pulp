@@ -82,7 +82,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto ir = pulp::view::parse_design_ir_json(serialized);
-    auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    // The document's own directory is the search root for its manifest assets:
+    // relative local_paths resolve against it, and a local_path that no longer
+    // points at its bytes is recovered by content hash from the asset folders
+    // beside it. Without this the tool depends on the process CWD.
+    auto root = pulp::view::build_native_view_tree(
+        ir, ir.asset_manifest,
+        {.asset_base_directory = input_path.parent_path()});
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;

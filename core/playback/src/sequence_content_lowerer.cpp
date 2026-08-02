@@ -142,15 +142,19 @@ class SequenceContentLowerer::Impl {
         std::int64_t right_trim = 0;
         std::size_t note_index = 0;
         std::vector<timeline::NoteEvent> clipped_notes;
+        timeline::ItemId context_sequence_id;
     };
 
     StepResult append(timeline::Clip clip, timeline::ItemId source,
-                      double source_frame_offset = 0.0) {
+                      double source_frame_offset = 0.0, timeline::ItemId context_sequence_id = {},
+                      std::optional<timebase::TickPosition> context_start = std::nullopt) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
-        output_->push_back({std::move(clip), source_frame_offset});
+        const auto authored_start = context_start.value_or(clip.start());
+        output_->push_back(
+            {std::move(clip), source_frame_offset, context_sequence_id, authored_start});
         return {};
     }
 
@@ -301,6 +305,7 @@ class SequenceContentLowerer::Impl {
             right_trim,
             0,
             {},
+            frame.sequence->id(),
         };
         if (!std::holds_alternative<timeline::MidiContent>(child.content()))
             return finish_pending_leaf();
@@ -351,6 +356,14 @@ class SequenceContentLowerer::Impl {
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
         if (const auto* notes = std::get_if<timeline::MidiContent>(&content)) {
+            const auto* owner = project_.find_sequence(pending.context_sequence_id);
+            if (!owner)
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.context_sequence_id}};
+            if ((pending.left_trim != 0 || pending.right_trim != 0) &&
+                !owner->groove().states_no_feel())
+                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedGrooveUnsupported,
+                                                       pending.child.id()}};
             // A nested note clip keeps its modifiers and its authored seed.
             // Rebuilding with the notes alone would leave the notes sounding
             // unconditionally inside a SequenceRef while they honour their
@@ -442,7 +455,8 @@ class SequenceContentLowerer::Impl {
         if (!flattened)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};
-        return append(std::move(flattened).value(), pending.child.id(), source_frame_offset);
+        return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
+                      pending.context_sequence_id, pending.clipped_start);
     }
 
     const timeline::Project& project_;
