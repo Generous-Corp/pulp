@@ -84,6 +84,21 @@ export interface TypedLayout {
     overflow?: 'visible' | 'hidden' | 'scroll' | 'auto';
     overflowX?: 'visible' | 'hidden' | 'scroll' | 'auto';
     overflowY?: 'visible' | 'hidden' | 'scroll' | 'auto';
+
+    /**
+     * The clip an importer resolved for THIS node along CSS's containing-block
+     * chain, in the node's own coordinate space (origin at its top-left).
+     *
+     * It clips the node's own ink only — every descendant carries the rectangle
+     * its own chain resolves to. Carried per node rather than inherited from a
+     * clipping parent because CSS clips along the containing-block chain while
+     * a tree clips by parentage, and the two disagree in both directions: an
+     * absolutely positioned node can escape an `overflow: hidden` ancestor it
+     * sits inside, and a node moved to a new parent must keep the clip its old
+     * one gave it. An inherited clip is an intersection and cannot widen, so it
+     * cannot express the first case.
+     */
+    clipRect?: { x: number; y: number; width: number; height: number };
 }
 
 // ── TypedPaint ────────────────────────────────────────────────────────

@@ -2953,12 +2953,9 @@ TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)", "[cli][shellou
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
 
-// The CLI delegates `import-design` to the sibling pulp-import-design binary
-// via std::system (cli_common.cpp run()/delegate_to_build_binary). std::system
-// returns a waitpid status, not the child exit code, so a child exit of 2 would
-// truncate to 0 unless decoded. This guards that a delegated non-zero exit code
-// (an unsupported --format → exit 2) survives the delegation boundary instead
-// of silently reading as success.
+// POSIX delegates through std::system, whose waitpid status must be decoded;
+// Windows bypasses cmd.exe so user arguments reach the helper literally.
+// Either route must preserve a delegated non-zero exit code.
 TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --format)",
           "[cli][shellout][delegate]") {
     if (!binary_exists()) {
@@ -2966,11 +2963,34 @@ TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --for
         return;
     }
 
-    auto r = run_pulp({"import-design", "--export-tokens", "--format", "bogus-format"}, 30000);
+    pulp_setenv("PULP_DELEGATE_EXPAND", "expanded-by-shell", 1);
+    auto r = run_pulp(
+        {"import-design", "--export-tokens", "--format", "%PULP_DELEGATE_EXPAND%"},
+        30000);
+    pulp_unsetenv("PULP_DELEGATE_EXPAND");
     REQUIRE_FALSE(r.timed_out);
     // Exit 2 must survive: NOT collapsed to 0 by an undecoded wait status.
     REQUIRE(r.exit_code == 2);
-    REQUIRE(r.stderr_output.find("unsupported --format") != std::string::npos);
+    REQUIRE(r.stderr_output.find("unsupported --format value '%PULP_DELEGATE_EXPAND%'") !=
+            std::string::npos);
+}
+
+// This is the exact delegated invocation used by the release smoke. On
+// Windows, every argument is quoted, so the old command began with a quoted
+// executable and contained a second quote; cmd.exe stripped the leading quote
+// and never launched the sibling, even though `--help` has no spaces.
+TEST_CASE("pulp import-design --help survives the Windows cmd leading-quote rule",
+          "[cli][shellout][delegate]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    auto r = run_pulp({"import-design", "--help"}, 30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE((r.stdout_output + r.stderr_output).find("import-design") !=
+            std::string::npos);
 }
 
 // `pulp ci-host` is the optional Tart-VM host-onboarding wrapper around

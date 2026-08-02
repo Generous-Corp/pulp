@@ -217,6 +217,38 @@ Facts worth knowing before touching any of it:
 - **The rows are addressed by layout node; the semantic report is addressed by
   `backend_node_id`.** The join is three hops: backend id → node index
   (`nodes.backendNodeId`) → layout index (`layout.nodeIndex`) → style row.
+- **The list is sized for drawing a whole panel, not for describing a control.**
+  A property the capture does not collect is one no consumer can ever draw — the
+  box arrives with that appearance defaulted, which renders as a plausible wrong
+  picture rather than an error. Collecting one costs a string per node;
+  re-capturing a corpus to add one later costs every design. So when in doubt,
+  collect it. Two properties earn specific mention: without `background-size`
+  the standard CSS grid idiom (a hard-stop gradient, tiled) lowers to a single
+  1 px line instead of eight columns, and reading only `border-top-style` makes
+  a dashed *left* border vanish — hence all four `border-*-style` are collected.
+- **A node can own more than one layout entry.** A box that also lays out an
+  inline text box contributes two entries with the same `nodeIndex`; a
+  `::before` with generated content is the everyday case. Take the **first**
+  entry — the node's own box — so the choice is defined rather than
+  last-write-wins.
+- **Element index N in the page is not element index N in the snapshot.** The
+  page walk is `document.querySelectorAll('*')`; the snapshot also emits
+  pseudo-element boxes (`::before` / `::after`) and shadow-tree content as
+  `nodeType === 1`. Counting those re-points every control after the first
+  `::before` at the node *before* its own — which still resolves and still looks
+  like data. `snapshotElementNodes()` in `semantics.mjs` is the one place that
+  correspondence is computed; every per-candidate snapshot value
+  (`backend_node_id`, `paint_order`) goes through it, and a candidate whose tag
+  disagrees with the node it landed on raises `capture-node-alignment-mismatch`
+  rather than shipping a neighbour's data.
+- **Paint order is consumed, never re-derived.** `includePaintOrder: true` makes
+  Chromium answer "what paints on top of what" directly, and each candidate
+  carries that integer as `paint_order`. Do not sort by `z-index` instead:
+  opacity, transforms, filters and `will-change` all create stacking contexts,
+  so a `z-index` sort agrees on simple pages and diverges silently on exactly
+  the layered panels this exists for. A laid-out document that arrives without
+  `paintOrders` raises `capture-paint-order-missing` — a tree of nulls would
+  read as "this page has no layering".
 - **A control's own node usually carries only its label's styling.** The
   gradient, radius, and shadow stack that make it look like a knob sit on an
   inner face element. Resolve through the candidate's `paint_bounds` — match it
@@ -242,6 +274,99 @@ Facts worth knowing before touching any of it:
 - **Do not carry a border colour without a border width.** Computed style
   reports `border-*-color` on every element whether or not one is drawn, so an
   ungated mapping paints borders the design never had.
+
+**Whole-tree lowering (`native_panel_lowering`, opt-in) draws the panel from
+its nodes instead of photographing it.** `browser_capture_tree.cpp` lowers every
+painted node in the snapshot into a tree under the IR root. Two invariants that
+are routinely confused, and the confusion is expensive:
+
+- **"Yoga must not re-solve" is the invariant.** It is satisfied by every node
+  being `position: absolute` with Chrome's own solved width/height/offsets.
+  Yoga takes an absolutely positioned child out of flow, so nesting adds offset
+  arithmetic and no flex resolution — a Yoga-vs-Blink divergence stays
+  impossible however deep the tree goes.
+- **"The tree must be flat" is NOT that invariant, and flattening costs the
+  editing surface.** A design gets edited section by section, which means an
+  agent has to be able to name a section and get its contents with it. Flat, two
+  `div.face` nodes are indistinguishable and there is no group to grab. So DOM
+  parentage, ids and class-derived names are preserved, and a child's box is
+  stored RELATIVE to its parent — which is what makes "move a container and its
+  children follow" true by construction rather than by special case. Composing
+  the offsets back down a chain returns Chrome's absolute box exactly; Blink's
+  1/64 px values survive binary32 unrounded, so the tests assert them with no
+  tolerance.
+
+Ordering follows Chrome's paint model, which is itself hierarchical: siblings
+are emitted in `paint_order` and carry it as `z-index`, so order lives inside
+its stacking context rather than in one global sequence. Two consequences worth
+knowing before you touch that file:
+
+- **A node that paints BEFORE its own DOM parent is hoisted, and flagged.** A
+  nested painter always draws a parent's box before anything inside it, so a
+  negative-`z-index` child (or a descendant that escaped to an outer stacking
+  context) cannot be expressed in place. It is regrafted onto the nearest
+  ancestor that works and carries `paint_order_hoisted` + `hoisted_from`; the
+  root counts them in `native_nodes_hoisted`. Never reorder one silently. On a
+  real panel this is a handful of backdrop divs, not a rarity.
+- **Re-expressing one flat order as a hierarchy can reorder interleaved
+  subtrees — `native_nodes_overlapping_reorders` is the honest measure of
+  whether it mattered.** Reordering disjoint boxes is invisible to the painter's
+  algorithm; reordering overlapping ones is a real regression. Only the
+  overlapping half is counted, and the count is recorded only when non-zero.
+- **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
+  of 1 means the lowering reflattened and every per-node count still looks
+  right, so check the shape, not only the census.
+- **Clipping travels with the node, NOT with its place in the tree — never put
+  `overflow` back on a lowered node.** A tree that carries `overflow` clips by
+  DOM parentage, because a renderer applies it to whatever the node's children
+  turn out to be. CSS clips along the containing-block chain, and the two
+  disagree in both directions: an absolutely positioned node whose containing
+  block sits above an `overflow: hidden` ancestor escapes that clip in Chrome
+  (nested under it, where the boxes do not intersect, the node disappears
+  entirely), and a hoisted node regrafted past the ancestor that clipped it
+  paints outside the box that contained it. No re-parenting fixes both. So
+  lowering resolves each node's real clip chain — `overflow` along the
+  containing-block chain, taken against each clipper's PADDING box — intersects
+  it to one rectangle, and stores it on the node in the node's own space
+  (`IRStyle::clip_rect`, `clipRect` in the IR JSON). `overflow` is dropped from
+  every lowered node; the rectangle is the only authority.
+  - **It is applied to the node's own ink, never inherited.** The engine slot is
+    `View::set_ancestor_clip_rect`, and `paint_content` releases it before the
+    children, each of which carries its own. That asymmetry is load-bearing: a
+    child can legitimately need a WIDER clip than its parent (it escapes a
+    clipper the parent is inside), and an inherited clip is an intersection and
+    cannot widen. Merging it into `overflow` re-creates the original defect.
+  - **`native_nodes_clip_over_applied` / `native_nodes_clip_lost` are now the
+    audit, and both should be absent.** They are computed off the emitted tree —
+    each node's stored rectangle composed with whatever its emitted ancestors
+    clip — against the CSS chain resolved independently, so a rectangle written
+    in the wrong space, dropped, or re-inherited from a parent's `overflow`
+    shows up as a number. A non-zero value is ink the panel draws wrongly.
+  - **The panel frame's crop is not a disagreement.** The root's own `overflow`
+    is on both sides of the audit: a node the frame cuts is out of frame, not
+    mis-clipped, and counting it would fire on `<html>` for every cropped
+    capture.
+  - **Known limits of one rectangle.** A `clip-path` ancestor clips to a shape
+    the rectangle cannot carry, so those nodes are counted in
+    `native_nodes_clip_lost` and carry `clip_inexpressible="clip-path"` — they
+    draw too much, not too little. A clipper's `border-radius` is likewise not
+    carried, so a rounded clipper under-clips at its corners; the audit compares
+    axis-aligned rectangles and cannot see that, deliberately — counting every
+    rounded card would bury the defects it exists to find. A rotated clipper
+    cannot arise at all: a
+    rotated element is `element_capture_fallback` and its whole subtree pools
+    into it.
+  - **JS and Swift codegen do not lower it yet** (allowlisted in
+    `test_design_import_parity.cpp`); the JS lane needs a `setClipRect` bridge
+    verb first. Both degrade by not clipping — too much ink, never a lost node.
+- **Anchors are DOM paths, not capture positions.** `stable_anchor_id` is
+  `capture:tag#id-or-.class[ordinal]/…`, with ordinals counted over ALL
+  same-signature siblings in the document rather than over the painted ones, so
+  hiding a sibling does not move the anchor. Keying on a layout index instead
+  identifies a node within one capture — the one job an anchor does not have,
+  since the tweaks layer replays edits ACROSS captures. A hoisted node keeps its
+  DOM anchor: hoisting is a rendering accommodation, not a claim about
+  structure.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
