@@ -26,6 +26,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include "support/thread_progress.hpp"
+
 using namespace pulp::view;
 
 namespace {
@@ -1081,9 +1083,9 @@ TEST_CASE("VectorSource survives a concurrent writer and reader",
         }
     });
 
-    for (int i = 0; i < 20000; ++i) {
+    const auto read_one = [&] {
         const auto frame = src.read();
-        if (frame.count == 0) continue;
+        if (frame.count == 0) return;
         reads.fetch_add(1, std::memory_order_relaxed);
         const float base = frame.samples[0];
         for (int s = 1; s < frame.count; ++s) {
@@ -1092,7 +1094,16 @@ TEST_CASE("VectorSource survives a concurrent writer and reader",
                 break;
             }
         }
-    }
+    };
+    for (int i = 0; i < 20000; ++i) read_one();
+
+    // A read only counts once the writer has published, and the 20000-read
+    // budget does not order its first publish before this loop ends: on a loaded
+    // host every read can return an empty frame and leave `reads` at zero. Keep
+    // reading until one lands; the deadline turns a source that genuinely never
+    // publishes into a failed CHECK rather than a hang.
+    (void)pulp::test::pump_until(
+        [&] { return reads.load(std::memory_order_relaxed) > 0; }, read_one);
     stop.store(true, std::memory_order_relaxed);
     writer.join();
 

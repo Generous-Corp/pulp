@@ -18,6 +18,15 @@ target_include_directories(pulp-test-cli-create-targets PRIVATE ${CMAKE_SOURCE_D
 target_link_libraries(pulp-test-cli-create-targets PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-create-targets)
 
+add_executable(pulp-test-cli-overflow-selector
+    test_cli_overflow_selector.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/overflow_selector.cpp)
+target_include_directories(pulp-test-cli-overflow-selector PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${choc_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-overflow-selector PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-overflow-selector)
+
 # CLI create shell-out edge tests. These launch the built CLI but stay on
 # fail-fast paths that do not run doctor, configure, build, or network setup.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
@@ -136,7 +145,16 @@ endfunction()
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
     test_cli_audio_heritage.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-shellout PRIVATE
+    PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
+
+add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
+target_link_libraries(pulp-test-cli-overflow-shellout PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-overflow-shellout)
+catch_discover_tests(pulp-test-cli-overflow-shellout)
 
 # The sampler-mip shell-out test verifies that the published sidecar is also
 # consumable by the example runtime. Keep its probe in the test graph even when
@@ -161,12 +179,22 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-if(TARGET pulp::inspect)
+if(TARGET pulp::inspect-runtime AND TARGET pulp::inspect-client)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
         pulp::platform
-        pulp::inspect
+        pulp::inspect-runtime
+        pulp::inspect-client
         Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect)
+        target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
+            pulp::inspect)
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=1)
+    else()
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=0)
+    endif()
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()

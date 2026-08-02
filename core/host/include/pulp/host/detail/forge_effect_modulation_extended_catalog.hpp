@@ -7,9 +7,9 @@
 // past its maintainability boundary.  The umbrella header includes this file,
 // preserving its existing include and symbol surface.
 
+#include <pulp/host/detail/forge_realization_identity.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
-#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/flanger.hpp>
 #include <pulp/signal/leslie.hpp>
@@ -44,13 +44,20 @@ enum : state::ParamID {
 
 inline signal::LfoWave wave_from_param(float value) noexcept {
     switch (static_cast<int>(std::lround(value))) {
-        case 1: return signal::LfoWave::triangle;
-        case 2: return signal::LfoWave::saw_up;
-        case 3: return signal::LfoWave::saw_down;
-        case 4: return signal::LfoWave::square;
-        case 5: return signal::LfoWave::sample_hold;
-        case 6: return signal::LfoWave::smooth_random;
-        default: return signal::LfoWave::sine;
+    case 1:
+        return signal::LfoWave::triangle;
+    case 2:
+        return signal::LfoWave::saw_up;
+    case 3:
+        return signal::LfoWave::saw_down;
+    case 4:
+        return signal::LfoWave::square;
+    case 5:
+        return signal::LfoWave::sample_hold;
+    case 6:
+        return signal::LfoWave::smooth_random;
+    default:
+        return signal::LfoWave::sine;
     }
 }
 
@@ -59,12 +66,12 @@ struct Instance {
 };
 
 inline std::string type_id(Mode mode, double offset_ms) {
-    if (mode == Mode::classic) return kTypeId;
-    if (mode == Mode::barberpole) return std::string{kTypeId} + ".barberpole";
-    const double frozen_offset =
-        std::clamp(offset_ms, Engine::kOffsetMinMs, Engine::kOffsetMaxMs);
-    return std::string{kTypeId} + ".through_zero." +
-           detail::realization_real_token(frozen_offset);
+    if (mode == Mode::classic)
+        return kTypeId;
+    if (mode == Mode::barberpole)
+        return std::string{kTypeId} + ".barberpole";
+    const double frozen_offset = std::clamp(offset_ms, Engine::kOffsetMinMs, Engine::kOffsetMaxMs);
+    return std::string{kTypeId} + ".through_zero." + detail::realization_real_token(frozen_offset);
 }
 
 inline int latency_samples(Mode mode, double offset_ms, double sample_rate) {
@@ -75,10 +82,8 @@ inline int latency_samples(Mode mode, double offset_ms, double sample_rate) {
     return probe.latency_samples();
 }
 
-inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
-                                        double offset_ms = 4.0) {
-    const double frozen_offset =
-        std::clamp(offset_ms, Engine::kOffsetMinMs, Engine::kOffsetMaxMs);
+inline CustomNodeType make_flanger_node(Mode mode = Mode::classic, double offset_ms = 4.0) {
+    const double frozen_offset = std::clamp(offset_ms, Engine::kOffsetMinMs, Engine::kOffsetMaxMs);
 
     CustomNodeType t;
     t.type_id = type_id(mode, frozen_offset);
@@ -101,15 +106,20 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
 
+    const float depth_max = mode == Mode::through_zero
+                                ? static_cast<float>(
+                                      std::min(frozen_offset,
+                                               static_cast<double>(Engine::kDepthMaxMs)))
+                                : static_cast<float>(Engine::kDepthMaxMs);
+    const float depth_default = std::min(1.5f, depth_max);
     t.baked_params = {
-        {kRate, static_cast<float>(Engine::kRateMinHz),
-         static_cast<float>(Engine::kRateMaxHz), 0.5f},
-        {kDepth, static_cast<float>(Engine::kDepthMinMs),
-         static_cast<float>(Engine::kDepthMaxMs), 1.5f},
+        {kRate, static_cast<float>(Engine::kRateMinHz), static_cast<float>(Engine::kRateMaxHz),
+         0.5f},
+        {kDepth, static_cast<float>(Engine::kDepthMinMs), depth_max, depth_default},
         {kCenter, static_cast<float>(Engine::kCenterMinMs),
          static_cast<float>(Engine::kCenterMaxMs), 3.0f},
-        {kFeedback, static_cast<float>(-Engine::kFbClamp),
-         static_cast<float>(Engine::kFbClamp), 0.6f},
+        {kFeedback, static_cast<float>(-Engine::kFbClamp), static_cast<float>(Engine::kFbClamp),
+         0.6f},
         {kMix, 0.0f, 1.0f, 0.5f},
         {kSpreadDeg, 0.0f, 180.0f, 90.0f},
         {kPolarity, 0.0f, 1.0f, 0.0f},
@@ -117,11 +127,9 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
         {kWave, 0.0f, 6.0f, 0.0f},
     };
     if (mode == Mode::barberpole)
-        t.baked_params.push_back(
-            {kBarberpoleHz, static_cast<float>(-Engine::kBarberpoleShiftMaxHz),
+        t.baked_params.push_back({kBarberpoleHz, static_cast<float>(-Engine::kBarberpoleShiftMaxHz),
              static_cast<float>(Engine::kBarberpoleShiftMaxHz), 3.0f});
-    t.process_instance_baked_param =
-        [mode](void* p, audio::BufferView<float>& out,
+    t.process_instance_baked_param = [mode](void* p, audio::BufferView<float>& out,
                const audio::BufferView<const float>& in, int n,
                const BakedParamView& params) {
             auto& engine = static_cast<Instance*>(p)->engine;
@@ -145,29 +153,33 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
 
                 float left = in.channel_ptr(0)[i];
                 float right = in.channel_ptr(1)[i];
-                engine.process_stereo(&left, &right, out.channel_ptr(0) + i,
-                                      out.channel_ptr(1) + i, 1);
+            engine.process_stereo(&left, &right, out.channel_ptr(0) + i, out.channel_ptr(1) + i, 1);
             }
         };
     return t;
 }
 
 inline ForgeNodeDescriptor flanger_descriptor() {
-    static const std::string through_zero_id = type_id(Mode::through_zero, 4.0);
     ForgeNodeDescriptor d;
     d.key = "flanger";
     d.label = "Flanger";
     d.description = "Stereo flanger with classic, through-zero, and barberpole topologies.";
     d.axes = {{"mode",
                "Mode",
-               "Delay-line topology and its fixed latency behavior.",
+               "Delay-line topology and, for through-zero variants, fixed latency.",
                {{"classic", "Classic", 0.0f},
-                {"through_zero", "Through-Zero", 1.0f},
-                {"barberpole", "Barberpole", 2.0f}}}};
-    d.realizations = {{"classic", kTypeId, {{"mode", "classic"}}},
-                      {"through_zero", through_zero_id, {{"mode", "through_zero"}}},
-                      {"barberpole", "modulation.flanger.barberpole",
-                       {{"mode", "barberpole"}}}};
+                {"through_zero", "Through-Zero 4 ms", 1.0f},
+                {"barberpole", "Barberpole", 2.0f},
+                {"through_zero_1ms", "Through-Zero 1 ms", 3.0f},
+                {"through_zero_2ms", "Through-Zero 2 ms", 4.0f},
+                {"through_zero_8ms", "Through-Zero 8 ms", 5.0f}}}};
+    d.realizations = {
+        {"classic", kTypeId, {{"mode", "classic"}}},
+        {"barberpole", "modulation.flanger.barberpole", {{"mode", "barberpole"}}},
+        {"through_zero", type_id(Mode::through_zero, 4.0), {{"mode", "through_zero"}}},
+        {"through_zero_1ms", type_id(Mode::through_zero, 1.0), {{"mode", "through_zero_1ms"}}},
+        {"through_zero_2ms", type_id(Mode::through_zero, 2.0), {{"mode", "through_zero_2ms"}}},
+        {"through_zero_8ms", type_id(Mode::through_zero, 8.0), {{"mode", "through_zero_8ms"}}}};
     d.params = {
         {"rate_hz", kRate, "Rate", "Hz", "Delay-sweep rate.", ForgeParamKind::continuous,
          ForgeParamCurve::logarithmic},
@@ -282,29 +294,39 @@ inline CustomNodeType make_leslie_node() {
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
     t.baked_params = {
-        {kSpeed, 0.0f, 2.0f, 2.0f},       {kHornFast, 5.5f, 7.5f, 6.7f},
-        {kHornSlow, 0.6f, 1.0f, 0.8f},    {kDrumFast, 4.5f, 6.5f, 5.7f},
-        {kDrumSlow, 0.5f, 0.9f, 0.6f},    {kHornAccel, 0.3f, 3.0f, 1.0f},
-        {kDrumAccel, 1.0f, 8.0f, 3.0f},   {kCrossover, 700.0f, 900.0f, 800.0f},
-        {kHornRadius, 0.1f, 0.25f, 0.18f}, {kDrumRadius, 0.08f, 0.18f, 0.12f},
-        {kAmDepth, 0.0f, 0.9f, 0.5f},     {kDirDepth, 0.0f, 12.0f, 6.0f},
+        {kSpeed, 0.0f, 2.0f, 2.0f},
+        {kHornFast, 5.5f, 7.5f, 6.7f},
+        {kHornSlow, 0.6f, 1.0f, 0.8f},
+        {kDrumFast, 4.5f, 6.5f, 5.7f},
+        {kDrumSlow, 0.5f, 0.9f, 0.6f},
+        {kHornAccel, 0.3f, 3.0f, 1.0f},
+        {kDrumAccel, 1.0f, 8.0f, 3.0f},
+        {kCrossover, 700.0f, 900.0f, 800.0f},
+        {kHornRadius, 0.1f, 0.25f, 0.18f},
+        {kDrumRadius, 0.08f, 0.18f, 0.12f},
+        {kAmDepth, 0.0f, 0.9f, 0.5f},
+        {kDirDepth, 0.0f, 12.0f, 6.0f},
         {kDirCorner, 1000.0f, 4000.0f, 2000.0f},
         {kDrumDirDepth, 0.0f, 6.0f, 2.0f},
-        {kDBias, 0.2f, 1.0f, 0.5f},       {kMicAngle, 0.0f, 90.0f, 45.0f},
-        {kMicDistance, 0.3f, 3.0f, 1.0f}, {kReflectionDb, -60.0f, -6.0f, -12.0f},
-        {kReflections, 1.0f, 4.0f, 2.0f}, {kReflDelay, 2.5f, 6.0f, 3.5f},
-        {kReflSpacing, 1.0f, 3.0f, 1.5f}, {kReflCorner, 1000.0f, 8000.0f, 3000.0f},
-        {kDrift, 0.0f, 10.0f, 3.0f},      {kWetMix, 0.0f, 1.0f, 1.0f},
+        {kDBias, 0.2f, 1.0f, 0.5f},
+        {kMicAngle, 0.0f, 90.0f, 45.0f},
+        {kMicDistance, 0.3f, 3.0f, 1.0f},
+        {kReflectionDb, -60.0f, -6.0f, -12.0f},
+        {kReflections, 1.0f, 4.0f, 2.0f},
+        {kReflDelay, 2.5f, 6.0f, 3.5f},
+        {kReflSpacing, 1.0f, 3.0f, 1.5f},
+        {kReflCorner, 1000.0f, 8000.0f, 3000.0f},
+        {kDrift, 0.0f, 10.0f, 3.0f},
+        {kWetMix, 0.0f, 1.0f, 1.0f},
     };
-    t.process_instance_baked_param =
-        [](void* p, audio::BufferView<float>& out,
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
            const audio::BufferView<const float>& in, int n,
            const BakedParamView& params) {
             auto& engine = static_cast<Instance*>(p)->engine;
             for (int i = 0; i < n; ++i) {
                 const auto offset = static_cast<std::int32_t>(i);
-                const int speed = std::clamp(
-                    static_cast<int>(std::lround(params.value_at(kSpeed, offset))), 0, 2);
+            const int speed =
+                std::clamp(static_cast<int>(std::lround(params.value_at(kSpeed, offset))), 0, 2);
                 engine.set_speed(static_cast<signal::LeslieSpeed>(speed));
                 engine.set_horn_fast_hz(params.value_at(kHornFast, offset));
                 engine.set_horn_slow_hz(params.value_at(kHornSlow, offset));
@@ -323,15 +345,15 @@ inline CustomNodeType make_leslie_node() {
                 engine.set_mic_angle_deg(params.value_at(kMicAngle, offset));
                 engine.set_mic_distance_m(params.value_at(kMicDistance, offset));
                 engine.set_reflection_db(params.value_at(kReflectionDb, offset));
-                engine.set_num_reflections(static_cast<int>(
-                    std::lround(params.value_at(kReflections, offset))));
+            engine.set_num_reflections(
+                static_cast<int>(std::lround(params.value_at(kReflections, offset))));
                 engine.set_refl_delay_ms(params.value_at(kReflDelay, offset));
                 engine.set_refl_spacing_ms(params.value_at(kReflSpacing, offset));
                 engine.set_refl_corner_hz(params.value_at(kReflCorner, offset));
                 engine.set_drift_cents(params.value_at(kDrift, offset));
                 engine.set_mix(params.value_at(kWetMix, offset));
-                engine.process(in.channel_ptr(0)[i], in.channel_ptr(1)[i],
-                               out.channel_ptr(0)[i], out.channel_ptr(1)[i]);
+            engine.process(in.channel_ptr(0)[i], in.channel_ptr(1)[i], out.channel_ptr(0)[i],
+                           out.channel_ptr(1)[i]);
             }
         };
     return t;
@@ -449,21 +471,18 @@ inline CustomNodeType make_scanner_vibrato_node() {
     };
     t.reset = [](void* p) { static_cast<ScannerInstance*>(p)->engine.reset(); };
     t.baked_params = {
-        {kScannerMode, 0.0f, 6.0f, 0.0f}, {kScanHz, 6.0f, 7.5f, 6.9f},
-        {kLineMs, 0.6f, 1.4f, 1.0f},      {kV1, 0.1f, 0.5f, 0.33f},
-        {kV2, 0.4f, 0.8f, 0.66f},         {kV3, 0.7f, 1.0f, 1.0f},
+        {kScannerMode, 0.0f, 6.0f, 0.0f}, {kScanHz, 6.0f, 7.5f, 6.9f}, {kLineMs, 0.6f, 1.4f, 1.0f},
+        {kV1, 0.1f, 0.5f, 0.33f},         {kV2, 0.4f, 0.8f, 0.66f},    {kV3, 0.7f, 1.0f, 1.0f},
         {kChorusMix, 0.0f, 1.0f, 0.5f},
     };
-    t.process_instance_baked_param =
-        [](void* p, audio::BufferView<float>& out,
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
            const audio::BufferView<const float>& in, int n,
            const BakedParamView& params) {
             auto& engine = static_cast<ScannerInstance*>(p)->engine;
             for (int i = 0; i < n; ++i) {
                 const auto offset = static_cast<std::int32_t>(i);
                 const int mode = std::clamp(
-                    static_cast<int>(std::lround(params.value_at(kScannerMode, offset))),
-                    0, 6);
+                static_cast<int>(std::lround(params.value_at(kScannerMode, offset))), 0, 6);
                 engine.set_mode(static_cast<signal::ScannerMode>(mode));
                 engine.set_scan_hz(params.value_at(kScanHz, offset));
                 engine.set_line_ms(params.value_at(kLineMs, offset));

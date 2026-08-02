@@ -284,6 +284,16 @@ that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
 the matching argv flags) can be exercised end-to-end on every PR
 without a real window or virtual display.
 
+A screenshot-only run opens **no audio device** — no audio system, no
+device, no render callback — so it can never make sound on a shared or
+unattended machine. Meters and other live-signal UI therefore read zero
+in the capture, and the Settings tab lists no devices. Two ways to keep
+audio live: ask for a readout in the same run (`--audio-probe-json`,
+`--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`,
+each produced by the render callback), or opt in explicitly with
+`PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
+when the pixels themselves must show live signal.
+
 #### Live Audio Inspector flags
 
 The live Audio Inspector is a floating developer window that observes the
@@ -752,14 +762,16 @@ busy; it does not cancel in-flight jobs.
 ```bash
 pulp overflow status
 pulp overflow enable
-pulp overflow enable --to '"namespace-profile-generouscorp-macos"'
+pulp overflow enable --to '"macos-15"'
 pulp overflow disable
 pulp overflow threshold
 pulp overflow threshold 1
 ```
 
-`enable` sets the overflow target, `disable` removes it for future dispatches,
-and `threshold` gets or sets the busy-run count that trips overflow. See
+`enable` sets the overflow target, `disable` sets the `local-only` sentinel for
+future dispatches, and `threshold` gets or sets the busy-run count that trips
+overflow. An unset overflow variable restores the hosted `macos-15` fallback;
+it does not disable overflow. See
 [local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 
@@ -1244,14 +1256,15 @@ Remaining limitation:
 
 **Status**: experimental
 
-Experimental low-level client for a custom host/test fixture that explicitly
-constructs an inspector server. Normal `pulp run` and plugin-format launches do
-not currently start an endpoint. With no `--port`, the client chooses the
-newest `pulp-inspector-*.port` temp-file hint; that transitional discovery
-mechanism does not authenticate or identify an exact session.
+Authenticated low-level client for an explicitly enabled inspector session.
+Normal `pulp run` and plugin-format launches do not currently start an
+endpoint. The client reads owner-private ephemeral discovery records, selects
+an exact non-reusable publication when requested, and proves possession of the
+session credential before sending a request.
 
 ```bash
 pulp inspect
+pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
 pulp inspect --command State.getParameters
@@ -1259,15 +1272,22 @@ pulp inspect --command State.getParameters
 
 Options:
 
-- `--host HOST` - connect to a host other than `127.0.0.1`
-- `--port PORT` - connect to an explicit inspector port
+- `--session ID` - select the exact live session
+- `--instance ID` - disambiguate an exact instance when a session ID is shared
+- `--publication ID` - pin one non-reusable publication generation; requires
+  `--session` and `--instance`
+- `--host HOST` - filter discovery by loopback host
+- `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
 
-The current transport is loopback-only but unauthenticated. Do not use it for
-privileged mutation or runtime evaluation. Authenticated, exact-session
-discovery is not yet implemented.
+The transport is loopback-only, token-authenticated, bounded, and
+capability-enforced. Mutations additionally require the controller lease.
+If a sent request times out or the connection closes while awaiting its
+response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
+the connection. Do not automatically retry that operation: the server may
+already have executed it.
 
 `Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
 protocol methods that currently return explicit unavailable errors until
@@ -1287,38 +1307,42 @@ fixture that explicitly constructs and wires the inspector server.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
-pulp motion stop --trace-id 1
+# copy the exact stop command printed by record:
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot
 pulp motion list-traces
-pulp motion load-fixture card-fade.motion.jsonl
-pulp motion scrub 30
-pulp motion play
-pulp motion pause
-pulp motion cost enable
-pulp motion cost disable
+pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion play --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion pause --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Options:
 
-- `--host HOST` - inspector host, defaulting to `127.0.0.1`
-- `--port PORT` - inspector port; defaults to auto-discovery from the same temp-file hint as `pulp inspect`
+- `--port PORT` - inspector port; defaults to owner-private authenticated discovery
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for stop, scrub, play,
+  pause, and cost mutations
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Start a trace and print the trace id. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
-| `stop [--trace-id N]` | `Motion.stopTrace` | Release an active trace. |
+| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact publication, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
+| `stop [--trace-id N] --session ID --instance ID --publication ID` | `Motion.stopTrace` | Release an active trace on the exact publication selected by `record`; the full selector is required. |
 | `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
 | `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `load-fixture PATH` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
-| `scrub FRAME` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
-| `play` / `pause` | `Motion.play` / `Motion.pause` | Control fixture playback. |
-| `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the session. |
+| `scrub FRAME --session ID --instance ID --publication ID` | `Motion.scrubTo` | Move the exact publication's scrubber playhead to a frame. |
+| `play` / `pause` with exact selection | `Motion.play` / `Motion.pause` | Control fixture playback without rediscovering a replacement process. |
+| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact publication. |
 
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
+`Motion.loadFixture` is intentionally unavailable over an authenticated
+inspector because its server-side path parameter would grant filesystem
+authority. Load replay fixtures inside an explicitly owned test host instead.
 
 ### trace
 
@@ -1326,21 +1350,18 @@ runtime trace, fixture replay, and cost-attribution workflow.
 
 The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
 not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
-require a Pulp source checkout plus a custom inspector fixture. Offline
+require a Pulp source checkout plus an explicitly owned host that constructs
+`InspectorServer`, wires `DomainHandler`, and publishes authenticated
+discovery. Offline
 `query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
 inspector session.
 
 ```bash
-pulp trace start --categories dsp,render --out /tmp/x.pftrace
-pulp trace stop                                   # → prints the .pftrace path
-pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
-pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
-pulp trace query --preset dsp-hotspots
-pulp trace slowest-frames
-pulp trace xruns
-pulp trace layout-vs-paint
+pulp trace start --categories dsp,render --ring-mb 128
+# copy the exact stop command printed by start:
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
 pulp trace snapshot
-pulp trace explain "why is my plugin slow to open?"
 pulp trace doctor                                 # readiness: inspector + build + trace_processor
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1348,25 +1369,27 @@ pulp trace open /tmp/x.pftrace                    # serve on loopback + open in 
 
 Options:
 
-- `--port PORT` - inspector port; defaults to `9147` / `$PULP_INSPECTOR_PORT`
+- `--port PORT` - optional filter for owner-private authenticated discovery;
+  `$PULP_INSPECTOR_PORT` supplies the same explicit filter
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for `stop` and for the
+  reserved live `query` / `explain` methods. An unqualified `start` resolves
+  the selector before mutating and prints the pinned follow-up command.
+  Publication IDs are non-reusable across server restarts.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `start [--categories LIST] [--out FILE.pftrace] [--ring-mb N]` | `Trace.startSession` | Begin a session recording the selected span categories into an in-process ring. |
+| `start [--categories LIST] [--ring-mb 1..512]` | `Trace.startSession` | Begin a session recording the selected span categories into a bounded in-process ring. The host owns the flushed trace destination; remote clients cannot select a filesystem path. |
 | `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the live captured trace; JSON by default. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Reserved live surface; currently fails with `capability_unavailable`. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
-| `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
-| `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
-| `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |
-| `dsp-hotspots` | `Trace.query` | L0 preset: per-node DSP cost, most expensive first. |
-| `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
-| `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
-| `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
-| `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `query --preset <name>` and named preset verbs | `Trace.query` | Reserved; currently fail with `capability_unavailable`. |
+| `snapshot` | `Trace.snapshot` | Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and the optional `last_trace_path`. |
+| `explain "<question>"` | `Trace.explain` | Reserved; currently fails with `capability_unavailable`. Use the `trace-analysis` skill with a flushed `.pftrace`. |
+| `doctor` | client-side + `Trace.snapshot` | Readiness check. Uses the authenticated `Trace.snapshot` request as its inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 

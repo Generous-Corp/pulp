@@ -1,8 +1,10 @@
 #include "transaction_note_internal.hpp"
 
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <algorithm>
+#include <variant>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -132,12 +134,35 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
         if (std::binary_search(replacement_ids.begin(), replacement_ids.end(), modifier.note_id))
             surviving_modifiers.push_back(modifier);
 
+    // A payload that names the modifiers it expects gates them the same way the
+    // note arrays gate the notes: an inverse restoring a removed note's modifier
+    // must not overwrite a modifier set someone else has since changed. An empty
+    // array is how an authoring caller spells "unstated", so it gates nothing.
+    if (!replace.expected_modifiers.empty()) {
+        std::vector<NoteModifier> expected_modifiers = replace.expected_modifiers;
+        std::sort(expected_modifiers.begin(), expected_modifiers.end(),
+                  [](const NoteModifier& lhs, const NoteModifier& rhs) {
+                      return lhs.note_id < rhs.note_id;
+                  });
+        if (notes->modifiers().size() != expected_modifiers.size() ||
+            !std::equal(notes->modifiers().begin(), notes->modifiers().end(),
+                        expected_modifiers.begin()))
+            return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                          transaction, command, replace.clip_id);
+    }
+
     // The command's payload is notes, so everything else the clip authors
-    // carries across: the surviving modifiers, the seed their probability draws
-    // are derived from, and the controller and expression lanes. Rebuilding
-    // from the notes alone would silently erase all three.
+    // carries across: the modifiers, the seed their probability draws are
+    // derived from, and the controller and expression lanes. Rebuilding from
+    // the notes alone would silently erase all three. A payload that states its
+    // own modifiers replaces the surviving set outright rather than adding to
+    // it — that is how an inverse reinstates the modifier of a note this edit's
+    // replacement brings back, which no filter over live content can recover.
+    std::vector<NoteModifier> next_modifiers = replace.replacement_modifiers;
+    if (next_modifiers.empty())
+        next_modifiers = std::move(surviving_modifiers);
     auto next_notes = MidiContent::create(
-        replace.replacement, std::move(surviving_modifiers), notes->modifier_seed(),
+        replace.replacement, std::move(next_modifiers), notes->modifier_seed(),
         std::vector<MidiExpressionLane>(notes->lanes().begin(), notes->lanes().end()));
     if (!next_notes)
         return runtime::Err(model_failure(transaction, command, next_notes.error()));
@@ -171,6 +196,14 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
                                                     expected_notes->notes().end());
     const std::vector<NoteEvent> canonical_replacement(next_notes->notes().begin(),
                                                        next_notes->notes().end());
+    // The inverse names both modifier sets outright. Restoring the notes alone
+    // would leave a removed note's modifier unrecoverable: it is gone from the
+    // content the inverse reduces against, so no filter over live state can
+    // bring it back.
+    const std::vector<NoteModifier> modifiers_before(notes->modifiers().begin(),
+                                                     notes->modifiers().end());
+    const std::vector<NoteModifier> modifiers_after(next_notes->modifiers().begin(),
+                                                    next_notes->modifiers().end());
     auto next_project =
         replace_note_content(project, *sequence, *track, *clip, std::move(next_notes).value(),
                              identity_changes, identity_plan->next_item_id, transaction, command);
@@ -179,7 +212,8 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
     return runtime::Ok(NoteCommandReduction{
         std::move(next_project).value(),
         ReplaceNoteContent{replace.sequence_id, replace.track_id, replace.clip_id,
-                           canonical_replacement, canonical_expected},
+                           canonical_replacement, canonical_expected, modifiers_after,
+                           modifiers_before},
         {replace.clip_id, replace.track_id, replace.sequence_id,
          DirtyFlags::Content | DirtyFlags::Notes}});
 }
@@ -187,8 +221,7 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
 } // namespace
 
 bool is_note_command(const Command& command) noexcept {
-    return std::holds_alternative<SetNoteVelocity>(command) ||
-           std::holds_alternative<ReplaceNoteContent>(command);
+    return std::visit([]<typename T>(const T&) { return is_note_command_type<T>; }, command);
 }
 
 runtime::Result<NoteCommandReduction, TransactionError>

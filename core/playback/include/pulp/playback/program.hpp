@@ -263,11 +263,16 @@ class PlaybackProgramStore {
   private:
     friend struct PlaybackProgramCompilerCore;
     friend class ProgramCompilerTask;
-    void publish(std::shared_ptr<const PlaybackProgram> program) {
+    void publish(std::shared_ptr<const PlaybackProgram> program,
+                 std::shared_ptr<const timeline::Project> project) {
+        live_project_ = std::move(project);
         slot_.publish(std::move(program));
     }
     const std::shared_ptr<const PlaybackProgram>& live() const noexcept {
         return slot_.live();
+    }
+    const std::shared_ptr<const timeline::Project>& live_project() const noexcept {
+        return live_project_;
     }
     bool try_bind_compiler() noexcept {
         bool expected = false;
@@ -277,6 +282,9 @@ class PlaybackProgramStore {
         compiler_bound_.store(false, std::memory_order_release);
     }
     runtime::Slot<const PlaybackProgram> slot_;
+    // Control-thread provenance for exact same-revision adoption by a newly
+    // bound compiler. Render threads never touch this sidecar.
+    std::shared_ptr<const timeline::Project> live_project_;
     std::atomic<bool> compiler_bound_{false};
 };
 

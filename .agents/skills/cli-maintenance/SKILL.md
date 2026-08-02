@@ -201,13 +201,13 @@ compare` is an advisory *judgment*, never a gate.
 `127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
 general-purpose class (a deliberate capability it tests, via
 `start_socket_server_on_any_interface`), which is the wrong one here: the
-inspector transport has no authentication and its protocol exposes
-`Runtime.evaluate`, so binding it where the network can reach it publishes
-arbitrary code execution in the host process. `pulp inspect --host` is the
-*client* side and stays — it is how you reach a remote machine's loopback
-through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
-this: loopback must connect (the control) and the host's real IPv4 must be
-refused.
+inspector transport mutually authenticates with nonce/HMAC proof backed by an
+owner-private per-session credential, but its protocol can still expose
+high-authority operations. Loopback is a separate, non-negotiable
+defense-in-depth boundary. `pulp inspect --host` is the *client* side and
+stays — it is how you reach a remote machine's loopback through an SSH tunnel.
+`test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
+(the control) and the host's real IPv4 must be refused.
 
 Normal Pulp standalone and plugin-format launches do **not** construct this
 server. `pulp inspect` is currently an experimental client for an explicitly
@@ -219,7 +219,8 @@ surface as an installed-user or ordinary `pulp run` workflow. Keep
 `docs/reference/cli.md`, and
 `docs/reference/development-inspector-capabilities.md` aligned; the
 `inspector_truth_check.py` mutation gate protects selected documentation and
-client-description claims, but does not prove runtime construction sites.
+client-description claims, including these shipped agent workflows, but does
+not prove runtime construction sites.
 
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
@@ -1370,7 +1371,7 @@ When this is the right tool vs. `shipyard rescue`:
 | Var | Purpose |
 |-----|---------|
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Selector when local has capacity |
-| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Selector when local is saturated (overflow target; despite the historical name, this is the generic overflow var) |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Generic selector when local is saturated; bare `local-only` disables overflow |
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | BUSY count that trips overflow |
 
 Surfaces:
@@ -1381,15 +1382,13 @@ Surfaces:
 - `pulp overflow enable [--to <selector>]` — set the overflow target.
   Default `--to "macos-15"` for free GH-hosted; pass
   `--to '"namespace-profile-generouscorp-macos"'` for paid Namespace.
-- `pulp overflow disable` — delete the overflow var. Note this only
-  changes future dispatches; in-flight cloud runs keep running.
+- `pulp overflow disable` — write the bare `local-only` sentinel. Note this
+  only changes future dispatches; in-flight cloud runs keep running.
 - `pulp overflow threshold [N]` — get (no arg) or set the BUSY count.
 
-The variable is named `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` for
-historical reasons (Plan B in `planning/2026-05-13-namespace-overflow-
-implementation.md` originally targeted Namespace exclusively). It now
-holds the overflow target regardless of provider — rename tracked as a
-future cleanup.
+Unset and empty overflow values restore `build.yml`'s GitHub-hosted
+`macos-15` default; they do not disable overflow. Namespace-specific selectors
+remain separate break-glass variables for explicit operator routing.
 
 ## `pulp upgrade --check-only`
 

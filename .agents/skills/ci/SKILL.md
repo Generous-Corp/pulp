@@ -108,13 +108,18 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   gate also runs `--repeat until-pass:2`, so a single timing-flake self-heals.
 - **`validation` is example-only** — the `pluginval-*` / `auval-*` /
   `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
-  gate on the **`example-validation`** lane
-  (`.github/workflows/examples-validation.yml`), which blocks PRs touching
-  `examples/**` and internally skips otherwise (required-safe: always reports).
+  run on the **`example-validation`** lane
+  (`.github/workflows/examples-validation.yml`), which reports on relevant PRs
+  and internally skips otherwise (required-safe: always reports). The lane
+  remains advisory until the promotion described below.
 - **The required `macos` gate does NOT compile the examples.** `build.yml` (and
   `cross-platform-check.yml`, the windows gates) configure with
-  `PULP_BUILD_EXAMPLES=OFF`. **Only `release-cli.yml` compiles the examples** — at
-  release time. Do not assume a green required gate means the examples build.
+  `PULP_BUILD_EXAMPLES=OFF`. The path-filtered `example-validation` workflow
+  compiles the full examples tree on Linux and macOS for relevant changes;
+  Shipyard's separate blocking `[validation.default]` temporarily retains
+  `PULP_BUILD_EXAMPLES=ON` until that stable context is promoted to required.
+  `release-cli.yml` also compiles them at release time. Do not assume a green
+  required gate by itself means the examples build.
 
 So a red required gate should NOT be an example `pluginval`/`auval` timeout — if
 it is, the exclusion regressed. The `example-validation` lane is **not yet in
@@ -323,8 +328,8 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
    action. This alone avoids chasing main-side breakage.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
-   `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
-   + the M5 overflow), which are usually idle. Confirm with:
+   `macos` gate runs on the **fast local JIT VM pool** selected by
+   `pulp-gate-fast` (M3 + M5), which is usually idle. Confirm with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
@@ -547,27 +552,22 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
-## Fork PRs are structurally kept off the local Macs
+## Fork PR routing is not a self-hosted trust boundary
 
-`build.yml`'s resolver blanks both self-hosted macOS selectors when a pull
-request's head lives in another repository, so the leg falls through to
-GitHub-hosted `macos-15`. The reason it must be structural rather than a habit:
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable**, and variables — unlike
-secrets — *do* resolve for fork runs, so an "Approve and run" click would
-otherwise dispatch contributor code onto the Studios that hold the signing
-keychain and notary key.
+`build.yml` currently blanks its self-hosted macOS selectors for a fork PR and
+falls through to hosted `macos-15`. That is useful defense in depth for the
+checked-in workflow, but it is not access control: pull-request workflow YAML is
+part of the contributor-controlled merge commit and can remove its own guard.
+Repo variables also resolve for fork runs.
 
-Consequences worth knowing:
-
-- A fork PR still gets a macOS result (clean hosted runner), but the required
-  `macos` check is posted by the local lane, so it **cannot merge on its own**.
-  That is intended — adopt the commits onto an in-repo `contrib/*` branch and
-  ship that (see the `contrib-intake` skill).
-- If a fork PR's macOS leg unexpectedly shows a self-hosted runner, the guard has
-  regressed — `tools/scripts/test_fork_pr_runner_routing.py` (ctest
-  `fork-pr-runner-routing`) exists to catch that, and runs the resolver the
-  workflow actually embeds rather than a copy of its logic.
-- Same-repo PRs, pushes, and `workflow_dispatch` are unaffected.
+The real boundary must be enforced outside PR-controlled YAML with an
+organization runner group restricted to selected trusted workflow refs (or an
+equivalent trusted dispatcher). Until that exists, do not add another private
+pool to automatic `pull_request` routing. In particular, the Mac Pro Linux pool
+and example-validation advisory macOS selector remain `workflow_dispatch`-only.
+The existing fork-routing regression test verifies defense-in-depth behavior;
+it must never be cited as proof that a runner is inaccessible to untrusted
+workflow revisions.
 ## Re-running a wedged required check
 
 `macos` and `Enforce version & skill sync` can be re-dispatched
@@ -849,6 +849,17 @@ uses, or the golden warms a cache the real jobs never touch.
   hostile-state rejection (overflow/CRC/truncation) folded into
   `wam_feature_runner.mjs` — so a regression in the state codec or chain runtime
   fails here rather than only in a browser.
+- **`web-plugins.yml` also hosts a non-browser job: `Timeline fixture corpus
+  (WASM)`.** It builds `pulp-fixture-runner` through the Emscripten-only root
+  `core/interchange/wasm` and runs the timeline conformance corpus under node
+  (`tools/ci/wasm-fixture-lane.sh`). It lives in this file only to share the
+  emsdk pin — it needs no Skia slice, no Chrome, no wasi-sdk, no npm, and
+  finishes in about a minute, so it is a sibling JOB and not a step in the lane
+  above. When adding another emsdk-only check, follow that shape rather than
+  appending to the browser lane. The lane script runs the corpus twice on
+  purpose (good corpus green, broken copy red); if you ever "simplify" it to one
+  run, you have deleted the only thing proving the wasm build validates
+  anything.
 - **The GPU-audio proof inside `web-plugins.yml` needs a real GPU, so it is a
   macOS job.** The Linux leg has **no WebGPU adapter at all** (measured:
   `--use-webgpu-adapter=swiftshader` and `forceFallbackAdapter:true` both return
@@ -2686,7 +2697,9 @@ runs on the local M1s or overflows to github-hosted `macos-15`. The rule:
 **The probe must count only macOS Build-and-Test jobs that are RIGHT NOW
 `status == "in_progress"` on a local M1** — a job whose `status` is
 `in_progress` *and* whose `labels` array contains the local self-hosted
-label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `sanitizer`). Everything
+label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `pulp-gate-fast`). The probe
+label must match the required selector's fast runner class; otherwise an idle
+rollback-only M1 can suppress overflow for work it cannot serve. Everything
 else counts 0:
 
 - A `queued` Build-and-Test run has dispatched nothing — never enumerate
@@ -3622,14 +3635,17 @@ Then proceed with the `ship` workflow below.
 ## Runner Priority (hard rule)
 
 **GitHub-hosted is the default runner provider** for Linux and Windows.
-macOS uses the self-hosted `pulp-build` runners. Namespace is not a
+macOS uses the self-hosted fast-gate runner class declared in
+`tools/scripts/runner_topology.json`. Namespace is not a
 default PR-validation backend after the 2026-05-20 cost cutover. The
 required branch-protection check on `main` is the `macos` alias job —
 that name MUST NOT be renamed.
 
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
-- `PULP_LOCAL_MACOS_RUNS_ON_JSON = ["self-hosted","pulp-build"]` (local mac selector)
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON` must match the
+  `tools/scripts/runner_topology.json` contract (currently the ephemeral
+  `pulp-gate-fast` class)
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = local-only` (no Namespace overflow)
 - `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` should be unset unless the operator is deliberately testing Namespace
 
@@ -3736,7 +3752,12 @@ REQUESTED_PROVIDER:
 ```
 
 Priority order:
-1. **macOS local GitHub runner** — `build.yml` reads `PULP_LOCAL_MACOS_RUNS_ON_JSON` into `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON`; with the usual value `["self-hosted","sanitizer"]`, the macOS build uses Daniels-MacBook-Pro.
+1. **macOS local GitHub runner** — `build.yml` reads
+   `PULP_LOCAL_MACOS_RUNS_ON_JSON` into
+   `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON`. Do not copy a selector from this
+   prose: use the exact value contracted in
+   `tools/scripts/runner_topology.json` and verify it against the live repo
+   variable with `runner_topology_check.py --mode=report`.
 2. **GitHub-hosted Linux/Windows** — advisory; failures should be filed as platform issues and should not block a macOS-focused merge.
 3. **Legacy SSH targets** — only when the user explicitly asks. Do not use `ssh ubuntu` or `ssh win` by default.
 
@@ -3796,7 +3817,11 @@ hit a generator-mismatch error against the warm dir.
   ```
   Passing `-f runner_provider=namespace` will fail until the
   `PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON` repo variables are restored.
-- **Pin macOS to a local runner selector**: set `PULP_LOCAL_MACOS_RUNS_ON_JSON` at the repo level, or pass `macos_runner_selector_json` on a manual dispatch. Keep the selector compatible with the runner labels (`self-hosted`, `sanitizer`).
+- **Pin macOS to a local runner selector**: set
+  `PULP_LOCAL_MACOS_RUNS_ON_JSON` at the repo level, or pass
+  `macos_runner_selector_json` on a manual dispatch. Use the contracted label
+  set in `tools/scripts/runner_topology.json`; do not maintain a second copy
+  here.
 - **Do not use Namespace overrides**: any remaining Namespace variable or mode is stale configuration and should be removed rather than worked around.
 
 ## Commands
@@ -4800,7 +4825,8 @@ sanitizer, or review failures.
 ## Self-hosted runner ops
 
 Pulp's required `macos` branch-protection check on `main` routes
-through the local self-hosted `sanitizer` runner (via the
+through the local self-hosted fast-gate class declared in
+`tools/scripts/runner_topology.json` (via the
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` repo variable, consumed by
 `.github/workflows/build.yml` → `resolve-provider`). When that runner
 wedges, every PR's `macos` check sits queued indefinitely and all PRs
@@ -4839,7 +4865,7 @@ polling. Shipyard v0.56.2 adds a REST fallback for this wait path; use
 ### Prevent — `shipyard runner watch --kill-hung-workers` (v0.54.0+)
 
 ```bash
-# One-time setup on a self-hosted runner host (Daniels-MacBook-Pro):
+# One-time setup on each persistent self-hosted runner host:
 shipyard runner watch --kill-hung-workers
 # Pair with launchd / systemd for unattended ops.
 ```
@@ -5048,15 +5074,19 @@ Adding a new top-level entry requires the same-PR allowlist update — the gate'
 
 Companion-track item U-1 in `planning/2026-05-17-refactor-roadmap-final.md`.
 
-## Namespace macOS overflow on `workflow_dispatch`
+## Generic macOS overflow on `workflow_dispatch`
 
-`resolve-provider` in `.github/workflows/build.yml` applies the Namespace macOS overflow logic on both `pull_request` AND `workflow_dispatch` events (since 2026-05-19, closes #2314).
+`resolve-provider` in `.github/workflows/build.yml` applies generic macOS
+overflow logic on both `pull_request` and `workflow_dispatch` events. The
+current selector is `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`; the bare
+`local-only` sentinel disables overflow, while an unset variable restores the
+GitHub-hosted `macos-15` default.
 
 Pre-2026-05-19 behavior gated overflow on `EVENT_NAME == "pull_request"` only, which silently routed `shipyard pr` ship cycles (`workflow_dispatch`-triggered) back to the local self-hosted Mac. That defeated the 2026-05-18 cloud cutover for the path most contributors hit.
 
 Precedence on `workflow_dispatch`:
 1. `inputs.macos_runner_selector_json` (operator override) — always wins.
-2. Namespace overflow when local Mac BUSY ≥ threshold.
+2. Generic overflow when local Mac BUSY ≥ threshold, unless `local-only`.
 3. Local default (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
 
 Manual `workflow_dispatch` with an explicit selector input still overrides; the fix only changes behavior for dispatches that arrive without one (which is the `shipyard pr` shape).
@@ -5102,25 +5132,24 @@ Key facts:
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
 
-## macOS runner routing — local primary, local-VM overflow
+## macOS runner routing — fast JIT primary, local-only overflow
 
 **A routing var describes REALITY; `build.yml`'s `||` default is only the
 fallback.** Read the live variable before reasoning about where a leg runs —
 the workflow's literal default is what happens when the var is *unset*, not
-what happens. Both are documented below, in that order.
+what happens.
 
-### Live routing state (verified 2026-07-16)
+`tools/scripts/runner_topology.json` is the single reviewed lane-to-selector
+contract; do not copy its arrays into this skill. Reconcile it against live repo
+variables and service history with:
 
-| Variable | Value | Lane |
-|---|---|---|
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — the required gate |
-| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
-| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
-| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
-| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
-| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
-| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
-| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
+```bash
+python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+The contracted required gate is the fast M3/M5 JIT class, macOS overflow is
+disabled with the `local-only` sentinel, and paid Namespace variables remain
+unset. Read the JSON contract for exact labels and hosts.
 
 **Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
 are reserved for required merge-gate work. Example validation and format
@@ -5136,8 +5165,9 @@ required runner. A local advisory lane needs its own tartci supervisor,
 governor capacity, and GitHub runner label. Shipyard and tartci are the
 placement/control path; do not use Orchard.
 
-So macOS overflow lands on **local JIT VMs**, not the cloud. Namespace vars are
-deliberately UNSET for cost control — do not treat them as an available lane.
+MacOS overflow is currently **disabled**, so saturated required work remains on
+the fast local JIT pool. Namespace vars are deliberately UNSET for cost control
+— do not treat them as an available lane.
 
 **A Linux/Windows runner without a `pulp-host-*` label is invisible to every
 lane.** Those lanes pin a machine, and GitHub selects a runner only when it
@@ -5161,11 +5191,11 @@ The `resolve-provider` job in `build.yml` decides per-run where each
 
 - **Local first.** While the local self-hosted Macs have spare capacity
   the macOS leg routes to them (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
-- **Overflow.** When the primary pool is saturated the leg routes to
-  `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` — the local VM pool per the
-  table above.
-  GitHub-hosted `macos-15` is free (the repo is public), so falling back
-  to it costs nothing; it just runs slower.
+- **Overflow is disabled live.** `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
+  is the `local-only` sentinel, so saturation leaves the leg on the fast
+  local JIT pool. If an operator deliberately re-enables overflow, that
+  variable supplies its selector; unsetting it falls back to free
+  GitHub-hosted `macos-15`.
 - **Capacity-aware (`#3299`).** "Saturated" is decided by real SUPPLY
   first, not just DEMAND. `_count_idle_local_runners()` queries
   `actions/runners` for self-hosted macOS runners that are `online` AND
@@ -5665,3 +5695,24 @@ with `unbound variable` under `set -u`, and the failure looks like the new gate
 itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
 the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
 Pass the same value through to a script that takes a root argument.
+
+## Apple's clang ships no libFuzzer runtime — fuzzing cannot live on the macOS lanes
+
+`libclang_rt.fuzzer_osx.a` is **absent from the Xcode toolchain** (Homebrew LLVM has it). Pulp's
+sanitizer lane runs on GitHub-hosted `macos-15` with Apple clang, so **a `-fsanitize=fuzzer`
+target would not build there at all** — a libFuzzer-only fuzzing design runs nowhere in this
+repo's CI.
+
+The shape that works, and the one `timeline-fuzz.yml` uses:
+
+- **Oracles live outside the fuzzer** and are toolchain-independent, so both lanes share them.
+- A **deterministic seeded replay** is the always-on lane — plain Catch2, runs on every platform,
+  and a failure is reproducible from a `(seed, index)` pair rather than a corpus artifact.
+- The **libFuzzer target is opt-in** behind a CMake option and **Linux-only** in CI, with a
+  configure-time probe that fails naming the missing runtime instead of dying at link with an
+  unresolved-symbol error that reads like a code bug.
+
+**A fuzz job's wall clock is usually its build, not its fuzzing** — measured here at ~37k
+cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
+almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
+plus `-max_total_time` on libFuzzer.

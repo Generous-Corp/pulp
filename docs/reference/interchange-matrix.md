@@ -69,6 +69,12 @@ is not a reason to add a model feature.
 | `tempo.value-quantized` | yes | A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation. |
 | `clip.media-window` | yes | A media clip that plays a source subrange rather than the referenced asset's complete frame range. |
 | `clip.fade-shape` | yes | A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like. |
+| `sequence.section-role` | yes | A region that names the structural part it spans, beyond its free-text name. |
+| `context.chord-bass` | yes | A chord statement naming the pitch class in the bass, rather than sounding root position. |
+| `context.chord-extension` | yes | A chord statement carrying added scale degrees beyond its quality. |
+| `context.chord-voicing` | yes | A chord statement carrying a hint for how a generator should spread its tones. |
+| `tuning.project` | yes | A document-wide statement of the tuning every instrument plays in. |
+| `tuning.instrument` | yes | One instrument overriding the document-wide tuning with its own. |
 
 ## DAWproject
 
@@ -128,6 +134,12 @@ Format id `dawproject`. Writer registered: yes.
 | `tempo.value-quantized` | none | not declared |
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
+| `sequence.section-role` | none | not declared |
+| `context.chord-bass` | none | not declared |
+| `context.chord-extension` | none | not declared |
+| `context.chord-voicing` | none | not declared |
+| `tuning.project` | none | not declared |
+| `tuning.instrument` | none | not declared |
 
 ### Export
 
@@ -183,6 +195,12 @@ Format id `dawproject`. Writer registered: yes.
 | `tempo.value-quantized` | full |  |  |  |
 | `clip.media-window` | drop |  | dropped | the writer references the complete media asset, so a nonzero source start or partial frame count is dropped |
 | `clip.fade-shape` | drop |  | dropped | the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped |
+| `sequence.section-role` | drop |  | dropped | DAWproject arrangement markers carry a name and span but no typed structural role |
+| `context.chord-bass` | drop |  | dropped | the DAWproject chord representation carries quality and root but no bass |
+| `context.chord-extension` | drop |  | dropped | the DAWproject chord representation carries no added scale degrees |
+| `context.chord-voicing` | drop |  | dropped | the DAWproject chord representation carries no voicing hint |
+| `tuning.project` | drop |  | dropped | DAWproject has no document-wide tuning statement |
+| `tuning.instrument` | drop |  | dropped | DAWproject has no per-instrument tuning statement |
 
 ## Standard MIDI File
 
@@ -242,6 +260,12 @@ Format id `smf`. Writer registered: yes.
 | `tempo.value-quantized` | none | not declared |
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
+| `sequence.section-role` | none | not declared |
+| `context.chord-bass` | none | not declared |
+| `context.chord-extension` | none | not declared |
+| `context.chord-voicing` | none | not declared |
+| `tuning.project` | none | not declared |
+| `tuning.instrument` | none | not declared |
 
 ### Export
 
@@ -297,6 +321,12 @@ Format id `smf`. Writer registered: yes.
 | `tempo.value-quantized` | degrade | `tempo.map` | approximated | tempo values are rounded to the nearest representable integer microseconds per quarter note |
 | `clip.media-window` | drop | | dropped | not declared |
 | `clip.fade-shape` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped |
+| `sequence.section-role` | drop |  | dropped | the bounded writer emits a region's name and span but not the part it names |
+| `context.chord-bass` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `context.chord-extension` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `context.chord-voicing` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `tuning.project` | drop |  | dropped | Standard MIDI Files have no document-wide tuning statement |
+| `tuning.instrument` | drop |  | dropped | Standard MIDI Files have no per-instrument tuning statement |
 
 ## Adding a format
 

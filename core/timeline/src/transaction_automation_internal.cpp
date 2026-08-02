@@ -1,5 +1,6 @@
 #include "transaction_automation_internal.hpp"
 
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <optional>
@@ -143,8 +144,7 @@ reduce_remove(const Project& project, const RemoveAutomationLane& remove,
 } // namespace
 
 bool is_automation_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertAutomationLane>(command) ||
-           std::holds_alternative<RemoveAutomationLane>(command);
+    return std::visit([]<typename T>(const T&) { return is_automation_command_type<T>; }, command);
 }
 
 runtime::Result<AutomationCommandReduction, TransactionError>

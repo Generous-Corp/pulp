@@ -177,6 +177,20 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U32",
+          "name": "chord-bass",
+          "required": true,
+          "schema_field": "chord_bass",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U32",
+          "name": "chord-extensions",
+          "required": true,
+          "schema_field": "chord_extensions",
+          "value_type": "uint"
+        },
+        {
           "kind": "String",
           "name": "chord-quality",
           "required": true,
@@ -210,6 +224,13 @@
           "required": true,
           "schema_field": "scale_root",
           "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "voicing",
+          "required": true,
+          "schema_field": "voicing",
+          "value_type": "string"
         }
       ],
       "name": "timeline:chord-scale-event",
@@ -659,6 +680,42 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "expected-before-track-id",
+          "required": false,
+          "schema_field": "expected_before_track_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "replacement-before-track-id",
+          "required": false,
+          "schema_field": "replacement_before_track_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:move-track",
+      "schema_type": "pulp.timeline.command.move_track",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "asset-id",
           "required": true,
           "schema_field": "asset_id",
@@ -943,9 +1000,23 @@
         },
         {
           "kind": "Array",
+          "name": "expected-modifiers",
+          "required": false,
+          "schema_field": "expected_modifiers",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
           "name": "replacement",
           "required": true,
           "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "replacement-modifiers",
+          "required": false,
+          "schema_field": "replacement_modifiers",
           "value_type": "json"
         },
         {
@@ -1395,6 +1466,42 @@
       "version": 1
     },
     {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "string"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-track-name",
+      "schema_type": "pulp.timeline.command.set_track_name",
+      "version": 1
+    },
+    {
       "domain": "Content",
       "flags": [],
       "name": "timeline:content:empty",
@@ -1697,11 +1804,19 @@
           "required": false,
           "schema_field": "tempo_map",
           "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "tuning",
+          "ref": "pulp.timeline.tuning",
+          "required": false,
+          "schema_field": "tuning",
+          "value_type": "json"
         }
       ],
       "name": "timeline:project",
       "schema_type": "pulp.timeline.project",
-      "version": 2
+      "version": 3
     },
     {
       "domain": "Document",
@@ -1740,6 +1855,13 @@
           "required": true,
           "schema_field": "position",
           "value_type": "int"
+        },
+        {
+          "kind": "String",
+          "name": "role",
+          "required": true,
+          "schema_field": "role",
+          "value_type": "string"
         }
       ],
       "name": "timeline:region",
@@ -1859,7 +1981,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 6
+      "version": 7
     },
     {
       "domain": "Document",
@@ -2055,11 +2177,55 @@
           "required": true,
           "schema_field": "take_lanes",
           "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "tuning",
+          "ref": "pulp.timeline.tuning",
+          "required": false,
+          "schema_field": "tuning",
+          "value_type": "json"
         }
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 7
+      "version": 8
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "keyboard-map-content",
+          "required": true,
+          "schema_field": "keyboard_map_content",
+          "value_type": "string"
+        },
+        {
+          "kind": "U32",
+          "name": "reference-pitch-millihertz",
+          "required": true,
+          "schema_field": "reference_pitch_millihertz",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "scale-content",
+          "required": true,
+          "schema_field": "scale_content",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "system",
+          "required": true,
+          "schema_field": "system",
+          "value_type": "string"
+        }
+      ],
+      "name": "timeline:tuning",
+      "schema_type": "pulp.timeline.tuning",
+      "version": 1
     }
   ],
   "x-pulp-generator": "schema-cli-emit",

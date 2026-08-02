@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "tools/import-design/browser_capture_ir.hpp"
+#include "tools/import-design/browser_capture_styles.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -702,4 +704,198 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     // Both controls name the SAME macro, so a macro-keyed anchor would collide
     // here and bind neither.
     REQUIRE(anchors.size() == 2);
+}
+
+#ifdef PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR
+// Chrome solves the page; the lowering's job is to carry that solved appearance
+// into the IR rather than leave the native nodes as transparent hit targets over
+// a screenshot. The fixture is a real capture, so these assertions run against
+// what Chrome actually serializes — including the `/` alpha separator in
+// `oklab(L a b / A)`, which a path-redaction pass in the capture runtime used to
+// rewrite to "<local-path>" and make every translucent colour unparseable.
+TEST_CASE("a lowered control carries the appearance Chrome solved",
+          "[import-design][browser-capture][computed-style]") {
+    const fs::path fixture{PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR};
+    REQUIRE(fs::exists(fixture / "capture.json"));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        fixture / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> controls;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.attributes.count("pulpParamKey") != 0)
+                controls.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(controls.size() == 2);
+
+    const auto& styled = result.design_ir->root.attributes.at(
+        "controls_with_captured_style");
+    CHECK(styled == "2");
+
+    for (const auto* control : controls) {
+        const auto& style = control->style;
+
+        // The knob face is painted by a radial gradient, not a flat fill. The
+        // gradient is the single clearest proof that the appearance survived:
+        // it exists only in the computed value, never in the semantic report.
+        REQUIRE(style.background_gradient.has_value());
+        CHECK(style.background_gradient->find("radial-gradient") !=
+              std::string::npos);
+        // color-mix() resolves to oklab() in Chrome's computed value. Its alpha
+        // arrives after a literal "/" — the exact byte the redaction pass ate.
+        CHECK(style.background_gradient->find("oklab(") != std::string::npos);
+        CHECK(style.background_gradient->find("<local-path>") ==
+              std::string::npos);
+
+        // `border-radius: 50%` on the face is a circle, so the percentage has
+        // to be resolved against the element's own box to survive as px. The
+        // reference is the 98px border box (96px content plus a 1px border per
+        // side) — the same box the paint bounds report — not the content box.
+        REQUIRE(style.border_radius.has_value());
+        CHECK(*style.border_radius == Catch::Approx(49.0f).margin(0.5));
+
+        // Three layered shadows, two of them inset. Collapsing the declaration
+        // to one string would drop every layer past the first.
+        REQUIRE(style.box_shadow.size() == 3);
+        int inset_layers = 0;
+        for (const auto& layer : style.box_shadow) {
+            CHECK_FALSE(layer.color.empty());
+            CHECK(layer.color.find("<local-path>") == std::string::npos);
+            if (layer.inset) ++inset_layers;
+        }
+        CHECK(inset_layers == 2);
+        // Ordered, and the offsets are real numbers rather than a parse that
+        // silently produced zeroes.
+        CHECK(style.box_shadow[0].offset_y == Catch::Approx(2.0f));
+        CHECK(style.box_shadow[1].offset_y == Catch::Approx(-14.0f));
+        CHECK(style.box_shadow[1].blur == Catch::Approx(22.0f));
+
+        // A translucent accent border, carried per side and as the uniform
+        // shorthand.
+        REQUIRE(style.border_top_color.has_value());
+        CHECK(style.border_top_color->find("oklab(") != std::string::npos);
+        CHECK(style.border_top_color->find('/') != std::string::npos);
+        REQUIRE(style.border_width.has_value());
+        CHECK(*style.border_width == Catch::Approx(1.0f));
+
+        REQUIRE(style.filter.has_value());
+        CHECK(style.filter->find("saturate") != std::string::npos);
+
+        // Appearance only: the design's paint box stays the placement
+        // authority, so the page's own layout values must not leak in.
+        REQUIRE(style.position.has_value());
+        CHECK(*style.position == "absolute");
+        REQUIRE(style.width.has_value());
+        CHECK(*style.width == Catch::Approx(98.0f));
+    }
+
+    // The full-frame capture node is untouched by style lowering: it still
+    // backs the panel, so nothing regresses visually while the controls gain
+    // appearance of their own.
+    const auto& root = result.design_ir->root;
+    REQUIRE_FALSE(root.children.empty());
+    const auto& capture = root.children.front();
+    CHECK(capture.style.object_fit.has_value());
+    CHECK_FALSE(capture.style.background_gradient.has_value());
+}
+#endif  // PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR
+
+// Direct cover for the CSS→IR mapping, independent of a capture: these are the
+// shapes Chrome's computed values actually take.
+TEST_CASE("computed style mapping folds CSS onto the IR",
+          "[import-design][browser-capture][computed-style]") {
+    using pulp::import_design::apply_computed_styles;
+    using pulp::import_design::CapturedBox;
+    using pulp::import_design::parse_box_shadow;
+
+    SECTION("shadow layers keep their order, inset flag, and colour commas") {
+        const auto layers = parse_box_shadow(
+            "rgba(0, 0, 0, 0.5) 0px 1px 2px 0px inset, "
+            "oklab(0.87 -0.2 0.13 / 0.34) 4px -8px 16px 2px");
+        REQUIRE(layers.size() == 2);
+        // A naive comma split would shred rgba() into four bogus layers.
+        CHECK(layers[0].color == "rgba(0, 0, 0, 0.5)");
+        CHECK(layers[0].inset);
+        CHECK(layers[0].offset_y == Catch::Approx(1.0f));
+        CHECK(layers[0].blur == Catch::Approx(2.0f));
+        CHECK(layers[1].color == "oklab(0.87 -0.2 0.13 / 0.34)");
+        CHECK_FALSE(layers[1].inset);
+        CHECK(layers[1].offset_x == Catch::Approx(4.0f));
+        CHECK(layers[1].offset_y == Catch::Approx(-8.0f));
+        CHECK(layers[1].spread == Catch::Approx(2.0f));
+    }
+
+    SECTION("a zero-width border contributes no colour") {
+        // Chrome reports border-*-color on every element whether or not a
+        // border is drawn, so an ungated mapping invents a border here.
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "0px"},
+                               {"border-right-width", "0px"},
+                               {"border-bottom-width", "0px"},
+                               {"border-left-width", "0px"},
+                               {"border-top-color", "rgb(184, 248, 192)"},
+                               {"border-right-color", "rgb(184, 248, 192)"},
+                               {"border-bottom-color", "rgb(184, 248, 192)"},
+                               {"border-left-color", "rgb(184, 248, 192)"},
+                               {"border-top-style", "solid"}},
+                              box, style);
+        CHECK_FALSE(style.border_top_color.has_value());
+        CHECK_FALSE(style.border_color.has_value());
+        CHECK_FALSE(style.border.has_value());
+        CHECK_FALSE(style.border_style.has_value());
+    }
+
+    SECTION("a real border survives as sides and shorthand") {
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "2px"},
+                               {"border-right-width", "2px"},
+                               {"border-bottom-width", "2px"},
+                               {"border-left-width", "2px"},
+                               {"border-top-color", "rgb(1, 2, 3)"},
+                               {"border-right-color", "rgb(1, 2, 3)"},
+                               {"border-bottom-color", "rgb(1, 2, 3)"},
+                               {"border-left-color", "rgb(1, 2, 3)"},
+                               {"border-top-style", "solid"}},
+                              box, style);
+        REQUIRE(style.border_color.has_value());
+        CHECK(*style.border_color == "rgb(1, 2, 3)");
+        REQUIRE(style.border.has_value());
+        CHECK(*style.border == "2px solid rgb(1, 2, 3)");
+    }
+
+    SECTION("transparent and absent values are not recorded as appearance") {
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"background-color", "rgba(0, 0, 0, 0)"},
+                               {"background-image", "none"},
+                               {"filter", "none"},
+                               {"letter-spacing", "normal"},
+                               {"opacity", "1"},
+                               {"mix-blend-mode", "normal"},
+                               {"transform", "matrix(2, 0, 0, 2, 0, 0)"}},
+                              box, style);
+        CHECK_FALSE(style.background_color.has_value());
+        CHECK_FALSE(style.background_gradient.has_value());
+        CHECK_FALSE(style.filter.has_value());
+        CHECK_FALSE(style.letter_spacing.has_value());
+        CHECK_FALSE(style.opacity.has_value());
+        CHECK_FALSE(style.mix_blend_mode.has_value());
+        // The node is placed by its already-transformed paint box, so carrying
+        // the matrix too would apply it twice.
+        CHECK_FALSE(style.transform.has_value());
+    }
+
+    SECTION("percentage radius resolves against the element's own box") {
+        CapturedBox box{0.0, 0.0, 80.0, 40.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-radius", "50%"}}, box, style);
+        REQUIRE(style.border_radius.has_value());
+        CHECK(*style.border_radius == Catch::Approx(20.0f));
+    }
 }

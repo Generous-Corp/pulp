@@ -2,6 +2,7 @@
 #pragma once
 
 #include "browser_capture_limits.hpp"
+#include "node_runtime.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -46,7 +47,13 @@ struct BrowserCandidate {
 enum class BrowserProbeFailure {
     none,
     browser_unavailable,
+    // The browser answered and is genuinely below the supported floor.
     browser_incompatible,
+    // The browser's version could not be read at all — it did not answer in
+    // time, exited non-zero, or printed something unrecognized. This says
+    // nothing about which version is installed and must never be reported as a
+    // version verdict.
+    browser_version_unreadable,
     node_unavailable,
     node_incompatible,
     capture_runtime_unavailable,
@@ -61,6 +68,10 @@ struct BrowserProbeResult {
     int major_version = 0;
     std::string failure;
     BrowserProbeFailure failure_kind = BrowserProbeFailure::none;
+
+    // How Node.js resolved for this candidate. Populated by the real probe; a
+    // caller-supplied probe leaves it at its not-yet-searched default.
+    NodeResolution node;
 };
 
 struct BrowserInstallation {
@@ -120,6 +131,11 @@ struct BrowserDiscoveryResult {
     std::optional<BrowserInstallation> selected;
     std::vector<BrowserProbeResult> probes;
     Diagnostic diagnostic;
+
+    // Node.js resolution from the probe that reached the runtime check. The
+    // failure message reports these locations instead of the browser probes,
+    // which say nothing about a missing Node.js.
+    NodeResolution node;
 
     [[nodiscard]] bool ok() const noexcept { return selected.has_value(); }
 };

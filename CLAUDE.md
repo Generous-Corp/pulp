@@ -913,6 +913,40 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 
 **The only acceptable "no test in this PR" justification** is: pre-existing historical coverage gap in a subsystem you are not modifying. In that case, file a follow-up issue linked to `#290` and reference it in the commit trailer. Anything else — ship the test.
 
+### Confirm the failure — a green test proves nothing on its own
+
+A test that passes may be asserting the same thing the code assumes, or never
+reaching the code at all. Before believing a new test covers its fix, **break the
+fix and watch that test fail.** This has repeatedly caught tests that could not
+fail: a guard that skips its check when the thing it needs is absent, an
+assertion that restates the code's own assumption, a probe whose inputs never
+reach the changed path.
+
+Run that loop with **`tools/scripts/confirm_failure.sh`** rather than by hand:
+
+```bash
+tools/scripts/confirm_failure.sh \
+  --file core/midi/include/pulp/midi/synthesiser.hpp \
+  --break "perl -0pi -e 's/policy\.priority/0/'" \
+  --build-dir build --target pulp-test-synthesiser \
+  --test ./build/test/pulp-test-synthesiser
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+```
+
+**Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
+source and rebuilding within the same filesystem second leaves make comparing
+equal mtimes, so the object is judged current and the binary keeps the OLD code —
+`touch` does not reliably fix this, because the touch lands in the same second.
+Both directions give a wrong answer, and the quiet one is worse: a stale object
+during the *break* step makes the control falsely pass, which reads as "my test
+does not cover this" and sends you off to rewrite a test that was already fine.
+The script restores through git, deletes the objects, and refuses to report a
+verdict unless it observed the recompile in the build log. `"Built target"` is
+not evidence; a compile line for your file is.
+
+Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
+`confirm-failure-harness` ctest so it is executed rather than merely present.
+
 **Test hygiene:**
 
 - Catch2 tag names cannot contain `#` (reserved). Use `[issue-NNN]` not `[#NNN]`.
@@ -940,13 +974,23 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`:
 `slow` (long, e.g. iOS try-compile) and `validation` (the **example** plugins'
 real-host `pluginval`/`auval`/`clap-dlopen` validators — the only users of that
-label) are **excluded** from the required gate and enforced elsewhere. Example
-*compile* is still gated (the gate builds `PULP_BUILD_EXAMPLES=ON`); example
-runtime *validation* runs on the path-filtered `example-validation` lane (blocks
-PRs that touch `examples/**`) and nightly. Before moving any test off the required
-gate by labeling it `slow`/`validation`, confirm something still enforces it — the
-nightly is an informational backstop, not a gate. Full model, label taxonomy, and
-how to add tests: **[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
+label) are **excluded** from the required gate. They are reported by the
+advisory `example-validation` lane and do not block until that context is
+promoted to required.
+`build.yml`'s required `macos` Actions job configures examples OFF. Shipyard's
+separate `[validation.default]` remains blocking and deliberately keeps
+`PULP_BUILD_EXAMPLES=ON` until the path-filtered `example-validation` context is
+promoted to a required check. That dedicated lane compiles
+the full examples tree on Linux and compiles plus runs the available hosted
+validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
+clap-validator require an operator-dispatched advisory image);
+it reports on relevant example, the state/format headers and core CMake source
+lists they depend on, and shared dependency PRs, but remains advisory until
+promoted into `required_status_checks`. Before moving any
+test off the required gate by labeling it `slow`/`validation`, confirm something
+still enforces it — the nightly is an informational backstop, not a gate. Full
+model, label taxonomy, and how to add tests:
+**[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
 
 ### Automated Testing Process
 
@@ -1719,17 +1763,22 @@ operator-dispatched break-glass option, but it is OFF by default and must never
 be auto-routed. Keep `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` (and the
 Linux/Windows equivalents) **UNSET**, and **never hijack that variable to point
 at self-hosted runners** — doing so dumps the high-volume sanitizer/coverage
-lanes onto the Mac Studio runners that host the required `macos` gate and breaks
-it across PRs (the 2026-06-07 lesson). This matches `.shipyard/config.toml`
+lanes onto the local Macs that host the required `macos` gate and breaks it
+across PRs (the 2026-06-07 lesson). This matches `.shipyard/config.toml`
 ("Namespace macOS routing is disabled for cost control").
+
+The generic build-overflow variable is separate:
+`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not delete it to
+disable overflow; unset restores the hosted `macos-15` fallback.
 
 macOS runs on **local Macs + GitHub-hosted**, in this order:
 
-1. **Mac Studio** (`pulp-studio-01/02/03`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
-   primary required `macos` gate.
-2. **M5 Mac** (`pulp-build-m5`, `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`) — local
-   overflow when the Studio runners are saturated
-   (>= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` busy).
+1. **Fast JIT VM pool on M3 + M5**
+   (`pulp-build-vm,pulp-gate-fast`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
+   primary required `macos` gate. M1 retains the generic `pulp-build-vm` label
+   for rollback/non-required work but cannot win required-gate placement.
+2. **Local overflow is disabled**:
+   `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`.
 3. **GitHub-hosted macOS** — sanitizers, coverage, release-cli, and the
    build-overflow fallback (each via its own `PULP_SANITIZER_*` /
    `PULP_COVERAGE_MACOS` var). UBSan uses `macos-26` so it runs against the
@@ -1739,8 +1788,11 @@ macOS runs on **local Macs + GitHub-hosted**, in this order:
 4. **Namespace macOS cloud** — break-glass ONLY, operator-dispatched, never
    automatic.
 
-Linux and Windows use GitHub-hosted runners (advisory). SSH Ubuntu/Windows only
-when a human explicitly asks — and they are **no longer declared** in
+Operator-dispatched Linux runs use clean-per-job x86_64 Proxmox VMs on the Mac
+Pro when the local selector is set; automatic PR runs stay GitHub-hosted until
+runner-group access control is enforced. Windows remains GitHub-hosted
+(advisory). SSH Ubuntu/Windows only when a human explicitly asks —
+and they are **no longer declared** in
 `.shipyard/config.toml`, so Shipyard does not probe them and
 `--skip-target ubuntu --skip-target windows` is no longer needed. To opt one
 machine into a local SSH lane, uncomment the target block in

@@ -123,12 +123,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   `SetClipSequenceRef`. Pass two command IDs allocated from the session
   `WriterToken`; the helper consumes item IDs from `Project::next_item_id`
   before publication but never synthesizes writer-scoped IDs.
-- For incremental compilation, build and retain one snapshot-scoped
-  `CompileInvalidationIndex` from the project, root sequence, and context
-  registry, then call `resolve_dirty_tracks()`; it maps direct edits, child
-  dirtiness, and nested context readers to the root tracks that must be
-  recompiled and fails closed on a stale structure token, root, or registry
-  generation.
+- For incremental compilation, construct `ProgramCompileRequest::invalidation`
+  from the shared context registry and exact `CommitResult`; `submit()`
+  builds and resolves the snapshot-scoped index against that same request. It
+  maps direct edits, child dirtiness, built-in MIDI groove reads, and nested
+  context readers to root tracks. The input pins that result's snapshot,
+  revision, exact predecessor snapshot, and an immutable registry copy. If the
+  predecessor is not the currently published project, sparse reuse is refused
+  and the cumulative target snapshot is rebuilt in full. A later registry
+  generation also forces a full compile without fabricating a document revision.
 - `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
   and positions are unique within a curve; values are finite; curvature is in
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
@@ -316,6 +319,23 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
   only when that field is absent, and a v1 envelope that illegally contains
   the field is rejected rather than silently normalized.
+- **A command schema is widened with optional fields at its current version —
+  never by bumping it.** Document schemas walk registered `upgrades` /
+  `downgrades` chains, but `decode_command` gates on exact version equality and
+  has no upgrade hook, and no command schema declares a migration edge. Raising
+  a command's version therefore rejects every envelope already written with
+  `UnsupportedSchemaVersion`. Declare the new field `required = false` in
+  `schema_registry.cpp`, read it with `JsonValue::find` in
+  `serialize_command_decode.cpp`, and make absence decode to what the payload
+  meant before the field existed (`replace_note_content`'s modifier arrays and
+  `set_clip_playback_properties`'s `fade_shape` both do this). Command decode
+  never validates a payload against `schema->fields`, so the registry entry is
+  documentation and generated-artifact input, not the gate — the decoder is.
+  Widening a command payload also means updating `equivalent()` (the
+  idempotency cache answers a repeated transaction id with its first result, so
+  a field it ignores lets a retry apply one payload and report another's
+  outcome) and `retained_size()` (it falls through to `sizeof(T)`, so a field it
+  forgets is under-counted rather than refused).
 - `schema_release.hpp` records exact shipped structural type/version sets,
   including `v0.736.0` (Track v1), `v0.744.0` (Track v2), `v0.748.0`
   (Track v3), and `v0.750.0` (Track v4, before SequenceRef content and sequence
@@ -398,6 +418,19 @@ artifact is needed. Never modify canonical project JSON text directly.
   breakage appears only when the two branches meet on main — neither PR's CI can
   see it alone. Check `corpus.index` covers the tree before merging a
   fixture-adding branch.
+- **The corpus runs twice per PR: natively under ctest, and compiled to WASM.**
+  `core/interchange/wasm/CMakeLists.txt` is an Emscripten-only root that builds
+  the runner from the portable sources, and `tools/ci/wasm-fixture-lane.sh`
+  drives it (job `Timeline fixture corpus (WASM)` in `web-plugins.yml`). Two
+  things follow. The wasm root **hand-lists** its sources, because linking
+  `pulp::timeline` would drag in `pulp::runtime`'s mbedTLS/HTTP — so a source
+  the desktop build gains is one the wasm build can silently miss; the root
+  fails its configure when `core/interchange/src` drifts from its list, but the
+  timeline list it borrows from `PulpTimelineSources.cmake` is shared and stays
+  honest on its own. And the lane deliberately runs the corpus a second time
+  against a broken copy and requires red, so a wasm build that validated
+  nothing cannot pass. Run it locally with
+  `source ~/emsdk/emsdk_env.sh && tools/ci/wasm-fixture-lane.sh <build-dir> 6`.
 - A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
   also emitted by `collect_summary()` in
   `core/interchange/tools/fixture_runner_main.cpp`, which lists the counts one by
@@ -512,27 +545,41 @@ before `t`" — two binary searches against that layout, versus a scan over ever
 event of every stream if lanes were flattened into one interleaved list.
 Flattening them is the change that quietly makes seeking O(n).
 
-### A new owned identity has to be added to *two* walks, and neither one checks the other
+### A new owned identity is added to the traversal, and nowhere else
 
-`id_remap.cpp` enumerates what a clip owns **twice, independently**:
+`id_remap.cpp` enumerates what a clip, a track, and a sequence own **only**
+through `owned_identity_traversal.hpp`. Both passes each level runs go through
+it: `owned_ids()` collects for preflight's validity/duplicate check, and
+`allocate_owned_subtree()` issues the destination identities. The same traversal
+also feeds the identity index that `Project::create` and serialization build,
+and the size check in the carried-id `remap_ids(Sequence, carried_ids, fixups)`
+overload. So a kind added to the traversal reaches every one of those at once,
+and the compiler is not what keeps them in step — *not restating the list* is.
 
-- `allocate_clip_owned()` — a hand-written walk that issues the destination
-  identities. This is the one a clip-level copy depends on.
-- `visit_clip_owned_identities()` (`owned_identity_traversal.hpp`) — the
-  canonical traversal, reached through `append_clip_ids()` / `owned_sequence_ids()`.
-  It feeds preflight's duplicate check, the identity index that `Project::create`
-  and serialization build, and the size check in the carried-id
-  `remap_ids(Sequence, carried_ids, fixups)` overload.
+Do not hand-write an owned-set walk at a call site, even when the level you are
+adding to already has an obvious loop. Both ways of getting it wrong are quiet
+and land far from the cause: an allocation walk that misses a kind returns a
+copy without those objects, and a collection walk that misses one lets the new
+identities skip validation entirely and then fails a later carried-id transfer
+with `InvalidIdentityTransition` naming a **size mismatch**, which names no kind
+at all.
 
-Nothing structurally ties them together, so adding a kind to one and missing the
-other fails in a different place than you would guess, and each failure mode is
-quiet in its own way. Miss the allocation walk and a copy loses the new objects.
-Miss the traversal and the copy looks correct while the new identities never
-reach preflight's duplicate check or the identity index — and a carried-id
-transfer then fails with `InvalidIdentityTransition` naming a size mismatch,
-nowhere near the kind that caused it. A test that copies a clip proves only the
-first walk; replaying one walk's table through the other's size check is what
-covers both.
+Three cases pin this down, one per level, and each asserts a hand-counted
+identity total — a distinctness or agreement check alone passes when a walk
+silently emits fewer identities:
+`Copying a clip issues fresh identities for its lanes and points` and
+`A sequence copy and its carried-id transfer agree on the whole owned set`
+(`test_timeline_midi_content.cpp`), and
+`A track copy issues a fresh identity for every kind a track owns`
+(`test_timeline_take_comp.cpp`), which carries every kind a track can own at
+once because a per-kind case passes while a sibling kind goes missing.
+
+One sharp edge remains: `rebuild_*()` dereferences `table.find(id)` for every id
+it rewrites, assuming the allocation walk covered it. A kind dropped from the
+traversal therefore reaches an empty-optional dereference — undefined behaviour,
+not a checked error. In practice the garbage id it reads is refused by the next
+`create()` and the remap fails, which is what the cases above observe, but the
+diagnostic points at the rebuilt object and never at the walk.
 
 Two more places a new `ItemKind` must land, neither of which the compiler will
 point at: `restore_identities()` in `model.cpp` recomputes `parent_id` from
@@ -680,6 +727,29 @@ is a serialized schema surface; `decode_command` gates on exact version equality
 with no upgrade hook, so it has to arrive as optional fields at v1, never a
 version bump.
 
+### An identity rewrite must copy the source input, not re-enumerate it
+
+`remap_ids` is the copy / paste / import path: it rewrites every owned
+`ItemId` and carries authored value state across untouched. `rebuild_track`
+used to express that as a designated-initializer `TrackInput{...}` naming every
+field. A designated initializer **does not warn on an omitted member** — unlike
+positional aggregate init, which `-Wmissing-field-initializers` catches — so the
+omitted field takes its default and the rebuild compiles clean. That is how a
+track's authored `mixer` came to be reset to unity gain and centre pan on every
+copy, paste, and import, with no error and no diagnostic.
+
+The shape that fails closed is copy-and-mutate over the source's own input:
+`detail::track_input_of(track)` (`track_input_access.hpp`, implemented beside
+`Track::Data` in `track.cpp`) returns the complete authored `TrackInput`, and
+the rewrite then assigns **only** the identity-bearing fields over it. A newly
+authored value field is carried by construction; the one place that must stay
+exhaustive sits next to the storage it reads. Enumerate identity, inherit value.
+
+The same reasoning applies to any rebuild of a model struct from a source
+value. `SequenceInput` and `ProjectInput` in `id_remap.cpp` are still
+enumerated in full — audit them against `model.hpp` whenever either struct
+grows, because nothing in the compiler will.
+
 ### Sequence-owned context and the compile-context subscription contract
 
 A `Sequence` owns a `ChordScaleLane` — an ordered set of `ChordScaleEvent`s
@@ -743,6 +813,13 @@ that has to pick a position swing carries across a step boundary; most positions
 land in the same step under either order and a test using one of those passes
 whichever way the code is written.
 
+Playback applies this context to built-in MIDI at compile time. The owning
+sequence's groove moves onset and release by one shared delta, scales velocity
+at the original onset, and is inherited unchanged by ratchets. Nested MIDI reads
+the child groove exactly once rather than composing it with the parent. A
+trimmed nested MIDI leaf with authored groove is currently refused because the
+source-window chase rule for displaced notes is intentionally undefined.
+
 ### Downgrade refusals: refuse on *authored* data, not just audible data
 
 The recipe says a downgrade must refuse rather than lie. The narrower trap is
@@ -784,6 +861,97 @@ The downgrade refuses on anything but the field's default, for the reason in
 *Downgrade refusals* above: a shape a v(N-1) reader cannot express is not an
 annotation it can drop, it changes what the document sounds like.
 
+### Drop-vs-refuse is decided per field, not per version
+
+Two fields introduced by the *same* schema version can land on opposite sides of
+the refusal rule, and the version number tells you nothing about which. Ask what
+an older reader that silently discarded the field would then believe:
+
+- If it would believe something **different about the music**, refuse. A chord
+  event's bass turns `C/E` into `C`; the older reader states a different chord,
+  not a less annotated one.
+- If it would believe the **same thing, less precisely**, drop. A region's
+  section role sits beside a free-text name the older reader still sees at the
+  same position over the same span; the information is degraded, not falsified.
+
+So one migration pair can refuse over one member and drop another in the same
+pass. Say which and why in the migration's own comment — the next reader cannot
+recover the reasoning from the code, and "it entered at the same version" is the
+wrong reason to make them match.
+
+### A member on an array element migrates per element, not by splicing `data`
+
+Every earlier sequence migration inserts or erases one member of the top-level
+`data` object, so the recipe reads as "find the neighbouring member's span and
+splice". A member that lives on a **chord event** or inside a **region
+envelope's `data`** is not reachable that way: each element needs its own edit,
+and the count varies with the document.
+
+`apply_edits` already takes a sorted `span<RawEdit>`, so a `std::vector<RawEdit>`
+built by walking the array works — sort order is established inside
+`apply_edits`, and overlapping or out-of-order edits fail closed there. Two
+details bite:
+
+- An object's `begin`/`end` bracket its braces, so an insert at the head goes at
+  `begin + 1` and at the tail at `end - 1`. Check `end > begin + 1` first, or an
+  empty object produces an inverted edit.
+- Erasing a member needs the **key** offset, which `JsonValue` does not store —
+  only value spans. Locate it with `source.find("\"<key>\"", <previous value>.end)`
+  for a leading member, or `source.find(',', <previous value>.end)` for a
+  trailing one, and assert the offset lands before the value's span before
+  trusting it.
+
+Prove the pair round-trips by asserting `upgrade(downgrade(x)) == x` on the raw
+bytes, not just that both calls succeeded.
+
+### Marker, region, scene, and slot envelopes carry a version they do not own
+
+These nested types are written with `write_envelope(..., 1, ...)` and appear in
+the registry with `current_version` 1, which reads like an independent version
+axis. It is not one: they only ever exist inside a sequence, and the **sequence**
+version is what decides their shape. Gate a new member on
+`sequence_schema_policy`, leave the nested envelope's version alone, and say so
+in a comment — bumping it instead makes "sequence v7 with region v1" a
+representable state that means nothing, and forces two numbers to be kept in
+agreement forever.
+
+### Commands are not version-gated, so a shared decoder needs three states, not two
+
+A document's schema version decides exactly whether a member is present, so the
+decoder's natural parameter is a `bool requires_x`. But some entity decoders are
+shared with the **command** path (`decode_region` via `insert_region`,
+`decode_chord_scale_lane` via `set_chord_scale_lane`), and a command payload is
+authored input with no migration path of its own. Forcing the member there
+breaks every hand-written and previously-journalled command; forbidding it drops
+the data silently.
+
+The shape that works is a tri-state (`MemberPolicy { Forbidden, Required,
+Optional }`): documents pass `member_policy_for(requires_x)`, commands pass
+`Optional`. When a version introduces **several** members together, `Optional`
+must still reject a payload carrying only some of them — half the detail is
+neither spelling, and filling in the rest invents data.
+
+### A "one field" document feature is often several schema bumps
+
+Fields land on entities, and entities have their own schemas. A tuning reference
+at project scope plus an override at instrument scope is `pulp.timeline.project`
+**and** `pulp.timeline.track`, each with its own policy header, both migration
+directions, and its own registry entry — plus a shared nested type if the value
+is a struct. Size the work by the entities touched, not by the number of fields.
+
+Two consequences downstream:
+
+- **Content-address a payload reference rather than pointing at an `ItemId`.** A
+  `ContentHash` needs no remapping, so a copy, paste, or import carries it with
+  no `id_remap.cpp` change; an identity reference would need one.
+- **Every suite that pins a current schema version breaks at once.** The literal
+  `"type_name":"pulp.timeline.sequence","version":N` appears in several suites,
+  in both raw-string and escaped-quote spellings — grep for both. Worse is the
+  `migrate(domain, type, N, N - 1, saved, ...)` idiom, where `saved` is a fresh
+  serialization: after a bump it starts from a version the payload no longer has
+  and fails for a reason unrelated to what the test is about. A refusal test
+  written that way passes for the wrong reason and stays green.
+
 ### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
 `Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through
@@ -800,6 +968,43 @@ version that predates it is as much a rejection as one missing from a version
 that requires it — so reusing another field's predicate silently accepts
 malformed documents on one of the two paths.
 
+### Build a `Sequence::Data` successor by copying and naming, never positionally
+
+Every `Sequence` edit but `create()` produces its successor with
+`auto next = *data_;`, assignment to the fields it changes, and
+`make_shared<const Data>(std::move(next))`. This is not style. `Data` carries
+fourteen fields, two of which — `track_order` and `outgoing_sequence_refs` —
+are both `std::vector<ItemId>`, so a positional brace-initializer that
+transposes them compiles silently and corrupts authored order. The positional
+form also made every new field a mechanical edit at every construction site,
+which is how a field gets dropped from one of them.
+
+Mutate the copy in place (`next.tracks.push_back(...)`) rather than building a
+new vector and assigning it, so a copy-and-mutate site costs the same single
+deep copy the positional form did.
+
+### A track reorder needs its own primitive; erase + insert is wrong three ways
+
+`Sequence::move_track` rewrites `track_order` and nothing else. Reaching for
+`erase_track` + `insert_track` instead is wrong for a reorder because it:
+
+- rebuilds `tracks`, `track_id_index`, and `outgoing_sequence_refs` — a whole
+  subtree rewrite for an edit that permutes one `vector<ItemId>`;
+- mints a fresh compile-structure token, so `Project::replace_sequence` bumps
+  `sequence_compile_structure_token()` and invalidates a compiled program that
+  never observed display order;
+- **fails outright** for a legal edit: `erase_track` refuses to strand a
+  launcher slot that sources one of the track's clips, so drag-reordering a
+  track that carries a launcher clip would be rejected for a non-reason.
+
+The same shape applies to any future authored-order edit. Authored position is
+encoded as "the item this one stands before", with an empty value meaning last —
+one encoding serves `InsertTrack::before_track_id`, `RemoveTrack`'s inverse, and
+`MoveTrack`'s optimistic gate, and swapping expected/replacement is the exact
+inverse. A destination that names the moved item itself must be refused: the
+item is lifted out before the destination is located, so the request would
+otherwise land silently at the end.
+
 ### `Command` `retained_size()` must account for heap the alternative owns
 
 `retained_size()` has a chain of `if constexpr` arms and a `sizeof(T)` fallback.
@@ -808,24 +1013,60 @@ reports only its inline size, so the journal's memory accounting silently
 under-counts and the bound it enforces stops meaning what it says. This does not
 fail to compile and no test notices unless one is written for it.
 
-### Adding a `Command` alternative fails closed in one place and aborts in another
+### Adding a `Command` alternative is checked in three places, all fail-closed
 
-`Command` has **no** exhaustive-visitor guard of the `ClipContentCases` kind.
-Two consumers behave differently:
+`Command` has no exhaustive-visitor guard of the `ClipContentCases` kind, so the
+guards are assembled rather than inherent. Three of them fire, and it is worth
+knowing which, because they fail in different ways and one used to not fire at
+all:
 
 - `command.cpp`'s `equivalent()` is an `if constexpr` chain ending in a generic
   `else` that reads `.track_id`/`.clip_id`. A new alternative without those
-  fields is a **compile error** — it fails closed, which is what you want.
-- `detail::reduce_transaction()` in `transaction.cpp` is an `if/else if` chain
-  ending in `std::get<SetClipPlaybackProperties>`. Under `-fno-exceptions` that
-  is `std::terminate`, not a caught error. Add the reduce branch **before** the
-  final `else`; a compile-clean build proves nothing here.
+  fields is a **compile error**. Note this fires *first* and can mask the others:
+  an alternative that happens to carry those fields sails past it.
+- `transaction.cpp` carries a `static_assert` that every alternative is claimed
+  by **exactly one** reduce dispatch branch, reading the lists in
+  `transaction_dispatch_internal.hpp`. Each family predicate (`is_track_command`
+  and friends) is derived from its list by `std::visit` rather than repeating it,
+  so the predicate and the claim cannot drift. Exactly-one, not at-least-one:
+  requiring one claim also catches an alternative two families both handle, which
+  branch order would otherwise resolve silently.
+- `retained_size()` has a `sizeof(T)` fallback and so fails **open** — see the
+  section above.
 
-Also extend the two coverage guards that pin the vocabulary: the type-name array
-in `test_timeline_schema_registry.cpp` (`static_assert`ed against
-`variant_size_v<Command>`) and the encoded-envelope batch in
-`test_timeline_command_persistence.cpp` (which asserts one decoded command per
-alternative, in variant order).
+The reason the second guard exists: `pulp-timeline` builds `-fno-exceptions`, so
+an alternative that reaches the end of the dispatch chain is not a
+`bad_variant_access` and not a `ConflictCode` — it is a process `abort()` inside
+a DAW. The chain's tail is now a rejection (`ConflictCode::ModelInvariant`)
+rather than a bare `std::get`, so the abort is gone even if the assertion is
+ever removed; verified by unwiring an alternative from its family, which aborts
+with **SIGABRT (exit 134)** against the old bare `std::get` and returns a clean
+`ModelInvariant` rejection against the current tail.
+
+**A count-based check is not enough here, and this is the trap.** Asserting
+`variant_size_v<Command>` against the sum of the family sizes passes when one
+alternative is claimed twice and another not at all — the two errors cancel.
+Verified: with `MoveTrack` claimed by both the scene and track families and
+`SetTrackName` claimed by none, the claim total is still 39 and a count check
+passes while the identity check fails. Compare identities, not counts.
+
+Also extend the two coverage guards that pin the vocabulary, and note that
+neither is ordered the way you would guess:
+
+- the type-name array in `test_timeline_schema_registry.cpp`, sized by a
+  `static_assert` against `variant_size_v<Command>` and compared elementwise
+  against the registry, which sorts by type name — so the array is **alphabetical
+  by schema type name**, not variant order. Insert in the right alphabetical
+  slot; appending fails the elementwise compare.
+- the encoded-envelope batch in `test_timeline_command_persistence.cpp`. Its real
+  invariant is **one decoded command per alternative** — `commands.size() ==
+  variant_size_v<Command>` plus one `holds_alternative` assertion per index,
+  naming each alternative exactly once. It is *not* in variant order: the batch
+  carries `InsertTake`, `RemoveTake`, `SetRecordArm` at indices 14-16 where the
+  variant declares `SetRecordArm`, `InsertTake`, `RemoveTake`. That divergence is
+  long-standing and harmless — do not "fix" it, and do not renumber the batch to
+  match the variant. Appending a new envelope and asserting it at the final index
+  is correct.
 
 ### The edit vocabulary sits at the editor rung, and "cannot see `view`" is not why
 
@@ -866,6 +1107,14 @@ Consequences worth knowing before you touch this:
   vocabulary. `SequencerUiHostT`'s parameter exists so the playback seam and the
   intent vocabulary can evolve apart; the alias is what keeps that parameter bound
   to something real instead of only ever meeting a test stand-in.
+- Piano-roll gestures use the sibling `NoteEditIntent` and
+  `NoteEditIntentHost`. Insert carries only `replacement`, erase carries only
+  `expected`, and move/resize/velocity carry both with one identity;
+  `ValidatedNoteEditIntent::create` rejects malformed or ambiguous shapes, and
+  `NoteEditIntentHost` accepts only that wrapper so invalid raw values cannot
+  cross the host seam. There is intentionally no note lowerer until the granular
+  note commands land — do not route these through the O(clip)
+  `ReplaceNoteContent` command as an interim implementation.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit
@@ -1007,6 +1256,40 @@ Three things bite when adding a row:
   no floor at all.** When a row's defining rule is that it cannot reach a module
   that *is* in the table — `timeline_editor` and playback — assert that pair by
   name too, or the rule survives someone widening the other row.
+- **A row constrains the whole link closure, not the module's own build file.**
+  The check follows `target_link_libraries` through `core/<module>/CMakeLists.txt`
+  to a fixed point, so a row is only honest if every module it reaches
+  transitively is in the set. Measure before declaring: a row that names one
+  in-floor dependency can still be breached three links down, and the error names
+  the chain (`playback -> audio -> state`) rather than only the destination.
+  Where the closure genuinely exceeds the floor, record the surplus in
+  `LINK_CLOSURE_DEBT` instead of widening the row — the row also governs
+  includes, and folding a link fact into it silently grants a header permission
+  nobody argued for.
+
+Two rules keep the walk honest and are easy to break by accident:
+
+- **Executables are not followed.** Nothing can link an executable, so a helper
+  binary in a dependency (`pulp-timeline-schema-emit`, `pulp-fixture-runner`)
+  must not raise the floors of everything above it. Its links are still policed
+  at depth zero by the direct scan of its own module's build file — that is the
+  half the selftest's helper-target assertions cover.
+- **A token that resolves to no `core/` directory is not a module.**
+  `pulp-tracing` (defined in `tools/cmake/PulpTracing.cmake`) and
+  `pulp-cpp-httplib` (an INTERFACE shim inside `core/runtime/CMakeLists.txt`) are
+  build plumbing reachable from every row. They are skipped transitively rather
+  than added to five floors; a module's own build file naming one is still caught
+  at depth zero.
+
+**A `core/` module that links a declared engine module but owns no row is the
+other half of the contract.** The intuitive rule — flag an engine module that
+links something undeclared — is useless: it fires on `platform`, `runtime`,
+`audio` and `midi`, which are floor primitives by design. The rule that bites is
+the inverse, and `ENGINE_CONSUMERS` carries the ones that exist, each with a
+reason. `format` and `host` are the sanctioned upper layers; `sequence`, `smf`
+and `dawproject` sit above or beside the engine and have not been given floors.
+The list rejects an entry with no reason and an entry whose subject no longer
+links the engine, so it can neither grow silently nor rot.
 
 A new `core/<module>` directory also drifts `codecov.yml`, whose flags and
 components mirror `core/*`. Add the flag and the component alongside the target;
@@ -1018,6 +1301,147 @@ will look like a gap the first time a view lands beside it. It is not. Widening
 that row to admit `view` makes every consumer of the kernel pay for `core/view`,
 which is the exact coupling the rung split exists to prevent. A view target gets
 its own directory and its own row, sitting above this one.
+
+**A type two rungs both need goes in their floors' intersection, not in either
+rung.** `playback` and `timeline_editor` exclude each other, and `timebase` is
+in both rows — so it is where a shared value type lives, and moving one there is
+legal with no floor change at all. `timebase::LoopRegion` is the worked case: the
+editor's `UiLoopRegion` and playback's `LoopRegion` had been the same three
+fields in the same order. Check `MODULE_FLOORS` for the intersection before
+placing anything; if the rows do not admit the home you want, the placement
+argument is wrong and widening a row is not the repair.
+
+The same reasoning bounds what may *not* move down. A converter between two
+rungs' types names both, so it belongs above both — not in either rung, and not
+in `timebase`, which may name neither. Until an engine above both exists there is
+no legal home for one, and adding it anywhere reachable would mean widening a row.
+
+`UiPlayhead` speaks the editor's nouns rather than mirroring the transport's:
+`UiTransportState` in place of `is_playing`/`scrubbing`, and `continuity_epoch`
+in place of `playback_epoch` — the rung's floor excludes `playback`, and a host
+backed by a scripted value or a plugin's own engine has a continuity guarantee
+without having a playback epoch. `continuity_epoch` is what a view checks before
+smoothing motion between two readings; `program_generation` cannot substitute,
+because a loop wrap breaks continuity without recompiling anything.
+
+### The floor has two directions and they need different instruments
+
+`timeline_engine_dependency_floor_check.py` is outbound: for each engine module,
+does it reach up? `tools/cmake/PulpLinkFloor.cmake` is the inbound counterpart:
+given a consumer — a plugin, an app — what does linking it actually cost, and
+did it say so? `pulp_assert_link_floor(<target> TIER <name>)` gates,
+`pulp_report_link_closure(<target>)` measures and writes
+`${CMAKE_BINARY_DIR}/link-floor/<target>.txt`.
+
+Reaching for the Python checker to answer the inbound question does not work,
+and the reasons are properties of CMake rather than of taste:
+
+- **A PRIVATE link to a static library still propagates.** CMake records it as
+  `$<LINK_ONLY:dep>` in `INTERFACE_LINK_LIBRARIES`, because a static archive
+  cannot resolve its own dependencies. Flipping a keyword from `PUBLIC` to
+  `PRIVATE` leaves the consumer's link line byte-identical. A checker reading
+  source text sees the keyword and has to model that rule; one reading the
+  resolved property observes it. Modelling it wrongly under-reports, which is
+  the one failure mode that makes a floor check worthless.
+- **A plugin's link edges are not written down anywhere a parser can read.**
+  `pulp_add_plugin(X FORMATS CLAP)` creates `X_CLAP` inside a function, links
+  `${_PULP_VIEW_TARGET}` — a variable `_pulp_pick_target` chooses — and only
+  when `PULP_HAS_CLAP`. Following that from text means evaluating CMake
+  variables, functions and conditionals. The engine check gets away with text
+  only because it reads `core/<module>/CMakeLists.txt`, where links are literals.
+
+Gotchas once you are reading the resolved graph:
+
+- **Name a module from `SOURCE_DIR`, never from the target name.** `pulp-view`,
+  `pulp-view-core` and `pulp-view-script` are all `core/view`, and there is no
+  naming convention that stays true on its own.
+- **A dependency contributes `INTERFACE_LINK_LIBRARIES`, not `LINK_LIBRARIES`.**
+  Only the root target's own direct links come from `LINK_LIBRARIES`. Reading a
+  dependency's would invent edges: a shared library resolves its PRIVATE links
+  inside its own artifact and charges the consumer nothing.
+- **The walk must close over what it has seen.** `core/host` links
+  `pulp::format` while format reaches back through view, so a walk without a
+  visited set hangs on the real repo rather than in a fixture.
+- **The declared-graph closure is a superset of the link line, and correctly
+  so.** Cross-checking `StepSequencer_CLAP` against
+  `CMakeFiles/<t>.dir/link.txt` shows the two agree on every archive and differ
+  by exactly the header-only libraries: `pulp-signal` is an `INTERFACE` target,
+  so it is a real dependency that costs headers and produces no `.a`. Do not
+  "fix" the walk to match the archive list — the archive list is the narrower
+  instrument.
+
+**Every plugin links the view stack, drawing or not.** VST3, CLAP and AU each
+link `${_PULP_VIEW_TARGET}` unconditionally in `PulpPluginFormats.cmake` and
+`FATAL_ERROR` if it is absent, so the closure runs
+`<plugin> -> pulp-view -> pulp-view-script -> pulp-view-core -> pulp-host ->
+pulp-playback`. Two consequences worth knowing before reading a report as a
+statement about the plugin's own code: a plugin acquires a transport it never
+asked for, and a sequencer plugin's reach to `core/timeline` today arrives
+through that chain rather than through its own engine. A red reading here is
+usually the format packaging's bill, not the plugin's doing.
+
+**Tier versus debt.** A tier is a bound several targets share, declared centrally
+so no single target can widen it alone; `PULP_LINK_FLOOR_DEBT_<target>` records
+what that target's closure drags in beyond the tier. Keep measured-but-unearned
+reach in debt, never in the tier — an entry is a fact to pay down, and deleting
+it once the edge is cut tightens the gate with no other edit. The check rejects a
+debt entry that is no longer linked and one that duplicates its tier, so the list
+cannot outlive its subject.
+
+**A tier is an upper bound and proves only absence.** `TIER` says nothing outside
+it is reached; it cannot say anything inside it *is*. "Reaches nothing extra" is
+satisfied most easily by reaching nothing at all, so a tier naming a module the
+target never links stays green while reading, to anyone scanning the row, as a
+proven link. Do not answer "does the piano roll ship inside the plugin?" from a
+tier — that question needs the other bound, and a tier that has been widened to
+look like an answer is worse than no answer, because it is a false one.
+
+**`REQUIRE <modules...>` is the lower bound.** Optional, listed at the call site
+next to `TIER`, and every module named must appear in the measured closure or the
+configure fails naming the ones that do not:
+
+```cmake
+pulp_assert_link_floor(MyPlugin_CLAP
+    TIER    sequencer-plugin
+    REQUIRE format state)
+```
+
+`REQUIRE` grants no reach of its own — a required module must also be declared in
+the tier or the debt list, or no closure could satisfy both bounds at once, and
+the check reports that contradiction rather than letting `REQUIRE` become a third
+permission list. Pair the two whenever the criterion is about what the artifact
+*contains*: the upper bound stops the editing stack leaking in, the lower bound
+stops the claim being satisfied by the module quietly disappearing.
+
+**What the two sequencer plugins prove.** Measured on a macOS
+configure, it reaches eighteen modules, and `timeline_editor` is not among them —
+`pulp-timeline-editor` is a live target in that same configure and this plugin
+does not link it. `timeline` it reaches only through
+`pulp-view -> … -> pulp-host -> pulp-playback -> pulp-timeline`, with no
+`pulp/timeline` include anywhere in the example's own sources, so `timeline` is
+recorded as debt rather than claimed by the tier. Its `REQUIRE format state` is
+correspondingly narrow: this plugin's own code contributes no module edge beyond
+the adapter it is packaged as. So the honest reading of a green run here is "a
+step sequencer packaged as a CLAP, carrying no editing stack" — **not** "a piano
+roll inside a plugin".
+
+`TimelinePluginProof_CLAP` is the positive counterpart. Its processor owns a
+`Project` and `DocumentSession`, implements `EditIntentHost`, returns a native
+view from `create_view()`, and stores canonical Timeline JSON in plugin-owned
+state. It claims `sequencer-plugin-editor` and requires `format timeline
+timeline_editor`, so configure fails if any of those three disappears. Its view
+is deliberately only a ruler/playhead shell: the target proves the integration
+boundary, not a piano-roll interaction surface.
+
+**Know where the verdict runs.** The assertion lives in the consumer's own
+`CMakeLists.txt`, so it is evaluated only where that consumer is configured. For
+an example plugin that means the Shipyard mac/windows lanes
+(`PULP_BUILD_EXAMPLES=ON`) and ordinary dev builds — not the GitHub-hosted legs
+of `build.yml`, which configure `PULP_BUILD_EXAMPLES=OFF`. It also reports one
+configuration: a link that only exists under `WIN32` is invisible to a macOS
+configure. `tools/scripts/link_floor_selftest.py --mutate` is what runs
+everywhere; it weakens the checker eleven ways — including one that stops
+checking `REQUIRE` at all — and requires each to be caught.
 
 ### Derived surfaces are projections of the manifest, not the registry
 
@@ -1123,6 +1547,41 @@ The `timeline-mcp-drift` ctest byte-checks the artifact;
 determinism, exact operation membership, complete domain projection,
 fail-closed empty command behavior, and confirm-the-failure.
 
+### One clean drift run proves one artifact, and a clean auto-merge proves nothing
+
+Two ways to believe a generated tree is in sync when it is not.
+
+**A bare `schema_drift_check.py` guards only its own `DEFAULT_ARTIFACT`**
+(`timeline_schema.json`). It is a reusable gate, not a whole-repo check, so its
+exit 0 says nothing about the four sibling projections or the three interchange
+artifacts. The enforced set is eight registrations, each naming its own
+`--artifact`/`--emit-cmd`: five in `test/cmake/timeline_tests.cmake` (the
+manifest plus `.d.ts`, CLI verbs, JS facade, MCP tools) and three in
+`test/cmake/interchange_tests.cmake` (`concepts.hpp`, `capability_tables.hpp`,
+`docs/reference/interchange-matrix.md`). Verify the set — `ctest -R 'drift'` —
+rather than a single hand run. Note the interchange three come from
+`capability_emit.py` over `core/interchange/capabilities/*.json`, a different
+generator with different inputs; `--update` on the schema gate does not touch
+them.
+
+**After a merge that touches any generator's inputs, regenerate every artifact
+that generator produces — whether or not git reported a conflict.** These
+artifacts are single-line or densely minified, so git will often auto-merge them
+cleanly and be wrong, with no conflict to alert you. A merge bringing in schema
+changes from both sides can leave `.d.ts`, CLI verbs, and the JS facade silently
+stale while the manifest's own gate passes. "Never resolve a generated artifact
+as text" covers only the conflicting case; the set that matters is every output
+of every generator whose inputs the merge touched.
+
+Two adjacent invariants the drift gates do not cover, both fail *after* a merge
+looks fine: `tools/mcp/CMakeLists.txt` FATAL_ERRORs at configure time unless
+`timeline_mcp_tools.json` carries exactly ten tools in an exact name order, and
+`core/interchange/capabilities/concepts.json` is append-only **and
+order-significant** because position fixes the generated enum ordinal. For
+`concepts.json`, check that the *other* side's entries survived at their
+original ordinals — confirming only your own additions passes a resolution that
+silently dropped theirs, and both wrong resolutions compile.
+
 ### Headless operations and CLI
 
 `pulp::tool-timeline` is the shared headless implementation for agent-facing
@@ -1203,6 +1662,15 @@ opt-in Audio Quality Lab tool is installed.
 
 ## Production mode and reproducibility class
 
+Generated live-event batches use monotonic half-open tick spans plus playback
+epoch. Keep producer-owned revisable staging physically separate from the
+immutable committed SPSC ring; publish a complete batch with one release cursor.
+Starvation advances the requested span, counts lag, emits zero events, and
+requests an active-note flush so a missed note-off cannot hang. Seek/restart
+must quiescently begin a new playback epoch, invalidating pending work. Validate
+each UMP packet's word count from its message-type nibble. Deadline degradation
+selects only a producer-supplied fallback policy; it never invents thinning.
+
 `production_mode.hpp` declares `ProductionMode` (`Synchronous` / `Buffered`) and
 `ReproducibilityClass` (`Deterministic` / `Tolerance` / `Materialized` /
 `BestEffort`). Three rules that are easy to get wrong:
@@ -1242,6 +1710,11 @@ Things that are easy to get wrong here:
   one-lane-per-control rule still applies: duplicate detection compares a
   normalized key whose leading discriminator keeps a mixer target from colliding
   with a device target that shares its zeroed placement ID.
+- **The mixer *value* is authored state a rebuild must carry.** It is not
+  identity, so every path that reconstructs a `TrackInput` has to bring it
+  across — see "An identity rewrite must copy the source input, not
+  re-enumerate it" for why the remap dropped it silently and what shape stops
+  the next field from going the same way.
 - **Widening `AutomationTarget` reaches four consumers.** `serialize_encode.cpp`,
   `automation_document_internal.cpp`, `transaction_automation_internal.cpp`, and
   `core/interchange/src/census.cpp`. Dispatch through `AutomationTargetCases`
@@ -1261,6 +1734,35 @@ Things that are easy to get wrong here:
   Program adoption fails closed if a hosted mixer becomes nontransparent
   without that route. Keep stopped automation parked, and evaluate precise
   host-mapped ticks without round-tripping through integer samples.
+
+## A view rung consumes the editor kernel; it never owns a projection
+
+`core/timeline_view` sits above `core/timeline_editor` and is the **first production consumer** of
+that kernel — everything else referencing it is build files, the floor script, docs and tests.
+
+**The convention that keeps it composable: a view takes resolved scalars, never a projection
+object.** The arranger is handed an origin tick and a `px_per_tick`, not a `ViewportProjection`;
+hit-testing takes a resolved `tolerance_px`, not a device-pixel-ratio to interpret. Two consequences
+worth keeping:
+
+- Two slices can build a viewport and a view **concurrently without racing**, because the view has
+  no projection to diverge from. The shell feeds the projection's *output* into the seam.
+- A view stays testable headlessly with plain numbers — no viewport fixture, no DPI plumbing.
+
+**The consumption chain, which is what makes a view worth shipping rather than deferring:**
+
+```
+arranger view -> EditIntent -> SequencerUiHost::submit_intent
+              -> lower_edit_intent -> timeline::Transaction -> reducer -> serialize_project
+```
+
+Every link existed before the arranger and **every link except the arranger was exercised only by
+tests.** When adding to this stack, check the chain more than one level up: this codebase has a
+long history of capabilities whose caller had no caller.
+
+**Acceptance for an editing surface is a `serialize_project` round trip with values asserted** —
+drive it with `simulate_click` / `simulate_drag` and assert the document's values survive, not that
+the view's internal state changed.
 
 ## Scope boundary
 
@@ -1323,6 +1825,15 @@ Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
 timeline translation units do not include or link `pulp::format`, `pulp::host`,
 or `pulp::view`.
 
+`test/cmake/timeline_tests.cmake` is the manifest that registers the
+`pulp-test-playback-*` suites alongside the document-model ones, so a new
+playback-side suite is added there rather than in a new manifest — including
+`pulp-test-playback-program-wire`, which covers the flat program wire the web
+lane publishes generations over (`pulp/playback/program_wire.hpp`; the format's
+own rules live in the `playback` skill). Sharing the manifest does not make the
+program wire part of the document schema: it encodes a *compiled* program, and
+a document-model change reaches it only through the compiler.
+
 `test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
 runtime tests. That shared CMake inventory does not make profile JSON, capture
 evidence, or sampler rendering part of the timeline document schema; keep those
@@ -1338,6 +1849,45 @@ Do not simplify that to a plain source list. Dropping the trap source while
 keeping the define fails at link on `RtNoAllocScope`'s out-of-line constructor,
 which is the intended behavior — the `playback` skill explains why that guard
 exists and what still needs a hand-run control.
+
+### Fuzzing the untrusted-document surface
+
+`pulp-test-timeline-document-fuzz` (registered under the `fuzz` ctest label)
+drives `deserialize_project`, `peek_project_summary`, and
+`deserialize_commands` over a mutated corpus seeded from
+`test/fixtures/timeline/corpus.index`. The oracles live in
+`test/fuzz/timeline_document_oracle.*` and are shared with the optional
+libFuzzer target, so there is one definition of what a finding is.
+
+Three things about it are easy to get wrong:
+
+- **A rejection is not a finding.** Refusing malformed input is the surface
+  working. The oracles that carry the quota contract are the *tightening
+  sweep* — lower one declared ceiling below the document's own measured count
+  and require a `LimitExceeded` that reports `actual > limit` — and *admission*,
+  which rejects a document accepted over a ceiling that was in force. A harness
+  whose only oracle is "did not crash" would pass with every structural quota
+  unenforced.
+- **The census must not come from the parser's own counters.** The decode path
+  is measured by walking the returned `Project`; the scan path reports
+  `ProjectSnapshotCounts` from the source bytes. Comparing the two is what
+  detects a counter that is never incremented. Measuring a quota with the
+  counter that enforces it confirms itself.
+- **`max_clips` and its siblings are enforced twice** — once in
+  `schema_json_preflight.cpp` and again in `serialize_project_decode.cpp`.
+  Weakening only the preflight leaves `deserialize_project` rejecting and
+  surfaces on `peek_project_summary` alone. Expect a finding to name one
+  surface and not the other, and do not read that as the oracle being flaky.
+
+Adding a structural ceiling to `DecodeLimits` means adding a row to
+`quota_axes()`; the axis-count assertion fails otherwise, which is deliberate —
+a ceiling with no axis is a quota the sweep silently never exercises.
+
+`PULP_ENABLE_FUZZING=ON` builds the coverage-guided target and is **off by
+default**: `-fsanitize=fuzzer` needs a compiler runtime Apple's clang does not
+ship, so on macOS it requires a Homebrew LLVM. The configure step fails with
+that cause named rather than at link time. The deterministic replay needs no
+special toolchain and is the lane that runs on the PR path.
 
 ### Writing a render-continuity assertion
 
@@ -1389,6 +1939,44 @@ when the lab is absent the handler still returns a well-formed typed envelope
 carrying its install hint. Assert the typed envelope and the absence of an
 argument refusal — that is what proves the loop reached the compare stage — and
 leave the measurement to the tool's own suite.
+
+## `std::int64_t` is a different type on Linux and Darwin — never let CTAD see a bare `LL`
+
+`std::int64_t` is **`long` on LP64 Linux** and **`long long` on Darwin**. A bare `0LL` literal is
+`long long` on *both*. So a sibling written with `LL` alongside a `std::int64_t` expression **unifies
+on macOS and diverges on Linux** — and `std::array` class-template argument deduction requires every
+element to have the *same* type, so it fails on exactly one platform:
+
+```cpp
+// BROKEN on Linux, compiles on macOS. kTicksPerQuarter is std::int64_t.
+const std::array windows{
+    std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4},  // pair<long,long> on Linux
+    std::pair{0LL,                  3 * kTicksPerQuarter / 4},  // pair<long long,long>  <-- diverges
+};
+```
+
+GCC reports `no matching function for call to 'array(std::pair<long int, long int>…)'` plus a
+`no type named 'type' in 'struct std::enable_if<false, …>'` — which reads like a container problem
+and is a *type-identity* problem.
+
+**Fix by spelling the element type, not by correcting the literal.** Correcting `0LL` leaves CTAD
+deducing, so the next sibling reintroduces it:
+
+```cpp
+using TrimWindow = std::pair<std::int64_t, std::int64_t>;
+const std::array<TrimWindow, 3> windows{ TrimWindow{…}, TrimWindow{0, …}, TrimWindow{…} };
+```
+
+**Why this class is dangerous here specifically:** the required gate is **macOS**, and there is *no
+macOS signal at all* — the code compiles cleanly on the platform that gates the merge. Only the
+advisory Linux lane can see it.
+
+**Reproduce it without a Linux toolchain** — a standalone TU with `using i64 = long;` in place of
+`std::int64_t` gives the identical deduction error on Apple clang, so the diagnosis is
+positive-controlled locally even though the confirming build is CI's.
+
+Applies to any deduced aggregate over timebase quantities — ticks, frames, sample counts — since
+those are `std::int64_t` throughout.
 
 ## Foreign-format import (interop)
 
@@ -1453,6 +2041,32 @@ serialized JSON, which is also more faithful: the constructor never runs on byte
 someone else wrote. A refusal on that path surfaces as `"stage":"open"`, not
 `"stage":"render"`.
 
+## Widening the authoring surface can make a document unplayable
+
+A model field, a command, or a schema property is not finished when it
+round-trips. The playback compiler refuses several constructs this module lets a
+user author — expression lanes on a clip, and six combinations reachable by
+composing `set_clip_sequence_ref` with `set_clip_playback_properties`,
+`set_track_mixer`, `set_track_freeze`, or the take, automation and device-chain
+surfaces. Those documents save, reload, copy and round-trip; only playback says
+no, and nothing at authoring time warns anyone.
+
+`tools/scripts/negative_capability_check.py` (ctest
+`playback-negative-capability`) is what makes that cost visible. It cross-refers
+every refusal-shaped `CompileErrorCode` raise against this module's public
+headers and `core/timeline/schema/timeline_schema.json`, and requires an owner
+and a written reason for each refusal it can reach from here. The gate is
+registered in `test/cmake/timeline_tests.cmake` beside the engine dependency
+floor.
+
+**When adding to the authoring surface, check the compiler consumes it** —
+`core/playback/src/program_compiler.cpp` and
+`core/playback/src/sequence_content_lowerer.cpp` are where a new field either
+lowers or gets refused. Shipping the model half alone is how a negative
+capability arrives. The check only sees refusals that name a code, so a field
+the compiler silently drops or clamps passes it: that case needs a test, not a
+gate.
+
 ## New public API in `core/timeline/include` needs a contract or docs fail
 
 `tools/build-api-docs.sh` runs `tools/scripts/timeline_api_docs_check.py` over
@@ -1497,3 +2111,25 @@ definition. The general rule: if a documented free function is also declared
 `build-api-docs.sh` now prints the local Doxygen version for exactly this
 reason — when CI is red and local is green, check the versions before assuming
 the tree differs.
+
+## A wait for a published route must keep republishing it
+
+`test_timeline_graph_binding_publication.cpp` drives `binding.prepare()` on the
+control thread while an audio thread renders, and asserts the audio thread
+observed **both** routes (`one_blocks > 0` and `two_blocks > 0`). Two traps
+compound here.
+
+First, the reprepare loop is an ordering budget that orders nothing: it can run
+to completion before the audio thread is ever scheduled, leaving both counters
+at zero.
+
+Second — and this is the one a re-poll cannot fix — the loop **alternates**
+routes and ends on `route_one`. A wait that only spins re-reading `two_blocks`
+can never succeed, because `route_two` is never published again. The wait has to
+keep alternating, not just keep looking.
+
+Bound it, and make the pump cheap. Tearing down reprepared bindings costs
+superlinearly in their count: a full-rate 10s wait spent 10s waiting and then
+~30s in teardown (6663 reprepares), long enough to present as a CTest timeout
+rather than the failure it is. A 1ms pump sleep with a 2s deadline holds the
+whole failing run under 3s.

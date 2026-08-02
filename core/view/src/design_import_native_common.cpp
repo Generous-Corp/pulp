@@ -25,8 +25,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <fstream>
-#include <iterator>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -920,10 +919,12 @@ std::vector<DesignFrameElement> to_frame_elements(
 std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
                                               const IRAssetManifest& manifest,
                                               std::string_view path,
+                                              const std::filesystem::path& asset_base_directory,
                                               std::vector<ImportDiagnostic>& diagnostics) {
     const std::string asset_id = node.svg_asset_id.value_or("");
     const IRAssetRef* asset = asset_id.empty() ? nullptr : manifest.resolve(asset_id);
-    std::string svg = asset ? resolve_svg_document(*asset) : std::string{};
+    std::string svg = asset ? resolve_svg_document(*asset, asset_base_directory)
+                            : std::string{};
     if (svg.empty()) {
         diagnostics.push_back(diagnostic(
             ImportDiagnosticSeverity::warning,
@@ -972,7 +973,8 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
         const IRNode& alt = node.alternate_frames[i];
         const std::string alt_id = alt.svg_asset_id.value_or("");
         const IRAssetRef* alt_asset = alt_id.empty() ? nullptr : manifest.resolve(alt_id);
-        std::string alt_svg = alt_asset ? resolve_svg_document(*alt_asset) : std::string{};
+        std::string alt_svg;
+        if (alt_asset) alt_svg = resolve_svg_document(*alt_asset, asset_base_directory);
         if (alt_svg.empty()) {
             diagnostics.push_back(diagnostic(
                 ImportDiagnosticSeverity::warning,
@@ -1705,8 +1707,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             const IRAssetRef* asset = manifest.resolve(*asset_id);
             if (asset == nullptr)
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
-            auto uri = asset_uri(
-                *asset, options.asset_base_directory);
+            auto uri = resolved_asset_uri(*asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
             auto image = std::make_unique<ImageView>();
@@ -1787,7 +1788,8 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     // to normal materialization (with a diagnostic) if the SVG asset can't be
     // resolved, so a bad asset degrades rather than blanks.
     if (node.render_mode == NodeRenderMode::faithful_svg) {
-        if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
+        if (auto frame = make_faithful_svg_frame(
+                node, manifest, path, options.asset_base_directory, diagnostics))
             return frame;
     }
     // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
@@ -2023,7 +2025,8 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 // both the runtime materializer and the C++ codegen lower a faithful_svg node
 // from identical resolved bytes. Calls svg_percent_decode from the anonymous
 // namespace above (visible throughout this translation unit).
-std::string resolve_svg_document(const IRAssetRef& asset) {
+std::string resolve_svg_document(const IRAssetRef& asset,
+                                 const std::filesystem::path& asset_base_directory) {
     const std::string& uri = asset.original_uri;
     if (uri.rfind("data:", 0) == 0) {
         const auto comma = uri.find(',');
@@ -2037,17 +2040,7 @@ std::string resolve_svg_document(const IRAssetRef& asset) {
         }
         return svg_percent_decode(payload);
     }
-    auto read_file = [](const std::string& path) -> std::string {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return {};
-        return std::string(std::istreambuf_iterator<char>(f),
-                           std::istreambuf_iterator<char>());
-    };
-    if (asset.local_path && !asset.local_path->empty())
-        return read_file(*asset.local_path);
-    if (uri.rfind("file://", 0) == 0)
-        return read_file(uri.substr(7));
-    return {};
+    return read_asset_text(asset, asset_base_directory);
 }
 
 const char* native_widget_kind_name(NativeWidgetKind kind) {
@@ -2241,8 +2234,17 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      "$",
                                      std::nullopt,
                                      materialize_diagnostics);
-        if (options.apply_token_theme)
-            root->set_theme(ir_tokens_to_theme(ir.tokens));
+        if (options.apply_token_theme) {
+            // A widget key the design states no source for is left unset, so
+            // the widget paints its own built-in colour instead of the
+            // design's. That is a gap in what was captured, not a rendering
+            // bug, and it is invisible in the pixels — the render just quietly
+            // carries a colour from nowhere. Name it.
+            std::vector<std::string> unresolved;
+            root->set_theme(ir_tokens_to_theme(ir.tokens, &unresolved));
+            if (auto gap = unmapped_widget_token_diagnostic(unresolved))
+                materialize_diagnostics.push_back(std::move(*gap));
+        }
         // Imported geometry is already solved at fractional coordinates;
         // Yoga's whole-pixel grid rounding would move concentric siblings
         // relative to each other (see View::set_subpixel_layout). The flag

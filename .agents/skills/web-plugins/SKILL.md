@@ -147,6 +147,96 @@ Two things that WILL bite:
   subscribe) that first publish is lost, and the consumer waits for a change that
   already happened.
 
+## A Worker and a worklet share no heap — a program crosses as bytes
+
+A Worker's wasm and a worklet's wasm are **separate linear memories**, so a
+pointer either one writes is meaningless in the other. That is why a compiled
+`playback::PlaybackProgram` — a graph of `shared_ptr` and `std::vector` — can
+never be published from a compiler Worker to a realtime worklet directly, and
+why `pulp/playback/program_wire.hpp` exists: it is the flat, pointer-free,
+versioned byte range that crossing form takes, with a validating decoder that
+allocates nothing and borrows typed spans straight out of the buffer.
+
+Consequences for anything on the web lane that publishes program state:
+
+- Size the destination with `program_wire_encoded_size` and write into a
+  caller-owned span. Both the encoder and the decoder allocate nothing, which is
+  what lets a producer write straight into a `SharedArrayBuffer` ring and a
+  worklet adopt without touching the allocator.
+- The buffer's base must be eight-byte aligned or the decoder rejects it — a
+  ring's slot stride has to be a multiple of eight, not merely large enough.
+- Payloads crossing this boundary are **untrusted input**. Never hand a worklet
+  bytes it has not run through `decode_program_wire`; the decoder is where
+  truncation, a spliced length, an unknown section, and an out-of-range index
+  all become typed rejections instead of an out-of-bounds read in the render
+  callback.
+- A rejected generation must leave the previously adopted program playing.
+  Adoption is `decode` then swap, never swap then validate.
+- **Adopt on `(producer_epoch, generation)`, never on `generation` alone.** A
+  differing epoch means a different producer: reset carried cursor state and
+  adopt unconditionally, because generations from two producers are not
+  comparable. This is the case a page hits whenever it rebuilds its Worker while
+  the `AudioContext` survives — the new Worker republishes generation 1, and a
+  consumer comparing generations alone refuses every publish from then on and
+  renders a stale program with no diagnostic to distinguish it from silence.
+
+## Capability tiers are shared with mobile — do not mint a browser-local enum
+
+When a browser lane needs to say "this page can only do the degraded thing",
+the tier vocabulary already exists and is **not** browser-specific:
+`core/platform/include/pulp/platform/device_capability.hpp` declares one
+`DeviceCapabilityTier` (`Constrained` / `Standard` / `Full`) that the browser
+lane's Tier A/B/C and the mobile lane's M-A/M-B/M-C both name. Use it. A
+second, browser-local `TierA | TierB | TierC` looks harmless in isolation and
+then permanently forks the ladder, because mobile and playback quotas will be
+reading the shared one.
+
+The seam is `DeviceCapabilityInputs::realtime_render_available`. The header
+deliberately never names `crossOriginIsolated`, `SharedArrayBuffer`, or worklet
+module support: **the browser probe collapses those three observations into
+that one boolean** and hands over neutral inputs, because a type consumed by
+iOS and Android must not carry web-platform spellings. Keep the probe's
+vocabulary in the probe.
+
+Two consequences worth knowing before you tune anything:
+
+- **No realtime render path caps the page at `Constrained`**, whatever its
+  memory and core count — the rungs above it are defined by rendering locally.
+  That is the controller-mode shape, and it is why a Tier-A page should refuse
+  to construct the worklet path with a typed diagnostic rather than build it
+  and catch a throw.
+- **A lane with no thermal API tops out at `Standard`.** Browsers expose no
+  thermal signal, so a browser page cannot currently reach `Full`. This is a
+  deliberate policy in `project_device_capability_tier` — the top rung's quotas
+  assume the platform will report heat so the consumer can step down — not an
+  oversight. Revisit it when the browser lane actually needs the top rung, and
+  change it in the shared header rather than routing around it.
+
+### The tier is in `platform`; the quota table is not
+
+`pulp::format::device_quotas(tier, thermal)`
+(`core/format/include/pulp/format/device_quotas.hpp`) is the matching table
+(voices, nodes, simultaneous editors, preview quality). It deliberately does
+**not** sit next to the tier enum, and reaching for
+`pulp::platform::DeviceQuotas` will not compile.
+
+`core/platform` is named in every row of the engine's declared dependency
+floors (`tools/scripts/timeline_engine_dependency_floor_check.py`), so anything
+placed there is reachable by every module and no floor row can object to it.
+That is right for a shared vocabulary and wrong for a budget over render-graph
+nodes and editing surfaces. `core/format` appears in no floor row, so an engine
+module that reaches for the quota header is rejected by the gate.
+
+Consumption runs one way: every enforcement point the table names already takes
+its ceilings as injected configuration (`playback::AudioRendererLimits`,
+`timeline::SessionLimits`, `graph::GraphRuntimeLimits`,
+`format::PrepareResourceLimits`), so the table's consumer is the shell that
+*constructs* those — which a browser lane already is. No engine module needs to
+see it.
+
+It is a declaration today: nothing enforces it yet, so reading it is safe and
+*relying* on someone else having enforced it is not.
+
 ## The worklet has no second thread
 
 A WAM module runs entirely inside the audio worklet: **there is no `std::thread`
@@ -437,6 +527,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   makes an unbounded ratchet fan-out especially dangerous. This engine support
   does not by itself add a JavaScript authoring surface.
 
+- Sequence groove rendering and compile-context invalidation are equally
+  portable. Built-in MIDI subscribes to `CompileContextKind::Groove`; its owner
+  sequence timing displacement and velocity accent are compiled before the
+  bounded ratchet expansion. WAM and WebCLAP therefore inherit the same note
+  program without browser-only math. Keep `CommitResult` predecessor provenance,
+  registry snapshots, and MIDI compile-structure tokens in the shared timeline /
+  playback lane so sparse reuse cannot publish stale browser programs. This also
+  does not create a JavaScript authoring surface by itself.
+
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
   alternative count (and an overload set with no generic fallback) precisely so
@@ -566,6 +665,14 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+
+`web-plugins.yml` also carries a second, unrelated job:
+`Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
+emscripten and runs the timeline conformance corpus through it. It shares the
+file only for the emsdk pin — it needs no Skia, no Chrome, no wasi-sdk, no npm,
+so keep it a separate job rather than a step in the lane above, or a one-minute
+check starts waiting on a fifteen-minute one. It is not a browser lane; if you
+are here for WAM/WebCLAP behavior, it is not the job you want.
 
 ### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
 

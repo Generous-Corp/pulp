@@ -328,6 +328,10 @@ pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalon
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# Screenshot-only launches skip the audio backend; the device lifecycle is
+# asserted through an injected fake system, so this one opens no real device
+# and needs no PROCESSORS reservation.
+pulp_add_test_suite(pulp-test-standalone-capture-audio LIBRARIES pulp::standalone pulp::audio)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
@@ -357,6 +361,11 @@ pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
 
 # Platform tests
 pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
+
+# Device capability tier and thermal ladder. The quota table they index is
+# policy and lives above the engine, so it is registered with the format tests
+# instead. Header-only over pulp::platform — linked for the include path only.
+pulp_add_test_suite(pulp-test-device-capability LIBRARIES pulp::platform)
 
 # Permissions tests
 pulp_add_test_suite(pulp-test-permissions LIBRARIES pulp::platform)

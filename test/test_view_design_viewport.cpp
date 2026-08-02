@@ -1,4 +1,4 @@
-// WindowHost::compute_design_viewport_transform.
+// WindowHost::compute_design_viewport_transform and DesignFitView.
 //
 // Unit-tests the pure math behind set_design_viewport so the
 // scale + letterbox math is locked down independent of any platform
@@ -10,11 +10,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/design_fit_view.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <cmath>
 #include <cstdint>
+#include <memory>
 #include <utility>
 
+using pulp::view::DesignFitView;
+using pulp::view::DimensionUnit;
+using pulp::view::Point;
+using pulp::view::View;
 using pulp::view::WindowHost;
 using Catch::Matchers::WithinAbs;
 
@@ -262,4 +269,203 @@ TEST_CASE("hidpi: pixel input divides by scale before the logical inverse",
                                   logical_h * scale * 0.5f);
     REQUIRE_THAT(rx, WithinAbs(dw * 0.5f, kEps));
     REQUIRE_THAT(ry, WithinAbs(dh * 0.5f, kEps));
+}
+
+// ── DesignFitView: the same fit, one pane deep ───────────────────────────────
+//
+// The window-level design viewport above fits a design into the WINDOW. A
+// design embedded as one PANE of a larger app needs the identical uniform fit
+// against the pane's bounds instead — otherwise a design taller than the pane
+// is clipped at the bottom (or scrolled, which hides half a control panel).
+// These cases assert the resulting GEOMETRY: where the fitted design actually
+// lands, and that a control is hit where it is painted.
+
+TEST_CASE("design fit: a panel taller than its pane fits instead of clipping",
+          "[view][design-viewport][design-fit]") {
+    // The shape an imported design carries: a fixed-size root (860 x 884.625)
+    // dropped into a pane that is only 600 tall.
+    constexpr float kPaneW = 860.0f, kPaneH = 600.0f;
+    constexpr float kDesignW = 860.0f, kDesignH = 884.625f;
+
+    DesignFitView fit;
+    fit.set_bounds({0, 0, kPaneW, kPaneH});
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = kDesignW;
+    panel->flex().preferred_height = kDesignH;
+    View* panel_ptr = panel.get();
+    fit.set_content(std::move(panel));
+
+    fit.layout_children();
+
+    const float s = fit.fit_scale();
+    // Height is the limiting axis.
+    REQUIRE_THAT(s, WithinAbs(kPaneH / kDesignH, kEps));
+    REQUIRE(s < 1.0f);
+
+    // The whole design is visible inside the pane — this is the defect: at
+    // scale 1 the bottom 284.6pt sat outside the pane.
+    const float visual_top = fit.content_offset_y();
+    const float visual_bottom = visual_top + kDesignH * s;
+    const float visual_left = fit.content_offset_x();
+    const float visual_right = visual_left + kDesignW * s;
+    REQUIRE(visual_top >= -kEps);
+    REQUIRE(visual_bottom <= kPaneH + kEps);
+    REQUIRE(visual_left >= -kEps);
+    REQUIRE(visual_right <= kPaneW + kEps);
+    // Nothing was cropped away to achieve that: the design still occupies its
+    // full authored extent, scaled.
+    REQUIRE_THAT(visual_bottom - visual_top, WithinAbs(kDesignH * s, kEps));
+
+    // Layout inside the design still solves at AUTHORED size — the fit is a
+    // paint-time scale, not a reflow, so nothing re-wraps or re-stacks.
+    REQUIRE_THAT(panel_ptr->bounds().width, WithinAbs(kDesignW, kEps));
+    REQUIRE_THAT(panel_ptr->bounds().height, WithinAbs(kDesignH, kEps));
+}
+
+TEST_CASE("design fit: the fit is uniform on both axes",
+          "[view][design-viewport][design-fit]") {
+    // A pane whose aspect differs from the design's: the design must letterbox,
+    // never stretch to fill.
+    constexpr float kPaneW = 1200.0f, kPaneH = 600.0f;
+    constexpr float kDesignW = 860.0f, kDesignH = 884.625f;
+
+    DesignFitView fit;
+    fit.set_bounds({0, 0, kPaneW, kPaneH});
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = kDesignW;
+    panel->flex().preferred_height = kDesignH;
+    View* panel_ptr = panel.get();
+    fit.set_content(std::move(panel));
+
+    fit.layout_children();
+
+    const float s = fit.fit_scale();
+    const float visual_w = kDesignW * s;
+    const float visual_h = kDesignH * s;
+
+    // The SAME scalar on both axes — asserted as the two independent ratios
+    // agreeing, not merely as "nothing was cut off". An anisotropic
+    // stretch-to-fit (1200/860 wide by 600/884.625 tall) also cuts nothing off
+    // and would pass a containment-only check.
+    REQUIRE_THAT(visual_w / kDesignW, WithinAbs(visual_h / kDesignH, kEps));
+    REQUIRE_THAT(panel_ptr->scale(), WithinAbs(s, kEps));
+    // Aspect ratio survives the fit.
+    REQUIRE_THAT(visual_w / visual_h, WithinAbs(kDesignW / kDesignH, kEps));
+    // …and it is NOT the stretch-to-fill geometry.
+    REQUIRE(std::abs(visual_w - kPaneW) > 1.0f);
+
+    // The slack lands as letterbox bars on the roomy axis, centered.
+    REQUIRE_THAT(fit.content_offset_x(), WithinAbs((kPaneW - visual_w) * 0.5f, kEps));
+    REQUIRE_THAT(fit.content_offset_y(), WithinAbs((kPaneH - visual_h) * 0.5f, kEps));
+    REQUIRE(fit.content_offset_x() > 0.0f);
+}
+
+TEST_CASE("design fit: a design that already fits is left at 1:1",
+          "[view][design-viewport][design-fit]") {
+    // Policy: never upscale by default. A design is authored at a size;
+    // blowing it past that fattens hairlines and softens raster assets.
+    constexpr float kPaneW = 1000.0f, kPaneH = 1000.0f;
+    constexpr float kDesignW = 860.0f, kDesignH = 884.625f;
+
+    DesignFitView fit;
+    fit.set_bounds({0, 0, kPaneW, kPaneH});
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = kDesignW;
+    panel->flex().preferred_height = kDesignH;
+    View* panel_ptr = panel.get();
+    fit.set_content(std::move(panel));
+
+    fit.layout_children();
+
+    REQUIRE_THAT(fit.fit_scale(), WithinAbs(1.0f, kEps));
+    REQUIRE_THAT(panel_ptr->scale(), WithinAbs(1.0f, kEps));
+    REQUIRE_THAT(panel_ptr->bounds().width, WithinAbs(kDesignW, kEps));
+    REQUIRE_THAT(panel_ptr->bounds().height, WithinAbs(kDesignH, kEps));
+    // Centered in the roomier pane.
+    REQUIRE_THAT(fit.content_offset_x(), WithinAbs((kPaneW - kDesignW) * 0.5f, kEps));
+    REQUIRE_THAT(fit.content_offset_y(), WithinAbs((kPaneH - kDesignH) * 0.5f, kEps));
+
+    // The policy is a choice, not a limitation: opting in scales up uniformly.
+    fit.set_allow_upscale(true);
+    fit.layout_children();
+    REQUIRE_THAT(fit.fit_scale(), WithinAbs(kPaneH / kDesignH, kEps));
+    REQUIRE(fit.fit_scale() > 1.0f);
+}
+
+TEST_CASE("design fit: input lands where the control is painted",
+          "[view][design-viewport][design-fit]") {
+    // A control authored BELOW the pane's own height: unreachable (and
+    // invisible) before the fit, and hit at its fitted position after it.
+    constexpr float kPaneW = 860.0f, kPaneH = 600.0f;
+    constexpr float kDesignW = 860.0f, kDesignH = 884.625f;
+    constexpr float kKnobX = 400.0f, kKnobY = 800.0f, kKnobSize = 64.0f;
+
+    DesignFitView fit;
+    fit.set_bounds({0, 0, kPaneW, kPaneH});
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = kDesignW;
+    panel->flex().preferred_height = kDesignH;
+    auto knob = std::make_unique<View>();
+    knob->set_position(View::Position::absolute);
+    knob->set_left(kKnobX);
+    knob->set_top(kKnobY);
+    knob->flex().preferred_width = kKnobSize;
+    knob->flex().preferred_height = kKnobSize;
+    View* knob_ptr = knob.get();
+    panel->add_child(std::move(knob));
+    fit.set_content(std::move(panel));
+
+    fit.layout_children();
+
+    // The design's interior solved at AUTHORED size: the control sits at the
+    // coordinate the design put it at, 800pt down — past the pane's own 600pt.
+    REQUIRE_THAT(knob_ptr->bounds().y, WithinAbs(kKnobY, kEps));
+
+    const float s = fit.fit_scale();
+    const Point painted{fit.content_offset_x() + (kKnobX + kKnobSize * 0.5f) * s,
+                        fit.content_offset_y() + (kKnobY + kKnobSize * 0.5f) * s};
+    // The paint position must be inside the pane at all — that is the whole
+    // point of the fit.
+    REQUIRE(painted.y < kPaneH);
+    REQUIRE(fit.hit_test(painted) == knob_ptr);
+
+    // The AUTHORED center is not where the control is any more; hit-testing
+    // against un-fitted coordinates must not find it.
+    REQUIRE(fit.hit_test({kKnobX + kKnobSize * 0.5f, kKnobY + kKnobSize * 0.5f}) !=
+            knob_ptr);
+    // A point inside the pane but outside the fitted design's letterbox bar
+    // belongs to the container, not the design.
+    if (fit.content_offset_x() > 1.0f) {
+        REQUIRE(fit.hit_test({1.0f, kPaneH * 0.5f}) == &fit);
+    }
+}
+
+TEST_CASE("design fit: the parent's layout pass drives the fit",
+          "[view][design-viewport][design-fit]") {
+    // owns_child_layout() is the seam that stops the flex pass from descending
+    // into the fitted subtree and re-solving it at pane size. Without it the
+    // design would be stretched/reflowed by the parent instead of scaled.
+    constexpr float kPaneW = 860.0f, kPaneH = 600.0f;
+    constexpr float kDesignW = 860.0f, kDesignH = 884.625f;
+
+    View root;
+    root.set_bounds({0, 0, kPaneW, kPaneH});
+    auto fit = std::make_unique<DesignFitView>();
+    fit->flex().dim_width = {100, DimensionUnit::percent};
+    fit->flex().dim_height = {100, DimensionUnit::percent};
+    DesignFitView* fit_ptr = fit.get();
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = kDesignW;
+    panel->flex().preferred_height = kDesignH;
+    View* panel_ptr = panel.get();
+    fit->set_content(std::move(panel));
+    root.add_child(std::move(fit));
+
+    root.layout_children();
+
+    REQUIRE_THAT(fit_ptr->bounds().height, WithinAbs(kPaneH, kEps));
+    REQUIRE_THAT(fit_ptr->fit_scale(), WithinAbs(kPaneH / kDesignH, kEps));
+    // The design kept its authored box; only its paint is scaled.
+    REQUIRE_THAT(panel_ptr->bounds().height, WithinAbs(kDesignH, kEps));
+    REQUIRE_THAT(panel_ptr->scale(), WithinAbs(kPaneH / kDesignH, kEps));
 }
