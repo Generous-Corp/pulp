@@ -356,8 +356,30 @@ void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& pan
     const auto* m = PortMap::shared().find(mod.brand, mod.name);
     if (!m) return;
 
+    // A widget drawn INSIDE another measured widget is already represented.
+    //
+    // The scan records a Quantizer's touch plate and, separately, each of its
+    // twelve key buttons — thirteen displays for one control. Drawing all of
+    // them put twelve recessed rectangles on top of the plate the keys were
+    // already painted on, so the panel read as hatching. Containment is the
+    // test, not the class name: it is true of any module whose author nested
+    // widgets, and false for two screens that merely sit near each other.
+    auto nested_in_another = [&](const MappedWidget& d) {
+        for (const auto& other : m->displays) {
+            if (&other == &d) continue;
+            if (!(other.w > d.w) && !(other.h > d.h)) continue;   // not larger
+            if (d.x - d.w / 2 >= other.x - other.w / 2 - 0.5f &&
+                d.x + d.w / 2 <= other.x + other.w / 2 + 0.5f &&
+                d.y - d.h / 2 >= other.y - other.h / 2 - 0.5f &&
+                d.y + d.h / 2 <= other.y + other.h / 2 + 0.5f)
+                return true;
+        }
+        return false;
+    };
+
     for (const auto& d : m->displays) {
         if (!(d.w > 0.0f) || !(d.h > 0.0f)) continue;
+        if (nested_in_another(d)) continue;
         const float w = d.w * scale, h = d.h * scale;
         if (w < 3.0f || h < 3.0f) continue;         // below this it is a speck
         const float x = panel.x + d.x * scale - w / 2.0f;
@@ -380,18 +402,33 @@ void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& pan
                               t.find("keyboard") != std::string::npos ||
                               t.find("piano") != std::string::npos;
         if (is_plate && h > 12.0f * scale) {
-            const int keys = 12;
-            const float kh = h / static_cast<float>(keys);
-            for (int i = 0; i < keys; ++i) {
-                // The black keys of an octave, so the plate is legible as one.
-                static const bool sharp[12] = {false, true, false, true, false,
-                                               false, true, false, true, false,
-                                               true, false};
-                const float ky = y + static_cast<float>(i) * kh;
-                canvas.set_fill_color(sharp[11 - i] ? from_rgb(0x161B22, 1.0f)
-                                                    : from_rgb(0xB8C0CC, 1.0f));
-                canvas.fill_rect(x + w * 0.08f, ky + kh * 0.12f,
-                                 w * (sharp[11 - i] ? 0.52f : 0.84f), kh * 0.76f);
+            // Drawn as a KEYBOARD, not as stripes.
+            //
+            // The first version alternated full-width light and dark bars,
+            // twelve of them, which at panel scale reads as hatching rather
+            // than as keys. A piano is white keys across the full width with
+            // the black ones narrower and sitting BETWEEN them — that overlap
+            // is the whole visual signature, and losing it loses the only
+            // thing that says "this selects notes".
+            static const bool sharp[12] = {false, true, false, true, false,
+                                           false, true, false, true, false,
+                                           true, false};
+            // Seven white keys to the octave, laid out first.
+            const float wh = h / 7.0f;
+            for (int i = 0; i < 7; ++i) {
+                const float ky = y + static_cast<float>(i) * wh;
+                canvas.set_fill_color(from_rgb(0xC8CFD8, 1.0f));
+                canvas.fill_rect(x + w * 0.06f, ky + 0.5f * scale,
+                                 w * 0.88f, wh - 1.0f * scale);
+            }
+            // Then the black keys, over the joins.
+            const float bh = h / 12.0f;
+            for (int i = 0; i < 12; ++i) {
+                if (!sharp[11 - i]) continue;
+                const float ky = y + static_cast<float>(i) * bh;
+                canvas.set_fill_color(from_rgb(0x14181E, 1.0f));
+                canvas.fill_rect(x + w * 0.06f, ky + bh * 0.15f,
+                                 w * 0.52f, bh * 0.70f);
             }
         }
     }
@@ -404,13 +441,16 @@ void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& pan
         if (!(r > 0.4f)) continue;
         const float cx = panel.x + l.x * scale;
         const float cy = panel.y + l.y * scale;
-        canvas.set_fill_color(from_rgb(0x11161C, 1.0f));
+        // Unlit, but VISIBLE. The first version drew a near-black disc with a
+        // near-black ring, which at panel scale disappeared into the panel —
+        // an audio interface rendered as if it had no meter at all, which is
+        // the very thing this was added to fix. A lamp that is off still has a
+        // lens.
+        canvas.set_fill_color(from_rgb(0x0B0E13, 1.0f));
         canvas.fill_circle(cx, cy, r);
-        // Unlit: the preview shows a patch at rest and has no signal to read,
-        // and a lamp drawn lit would be a claim about level that is not true.
-        canvas.set_stroke_color(from_rgb(0x39424E, 1.0f));
-        canvas.set_line_width(std::max(0.4f, r * 0.25f));
-        canvas.stroke_circle(cx, cy, r * 0.7f);
+        canvas.set_stroke_color(from_rgb(0x6E7B8C, 1.0f));
+        canvas.set_line_width(std::max(0.6f, r * 0.30f));
+        canvas.stroke_circle(cx, cy, r * 0.78f);
     }
 }
 

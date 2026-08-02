@@ -7130,3 +7130,30 @@ TEST_CASE("the explanation opens with what was asked for", "[explain][request]")
     ex.set_request("");
     CHECK(ex.child_count() == without);
 }
+
+TEST_CASE("a scanned panel draws its screens and lamps", "[.screens-look]") {
+    // Hidden by default: it writes a picture for a person to look at. Run with
+    //   ./forge-test-chrome-no-leak "[.screens-look]"
+    // A Quantizer carries 13 measured displays including its touch plate; an
+    // audio interface carries 12 lamps, which are its meter ladder. Both were
+    // measured by CARTOG and drawn by nobody until now, so this is the check
+    // that the drawing is real rather than merely compiled.
+    forge_modular::RackPreview preview;
+    std::vector<forge_modular::RackModule> mods;
+    forge_modular::RackModule q;
+    q.id = "1"; q.brand = "Fundamental"; q.name = "Quantizer"; q.hp = 4;
+    forge_modular::RackModule a;
+    a.id = "2"; a.brand = "Core"; a.name = "AudioInterface2"; a.hp = 5;
+    forge_modular::RackModule v;
+    v.id = "3"; v.brand = "Fundamental"; v.name = "VCO"; v.hp = 10;
+    mods = {q, a, v};
+    preview.set_rack(mods, {});
+    const auto png = pulp::view::render_to_png(preview, 420, 380, 2.0f,
+                                               pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    const auto out = std::filesystem::temp_directory_path() / "screens-look.png";
+    std::ofstream f(out, std::ios::binary);
+    f.write(reinterpret_cast<const char*>(png.data()),
+            static_cast<std::streamsize>(png.size()));
+    WARN("wrote " << out.string());
+}
