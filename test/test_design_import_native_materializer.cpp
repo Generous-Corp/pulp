@@ -654,6 +654,53 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     CHECK(border.a > 0.0f);
 }
 
+TEST_CASE("baked native materializer accepts the oklab colours Chromium serializes",
+          "[view][import][native-materializer][color]") {
+    // A captured design does not reach the materializer in the syntax it was
+    // authored in: Chromium serializes lab/lch/oklab/oklch/color-mix and any
+    // wide-gamut literal into `oklab()` or `oklch()`. The colour allowlist knew
+    // only `rgb`/`hsl`, so those values were not parsed and never applied — the
+    // view kept its DEFAULT colour, which is a silent loss rather than a visibly
+    // wrong one. A real capture's accent label rendered in the inherited colour.
+    //
+    // Asserted on text, border and background together for the same reason the
+    // rgba() case above does: the allowlist is one gate in front of seven paint
+    // sites, so a single-site check passes throughout the bug.
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "DRIVE";
+    ir.root.stable_anchor_id = "label";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 20.0f;
+    // Chromium paints these exact strings as rgb(6, 8, 9), rgb(142, 255, 157)
+    // and rgb(192, 255, 198); the values below are read off its own render.
+    ir.root.style.background_color = "oklab(0.152 0 -0.005)";
+    ir.root.style.color = "oklab(0.913804 -0.143517 0.0939829)";
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "oklch(0.7 0.2 145)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    const auto text = root->inheritable_text_color();
+    REQUIRE(text.has_value());
+    CHECK(text->r == Catch::Approx(142.0f / 255.0f).margin(0.01f));
+    CHECK(text->g == Catch::Approx(255.0f / 255.0f).margin(0.01f));
+    CHECK(text->b == Catch::Approx(157.0f / 255.0f).margin(0.01f));
+
+    const auto border = root->border_color();
+    CHECK(border.r == Catch::Approx(48.0f / 255.0f).margin(0.01f));
+    CHECK(border.g == Catch::Approx(189.0f / 255.0f).margin(0.01f));
+    CHECK(border.a > 0.0f);
+
+    // The background must be the design's near-black, not the parser's
+    // opaque-white fallback for a token it does not know. Without this the case
+    // passes when every value above resolves to white.
+    CHECK(root->background_color().r < 0.2f);
+    CHECK(root->background_color().g < 0.2f);
+    CHECK(root->background_color().b < 0.2f);
+}
+
 TEST_CASE("baked native materializer carries a resolved clip rectangle to the view",
           "[view][import][native-materializer][clip-model]") {
     // The importer resolves a node's real CSS clip chain to one rectangle in
