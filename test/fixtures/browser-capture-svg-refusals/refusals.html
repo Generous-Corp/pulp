@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>svg refusals</title>
+<style>
+  html,body{margin:0;padding:0}
+  body{width:420px;height:110px;background:#101418;font-family:system-ui}
+  .row{display:flex;gap:12px;padding:16px}
+  .cell{width:60px;height:48px;border-radius:6px;background:#1b2229;
+        display:flex;align-items:center;justify-content:center;color:#7cd6c1}
+  svg{display:block}
+</style></head>
+<body>
+  <div class="row">
+    <!-- element: <text> has no shape vocabulary here -->
+    <div class="cell"><svg width="48" height="32" viewBox="0 0 24 16">
+      <text x="2" y="12" font-size="9" fill="#e8b552">Hi</text>
+    </svg></div>
+
+    <!-- element: <switch> renders ONE child, not all of them -->
+    <div class="cell"><svg width="40" height="40" viewBox="0 0 20 20">
+      <switch>
+        <rect systemLanguage="zz" x="2" y="2" width="16" height="16" fill="#d4544a"/>
+        <rect x="5" y="5" width="10" height="10" fill="#4a90d4"/>
+      </switch>
+    </svg></div>
+
+    <!-- element: a non-default preserveAspectRatio maps the viewBox elsewhere -->
+    <div class="cell"><svg width="48" height="24" viewBox="0 0 12 12"
+         preserveAspectRatio="none">
+      <rect x="1" y="1" width="10" height="10" fill="#63b3ed"/>
+    </svg></div>
+
+    <!-- dashed-stroke: drawn solid it is a different picture -->
+    <div class="cell"><svg width="40" height="40" viewBox="0 0 20 20">
+      <circle cx="10" cy="10" r="7" fill="none" stroke="#f0a04b"
+              stroke-width="2" stroke-dasharray="3 2"/>
+    </svg></div>
+
+    <!-- group-opacity: composited as a unit, not per shape -->
+    <div class="cell"><svg width="40" height="40" viewBox="0 0 20 20">
+      <g opacity="0.5">
+        <rect x="2" y="2" width="11" height="11" fill="#c86ad0"/>
+        <rect x="7" y="7" width="11" height="11" fill="#8fd694"/>
+      </g>
+    </svg></div>
+
+    <!-- shape-geometry: a percentage length needs a viewport we do not have -->
+    <div class="cell"><svg width="40" height="40" viewBox="0 0 20 20">
+      <rect x="2" y="2" width="50%" height="60%" fill="#7cd6c1"/>
+    </svg></div>
+  </div>
+</body></html>

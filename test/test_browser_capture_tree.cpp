@@ -1116,6 +1116,65 @@ TEST_CASE("an svg the vector lowering cannot draw says which construct refused",
     }
 }
 
+TEST_CASE("each refusal names the construct that caused it",
+          "[browser-capture][native-lowering][svg]") {
+    // A second real capture, one icon per refusal, because the residual is
+    // meant to be a LIST of constructs a reader can act on. Each of these
+    // draws something visibly different from what the vector lowering could
+    // produce, which is why the honest answer is the captured element:
+    //   <text>            — no shape vocabulary for glyphs
+    //   <switch>          — renders ONE child, so a group walk draws too much
+    //   preserveAspectRatio="none" — stretches instead of fitting
+    //   stroke-dasharray  — drawn solid it is a different picture
+    //   <g opacity>       — composited as a unit, not per shape
+    //   width="50%"       — resolves against a viewport the synthesis lacks
+    const auto lowered = lower_capture("browser-capture-svg-refusals");
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(root.attributes.count("native_svg_lowered") == 0);
+    CHECK(attribute(root, "native_svg_refused") == "6");
+
+    std::map<std::string, std::string> refusals;  // reason → detail
+    const std::function<void(const IRNode&)> walk = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_element") == "svg") {
+                refusals[attribute(child, "capture_fallback_reason")] =
+                    attribute(child, "capture_fallback_detail");
+            }
+            walk(child);
+        }
+    };
+    walk(root);
+
+    CHECK(refusals["svg-dashed-stroke"] == "circle");
+    CHECK(refusals["svg-group-opacity"] == "g");
+    CHECK(refusals["svg-shape-geometry"] == "rect");
+    // Three different constructs share the `element` reason, so the DETAIL is
+    // the only thing that separates them — a reason alone would collapse
+    // "add a shape kind" and "this can never be a shape" into one line.
+    CHECK(refusals.count("svg-element") == 1);
+
+    std::vector<std::string> element_details;
+    const std::function<void(const IRNode&)> details = [&](const IRNode& node) {
+        for (const auto& child : node.children) {
+            if (attribute(child, "capture_fallback_reason") == "svg-element")
+                element_details.push_back(
+                    attribute(child, "capture_fallback_detail"));
+            details(child);
+        }
+    };
+    details(root);
+    std::sort(element_details.begin(), element_details.end());
+    CHECK(element_details == std::vector<std::string>{
+                                 "preserveAspectRatio=none", "switch", "text"});
+
+    // Nothing from a refused subtree may reach the tree as geometry.
+    CHECK(count_nodes(root, [](const IRNode& node) {
+              return node.attributes.count("path_data") != 0;
+          }) == 0);
+}
+
 TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
           "[browser-capture][native-lowering][svg]") {
     const auto lowered = lower_capture("browser-capture-svg-icons");

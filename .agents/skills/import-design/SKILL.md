@@ -5527,6 +5527,19 @@ own capture. Read `native_svg_lowered` / `native_svg_refused` /
 `native_svg_shapes` on the IR root beside those per-node strings: the residual
 is meant to be a list of constructs, not a total.
 
+Two refusals are easy to get wrong in the permissive direction, and both draw a
+plausible-looking WRONG picture rather than nothing: `<switch>` renders the
+FIRST child whose requirement attributes hold, so walking it as a plain group
+draws every alternative stacked; and a non-default `preserveAspectRatio`
+(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
+renderer's fixed `xMidYMid meet` will not.
+
+**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
+miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
+stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
+coverage by <1%, which is why it is accepted rather than sent to the fallback —
+refusing on it would capture most real icons. Revisit if a design shows it.
+
 ## Scoring a native panel — the instrument lies in two specific ways
 
 `tools/import-validation/score_native_panel.py` renders the emitted artifact and
