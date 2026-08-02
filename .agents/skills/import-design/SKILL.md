@@ -4018,6 +4018,13 @@ capture backdrop out from under its controls, and errs in *both* directions —
 from the same tree as the importer (a stale one no-ops the artifact's token
 calls and scores near zero, looking exactly like a broken design).
 
+The verifier checks runtime calls used by the artifact against complete string
+table entries in `pulp-screenshot` before rendering. A missing capability, an
+unreadable binary, or an unreadable artifact exits with harness error 7; it is
+not a panel-regression score. Rebuild `pulp-screenshot` from the importer's tree
+and rerun. Partial names such as `setColorTokenLegacy` deliberately do not prove
+that the renderer implements `setColorToken`.
+
 Its similarity is blind to palette regressions — an artifact whose tokens never
 reach the widget theme keys renders blue knobs on a cream faceplate and still
 scores **0.940**. The `--tokens` foreign-colour check is the only thing that
