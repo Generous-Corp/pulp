@@ -573,6 +573,46 @@ TEST_CASE("WidgetBridge __domAppend routes <knob> tag to a draggable native Knob
     REQUIRE(val0 > 0.0);  // dragged up from the 0.0 initial value
 }
 
+// A widget's element id is an addressing handle, not its name. Widgets paint
+// their label, so a caption seeded from the id draws that handle on screen —
+// which is what a browser-imported panel showed instead of its controls'
+// names: every element built through the web-compat DOM carries a generated
+// `__el_N__` id.
+TEST_CASE("a widget never paints its own element id as a caption",
+          "[view][bridge]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        __domAppend('', '__el_3__', 'knob');
+        __domAppend('', '__el_4__', 'fader');
+        __domAppend('', '__el_5__', 'toggle');
+        createKnob('__el_6__', '');
+        createFader('__el_7__', 0, 0, 24, 200, 'vertical');
+        createToggle('__el_8__', 0, 0, 50, 30);
+    )");
+
+    for (const auto* id : {"__el_3__", "__el_4__", "__el_5__",
+                           "__el_6__", "__el_7__", "__el_8__"}) {
+        auto* view = bridge.widget(id);
+        REQUIRE(view != nullptr);
+        std::string label;
+        if (auto* k = dynamic_cast<Knob*>(view)) label = k->label();
+        else if (auto* f = dynamic_cast<Fader*>(view)) label = f->label();
+        else if (auto* t = dynamic_cast<Toggle*>(view)) label = t->label();
+        INFO("widget " << id << " caption: " << label);
+        CHECK(label.empty());
+        CHECK(label.find("__el_") == std::string::npos);
+    }
+
+    // A caption the caller actually asked for still reaches the widget.
+    bridge.load_script("setLabel('__el_3__', 'RATE');");
+    CHECK(dynamic_cast<Knob*>(bridge.widget("__el_3__"))->label() == "RATE");
+}
+
 // ── Routing-parity sweep (breadth) ─────────────────────────────────────────
 // Asserts every `@pulp/react` widget intrinsic, lowered to its lowercase tag,
 // routes to the correct NATIVE widget type — not the createCol/View container
@@ -4922,4 +4962,26 @@ TEST_CASE("WidgetBridge does not report a hover sample as a pointerup",
     surface->on_pointer_event(hover);
 
     CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 0);
+}
+
+// The negative control for dropping the id seed: removing a default must not
+// remove the real thing. Covers the FACTORY call shape and the accessible
+// name, neither of which the tag-path case above reaches — an id that stopped
+// painting but still got read aloud would be a half-fix.
+TEST_CASE("an explicit label still reaches a bridge-made control",
+          "[view][bridge][labels]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k1', 'root');
+        setLabel('k1', 'RATE');
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k1"));
+    REQUIRE(knob != nullptr);
+    CHECK(knob->label() == "RATE");
+    CHECK(knob->access_label() == "RATE");
 }

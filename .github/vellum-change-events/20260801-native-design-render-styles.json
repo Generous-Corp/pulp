@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "event_id": "20260801-native-design-render-styles",
+  "kind": "change",
+  "created_at": "2026-08-01T20:40:00Z",
+  "slices": [
+    "canvas-kernel",
+    "design-schema-compiler",
+    "render-skia-dawn"
+  ],
+  "rationale": "Rendering a browser-solved design natively reached three frozen slices, each because a real design exercised a path that no hand-authored fixture had. In canvas-kernel, a conic gradient could not express its start angle: the sweep shader's angle window is a full turn, so rotating within that window silently dropped a quarter of every default gradient. The rotation now applies as a local matrix about the gradient's own centre (rotate_sweep), which leaves the window intact and makes angular units, double-position stops and the repeating tile behave; the path change accompanies it because SkPathBuilder::setFillType is unreliable in this bundle, the headers and the macOS libskia.a being from different revisions, so the header writes one byte offset and the library reads another. In render-skia-dawn, Graphite discards any raster SkImage it meets unless the Recorder carries an ImageProvider, and Skia's default provider returns nothing; the draw call still reports success, so an asset that composited on raster vanished on GPU with no error. RecorderOptions::fImageProvider now carries a Recorder-scoped provider. In design-schema-compiler, ir_tokens_to_theme previously copied design tokens verbatim and never resolved the widget theme keys, so every widget whose key went unmapped painted Pulp's built-in default over the design's own palette; the mapping is now explicit per widget key and emits a diagnostic naming the unmapped keys rather than failing silently, which is what made the fallback visible at all. Pulp-only: all three originate in the browser-capture to DesignIR to Skia path, which exists only here, and no counterpart framework change exists to backport. An unparseable token still leaves its widget key unset rather than guessing a colour, so nothing invents appearance the design did not state.",
+  "tests": [
+    "pulp-test-canvas",
+    "pulp-test-canvas-cg-gradients",
+    "pulp-test-design-import-native-common",
+    "pulp-test-headless-surface"
+  ],
+  "disposition": "pulp-only"
+}

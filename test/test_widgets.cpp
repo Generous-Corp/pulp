@@ -422,11 +422,47 @@ TEST_CASE("Skinned Meter gradient samples low→high across stops",
     auto lo = meter.gradient_color_at(0.0f);
     auto hi = meter.gradient_color_at(1.0f);
     auto mid = meter.gradient_color_at(0.5f);
-    REQUIRE_THAT(lo.g, WithinAbs(1.0, 0.01));
-    REQUIRE_THAT(hi.r, WithinAbs(1.0, 0.01));
+    REQUIRE(lo.has_value());
+    REQUIRE(hi.has_value());
+    REQUIRE(mid.has_value());
+    REQUIRE_THAT(lo->g, WithinAbs(1.0, 0.01));
+    REQUIRE_THAT(hi->r, WithinAbs(1.0, 0.01));
     // Midpoint is an even blend.
-    REQUIRE_THAT(mid.r, WithinAbs(0.5, 0.02));
-    REQUIRE_THAT(mid.g, WithinAbs(0.5, 0.02));
+    REQUIRE_THAT(mid->r, WithinAbs(0.5, 0.02));
+    REQUIRE_THAT(mid->g, WithinAbs(0.5, 0.02));
+}
+
+TEST_CASE("a Meter with no gradient has no colour to give",
+          "[view][widget][tokens]") {
+    // Sampling an unset gradient used to answer a built-in green
+    // (rgba8(80,200,80)) — a colour no design chose, on a public method any
+    // caller can reach. Nothing is the honest answer, and it is why the type
+    // is optional: a transparent Color would be just as wrong the moment a
+    // caller ignored the alpha and painted it black.
+    Meter meter;
+    CHECK_FALSE(meter.gradient_color_at(0.0f).has_value());
+    CHECK_FALSE(meter.gradient_color_at(0.5f).has_value());
+    CHECK_FALSE(meter.gradient_color_at(1.0f).has_value());
+
+    // Same after a skin is cleared — the meter must not keep a colour it no
+    // longer has stops for.
+    meter.set_skin_gradient({Color::rgba8(0, 255, 0), Color::rgba8(255, 0, 0)});
+    REQUIRE(meter.gradient_color_at(0.5f).has_value());
+    meter.clear_skin();
+    CHECK_FALSE(meter.gradient_color_at(0.5f).has_value());
+}
+
+TEST_CASE("a Meter with one stop answers that stop, not a blend",
+          "[view][widget][tokens]") {
+    // A single stop is a colour the design did state, so it is returned as
+    // given rather than refused.
+    Meter meter;
+    meter.set_skin_gradient({Color::rgba8(196, 98, 42)});
+    const auto only = meter.gradient_color_at(0.7f);
+    REQUIRE(only.has_value());
+    CHECK(only->r8() == 196);
+    CHECK(only->g8() == 98);
+    CHECK(only->b8() == 42);
 }
 
 TEST_CASE("derive_meter_skin samples a synthetic gradient bottom→top",

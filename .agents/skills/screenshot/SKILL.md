@@ -53,6 +53,19 @@ below. The image-compositing rule still applies to the raster backends.
 | `coregraphics` (macOS default of `default_backend`) | **Yes, as of #6223** | Vector-only UIs, or when you specifically want the CG raster path |
 | `default_backend` | macOS → CoreGraphics, else provider | Fine for images now; still prefer `skia` for import fidelity |
 
+**"Skia is the fidelity reference" is about IMAGES, not about everything.**
+The rule above exists because CG could not composite file-backed images — it is
+not a general statement that the GPU path is more correct. Conic gradients were
+the counter-example: Skia's sweep shader clamps angles outside its
+`[start, end]` window instead of wrapping, so passing the CSS rotation as the
+window's start left a flat wedge the size of that rotation, and the default
+`from 0deg` lost a quarter of the circle. CoreGraphics software-rasterises the
+sweep and wraps its angle correctly, so it never had the defect — a CG
+screenshot of a conic was the more faithful one. Fixed by rotating the shader
+instead of shifting its window, so the two agree again. The durable lesson:
+when two backends disagree, find out WHICH is wrong before assuming; a
+per-backend gap is a claim about one primitive, not a ranking.
+
 **History (the trap — fixed #6223 S34):** `ImageView::paint` decodes images
 on-paint via the canvas's `draw_image_from_file` / `measure_image_from_file`
 primitive. `SkiaCanvas` always implemented it; the **CoreGraphics canvas did
@@ -186,6 +199,35 @@ missing comparison backend, not proof that the rendered PNG was empty.
   `AssetManager::decode_png` does NOT actually decode (it stores raw PNG bytes +
   parses IHDR), so you cannot get RGBA by round-tripping a PNG through it — use
   `render_to_rgba` for raw pixels.
+
+## A standalone `--screenshot` run opens NO audio device
+
+`StandaloneApp::start()` skips the audio backend entirely for a screenshot-only
+launch: no `AudioSystem`, no device, no render callback, and no hardware MIDI
+(nothing drains it without the callback). That is what makes the Standalone
+format capturable on a shared or unattended machine — before it, every capture
+opened a CoreAudio device, so the format could only be verified with a human at
+the desk.
+
+Consequences when you read such a capture:
+
+- **Meters, scopes and any live-signal UI read zero.** That is the mode, not a
+  broken UI. To capture a UI that must show real signal, set
+  `StandaloneConfig::screenshot_keeps_audio` or export
+  `PULP_SCREENSHOT_KEEP_AUDIO=1`.
+- **The Settings tab's device lists are empty** — there is no audio system to
+  enumerate. Capture with the keep-audio opt-in if the device picker is the
+  subject of the shot.
+- **Asking for a live readout in the same run keeps audio on**, because those
+  readouts are produced BY the render callback: `--audio-probe-json`,
+  `--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`.
+
+Verify a capture really stayed silent by process state, not by listening: while
+the app is alive, `lsof -p <pid>` must not map
+`/System/Library/Components/CoreAudio.component/…/CoreAudio`, and
+`sample <pid> 1` must show no `com.apple.audio.IOThread.client` thread running
+`HALC_ProxyIOContext::IOWorkLoop()`. Both appear when a device IS open, so
+their absence is a two-state result rather than a hopeful one.
 
 ## Render size: use the design's true root, not the source bbox
 

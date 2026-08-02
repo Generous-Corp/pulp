@@ -402,8 +402,8 @@ canvas::Color ImageView::fill_gradient_color_at(float t) const {
     return fill_gradient_[i].interpolate(fill_gradient_[i + 1], frac);
 }
 
-canvas::Color Meter::gradient_color_at(float t) const {
-    if (gradient_stops_.empty()) return canvas::Color::rgba8(80, 200, 80);
+std::optional<canvas::Color> Meter::gradient_color_at(float t) const {
+    if (gradient_stops_.empty()) return std::nullopt;
     if (gradient_stops_.size() == 1) return gradient_stops_.front();
     t = std::clamp(t, 0.0f, 1.0f);
     float scaled = t * static_cast<float>(gradient_stops_.size() - 1);
@@ -460,14 +460,18 @@ void Meter::paint(canvas::Canvas& canvas) {
                     // position within the FILL: 1.0 at the fill top, 0.0 at the
                     // fill bottom (the meter base).
                     float pos = 1.0f - (static_cast<float>(y) + 0.5f - fill_top) / fill_span;
-                    canvas.set_fill_color(gradient_color_at(pos));
+                    const auto row = gradient_color_at(pos);
+                    if (!row) continue;  // no stops, no colour, no paint
+                    canvas.set_fill_color(*row);
                     canvas.fill_rect(h_inset, static_cast<float>(y), b.width - 2 * h_inset, 1);
                 }
             } else {
                 float fill_span = std::max(1.0f, fill);
                 for (int x = 0; x < static_cast<int>(fill); ++x) {
                     float pos = (static_cast<float>(x) + 0.5f) / fill_span;
-                    canvas.set_fill_color(gradient_color_at(pos));
+                    const auto column = gradient_color_at(pos);
+                    if (!column) continue;  // no stops, no colour, no paint
+                    canvas.set_fill_color(*column);
                     canvas.fill_rect(static_cast<float>(x), v_inset, 1, b.height - 2 * v_inset);
                 }
             }

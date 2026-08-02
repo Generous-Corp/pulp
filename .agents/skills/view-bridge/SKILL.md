@@ -332,6 +332,26 @@ must not assume a trigger it set stays raised across frames — it is
 observed for one block and then auto-settles. Read it back from the
 store if you need to reflect the resting state in the UI.
 
+## Standalone editor: a `--screenshot` launch has no audio behind it
+
+`StandaloneApp::start()` skips the audio backend entirely when the launch is a
+screenshot-only capture — no `AudioSystem`, no device, no render callback, no
+hardware MIDI. The editor is built, opened and photographed exactly as usual;
+only the audio underneath it is absent, so a capture can run on a shared or
+unattended machine without opening a device.
+
+What this means for editor work:
+
+- The `ViewBridge` lifecycle is unchanged — `open` / `notify_attached` /
+  `resize` / `close` all still run. Do not "fix" a capture by re-adding a
+  device.
+- Anything the editor drives from live audio (meters, scopes, the Settings
+  tab's device lists) is empty in such a capture. Set
+  `StandaloneConfig::screenshot_keeps_audio` (or `PULP_SCREENSHOT_KEEP_AUDIO=1`)
+  when the shot is *about* live signal; requesting a probe/scope/WAV readout in
+  the same run keeps audio on by itself.
+- `StandaloneApp::audio_skipped_for_capture()` reports which mode a run took.
+
 ## Secondary views
 
 ```cpp

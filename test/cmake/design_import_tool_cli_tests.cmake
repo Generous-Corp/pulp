@@ -7,7 +7,10 @@
 add_executable(pulp-browser-capture-launcher-fixture
     fixtures/browser_capture_launcher_fixture.cpp)
 add_executable(pulp-test-browser-capture-backend
-    test_browser_capture_backend.cpp)
+    test_browser_capture_backend.cpp
+    # Node.js discovery: PATH plus the standard install locations, so a
+    # GUI-launched app (minimal PATH) resolves the same Node a terminal does.
+    test_node_runtime.cpp)
 target_link_libraries(pulp-test-browser-capture-backend PRIVATE
     pulp::browser-capture-backend
     Catch2::Catch2WithMain)
@@ -42,6 +45,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_cli.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_session.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
@@ -52,6 +56,12 @@ add_executable(pulp-test-browser-capture-import
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
+# A real Chromium capture of a panel built from oklab colours, gradients, and
+# layered shadows. Kept byte-verbatim (the envelope carries the screenshot's
+# sha256) so the computed-style lowering is proven against what Chrome actually
+# serializes rather than against hand-written JSON that agrees with the parser.
+target_compile_definitions(pulp-test-browser-capture-import PRIVATE
+    PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style")
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
     pulp::view
@@ -155,7 +165,9 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp
     # fig_lane's multi-state merge lives here (and is shared with the
     # repeated---file lane), so the in-process fig_lane cases need it linked.
-    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp
+    # fig_lane resolves the Node decoder through the shared search.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/node_runtime.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
     ${CMAKE_SOURCE_DIR}/external/miniz
     ${CMAKE_SOURCE_DIR}/tools/import-design
