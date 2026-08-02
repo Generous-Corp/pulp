@@ -529,16 +529,16 @@ jobs:
               -o "$authoritative_matrix"
             python3 - "$compat_dir/release_product_matrix.json" \
               "$authoritative_matrix" <<'PY'
-            import json
-            import sys
-            from pathlib import Path
+          import json
+          import sys
+          from pathlib import Path
 
-            selected_path = Path(sys.argv[1])
-            selected = json.loads(selected_path.read_text(encoding="utf-8"))
-            authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-            selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
-            selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
-            PY
+          selected_path = Path(sys.argv[1])
+          selected = json.loads(selected_path.read_text(encoding="utf-8"))
+          authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
+          PY
             echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
