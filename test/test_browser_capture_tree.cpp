@@ -469,8 +469,13 @@ TEST_CASE("native lowering refuses a capture with no DOM snapshot",
 // fixture sized to be readable. Hidden by default (`[.]`) because it needs a
 // capture that is not committed; selecting it without one FAILS rather than
 // passing quietly, so it can never become a test that proves nothing.
+// Tagged ONLY `[.real-design]`: it must not be swept up by a `[native-lowering]`
+// or `[browser-capture]` filter, which would fail a clean run for want of a
+// capture nobody asked it to supply.
+//   PULP_NATIVE_LOWERING_CAPTURE=<capture-dir> \
+//     pulp-test-browser-capture-import "[.real-design]" -s
 TEST_CASE("whole-tree lowering census over a real captured design",
-          "[.real-design][browser-capture][native-lowering]") {
+          "[.real-design]") {
     const char* directory = std::getenv("PULP_NATIVE_LOWERING_CAPTURE");
     REQUIRE(directory != nullptr);
     const auto envelope = fs::path(directory) / "capture.json";
