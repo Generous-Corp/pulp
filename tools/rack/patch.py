@@ -229,18 +229,41 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
         except Exception:
             continue
         for m in doc.get("modules", []):
+            # Expand `*_array` shorthand FIRST, and order every port list by
+            # its declared id.
+            #
+            # A manifest may declare six mixer channels as one `input_array`
+            # and the master CV separately as `inputs` with "id": 6. Reading
+            # `inputs` alone reported SIXMIX — a six-channel mixer — as having
+            # ONE input, so that is what the model was told it had, and the
+            # index-to-name mapping every reader derives from list position
+            # pointed at the wrong jack. The emitter has always expanded these;
+            # this reader never did, and two readers of one manifest that
+            # disagree is the whole bug.
+            try:
+                import forge_modular as _fm                  # noqa: PLC0415
+                m = _fm.expand_arrays(dict(m))
+            except Exception:                                # noqa: BLE001
+                pass                       # an unexpandable manifest still reads
+
+            def _by_id(group):
+                entries = [e for e in (m.get(group) or []) if isinstance(e, dict)]
+                # Sort by id so position IS index; without this a manifest that
+                # lists a high-id port first silently renumbers every cable.
+                entries.sort(key=lambda e: e.get("id", 0))
+                return entries
+
             for pslug, plug in inv.items():
                 if pslug != our_plugin:
                     continue
                 mod = plug["modules"].get(m.get("slug"))
                 if mod is None:
                     continue
-                mod["inputs"] = [p.get("label") or p.get("name")
-                                 for p in m.get("inputs", [])]
-                mod["outputs"] = [p.get("label") or p.get("name")
-                                  for p in m.get("outputs", [])]
-                mod["roles_in"] = [p.get("role", "Cv") for p in m.get("inputs", [])]
-                mod["roles_out"] = [p.get("role", "Cv") for p in m.get("outputs", [])]
+                ins, outs = _by_id("inputs"), _by_id("outputs")
+                mod["inputs"] = [p.get("label") or p.get("name") for p in ins]
+                mod["outputs"] = [p.get("label") or p.get("name") for p in outs]
+                mod["roles_in"] = [p.get("role", "Cv") for p in ins]
+                mod["roles_out"] = [p.get("role", "Cv") for p in outs]
                 # Params, for the same reason as ports: a value written
                 # blindly is as wrong as a cable to the wrong jack, and
                 # nothing told the model what a param even was. It set a
