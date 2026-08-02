@@ -150,6 +150,109 @@ std::vector<std::string> anchors(const IRNode& root) {
     return out;
 }
 
+
+fs::path write_snapshot(const std::string& body, const std::string& name) {
+    const auto path =
+        fs::temp_directory_path() / ("pulp-native-lowering-" + name + ".json");
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << body;
+    out.close();
+    return path;
+}
+
+/// The parallel arrays of a DOMSnapshot that whole-tree lowering reads.
+///
+/// Named rather than positional: a snapshot IS the alignment of its arrays, and
+/// a run of same-typed arguments makes a mis-slotted one describe a different
+/// document than the case says it is about.
+struct SnapshotSpec {
+    std::string node_names;    ///< node index → string-table index
+    std::string node_types;    ///< node index → DOM nodeType
+    std::string parents;       ///< node index → parent index, -1 at the root
+    std::string attributes;    ///< node index → flat name/value string indices
+    std::string layout_nodes;  ///< layout index → node index
+    std::string styles;        ///< layout index → one entry per computed name
+    std::string bounds;        ///< layout index → [left, top, width, height]
+    std::string paint_orders;  ///< layout index → Chrome's paint rank
+    /// layout index → string-table index of the laid-out text, -1 for an
+    /// element. Empty fills in `-1` for every layout node.
+    std::string texts;
+    /// The property list every style row is parallel to.
+    std::string computed_names = R"(["background-image","display"])";
+};
+
+/// The shared string table, in index order:
+///    0 #document  1 HTML   2 BODY   3 DIV   4 svg   5 path   6 CANVAS  7 IMG
+///    8 src        9 logo.png       10 background-image      11 none
+///   12 url("texture.png")          13 display               14 block
+///   15 g         16 VIDEO 17 IFRAME 18 EMBED 19 OBJECT 20 math
+///   21 image-set("texture.png" 1x)
+///   22 -webkit-image-set("texture.png" 1x)
+///   23 class     24 wrap  25 inner  26 leaf  27 item  28 #text
+///   29 "   " (a collapsed whitespace run)    30 Level
+///   31 rgb(9, 11, 16)
+///   32 linear-gradient(180deg, rgb(40, 44, 52), rgb(9, 11, 16))
+///   33 rgba(0, 0, 0, 0.6) 0px 8px 24px 0px   34 3px  35 rgb(240, 240, 240)
+/// so a style row of [11,14] is `background-image: none; display: block`.
+constexpr std::string_view kSnapshotStrings =
+    R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
+    R"J("src","logo.png","background-image","none","url(\"texture.png\")",)J"
+    R"J("display","block","g","VIDEO","IFRAME","EMBED","OBJECT","math",)J"
+    R"J("image-set(\"texture.png\" 1x)",)J"
+    R"J("-webkit-image-set(\"texture.png\" 1x)",)J"
+    R"J("class","wrap","inner","leaf","item","#text","   ","Level",)J"
+    R"J("rgb(9, 11, 16)",)J"
+    R"J("linear-gradient(180deg, rgb(40, 44, 52), rgb(9, 11, 16))",)J"
+    R"J("rgba(0, 0, 0, 0.6) 0px 8px 24px 0px","3px","rgb(240, 240, 240)")J";
+
+/// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
+std::string build_snapshot(const SnapshotSpec& spec) {
+    std::string texts = spec.texts;
+    if (texts.empty()) {
+        // No text runs in this snapshot, so one `-1` per layout node.
+        const auto entries =
+            static_cast<size_t>(std::count(spec.layout_nodes.begin(),
+                                           spec.layout_nodes.end(), ',')) + 1;
+        texts = "[-1";
+        for (size_t i = 1; i < entries; ++i) texts += ",-1";
+        texts += "]";
+    }
+    std::string json;
+    json += R"({"strings":[)" + std::string(kSnapshotStrings) + "],";
+    json += R"("computedStyleNames":)" + spec.computed_names + ",";
+    json += R"("documents":[{"nodes":{"parentIndex":)" + spec.parents +
+            R"(,"nodeType":)" + spec.node_types +
+            R"(,"nodeName":)" + spec.node_names +
+            R"(,"backendNodeId":)" + spec.node_names +
+            R"(,"attributes":)" + spec.attributes + "}," +
+            R"("layout":{"nodeIndex":)" + spec.layout_nodes +
+            R"(,"styles":)" + spec.styles +
+            R"(,"bounds":)" + spec.bounds +
+            R"(,"paintOrders":)" + spec.paint_orders +
+            R"(,"text":)" + texts + "}}]}";
+    return json;
+}
+
+/// Load a hand-built snapshot, lower it, and clean the temp file up.
+struct LoweredSnapshot {
+    PaintedTreeCounts counts;
+    IRNode root;
+};
+
+LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
+                               const std::string& name) {
+    const auto path = write_snapshot(build_snapshot(spec), name);
+    const auto index = CapturedStyleIndex::load(path);
+    // The index holds no reference to the file, so it goes now rather than at
+    // the end — a failing assertion below throws, and a cleanup after it would
+    // leave the snapshot behind exactly on the runs someone wants to inspect.
+    fs::remove(path);
+    REQUIRE(index);
+    LoweredSnapshot out;
+    out.counts = lower_painted_tree(*index, 0.0, 0.0, out.root);
+    return out;
+}
+
 }  // namespace
 
 TEST_CASE("native lowering draws the panel's real nodes, not a bitmap",
@@ -272,14 +375,23 @@ TEST_CASE("native lowering places nodes at Chrome's solved boxes verbatim",
     CHECK(drive_box->left == 93.921875 - 40.0);
     CHECK(drive_box->top == 176.0 - 40.0);
 
+    // A text run is sized by the box Chrome laid the RUN out in. Asserting only
+    // that a size was written accepts 0×0, which draws nothing while satisfying
+    // every count and placement check in this file.
+    CHECK(*drive->style.width == 46.140625f);
+    CHECK(*drive->style.height == 15.0f);
+
     // Absolute placement is the whole design of this lane: Yoga must have
     // nothing left to solve, at every depth and not merely at the top.
     for (const auto& entry : all) {
         if (entry.node->attributes.count("paint_class") == 0) continue;
+        INFO("node " << entry.node->name);
         REQUIRE(entry.node->style.position);
         CHECK(*entry.node->style.position == "absolute");
-        CHECK(entry.node->style.width);
-        CHECK(entry.node->style.height);
+        REQUIRE(entry.node->style.width);
+        REQUIRE(entry.node->style.height);
+        CHECK(*entry.node->style.width > 0.0f);
+        CHECK(*entry.node->style.height > 0.0f);
     }
 }
 
@@ -496,6 +608,53 @@ TEST_CASE("a text node does not repaint its element's box",
     CHECK(drive->style.color.has_value());
     CHECK(drive->style.font_family.has_value());
     CHECK(drive->style.font_size.has_value());
+
+    // The fixture's caption element carries no fill of its own, so the checks
+    // above hold even if the box half WERE folded on. A label over a decorated
+    // slab is the case the concern is about, and the parent's decorations are
+    // asserted present first — otherwise this is four more absences over an
+    // element that never had anything to copy.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV slab, 4 #text "Level".
+    // The text run's style row IS the slab's, which is what Chrome serializes.
+    const std::string plain = "[11,11,11,11,11,11,11,11,14]";
+    const std::string slab_row = "[31,32,33,34,34,34,34,35,14]";
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,28]",
+            .node_types = "[9,1,1,1,3]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[" + plain + "," + plain + "," + plain + "," +
+                      slab_row + "," + slab_row + "]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,120,40],[14,14,80,20]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .texts = "[-1,-1,-1,-1,30]",
+            .computed_names =
+                R"(["background-color","background-image","box-shadow",)"
+                R"("border-top-width","border-right-width",)"
+                R"("border-bottom-width","border-left-width","color",)"
+                R"("display"])",
+        },
+        "decorated-label");
+
+    const auto* slab = find_named(lowered.root, "div");
+    REQUIRE(slab != nullptr);
+    CHECK(slab->style.background_color.has_value());
+    CHECK(slab->style.background_gradient.has_value());
+    CHECK_FALSE(slab->style.box_shadow.empty());
+    REQUIRE(slab->style.border_width.has_value());
+    CHECK(*slab->style.border_width == 3.0f);
+
+    const auto* label = find_by_text(lowered.root, "Level");
+    REQUIRE(label != nullptr);
+    CHECK_FALSE(label->style.background_color.has_value());
+    CHECK_FALSE(label->style.background_gradient.has_value());
+    CHECK(label->style.box_shadow.empty());
+    CHECK_FALSE(label->style.border_width.has_value());
+    CHECK(label->style.color.has_value());
 }
 
 TEST_CASE("native lowering reports a per-class census",
@@ -586,84 +745,32 @@ TEST_CASE("a control over a native panel restates its body contract",
     }
 }
 
-// ── Classifier cases the committed Chrome fixture cannot reach ──────────────
+// ── Cases the committed Chrome fixture cannot reach ─────────────────────────
 //
-// The fixture is pure CSS, so `<canvas>` / `<svg>` / `<img>` classification is
+// The fixture is pure CSS with nothing hidden, nothing unranked and nothing
+// collapsed, so classification, pooling, elision and the diagnostics are
 // exercised against hand-built snapshots. That split is deliberate: the cases
 // above pin snapshot DECODING against what Chrome really serializes, and these
 // pin the tree logic layered on top of the same loader.
 
-namespace {
-
-fs::path write_snapshot(const std::string& body, const std::string& name) {
-    const auto path =
-        fs::temp_directory_path() / ("pulp-native-lowering-" + name + ".json");
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << body;
-    out.close();
-    return path;
-}
-
-/// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
-/// The shared string table is, in index order:
-///   0 #document  1 HTML  2 BODY  3 DIV  4 svg  5 path  6 CANVAS  7 IMG
-///   8 src  9 logo.png  10 background-image  11 none  12 url("texture.png")
-///   13 display  14 block
-/// so a style row of [11,14] is `background-image: none; display: block`.
-std::string snapshot_with(const std::string& node_names,
-                          const std::string& node_types,
-                          const std::string& parents,
-                          const std::string& attributes,
-                          const std::string& layout_nodes,
-                          const std::string& styles,
-                          const std::string& bounds,
-                          const std::string& paint_orders) {
-    std::string json;
-    json += R"({"strings":["#document","HTML","BODY","DIV","svg","path",)";
-    json += R"("CANVAS","IMG","src","logo.png","background-image","none",)";
-    json += R"J("url(\"texture.png\")","display","block"],)J";
-    json += R"("computedStyleNames":["background-image","display"],)";
-    json += R"("documents":[{"nodes":{"parentIndex":)" + parents +
-            R"(,"nodeType":)" + node_types +
-            R"(,"nodeName":)" + node_names +
-            R"(,"backendNodeId":)" + node_names +
-            R"(,"attributes":)" + attributes + "}," +
-            R"("layout":{"nodeIndex":)" + layout_nodes +
-            R"(,"styles":)" + styles +
-            R"(,"bounds":)" + bounds +
-            R"(,"paintOrders":)" + paint_orders +
-            R"(,"text":[)";
-    // Every layout node in these snapshots is an element, so no text runs.
-    std::string texts = "-1";
-    const auto commas =
-        static_cast<size_t>(std::count(layout_nodes.begin(),
-                                       layout_nodes.end(), ','));
-    for (size_t i = 0; i < commas; ++i) texts += ",-1";
-    json += texts + "]}}]}";
-    return json;
-}
-
-}  // namespace
-
 TEST_CASE("an svg subtree pools into one capture-fallback node",
           "[browser-capture][native-lowering]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 path, 5 path
-    const auto json = snapshot_with(
-        /*names*/     "[0,1,2,4,5,5]",
-        /*types*/     "[9,1,1,1,1,1]",
-        /*parents*/   "[-1,0,1,2,3,3]",
-        /*attributes*/"[[],[],[],[],[],[]]",
-        /*layout*/    "[0,1,2,3,4,5]",
-        /*styles*/    "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
-        /*bounds*/    "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,4,5,5]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,3]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
                       "[10,10,50,50],[12,12,10,10],[30,30,10,10]]",
-        /*paint*/     "[0,1,1,2,3,4]");
-    const auto path = write_snapshot(json, "svg");
-    const auto index = CapturedStyleIndex::load(path);
-    REQUIRE(index);
-
-    IRNode root;
-    const auto counts = lower_painted_tree(*index, 0.0, 0.0, root);
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "svg");
+    const auto& counts = lowered.counts;
+    const auto& root = lowered.root;
     CHECK(counts.painted == 6);
     CHECK(counts.skipped_non_visual == 1);      // the document node
     CHECK(counts.element_capture_fallback == 1);
@@ -683,28 +790,95 @@ TEST_CASE("an svg subtree pools into one capture-fallback node",
     const auto* body = find_named(root, "body");
     REQUIRE(body != nullptr);
     CHECK(contains(*body, svg));
-    fs::remove(path);
+}
+
+TEST_CASE("pooling reaches through a plain element inside the capture",
+          "[browser-capture][native-lowering]") {
+    // `<g>` is how real SVG groups its shapes, so the depth at which a shape
+    // sits under its `<svg>` is arbitrary. Pooling therefore has to be an
+    // ANCESTOR question: a parent-only test pools the `<g>` and then emits the
+    // `<path>` natively ON TOP of the raster the `<svg>` was captured as, which
+    // is the one outcome the capture-fallback class exists to prevent.
+    //
+    // The intermediate is deliberately NOT another `<svg>`: an inner `<svg>` is
+    // itself capture-only, so it would pool under either rule and prove nothing.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 svg, 4 g, 5 path
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,4,15,5]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                      "[10,10,50,50],[12,12,30,30],[14,14,10,10]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "svg-group");
+    const auto& counts = lowered.counts;
+    const auto& root = lowered.root;
+
+    CHECK(counts.element_capture_fallback == 1);
+    CHECK(counts.pooled_into_fallback == 2);  // the <g> AND the <path> under it
+    CHECK(counts.lowered == 3);               // html, body, svg
+    CHECK(counts.native == 2);                // html, body
+
+    // Said as the thing that actually goes wrong: no shape may be drawn over
+    // the raster that already contains it.
+    const auto drawn_over_the_raster =
+        count_nodes(root, [](const IRNode& node) {
+            const auto tag = attribute(node, "source_tag");
+            return tag == "g" || tag == "path";
+        });
+    CHECK(drawn_over_the_raster == 0);
+
+    // Same document, but Chrome ranks the shapes BEFORE the `<svg>` that
+    // contains them, so the walk reaches them first. Pooling is answered from
+    // the document tree for exactly this reason: an answer memoized in visit
+    // order would record "not under a capture" for the whole chain and then
+    // keep giving that answer once the `<svg>` finally arrived.
+    const auto reversed = lower_snapshot(
+        {
+            .node_names = "[0,1,2,4,15,5]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                      "[10,10,50,50],[12,12,30,30],[14,14,10,10]]",
+            // svg 4, g 3, path 2 — the shapes are visited first.
+            .paint_orders = "[0,1,1,4,3,2]",
+        },
+        "svg-group-reversed");
+    CHECK(reversed.counts.pooled_into_fallback == 2);
+    CHECK(reversed.counts.lowered == 3);
+    CHECK(count_nodes(reversed.root, [](const IRNode& node) {
+              const auto tag = attribute(node, "source_tag");
+              return tag == "g" || tag == "path";
+          }) == 0);
 }
 
 TEST_CASE("canvas and image elements classify away from native",
           "[browser-capture][native-lowering]") {
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 CANVAS, 4 IMG, 5 DIV(url bg)
-    const auto json = snapshot_with(
-        /*names*/     "[0,1,2,6,7,3]",
-        /*types*/     "[9,1,1,1,1,1]",
-        /*parents*/   "[-1,0,1,2,2,2]",
-        /*attributes*/"[[],[],[],[],[8,9],[]]",
-        /*layout*/    "[0,1,2,3,4,5]",
-        /*styles*/    "[[11,14],[11,14],[11,14],[11,14],[11,14],[12,14]]",
-        /*bounds*/    "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6,7,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2]",
+            .attributes = "[[],[],[],[],[8,9],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[12,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
                       "[0,0,116,116],[10,10,20,20],[40,40,60,60]]",
-        /*paint*/     "[0,1,1,2,2,2]");
-    const auto path = write_snapshot(json, "assets");
-    const auto index = CapturedStyleIndex::load(path);
-    REQUIRE(index);
-
-    IRNode root;
-    const auto counts = lower_painted_tree(*index, 0.0, 0.0, root);
+            .paint_orders = "[0,1,1,2,2,2]",
+        },
+        "assets");
+    const auto& counts = lowered.counts;
+    const auto& root = lowered.root;
     CHECK(counts.element_capture_fallback == 1);  // <canvas>: no styles to draw
     CHECK(counts.image_asset == 2);               // <img> and the url() fill
     CHECK(counts.native == 2);                    // html, body
@@ -715,29 +889,323 @@ TEST_CASE("canvas and image elements classify away from native",
     });
     REQUIRE(image != nullptr);
     CHECK(attribute(*image, "src") == "logo.png");
-    fs::remove(path);
+}
+
+TEST_CASE("every element whose pixels are not CSS is captured, not styled",
+          "[browser-capture][native-lowering]") {
+    // `<canvas>` and `<svg>` are the two the other cases reach. The rest of the
+    // set is here because classifying any of them `native` emits an empty
+    // styled box where the design has a video, an embedded document, or a
+    // formula — a hole nothing else in the pipeline can attribute.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 VIDEO, 4 IFRAME, 5 EMBED,
+    //        6 OBJECT, 7 math
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,16,17,18,19,20]",
+            .node_types = "[9,1,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2,2,2]",
+            .attributes = "[[],[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6,7]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14],"
+                      "[11,14],[11,14]]",
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[0,0,160,90],[0,100,160,90],[0,200,40,40],"
+                      "[60,200,40,40],[120,200,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4,5,6]",
+        },
+        "capture-only-tags");
+    CHECK(lowered.counts.element_capture_fallback == 5);
+    CHECK(lowered.counts.native == 2);   // html, body — nothing else
+    CHECK(lowered.counts.lowered == 7);
+
+    for (const char* tag : {"video", "iframe", "embed", "object", "math"}) {
+        INFO("tag " << tag);
+        const auto* node = find_node(lowered.root, [tag](const IRNode& entry) {
+            return attribute(entry, "capture_fallback_element") == tag;
+        });
+        REQUIRE(node != nullptr);
+        CHECK(attribute(*node, "paint_class") == "element-capture-fallback");
+    }
+}
+
+TEST_CASE("a fill that is not a gradient needs an asset whatever names it",
+          "[browser-capture][native-lowering]") {
+    // `image-set()` is the responsive-image idiom a real design system emits,
+    // and it is not the only spelling of "this fill is a picture". Testing for
+    // `url(` specifically classifies these `native` — a frame with no fill,
+    // drawn as nothing, reported as drawn. Gradients are already split off
+    // before this point, so ANY surviving `background-image` is an asset.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV image-set(),
+    //        4 DIV -webkit-image-set()
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,2]",
+            .attributes = "[[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[11,14],[11,14],[11,14],[21,14],[22,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,60,60],[80,10,60,60]]",
+            .paint_orders = "[0,1,1,2,3]",
+        },
+        "image-set");
+    CHECK(lowered.counts.image_asset == 2);
+    CHECK(lowered.counts.native == 2);   // html and body, and nothing else
+    CHECK(lowered.counts.lowered == 4);
+    CHECK(count_nodes(lowered.root, [](const IRNode& node) {
+              return attribute(node, "paint_class") == "image-asset";
+          }) == 2);
+}
+
+TEST_CASE("a skipped wrapper elides without orphaning what it contained",
+          "[browser-capture][native-lowering]") {
+    // A zero-area wrapper is not lowered, and its painted descendants have to
+    // land on the nearest ancestor that WAS. Reading only the immediate DOM
+    // parent finds nothing for them and grafts the whole subtree onto the IR
+    // root — the design's structure silently flattened at the first collapsed
+    // box, which every count in this file would still agree with.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.wrap (0×0),
+    //        4 DIV.inner, 5 DIV.leaf
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4]",
+            .attributes = "[[],[],[],[23,24],[23,25],[23,26]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,0,0],[20,20,100,100],[30,30,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "elided-wrapper");
+    const auto& root = lowered.root;
+    CHECK(lowered.counts.skipped_empty_box == 1);
+    CHECK(lowered.counts.lowered == 4);
+
+    // Nothing escaped to the root: `<html>` is still the only thing there.
+    REQUIRE(root.children.size() == 1);
+    const auto* body = find_named(root, "body");
+    REQUIRE(body != nullptr);
+    REQUIRE(body->children.size() == 1);
+    CHECK(body->children[0].name == "div.inner");
+    REQUIRE(body->children[0].children.size() == 1);
+    CHECK(body->children[0].children[0].name == "div.leaf");
+
+    // Eliding is a placement accommodation, not a claim about the document:
+    // the anchor still records the wrapper the node really lives in, so an
+    // edit stored against it survives the wrapper gaining an area.
+    CHECK(*body->children[0].stable_anchor_id ==
+          "capture:html[0]/body[0]/div.wrap[0]/div.inner[0]");
+}
+
+TEST_CASE("a hidden sibling does not move its neighbour's anchor",
+          "[browser-capture][native-lowering]") {
+    // The merge layer keys a human's edits off these anchors. An ordinal
+    // counted over the PAINTED siblings alone renumbers a node whenever a
+    // sibling is hidden — a change to the page's state, not to its structure —
+    // and the edit is then applied to the wrong node or reported as a conflict
+    // that never happened.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.item, 4 DIV.item
+    const std::string names = "[0,1,2,3,3]";
+    const std::string types = "[9,1,1,1,1]";
+    const std::string parents = "[-1,0,1,2,2]";
+    const std::string attributes = "[[],[],[],[23,27],[23,27]]";
+
+    // The first `.item` is `display: none`, so Chrome never lays it out and it
+    // is absent from the layout array while remaining in the document.
+    const auto hidden = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,4]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[70,10,50,50]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "ordinals-hidden");
+    CHECK(hidden.counts.lowered == 3);
+    const auto* survivor = find_named(hidden.root, "div.item");
+    REQUIRE(survivor != nullptr);
+    CHECK(*survivor->stable_anchor_id ==
+          "capture:html[0]/body[0]/div.item[1]");
+
+    // The same document with the sibling shown. The surviving node's anchor is
+    // the SAME string — which is the whole property, so it is compared against
+    // the hidden capture's answer rather than only against a literal.
+    const auto shown = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,50,50],[70,10,50,50]]",
+            .paint_orders = "[0,1,1,2,3]",
+        },
+        "ordinals-shown");
+    CHECK(shown.counts.lowered == 4);
+    const auto* shown_body = find_named(shown.root, "body");
+    REQUIRE(shown_body != nullptr);
+    REQUIRE(shown_body->children.size() == 2);
+    CHECK(*shown_body->children[0].stable_anchor_id ==
+          "capture:html[0]/body[0]/div.item[0]");
+    CHECK(*shown_body->children[1].stable_anchor_id ==
+          *survivor->stable_anchor_id);
+}
+
+TEST_CASE("the reorder audit counts a real inversion and only a visible one",
+          "[browser-capture][native-lowering]") {
+    // The other cases assert this diagnostic is zero, which a counter wired to
+    // zero also satisfies — deleting the audit outright passes them all. So it
+    // is driven to a known non-zero value here, over a document whose subtrees
+    // interleave in Chrome's numbering.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV outer, 4 DIV inside it,
+    //        5 DIV sibling of outer. Chrome paints outer(2), sibling(3),
+    //        inner(4); nesting composes outer, inner, sibling — so the
+    //        inner/sibling pair is emitted against Chrome's order.
+    const std::string names = "[0,1,2,3,3,3]";
+    const std::string types = "[9,1,1,1,1,1]";
+    const std::string parents = "[-1,0,1,2,3,2]";
+    const std::string attributes = "[[],[],[],[],[],[]]";
+    const std::string styles =
+        "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]";
+    const std::string paint_orders = "[0,1,1,2,4,3]";
+
+    const auto overlapping = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = styles,
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[20,20,100,100],[40,40,60,60],[60,60,100,100]]",
+            .paint_orders = paint_orders,
+        },
+        "reorder-visible");
+    CHECK(overlapping.counts.lowered == 5);
+    CHECK(overlapping.counts.hoisted_escapes == 0);  // not the same effect
+    CHECK(overlapping.counts.overlapping_reorders == 1);
+
+    // The identical inversion with the two boxes moved apart. A painter cannot
+    // show a reorder of disjoint boxes, so the audit must NOT count it — which
+    // is what makes the number above a fidelity measure rather than a tally of
+    // how hierarchical the document happens to be.
+    const auto disjoint = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = styles,
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[20,20,100,100],[40,40,60,60],[200,200,50,50]]",
+            .paint_orders = paint_orders,
+        },
+        "reorder-invisible");
+    CHECK(disjoint.counts.lowered == 5);
+    CHECK(disjoint.counts.overlapping_reorders == 0);
+}
+
+TEST_CASE("a layout object Chrome did not rank is counted, not assumed",
+          "[browser-capture][native-lowering]") {
+    // Absent paint order is reported rather than defaulted, because zero is a
+    // legitimate rank: silently reading it as zero reorders the panel into
+    // document order while every number still looks like real data. The other
+    // cases assert this counter is zero, so it is driven non-zero here.
+    //
+    // nodes: 0 #document, 1 HTML (unranked), 2 BODY, 3 DIV
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,50,50],[0,0,50,50],[0,0,50,50],[10,10,20,20]]",
+            .paint_orders = "[0,-1,0,1]",
+        },
+        "unranked");
+    CHECK(lowered.counts.missing_paint_order == 1);
+    CHECK(lowered.counts.lowered == 3);
+    CHECK(lowered.counts.hoisted_escapes == 0);
+    // It is still lowered, carrying the rank Chrome did not give it, so a
+    // consumer sees the gap rather than a plausible zero.
+    const auto* unranked = find_named(lowered.root, "html");
+    REQUIRE(unranked != nullptr);
+    CHECK(attribute(*unranked, "paint_order") == "-1");
+}
+
+TEST_CASE("a collapsed whitespace run is dropped and a real one is not",
+          "[browser-capture][native-lowering]") {
+    // Chrome lays out the whitespace between elements as its own text run with
+    // a real box. Emitting it adds an invisible node to every gap in the
+    // design; dropping ALL text is the failure in the other direction, and a
+    // counter only ever asserted at zero cannot tell the two apart.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV, 4 #text "   ",
+    //        5 DIV, 6 #text "Level"
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,28,3,28]",
+            .node_types = "[9,1,1,1,3,1,3]",
+            .parents = "[-1,0,1,2,3,2,5]",
+            .attributes = "[[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14],"
+                      "[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,80,20],[10,10,80,20],[10,40,80,20],"
+                      "[10,40,80,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .texts = "[-1,-1,-1,-1,29,-1,30]",
+        },
+        "blank-text");
+    CHECK(lowered.counts.skipped_blank_text == 1);
+    // Not the zero-area gate: the whitespace run has a real box, and only the
+    // blank-text test can be what dropped it.
+    CHECK(lowered.counts.skipped_empty_box == 0);
+    CHECK(lowered.counts.text == 1);
+    CHECK(lowered.counts.lowered == 5);
+
+    const auto* text = find_by_text(lowered.root, "Level");
+    REQUIRE(text != nullptr);
+    CHECK(count_nodes(lowered.root, [](const IRNode& node) {
+              return node.type == "text";
+          }) == 1);
 }
 
 TEST_CASE("a zero-area layout object is not lowered",
           "[browser-capture][native-lowering]") {
-    const auto json = snapshot_with(
-        /*names*/     "[0,1,2,3]",
-        /*types*/     "[9,1,1,1]",
-        /*parents*/   "[-1,0,1,2]",
-        /*attributes*/"[[],[],[],[]]",
-        /*layout*/    "[0,1,2,3]",
-        /*styles*/    "[[11,14],[11,14],[11,14],[11,14]]",
-        /*bounds*/    "[[0,0,50,50],[0,0,50,50],[0,0,50,50],[10,10,0,0]]",
-        /*paint*/     "[0,1,1,2]");
-    const auto path = write_snapshot(json, "empty");
-    const auto index = CapturedStyleIndex::load(path);
-    REQUIRE(index);
-
-    IRNode root;
-    const auto counts = lower_painted_tree(*index, 0.0, 0.0, root);
-    CHECK(counts.skipped_empty_box == 1);
-    CHECK(counts.lowered == 2);
-    fs::remove(path);
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,50,50],[0,0,50,50],[0,0,50,50],[10,10,0,0]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "empty");
+    CHECK(lowered.counts.skipped_empty_box == 1);
+    CHECK(lowered.counts.lowered == 2);
 }
 
 TEST_CASE("a child that paints before its parent is hoisted and flagged",
@@ -749,22 +1217,21 @@ TEST_CASE("a child that paints before its parent is hoisted and flagged",
     // parent it belongs under, which looks deliberate and is not.
     //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV, 4 DIV inside it painting first
-    const auto json = snapshot_with(
-        /*names*/     "[0,1,2,3,3]",
-        /*types*/     "[9,1,1,1,1]",
-        /*parents*/   "[-1,0,1,2,3]",
-        /*attributes*/"[[],[],[],[],[]]",
-        /*layout*/    "[0,1,2,3,4]",
-        /*styles*/    "[[11,14],[11,14],[11,14],[11,14],[11,14]]",
-        /*bounds*/    "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
                       "[20,20,100,100],[30,30,40,40]]",
-        /*paint*/     "[0,1,1,5,2]");
-    const auto path = write_snapshot(json, "hoist");
-    const auto index = CapturedStyleIndex::load(path);
-    REQUIRE(index);
-
-    IRNode root;
-    const auto counts = lower_painted_tree(*index, 0.0, 0.0, root);
+            .paint_orders = "[0,1,1,5,2]",
+        },
+        "hoist");
+    const auto& counts = lowered.counts;
+    const auto& root = lowered.root;
     CHECK(counts.lowered == 4);
     CHECK(counts.hoisted_escapes == 1);
 
@@ -790,7 +1257,6 @@ TEST_CASE("a child that paints before its parent is hoisted and flagged",
     // Hoisting is what keeps the composed order faithful, so nothing was
     // reordered against Chrome in the process.
     CHECK(counts.overlapping_reorders == 0);
-    fs::remove(path);
 }
 
 TEST_CASE("anchors survive a differently serialized capture",
@@ -809,36 +1275,38 @@ TEST_CASE("anchors survive a differently serialized capture",
     const std::string styles =
         "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]";
 
-    const auto first = write_snapshot(
-        snapshot_with(names, types, parents, attributes,
-                      /*layout*/ "[0,1,2,3,4,5]", styles,
-                      /*bounds*/ "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
-                                 "[10,10,80,80],[100,10,80,80],[20,20,40,40]]",
-                      /*paint*/ "[0,1,1,2,3,4]"),
+    const auto a = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = styles,
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[10,10,80,80],[100,10,80,80],[20,20,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
         "anchors-a");
-    const auto second = write_snapshot(
-        snapshot_with(names, types, parents, attributes,
-                      // node 4 serialized before node 3, and ranked differently
-                      /*layout*/ "[0,1,2,4,3,5]", styles,
-                      /*bounds*/ "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
-                                 "[100,10,80,80],[10,10,80,80],[20,20,40,40]]",
-                      /*paint*/ "[0,1,1,3,2,4]"),
+    const auto b = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            // node 4 serialized before node 3, and ranked differently
+            .layout_nodes = "[0,1,2,4,3,5]",
+            .styles = styles,
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[100,10,80,80],[10,10,80,80],[20,20,40,40]]",
+            .paint_orders = "[0,1,1,3,2,4]",
+        },
         "anchors-b");
+    CHECK(a.counts.lowered == 5);
+    CHECK(b.counts.lowered == 5);
 
-    const auto index_a = CapturedStyleIndex::load(first);
-    const auto index_b = CapturedStyleIndex::load(second);
-    REQUIRE(index_a);
-    REQUIRE(index_b);
-
-    IRNode root_a;
-    IRNode root_b;
-    const auto counts_a = lower_painted_tree(*index_a, 0.0, 0.0, root_a);
-    const auto counts_b = lower_painted_tree(*index_b, 0.0, 0.0, root_b);
-    CHECK(counts_a.lowered == 5);
-    CHECK(counts_b.lowered == 5);
-
-    const auto list_a = anchors(root_a);
-    const auto list_b = anchors(root_b);
+    const auto list_a = anchors(a.root);
+    const auto list_b = anchors(b.root);
     const std::set<std::string> set_a(list_a.begin(), list_a.end());
     const std::set<std::string> set_b(list_b.begin(), list_b.end());
     CHECK(set_a == set_b);
@@ -849,9 +1317,6 @@ TEST_CASE("anchors survive a differently serialized capture",
                        "capture:html[0]/body[0]/div[0]/div[0]",
                        "capture:html[0]/body[0]/div[1]",
                    });
-
-    fs::remove(first);
-    fs::remove(second);
 }
 
 TEST_CASE("native lowering refuses a capture with no DOM snapshot",
