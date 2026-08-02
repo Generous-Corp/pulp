@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.770.0
+    VERSION 0.771.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -290,6 +290,11 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # Sanitizers via PULP_SANITIZER=address|thread|undefined|memory|realtime
 # Coverage via PULP_ENABLE_COVERAGE=ON (Clang only, mutually exclusive
 # with PULP_SANITIZER).
+# Coverage-guided fuzz targets via PULP_ENABLE_FUZZING=ON. Off by default
+# because -fsanitize=fuzzer needs a compiler runtime Apple's clang does not
+# ship; the properties those targets check are also driven by deterministic
+# replays in the normal test suite, which need no special toolchain.
+option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtime)" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)

@@ -350,6 +350,12 @@ if(UNIX)
     add_test(NAME contributor-check
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
     set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # Builds four throwaway CMake fixtures, so it is slower than a text check
+    # and worth every second: the vacuous-test case is the one that proves the
+    # harness reports a test that cannot fail rather than blessing it.
+    add_test(NAME confirm-failure-harness
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_confirm_failure.sh)
+    set_tests_properties(confirm-failure-harness PROPERTIES TIMEOUT 300)
     add_test(NAME pulp-installer-mcp-contract
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
     # The suite drives the installer once per scenario, so its wall time tracks
