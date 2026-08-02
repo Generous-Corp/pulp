@@ -294,7 +294,7 @@ TEST_CASE("a nowrap run lowers with white-space present and restrictive",
     CHECK(*unwrapped->style.white_space == "nowrap");
 }
 
-TEST_CASE("a run that resumes a sibling's line is not cached, and cannot wrap",
+TEST_CASE("a line-resuming run is cached with a per-line horizontal origin",
           "[browser-capture][text-metrics]") {
     // An inline <span> splits one visual paragraph into sibling runs, and the
     // run after the span resumes mid-line before returning to the left edge.
@@ -315,10 +315,15 @@ TEST_CASE("a run that resumes a sibling's line is not cached, and cannot wrap",
     // renderer catches up.
     CHECK(resumed->text_content.find("for the rest.") != std::string::npos);
 
-    CHECK(resumed->text_line_boxes.empty());
-    CHECK_FALSE(resumed->text_layout_basis.has_value());
-    REQUIRE(resumed->style.white_space.has_value());
-    CHECK(*resumed->style.white_space == "nowrap");
+    // It IS cached, and its first line carries the horizontal origin that no
+    // per-run wrap can produce: the line begins ~162px into the run's own
+    // block because a sibling's text occupies the space before it.
+    REQUIRE(resumed->text_line_boxes.size() == 4);
+    REQUIRE(resumed->text_layout_basis.has_value());
+    CHECK(resumed->text_line_boxes.front().left > 100.0f);
+    for (size_t i = 1; i < resumed->text_line_boxes.size(); ++i)
+        CHECK_THAT(static_cast<double>(resumed->text_line_boxes[i].left),
+                   WithinAbs(0.0, 0.5));
 }
 
 TEST_CASE("the run that defeats a per-run model really does start mid-line",

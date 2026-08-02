@@ -611,20 +611,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // no slack and any positive epsilon in our advance pushes the last
             // word onto a second line. Caching only multi-line runs would fix
             // the paragraphs and leave every tab label broken.
-            // A run whose first line box starts right of its own block resumes
-            // a line an earlier inline sibling began. Its cached lines are
-            // correct but need a per-line HORIZONTAL origin to be drawn, and
-            // the renderer stacks lines from the box's left edge — so caching
-            // them today would draw the first line on top of the sibling's
-            // text. Until the renderer carries per-line x, those runs are
-            // marked nowrap: one line, incomplete, but not overprinted.
-            // 8 of 277 runs on the delay capture.
-            const bool resumes_a_line =
-                line_boxes.size() > 1 &&
-                line_boxes.front().bounds.left > box.left + 1.0;
-            if (resumes_a_line) {
-                lowered.style.white_space = "nowrap";
-            } else if (!line_boxes.empty()) {
+            if (!line_boxes.empty()) {
                 for (const auto& line : line_boxes) {
                     if (line.length <= 0 || line.start < 0) continue;
                     pulp::view::IRTextLineBox cached;

@@ -87,6 +87,12 @@ struct ShapedLayout {
     struct Line {
         float width = 0;
         float y = 0;
+        /// Horizontal offset from the block's own left edge. Zero for text a
+        /// shaper broke, because every such line starts at the edge. Non-zero
+        /// only for a captured layout whose run resumes a line an earlier
+        /// inline sibling began — the one case a block-relative origin cannot
+        /// express, and the reason this field exists.
+        float x_offset = 0;
         int first_segment = 0;
         int segment_count = 0;
         std::string text;  // Materialized line text (optional)

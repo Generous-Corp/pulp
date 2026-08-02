@@ -20,6 +20,21 @@ namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
 
+namespace {
+/// Not atomic: every caller is the paint/layout thread, and a counter that
+/// pretended to be thread-safe would invite use from somewhere it is not.
+Label::LineBreakPathCounts& line_break_counts() {
+    static Label::LineBreakPathCounts counts;
+    return counts;
+}
+}  // namespace
+
+Label::LineBreakPathCounts Label::line_break_path_counts() {
+    return line_break_counts();
+}
+
+void Label::reset_line_break_path_counts() { line_break_counts() = {}; }
+
 void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
                                   float basis_width, std::string basis_face) {
     cached_line_boxes_ = std::move(boxes);
@@ -115,6 +130,7 @@ canvas::ShapedLayout Label::layout_from_cached_lines(
         canvas::ShapedLayout::Line line;
         line.text = utf16_slice(text, box.start, box.length);
         line.width = box.width;
+        line.x_offset = box.left;
         // Stack the lines on the Label's own line height rather than the
         // captured tops. The captured rects agree with that stacking when the
         // basis holds, and driving one geometry from two sources is how the
@@ -840,9 +856,12 @@ void Label::paint(canvas::Canvas& canvas) {
             // A captured layout is used verbatim while the conditions that
             // produced it still hold, and reflowed the moment they do not.
             if (cached_line_layout_usable(display_text)) {
+                ++line_break_counts().cached;
                 shaped_cache_layout_ =
                     layout_from_cached_lines(display_text, lh);
             } else {
+                if (cached_line_boxes_.empty()) ++line_break_counts().uncached;
+                else ++line_break_counts().reflowed;
                 auto prepared = shaper.prepare(display_text, family,
                                                effective_font_size, effective_font_weight());
                 shaped_cache_layout_ = shaper.layout_with_lines(
@@ -972,7 +991,7 @@ void Label::paint(canvas::Canvas& canvas) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                canvas.fill_text(line, x, y);
+                canvas.fill_text(line, x + shaped_line.x_offset, y);
                 y += lh;
                 ++emitted;
             }
