@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-bundled-family-weight-selection",
+  "kind": "change",
+  "created_at": "2026-08-02T19:10:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Bundling four weights of Jost changed nothing, because the bundled-typeface cache keys one face per family name and every weight of a family reports the same family name — CoreText answers \"Jost\" for Jost-Regular through Jost-Bold alike. The first blob declared won the key and the other three were dropped at registration, so the binary carried six faces and the cache held three. match_bundled_typeface then compared the surviving 400 face against the request and missed every non-400 weight, sending measurement to a platform substitute; the SkParagraph bridge, reading the same cache, registered one face under \"Jost\" and SkParagraph faux-emboldened it. Traced before changing anything: at 400/500/600/700 the resolver answered Jost-Regular/Helvetica/Helvetica/Helvetica and the paragraph path answered Jost-Regular four times, painting 461/461/606/606 ink px for one string — two synthesis steps, not four weights. A family now holds every face that reports its name, and both the bundled cache and the plugin registry select through one shared three-pass style matcher (exact, then nearest same-slant within one CSS weight step, then variable-axis eligibility), so a family that ships a single Regular still declines a Bold and lets the cascade reach a system face. After: four distinct faces on all three surfaces and 438/481/538/580 ink px at 15px, 3523/4226/4707/5117 at 48px. Measured against Chrome on the design corpus, forge moves 0.1678 to 0.1691 and delay 0.0967 to 0.0968 area-weighted failing at unchanged 1.0000/0.9998 ink coverage — the metric gets marginally worse because Chrome laid every Jost run out on Regular's advances and added synthetic ink for the heavy ones, which is what the broken path was accidentally reproducing; the correct static SemiBold and Bold are 7-11% wider by their own hmtx. Jost 400, where the face was already right, holds at 0.0% ink-width error against Chrome before and after, which is what says the measurement chain is sound and the residual is a static-versus-variable face difference rather than a regression. Pulp-only: the defect and the fix both originate here.",
+  "tests": [
+    "pulp-test-canvas-fonts"
+  ],
+  "disposition": "pulp-only"
+}

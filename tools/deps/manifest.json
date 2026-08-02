@@ -353,9 +353,12 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Vendored deterministic UI font. Jost-Regular.ttf SHA-256: c3143e923ed1ca7bdf27f96c351fbafaebcbd3cf3f4c2d30d03e6c7f98e73d7a. Bundled because imported designs specify it and no host ships it, so resolution otherwise falls through to a substitute about 10% wider per glyph.",
+      "notes": "Vendored deterministic UI font, four weights. SHA-256 Regular c3143e923ed1ca7bdf27f96c351fbafaebcbd3cf3f4c2d30d03e6c7f98e73d7a, Medium d6ff7726ec21576cf2fdac55080b2d43832780fa981f03f0b66d2723a7c1ea09, SemiBold a63c8d75600a2d42e0e152e4c4810474a90a0b93206f47530a741dbb78a9e571, Bold 3e49280c154002dcbab4344a77ad291d5587d4157b24b5a02341f68cccd24615. Bundled because imported designs specify it and no host ships it; a family bundled at one weight abandons itself, since the bundled matcher refuses a face whose weight is too far from the request.",
       "source_files": [
         "external/fonts/Jost-Regular.ttf",
+        "external/fonts/Jost-Medium.ttf",
+        "external/fonts/Jost-SemiBold.ttf",
+        "external/fonts/Jost-Bold.ttf",
         "external/fonts/README.md"
       ]
     },
