@@ -869,6 +869,60 @@ TEST_CASE("computed style mapping folds CSS onto the IR",
         CHECK(*style.border == "2px solid rgb(1, 2, 3)");
     }
 
+    SECTION("a style on an edge other than the top is not dropped") {
+        // Chrome computes a style per edge, and the capture records all four.
+        // Reading only `border-top-style` lost the style of any border that is
+        // not on the top edge: this box has a dashed LEFT border and a top
+        // edge of zero width, so the only style it has was never read and it
+        // painted solid.
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "0px"},
+                               {"border-right-width", "0px"},
+                               {"border-bottom-width", "0px"},
+                               {"border-left-width", "3px"},
+                               {"border-left-color", "rgb(1, 2, 3)"},
+                               {"border-top-style", "none"},
+                               {"border-right-style", "none"},
+                               {"border-bottom-style", "none"},
+                               {"border-left-style", "dashed"}},
+                              box, style);
+        REQUIRE(style.border_style.has_value());
+        CHECK(*style.border_style == "dashed");
+        // The edge that has no width contributes no style either: `none` on
+        // the other three is Chrome's report for "there is no border here",
+        // and taking it would turn the one real edge off.
+        REQUIRE(style.border_left_width.has_value());
+        CHECK(*style.border_left_width == Catch::Approx(3.0f));
+    }
+
+    SECTION("edges that disagree about style emit no shorthand") {
+        // The shorthand is a single `<width> <style> <color>` string, so a box
+        // whose edges carry different styles cannot be described by one. Left
+        // ungated, it took the first style it found and asserted it of all
+        // four — a solid frame reported as dashed, or the reverse.
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "2px"},
+                               {"border-right-width", "2px"},
+                               {"border-bottom-width", "2px"},
+                               {"border-left-width", "2px"},
+                               {"border-top-color", "rgb(1, 2, 3)"},
+                               {"border-right-color", "rgb(1, 2, 3)"},
+                               {"border-bottom-color", "rgb(1, 2, 3)"},
+                               {"border-left-color", "rgb(1, 2, 3)"},
+                               {"border-top-style", "solid"},
+                               {"border-right-style", "solid"},
+                               {"border-bottom-style", "dashed"},
+                               {"border-left-style", "solid"}},
+                              box, style);
+        CHECK_FALSE(style.border.has_value());
+        // The uniform width and colour still hold; only the one-string
+        // shorthand is refused.
+        REQUIRE(style.border_width.has_value());
+        CHECK(*style.border_width == Catch::Approx(2.0f));
+    }
+
     SECTION("transparent and absent values are not recorded as appearance") {
         CapturedBox box{0.0, 0.0, 40.0, 20.0};
         pulp::view::IRStyle style;

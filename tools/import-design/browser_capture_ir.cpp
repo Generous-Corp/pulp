@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -916,6 +917,24 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             std::to_string(tree.image_asset);
         ir.root.attributes["native_nodes_element_capture_fallback"] =
             std::to_string(tree.element_capture_fallback);
+        // How much of the panel those fallbacks leave BLANK, as a fraction of
+        // the emitted root. The count above cannot carry that: eighteen `<svg>`
+        // icons and two full-window `<canvas>` elements are both small numbers,
+        // and one of them is 0.4% of the design while the other is all of it.
+        // Emitted whenever there is a fallback at all, including 0.000, so a
+        // consumer that reads it can tell "measured and negligible" from "the
+        // producer never computed it".
+        if (tree.element_capture_fallback > 0) {
+            const double panel =
+                static_cast<double>(ir.root.style.width.value_or(0.0f)) *
+                static_cast<double>(ir.root.style.height.value_or(0.0f));
+            char fraction[32] = {};
+            std::snprintf(fraction, sizeof(fraction), "%.4f",
+                          panel > 0.0 ? tree.unpainted_fallback_area / panel
+                                      : 0.0);
+            ir.root.attributes["native_nodes_unpainted_area_fraction"] =
+                fraction;
+        }
         ir.root.attributes["native_nodes_text"] = std::to_string(tree.text);
         ir.root.attributes["native_nodes_pooled"] =
             std::to_string(tree.pooled_into_fallback);

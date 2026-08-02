@@ -572,6 +572,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         if (capture_only) {
             paint_class = PaintClass::element_capture_fallback;
             lowered.type = "frame";
+            // Nothing attaches a raster to this node, so the frame emitted here
+            // paints only whatever background the element's own styles carry —
+            // for a `<canvas>` or an `<svg>`, nothing at all. Saying so on the
+            // node is the difference between a hole a consumer can find and a
+            // classification that reads as "handled by a capture".
+            lowered.attributes["unpainted"] = "true";
+            counts.unpainted_fallback_area +=
+                node.bounds.width * node.bounds.height;
             lowered.attributes["capture_fallback_element"] = node.tag_name;
             // WHY it cannot be drawn, because the two reasons have different
             // fixes: a `<canvas>` is the permanent answer, a rotation is a

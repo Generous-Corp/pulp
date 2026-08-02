@@ -947,6 +947,88 @@ TEST_CASE("canvas and image elements classify away from native",
     CHECK(attribute(*image, "src") == "logo.png");
 }
 
+TEST_CASE("a fallback that carries no raster says it paints nothing",
+          "[browser-capture][native-lowering]") {
+    // The classification is honest and the RENDER is empty: nothing attaches a
+    // raster to a fallback node, so the frame it emits paints only whatever
+    // background the element's own styles carry — for a `<canvas>`, nothing.
+    // Left at that, the node is counted among the lowered and reads downstream
+    // as handled by a capture. It has to say otherwise on its face.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,200,100],[0,0,200,100],[0,0,200,100],"
+                      "[0,0,40,20]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "unpainted-fallback");
+    const auto* canvas = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "capture_fallback_element") == "canvas";
+    });
+    REQUIRE(canvas != nullptr);
+    CHECK(attribute(*canvas, "unpainted") == "true");
+    // 40x20 of it, and nothing else in the document is unpainted.
+    CHECK(lowered.counts.unpainted_fallback_area == 800.0);
+
+    // A node that CAN be drawn from styles must not be tarred with it, or the
+    // number stops meaning anything.
+    const auto* body = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "source_tag") == "body";
+    });
+    REQUIRE(body != nullptr);
+    CHECK(body->attributes.count("unpainted") == 0);
+}
+
+TEST_CASE("unpainted area separates an icon-sized hole from a panel-sized one",
+          "[browser-capture][native-lowering]") {
+    // The count cannot rank these and the area can, which is the whole reason
+    // the area exists. Measured on the real corpus: forge's EIGHTEEN fallback
+    // nodes are inline `<svg>` icons covering 0.4% of the panel, while SPECTR's
+    // TWO are full-window `<canvas>` elements covering it twice over. Read as
+    // counts, the eighteen look nine times worse than the two.
+    const auto icons = lower_snapshot(
+        {
+            .node_names = "[0,1,2,4,4,4]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,400,200],[0,0,400,200],[0,0,400,200],"
+                      "[0,0,16,16],[20,0,16,16],[40,0,16,16]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+        },
+        "unpainted-icons");
+    const auto panel = lower_snapshot(
+        {
+            .node_names = "[0,1,2,6]",
+            .node_types = "[9,1,1,1]",
+            .parents = "[-1,0,1,2]",
+            .attributes = "[[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3]",
+            .styles = "[[11,14],[11,14],[11,14],[11,14]]",
+            .bounds = "[[0,0,400,200],[0,0,400,200],[0,0,400,200],"
+                      "[0,0,400,200]]",
+            .paint_orders = "[0,1,1,2]",
+        },
+        "unpainted-panel");
+
+    // Three holes against one: the count ranks the icons as the worse design.
+    CHECK(icons.counts.element_capture_fallback == 3);
+    CHECK(panel.counts.element_capture_fallback == 1);
+    // The area ranks them the other way round, which is the true one — 768 px²
+    // of a 80,000 px² document against all 80,000 of it.
+    CHECK(icons.counts.unpainted_fallback_area == 768.0);
+    CHECK(panel.counts.unpainted_fallback_area == 80000.0);
+    CHECK(panel.counts.unpainted_fallback_area >
+          icons.counts.unpainted_fallback_area * 100.0);
+}
+
 TEST_CASE("every element whose pixels are not CSS is captured, not styled",
           "[browser-capture][native-lowering]") {
     // `<canvas>` and `<svg>` are the two the other cases reach. The rest of the

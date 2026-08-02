@@ -5505,3 +5505,101 @@ fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome an
 Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
+
+## A border is drawn INSIDE its box, and its four sides are independent
+
+Rendering a captured panel from its own nodes put borders in the second-largest
+failing class on the design that otherwise works (21.0% of `delay`'s failing
+area). Four separate defects, three of which paint the wrong thing rather than
+nothing, all measured against Chrome's own pixels at dpr 2:
+
+- **The stroke was centred on the box outline, so half of every border landed
+  OUTSIDE the element.** CSS grows a border inward from the border box, which is
+  the box Chrome reports. Measured: Chrome puts a 4px border at device columns
+  0..7 and 232..239 of a 240-wide box; a centred stroke put it at −4..3 and
+  236..243. **Stroke the rect inset by half the width**, with the corner radius
+  reduced by the same half, and it lands where the browser puts it.
+- **A border on one edge painted nothing.** `View` stored per-side widths and
+  colours, `yoga_layout.cpp` read them for layout, and no paint site read them at
+  all — `has_border_sides()` had exactly two callers, neither of them paint. A
+  one-edge divider is the commonest border in a real panel: 27 of `delay`'s 67
+  bordered nodes are per-side only.
+- **Four edge colours at one width painted a BLACK frame.** The uniform colour
+  slot is never written in that case and `BorderSide::color` default-constructs
+  to opaque black, so the box gained ink the design never had. Paint has to be
+  able to tell "colour never set" from "colour set to black" — that needs a
+  per-edge colour `set` flag, separate from the width flag, because CSS treats
+  the longhands independently.
+- **Four edge widths at one colour painted nothing**, the mirror case: the
+  uniform width slot stays 0, so `border_width_ > 0` short-circuits.
+
+**Chrome's dash cadence is 2w on / 1w off for `dashed` and 1w / 1w for
+`dotted`** — measured at 12/6 and 6/6 device px for a 3px border at dpr 2. Blink
+additionally stretches the pattern so a whole number of dashes fits each edge
+(its runs read 12,11,12,12 with gaps 6,6,6,5); a single `SkDashPathEffect`
+cannot, so **assert the cadence and never the phase.**
+
+**Opposite sides that overflow the box: the NEAR side wins the remainder.**
+`border-left: 50px` with `border-right: 50px` on a 60px-wide box paints 50 on
+the left and 10 on the right in Chrome — not 30/30. Without that clamp the inset
+stroke below is handed a NEGATIVE rectangle, which no backend answers sensibly.
+
+**Four abutting fills are not one shape.** Two antialiased edges meeting along a
+mitre composite to ~75% coverage, so a seam of background shows through the
+diagonal — four corner pixels on a hairline, a full diagonal once the sides are
+thick. Where the four colours agree, draw ONE ring (the border box with the
+padding box knocked out, even-odd) instead of four trapezoids; a ring has no
+interior edge to seam.
+
+Mixed sides cannot be one stroke. Each side is filled as the trapezoid between
+its outer edge and the padding box, which is the 45° mitre a UA draws. A radius
+is applied as a clip on that path rather than followed per side, so the outer arc
+is right and the inner corner is mitred straight.
+
+**The capture records all four `border-*-style`; the C++ reader took only
+`border-top-style`.** So `border-left: 1px dashed` with no top border recorded no
+style at all and painted solid — the JS-side fix for this landed without the
+reader fix, and the two look identical from either side alone. Take the style
+from an edge that actually has width.
+
+**Build the border fixture rather than reading a real design's score.** Borders
+were 21% of `delay`'s failing area before the fix and 20.6% after, which looks
+like the fix did nothing. It is attribution, not cause: `feature_class` charges a
+node's whole failing area to its most suspect property, and `delay`'s wrapped
+paragraphs bleed across bordered boxes. On a Chrome-captured fixture of 14
+bordered boxes and nothing else, the same fix moves area-weighted failing from
+**0.0829 to 0.0037** and failing border nodes from 13/14 to 6/14. **A
+single-feature fixture is the only place a single-feature fix is measurable.**
+
+## An `element_capture_fallback` node paints NOTHING, and a count cannot rank it
+
+Lowering classifies a node `element_capture_fallback` when its pixels cannot come
+from style — a `<canvas>`, an `<svg>`, a non-axis-preserving `transform`. Nothing
+attaches a raster to that node, so the frame it emits paints only whatever
+background the element's own styles carry: for a `<canvas>`, nothing at all. The
+classification is honest and the render is empty, and the census counted the node
+among the lowered — the hole was real and silent at the same time.
+
+**Report the AREA, not the count.** Measured on the corpus:
+
+| design | fallback nodes | tags | unpainted area / root |
+|---|---|---|---|
+| forge | 18 | all `<svg>` | 0.0041 |
+| forge-modular | 16 | all `<svg>` | 0.0032 |
+| delay | 4 | rotated `<div>` | 0.0106 |
+| spectr | 7 | 2 `<canvas>`, 5 `<svg>` | **2.0013** |
+
+Eighteen nodes are 0.4% of a panel; two are the whole panel twice over. The
+count ranks them exactly backwards. `native_nodes_unpainted_area_fraction` on the
+IR root and `unpainted="true"` on each node are the honest statement.
+
+**`<svg>` is the dominant fallback cause, not `<canvas>`** — 39 of the 45
+fallback nodes across the four designs. That is a *paintable* format Pulp already
+rasterises via `SkSVGDOM`, so most of this list is lowering work, not a hole.
+
+**A full-panel `<canvas>` is a generation-time problem, not a rendering one.**
+SPECTR's two canvases are 1280×800 each. A per-element raster there is not a
+small escape hatch; it is the screen-sized photograph the native path exists to
+remove, reintroduced under another name. The area fraction is what makes that
+decidable: **bound it, and refuse a design whose unpainted area crosses the
+bound** rather than quietly rasterising a whole panel.

@@ -95,15 +95,36 @@ TEST_CASE("pulp #1731 P1 — View border stroke honors percent radius",
     pulp::canvas::RecordingCanvas rc;
     v.paint_all(rc);
 
-    bool saw_40 = false;
+    // The percent has to reach the stroke — that is what this case is for —
+    // but the stroked path is the CENTRE LINE of the border band, not the
+    // element's outline. CSS grows a border inward from the border box, so a
+    // 2px border on a 40px radius strokes a 39px radius inset 1px on each
+    // side: outer edge at exactly 40, inner at 38.
+    //
+    // Asserting radius 40 here asserted a centred stroke, whose outer edge
+    // bulges 1px OUTSIDE the element. Chrome disagrees, measured: for
+    // `border: 5px solid; border-radius: 16px` on a 120x60 box at dpr 2, the
+    // browser's border occupies device columns 0..9 and rows 220..339 of the
+    // box, and so does this after the inset — identically, to the pixel.
+    bool saw_stroke = false;
     for (const auto& cmd : rc.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rounded_rect
-                && std::abs(cmd.f[4] - 40.0f) < 1e-4f) {
-            saw_40 = true;
-            break;
-        }
+        if (cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect)
+            continue;
+        saw_stroke = true;
+        INFO("stroke rect " << cmd.f[0] << "," << cmd.f[1] << " "
+                            << cmd.f[2] << "x" << cmd.f[3]
+                            << " r" << cmd.f[4]);
+        // Half the border width in from each side, so the band's outer edge
+        // lands on the element's own box.
+        REQUIRE_THAT(cmd.f[0], WithinAbs(1.0f, 1e-4f));
+        REQUIRE_THAT(cmd.f[1], WithinAbs(1.0f, 1e-4f));
+        REQUIRE_THAT(cmd.f[2], WithinAbs(78.0f, 1e-4f));
+        REQUIRE_THAT(cmd.f[3], WithinAbs(78.0f, 1e-4f));
+        // 40 came from the percent; 39 is that radius on the centre line.
+        REQUIRE_THAT(cmd.f[4], WithinAbs(39.0f, 1e-4f));
+        break;
     }
-    REQUIRE(saw_40);
+    REQUIRE(saw_stroke);
 }
 
 TEST_CASE("pulp #1731 P1 — View outline honors percent radius",

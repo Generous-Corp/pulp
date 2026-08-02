@@ -608,8 +608,33 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
                    style.border_bottom_color);
     set_side_color("border-left-color", style.border_left_width,
                    style.border_left_color);
-    if (style.border_top_width && *style.border_top_width > 0.0f)
-        set_string("border-top-style", style.border_style);
+    // A border's style has to come from a side that actually HAS a border.
+    // Reading only the top edge lost `border-left: 1px dashed` entirely: the
+    // top edge has no width, so nothing was recorded and the left edge painted
+    // solid. The capture protocol records all four edges for this reason.
+    const auto side_style = [&](const char* name,
+                                const std::optional<float>& width)
+        -> std::optional<std::string> {
+        if (!width || *width <= 0.0f) return std::nullopt;
+        std::optional<std::string> out;
+        set_string(name, out);
+        return out;
+    };
+    const std::optional<std::string> edge_styles[4] = {
+        side_style("border-top-style", style.border_top_width),
+        side_style("border-right-style", style.border_right_width),
+        side_style("border-bottom-style", style.border_bottom_width),
+        side_style("border-left-style", style.border_left_width),
+    };
+    // `border_style` is one slot, so a box whose edges disagree keeps the first
+    // edge that has one. That is a known narrowing, not a silent one: it is
+    // still better than dropping the only style a one-edge border has.
+    bool uniform_style = true;
+    for (const auto& edge : edge_styles) {
+        if (!edge) continue;
+        if (!style.border_style) style.border_style = edge;
+        else if (*style.border_style != *edge) uniform_style = false;
+    }
 
     const bool uniform_color =
         style.border_top_color && style.border_right_color &&
@@ -628,7 +653,7 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     // A border only reads as one when it has a width, a style, and a colour;
     // Chrome reports a colour for every element whether or not one is drawn.
-    if (uniform_width && uniform_color && style.border_style &&
+    if (uniform_width && uniform_color && uniform_style && style.border_style &&
         *style.border_width > 0.0f) {
         std::ostringstream shorthand;
         shorthand << *style.border_width << "px " << *style.border_style << ' '

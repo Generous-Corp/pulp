@@ -36,6 +36,13 @@ struct PaintedTreeCounts {
     int native = 0;
     int image_asset = 0;
     int element_capture_fallback = 0;
+    /// Area, in CSS px², of the fallback nodes that reach the screen carrying
+    /// NO raster — so the renderer draws nothing where the browser drew
+    /// something. A count cannot say how bad that is in either direction:
+    /// eighteen `<svg>` icons are 0.4% of a panel, while two full-window
+    /// `<canvas>` elements are the whole panel twice over and arrive as the
+    /// same "2". The area is the number that separates them.
+    double unpainted_fallback_area = 0.0;
     int text = 0;                  ///< of the lowered, how many carry a string
     int pooled_into_fallback = 0;  ///< descendants of a captured element
     int skipped_empty_box = 0;     ///< zero-area layout objects

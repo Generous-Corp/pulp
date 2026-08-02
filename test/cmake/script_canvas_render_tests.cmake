@@ -193,6 +193,17 @@ if(PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-css-gradient-render)
 endif()
 
+# CSS borders judged against the pixel spans Chrome itself paints for the same
+# HTML, read out of a browser capture at dpr 2. Needs the Skia raster path:
+# render_to_rgba returns an empty buffer without it, and every span assertion
+# would then be measuring nothing.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-view-border-render test_view_border_render.cpp)
+    target_link_libraries(pulp-test-view-border-render
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-view-border-render)
+endif()
+
 # CG-degraded gradient + pattern cluster. Apple-only TU: every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
 # fallback honours the canvas2d spec — conic / two-circle

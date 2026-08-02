@@ -596,47 +596,212 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         }
     }
 
-    // Paint border if set. border-style is honored at paint time:
-    // `none` / `hidden` short-circuit; `dashed` / `dotted` install a
-    // SkDashPathEffect via canvas.set_line_dash(...) before stroking.
-    // Other named styles (`double` / `groove` / `ridge` / `inset` /
-    // `outset`) currently degrade to solid.
-    if (has_border_ && border_width_ > 0
-            && border_style_ != BorderStyle::none
-            && border_style_ != BorderStyle::hidden) {
-        canvas.set_stroke_color(border_color_);
-        canvas.set_line_width(border_width_);
+    paint_border(canvas, use_per_corner, build_corner_path,
+                 eff_r, eff_tl, eff_tr, eff_bl, eff_br);
+}
 
-        // Install dash pattern for dashed / dotted. Pattern values are
-        // a function of the stroke width so the visible cadence scales
-        // with the border thickness — matches how CSS UAs render these.
-        const float w = border_width_;
+// A border lives INSIDE the border box. `bounds_` is the border box, so the
+// outer edge of every side is the box outline and the ink grows inward. A
+// stroke is centred on its path, so stroking the outline directly puts half
+// the width OUTSIDE the element: measured against Chrome at dpr 2, a 4px
+// border landed 4 device pixels wide of where the browser drew it, on all four
+// sides, on every bordered node in a captured panel.
+//
+// The four sides are resolved independently, the same way `apply_border_widths`
+// resolves them for layout, because CSS resolves them independently even when
+// the author wrote the shorthand. Two shapes come out of that:
+//
+//   * All four widths AND colours equal — one stroke down the middle of the
+//     border band. This is the only shape that can carry `dashed` / `dotted`
+//     around a corner, and the only one that follows a corner radius exactly.
+//   * Anything else — each side filled as the trapezoid between its outer edge
+//     and the padding box, which is how a UA mitres adjacent sides of
+//     different widths or colours. A corner radius is applied as a clip on
+//     that path rather than followed per side: the outer arc is then right and
+//     the inner corner is mitred straight, which is a fraction of a pixel off
+//     for the small radii these appear with.
+void View::paint_border(canvas::Canvas& canvas,
+                        bool use_per_corner,
+                        const CornerPathBuilder& build_corner_path,
+                        float eff_r, float eff_tl, float eff_tr,
+                        float eff_bl, float eff_br) {
+    if (border_style_ == BorderStyle::none
+            || border_style_ == BorderStyle::hidden) {
+        return;
+    }
+
+    // Resolution order matches yoga_layout.cpp's `resolve_edge`: an explicitly
+    // set edge wins even when it is 0, otherwise the uniform shorthand applies.
+    const float uniform_w = has_border_ ? std::max(0.0f, border_width_) : 0.0f;
+    const auto edge_w = [&](bool was_set, float value) {
+        return was_set ? std::max(0.0f, value) : uniform_w;
+    };
+    const float w = bounds_.width;
+    const float h = bounds_.height;
+
+    // Opposite sides cannot want more than the box has. Chrome resolves that
+    // over-constraint by giving the NEAR side its full width and handing the
+    // far side only what is left: `border-left: 50px; border-right: 50px` on a
+    // 60px-wide box paints 50 on the left and 10 on the right, measured. It is
+    // also what keeps the inset stroke below from being handed a negative
+    // rectangle, which no backend has a sensible answer for.
+    const float wt = std::min(edge_w(border_top_set_, border_top_.width), h);
+    const float wb = std::min(edge_w(border_bottom_set_, border_bottom_.width),
+                              std::max(0.0f, h - wt));
+    const float wl = std::min(edge_w(border_left_set_, border_left_.width), w);
+    const float wr = std::min(edge_w(border_right_set_, border_right_.width),
+                              std::max(0.0f, w - wl));
+    if (wt <= 0.0f && wr <= 0.0f && wb <= 0.0f && wl <= 0.0f) return;
+
+    const auto edge_c = [&](bool was_set, Color value) {
+        return was_set ? value : border_color_;
+    };
+    const Color ct = edge_c(border_top_color_set_, border_top_.color);
+    const Color cr = edge_c(border_right_color_set_, border_right_.color);
+    const Color cb = edge_c(border_bottom_color_set_, border_bottom_.color);
+    const Color cl = edge_c(border_left_color_set_, border_left_.color);
+
+    if (wt == wr && wr == wb && wb == wl && ct == cr && cr == cb && cb == cl) {
+        const float bw = wt;
+        const float half = bw * 0.5f;
+        canvas.set_stroke_color(ct);
+        canvas.set_line_width(bw);
+
+        // Dash cadence read off Chrome's own render of a 3px border at dpr 2:
+        // `dashed` paints 12 device px on / 6 off, `dotted` 6 on / 6 off —
+        // 2w/1w and 1w/1w. Blink additionally stretches the pattern so a whole
+        // number of dashes fits each side exactly; a single path effect cannot,
+        // so the cadence is right and the phase drifts along a long edge.
         if (border_style_ == BorderStyle::dashed) {
-            const float dashed[2] = { 3.0f * w, 3.0f * w };
+            const float dashed[2] = { 2.0f * bw, 1.0f * bw };
             canvas.set_line_dash(dashed, 2, 0.0f);
         } else if (border_style_ == BorderStyle::dotted) {
-            const float dotted[2] = { 1.0f * w, 2.0f * w };
+            const float dotted[2] = { 1.0f * bw, 1.0f * bw };
             canvas.set_line_dash(dotted, 2, 0.0f);
         }
 
         if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.save();
+            canvas.translate(half, half);
+            build_corner_path(w - bw, h - bw,
+                              std::max(0.0f, eff_tl - half),
+                              std::max(0.0f, eff_tr - half),
+                              std::max(0.0f, eff_bl - half),
+                              std::max(0.0f, eff_br - half));
             canvas.stroke_current_path();
+            canvas.restore();
         } else if (eff_r > 0) {
-            canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+            canvas.stroke_rounded_rect(half, half, w - bw, h - bw,
+                                       std::max(0.0f, eff_r - half));
         } else {
-            canvas.stroke_rect(0, 0, bounds_.width, bounds_.height);
+            canvas.stroke_rect(half, half, w - bw, h - bw);
         }
 
-        // Reset dash pattern so subsequent strokes (per-side borders,
-        // children) aren't dashed inadvertently. Empty intervals array
-        // disables the path effect on Skia and is a no-op on CG.
+        // Reset the dash so later strokes (outline, children) aren't dashed
+        // inadvertently. An empty intervals array disables the path effect on
+        // Skia and is a no-op on CG.
         if (border_style_ == BorderStyle::dashed
                 || border_style_ == BorderStyle::dotted) {
             canvas.set_line_dash(nullptr, 0, 0.0f);
         }
+        return;
     }
+
+    // Mixed sides. Confine the ink to the rounded outline first so a radius is
+    // not simply lost, then draw each side.
+    const bool rounded = use_per_corner || eff_r > 0;
+    if (rounded) {
+        canvas.save();
+        if (use_per_corner) {
+            build_corner_path(w, h, eff_tl, eff_tr, eff_bl, eff_br);
+        } else {
+            build_per_corner_rounded_rect_path(canvas, w, h, eff_r, eff_r,
+                                               eff_r, eff_r);
+        }
+        canvas.clip();
+    }
+
+    const bool patterned = border_style_ == BorderStyle::dashed
+                        || border_style_ == BorderStyle::dotted;
+
+    // Sides that differ only in WIDTH are one shape, and drawing them as four
+    // abutting fills is not the same picture: two antialiased edges meeting
+    // along a mitre composite to about 75% coverage, so a seam of background
+    // shows through the diagonal. It is four corner pixels on a hairline and a
+    // full diagonal once the sides are thick. One ring — the border box with
+    // the padding box knocked out of it — has no interior edge to seam.
+    if (!patterned && ct == cr && cr == cb && cb == cl) {
+        const float inner_w = std::max(0.0f, w - wl - wr);
+        const float inner_h = std::max(0.0f, h - wt - wb);
+        canvas.set_fill_color(ct);
+        canvas.begin_path();
+        canvas.move_to(0.0f, 0.0f);
+        canvas.line_to(w, 0.0f);
+        canvas.line_to(w, h);
+        canvas.line_to(0.0f, h);
+        canvas.close_path();
+        if (inner_w > 0.0f && inner_h > 0.0f) {
+            canvas.move_to(wl, wt);
+            canvas.line_to(wl + inner_w, wt);
+            canvas.line_to(wl + inner_w, wt + inner_h);
+            canvas.line_to(wl, wt + inner_h);
+            canvas.close_path();
+        }
+        canvas.fill_current_path(canvas::FillRule::evenodd);
+        if (rounded) canvas.restore();
+        return;
+    }
+
+    const auto side_dash = [&](float bw) {
+        if (border_style_ == BorderStyle::dashed) {
+            const float dashed[2] = { 2.0f * bw, 1.0f * bw };
+            canvas.set_line_dash(dashed, 2, 0.0f);
+        } else {
+            const float dotted[2] = { 1.0f * bw, 1.0f * bw };
+            canvas.set_line_dash(dotted, 2, 0.0f);
+        }
+    };
+    // A dash pattern is a stroke property, so a patterned side is stroked down
+    // its own centre line instead of filled. The mitre is lost, which is what
+    // a dashed corner looks like anyway.
+    const auto draw_side = [&](float bw, Color c,
+                               float ax, float ay, float bx, float by,
+                               float cx, float cy, float dx, float dy,
+                               float lx0, float ly0, float lx1, float ly1) {
+        if (bw <= 0.0f) return;
+        if (patterned) {
+            canvas.set_stroke_color(c);
+            canvas.set_line_width(bw);
+            side_dash(bw);
+            canvas.begin_path();
+            canvas.move_to(lx0, ly0);
+            canvas.line_to(lx1, ly1);
+            canvas.stroke_current_path();
+            canvas.set_line_dash(nullptr, 0, 0.0f);
+            return;
+        }
+        canvas.set_fill_color(c);
+        canvas.begin_path();
+        canvas.move_to(ax, ay);
+        canvas.line_to(bx, by);
+        canvas.line_to(cx, cy);
+        canvas.line_to(dx, dy);
+        canvas.close_path();
+        canvas.fill_current_path();
+    };
+
+    // Outer edge along the border box, inner edge along the padding box; the
+    // two meet on the 45° mitre CSS draws between adjacent sides.
+    draw_side(wt, ct, 0, 0, w, 0, w - wr, wt, wl, wt,
+              0, wt * 0.5f, w, wt * 0.5f);
+    draw_side(wr, cr, w, 0, w, h, w - wr, h - wb, w - wr, wt,
+              w - wr * 0.5f, 0, w - wr * 0.5f, h);
+    draw_side(wb, cb, w, h, 0, h, wl, h - wb, w - wr, h - wb,
+              0, h - wb * 0.5f, w, h - wb * 0.5f);
+    draw_side(wl, cl, 0, h, 0, 0, wl, wt, wl, h - wb,
+              wl * 0.5f, 0, wl * 0.5f, h);
+
+    if (rounded) canvas.restore();
 }
 
 void View::paint_children_in_order(canvas::Canvas& canvas) {

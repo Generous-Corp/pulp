@@ -9,6 +9,7 @@
 #include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
+#include <functional>
 #include <optional>
 #include <vector>
 #include <memory>
@@ -899,18 +900,18 @@ public:
     /// `borderTopWidth: 0` must yield a 0-px top border, not the 10-px
     /// shorthand. Without a per-edge `set` bit, the stored 0 is
     /// indistinguishable from "unset" in `apply_border_widths`.
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; border_top_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; border_right_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; border_left_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Color-only setters. Setting `borderTopColor` alone must not mark the
     /// top edge's width as explicitly set; that would let a stale 0 override
     /// the uniform `borderWidth` shorthand. Mirrors CSS, where
     /// `border-top-color` and `border-top-width` are independent longhands.
-    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top_color(Color c)    { border_top_.color = c;    border_top_color_set_ = true;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right_color(Color c)  { border_right_.color = c;  border_right_color_set_ = true;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left_color(Color c)   { border_left_.color = c;   border_left_color_set_ = true;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Width-only setters. Setting `borderTopWidth` alone preserves the
     /// existing per-edge color and explicitly marks the width as set, including
     /// a width of 0, which then overrides any uniform shorthand on that edge.
@@ -937,6 +938,15 @@ public:
     bool has_border_right_set() const { return border_right_set_; }
     bool has_border_bottom_set() const { return border_bottom_set_; }
     bool has_border_left_set() const { return border_left_set_; }
+    /// Per-edge colour "explicitly set" probes. A `BorderSide` default-
+    /// constructs to opaque black, so a stored colour is indistinguishable
+    /// from "never set" — and paint has to tell those apart, or a box that
+    /// only ever received per-side WIDTHS gets four black edges instead of
+    /// the uniform `border_color()` the shorthand asked for.
+    bool has_border_top_color_set() const { return border_top_color_set_; }
+    bool has_border_right_color_set() const { return border_right_color_set_; }
+    bool has_border_bottom_color_set() const { return border_bottom_color_set_; }
+    bool has_border_left_color_set() const { return border_left_color_set_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.). When
     /// transitioning from uniform `corner_radius_` to per-corner mode, seed
@@ -2041,6 +2051,18 @@ private:
     void paint_outset_shadows(canvas::Canvas& canvas);
     void apply_overflow_and_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
+    /// Builds the per-corner outline for a box of the given size and four
+    /// corner radii, dispatching between circular corners and the `continuous`
+    /// squircle. Owned by paint_background_and_border and handed to the border
+    /// pass so both draw the same shape.
+    using CornerPathBuilder =
+        std::function<void(float w, float h, float tl, float tr,
+                           float bl, float br)>;
+    void paint_border(canvas::Canvas& canvas,
+                      bool use_per_corner,
+                      const CornerPathBuilder& build_corner_path,
+                      float eff_r, float eff_tl, float eff_tr,
+                      float eff_bl, float eff_br);
     void paint_children_in_order(canvas::Canvas& canvas);
     void paint_post_decorations(canvas::Canvas& canvas, const EffectLayerState& layers);
 
@@ -2147,6 +2169,13 @@ private:
     bool border_right_set_ = false;
     bool border_bottom_set_ = false;
     bool border_left_set_ = false;
+    // Parallel flags for the per-edge COLOR longhands. Separate from the width
+    // flags because CSS treats them as independent: `border-top-color` alone
+    // must not make the top edge's width explicit.
+    bool border_top_color_set_ = false;
+    bool border_right_color_set_ = false;
+    bool border_bottom_color_set_ = false;
+    bool border_left_color_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     // % support paired with corner_radii_. >0 means use pct
