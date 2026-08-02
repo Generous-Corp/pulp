@@ -5,6 +5,7 @@
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>  // font_registration_generation() for the shaped-layout cache key
 #include <choc/text/choc_JSON.h>
@@ -18,6 +19,116 @@
 namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
+
+void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
+                                  float basis_width, std::string basis_face) {
+    cached_line_boxes_ = std::move(boxes);
+    cached_line_basis_width_ = basis_width;
+    cached_line_basis_face_ = std::move(basis_face);
+    shaped_cache_valid_ = false;
+}
+
+/// Slice a UTF-8 string by a UTF-16 offset and length.
+///
+/// Captured line offsets count UTF-16 code units, because that is how the
+/// browser protocol indexes strings, while the text is UTF-8. Treating one as
+/// the other splits a multi-byte sequence the moment a paragraph contains a
+/// dash, a curly apostrophe or a multiplication sign, and emits bytes that are
+/// not valid UTF-8 at all — not merely an off-by-one.
+static std::string utf16_slice(const std::string& text, int start, int length) {
+    if (start < 0 || length <= 0) return {};
+    const auto begin = static_cast<size_t>(start);
+    const auto count = static_cast<size_t>(length);
+    size_t units = 0;
+    size_t byte_begin = std::string::npos;
+    size_t i = 0;
+    while (i <= text.size()) {
+        if (units == begin && byte_begin == std::string::npos) byte_begin = i;
+        if (byte_begin != std::string::npos && units == begin + count)
+            return text.substr(byte_begin, i - byte_begin);
+        if (i >= text.size()) break;
+        const auto lead = static_cast<unsigned char>(text[i]);
+        size_t bytes = 1;
+        if      ((lead & 0x80u) == 0x00u) bytes = 1;
+        else if ((lead & 0xE0u) == 0xC0u) bytes = 2;
+        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
+        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
+        units += (bytes == 4) ? 2 : 1;  // astral codepoints are a surrogate pair
+        i += bytes;
+    }
+    if (byte_begin == std::string::npos) return {};
+    return text.substr(byte_begin);
+}
+
+bool Label::cached_line_layout_usable(const std::string& display_text) const {
+    if (cached_line_boxes_.empty()) return false;
+
+    // 1. The face. Not the requested family — a family is a REQUEST, and the
+    //    same request resolves to different faces on different machines or
+    //    after a register_font. An empty basis face means the capture recorded
+    //    none, which is unverifiable and therefore unusable.
+    if (cached_line_basis_face_.empty()) return false;
+    const std::string family =
+        font_family_.empty() ? std::string("Inter") : font_family_;
+    if (canvas::resolved_face_identity(
+            family, static_cast<float>(effective_font_weight())) !=
+        cached_line_basis_face_) {
+        return false;
+    }
+
+    // 2. The width the text was broken at. A break is a function of the box,
+    //    so a box of a different width has different breaks — including the
+    //    auto-width case this exists for, where the box was sized BY the text.
+    if (std::abs(bounds().width - cached_line_basis_width_) > 0.5f) return false;
+
+    // 3. The text itself. Offsets index the string the capture broke, so any
+    //    edit — a translation, a text-transform, a bound value — makes every
+    //    slice below name the wrong characters rather than merely re-breaking.
+    int units = 0;
+    for (size_t i = 0; i < display_text.size();) {
+        const auto lead = static_cast<unsigned char>(display_text[i]);
+        size_t bytes = 1;
+        if      ((lead & 0xE0u) == 0xC0u) bytes = 2;
+        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
+        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
+        units += (bytes == 4) ? 2 : 1;
+        i += bytes;
+    }
+    for (const auto& box : cached_line_boxes_) {
+        if (box.start < 0 || box.length <= 0) return false;
+        if (box.start + box.length > units) return false;
+    }
+    // Deliberately NOT invalidated on: font SIZE and letter-spacing. Both are
+    // already folded into the resolved advances the browser broke with, and a
+    // Label whose size or tracking changed after import has a different box
+    // too, which condition 2 catches. Size is not tracked separately because
+    // doing so without tracking every other advance input would look like a
+    // completeness this check does not have.
+    return true;
+}
+
+canvas::ShapedLayout Label::layout_from_cached_lines(
+    const std::string& text, float line_height) const {
+    canvas::ShapedLayout layout;
+    layout.lines.reserve(cached_line_boxes_.size());
+    for (const auto& box : cached_line_boxes_) {
+        canvas::ShapedLayout::Line line;
+        line.text = utf16_slice(text, box.start, box.length);
+        line.width = box.width;
+        // Stack the lines on the Label's own line height rather than the
+        // captured tops. The captured rects agree with that stacking when the
+        // basis holds, and driving one geometry from two sources is how the
+        // two drift apart later.
+        line.y = line_height * static_cast<float>(layout.lines.size());
+        line.first_segment = 0;
+        line.segment_count = 0;
+        layout.total_width = std::max(layout.total_width, line.width);
+        layout.lines.push_back(std::move(line));
+    }
+    layout.line_count = static_cast<int>(layout.lines.size());
+    layout.total_height = line_height * static_cast<float>(layout.line_count);
+    return layout;
+}
 
 int Label::effective_font_weight() const {
     if (has_own_font_weight_) return font_weight_;
@@ -726,10 +837,17 @@ void Label::paint(canvas::Canvas& canvas) {
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
-            auto prepared = shaper.prepare(display_text, family,
-                                           effective_font_size, effective_font_weight());
-            shaped_cache_layout_ = shaper.layout_with_lines(
-                prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+            // A captured layout is used verbatim while the conditions that
+            // produced it still hold, and reflowed the moment they do not.
+            if (cached_line_layout_usable(display_text)) {
+                shaped_cache_layout_ =
+                    layout_from_cached_lines(display_text, lh);
+            } else {
+                auto prepared = shaper.prepare(display_text, family,
+                                               effective_font_size, effective_font_weight());
+                shaped_cache_layout_ = shaper.layout_with_lines(
+                    prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+            }
             shaped_cache_key_ = std::move(key);
             shaped_cache_valid_ = true;
         }

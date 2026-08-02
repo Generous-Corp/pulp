@@ -15,39 +15,6 @@
 
 namespace pulp::import_design {
 namespace {
-/// Slice a UTF-8 string by a UTF-16 offset and length.
-///
-/// Chrome's `textBoxes` `start` / `length` count UTF-16 code units, because
-/// that is how CDP indexes strings; the run's text arrives as UTF-8. Treating
-/// one as the other splits a multi-byte sequence the moment a run contains a
-/// dash, a curly apostrophe or a multiplication sign — which produces bytes
-/// that are not valid UTF-8 at all, not merely an off-by-one.
-std::string utf16_slice(const std::string& text, int start, int length) {
-    if (start < 0 || length <= 0) return {};
-    const auto begin = static_cast<size_t>(start);
-    const auto count = static_cast<size_t>(length);
-    size_t units = 0;
-    size_t byte_begin = std::string::npos;
-    size_t i = 0;
-    while (i <= text.size()) {
-        if (units == begin && byte_begin == std::string::npos) byte_begin = i;
-        if (byte_begin != std::string::npos && units == begin + count)
-            return text.substr(byte_begin, i - byte_begin);
-        if (i >= text.size()) break;
-        const auto lead = static_cast<unsigned char>(text[i]);
-        size_t bytes = 1;
-        if      ((lead & 0x80u) == 0x00u) bytes = 1;
-        else if ((lead & 0xE0u) == 0xC0u) bytes = 2;
-        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
-        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
-        // A codepoint outside the BMP is a surrogate PAIR in UTF-16.
-        units += (bytes == 4) ? 2 : 1;
-        i += bytes;
-    }
-    if (byte_begin == std::string::npos) return {};
-    return text.substr(byte_begin);
-}
-
 
 using pulp::view::IRNode;
 
@@ -612,10 +579,6 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         const auto line_boxes =
             is_text ? index.text_boxes_for_layout(node.layout_index)
                     : std::vector<CapturedTextBox>{};
-        const bool resumes_a_line =
-            line_boxes.size() > 1 &&
-            line_boxes.front().bounds.left > box.left + 1.0;
-
         PaintClass paint_class = PaintClass::native;
         if (capture_only) {
             paint_class = PaintClass::element_capture_fallback;
@@ -626,54 +589,62 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // transform the IR does not carry yet.
             lowered.attributes["capture_fallback_reason"] =
                 is_capture_only_element(node.tag_name) ? "element" : "transform";
-        } else if (is_text && resumes_a_line) {
-            // Emit ONE NODE PER LINE BOX rather than one per run. Each line
-            // carries the substring Chrome put on it, at the rect Chrome put it
-            // at, so a line beginning at x=1336 inside a block whose left edge
-            // is 1168 simply IS at 1336 — the case that defeats any per-run
-            // model regardless of how it wraps. The run's own node becomes a
-            // frame holding them, so parentage, paint order and the anchor path
-            // are unchanged.
-            //
-            // The tradeoff, stated because it is permanent for these nodes:
-            // a per-line node is pinned to Chrome's break positions and cannot
-            // reflow. Runs that own their block keep the reflowing text path
-            // above, so only the runs that CANNOT reflow correctly give it up.
-            lowered.type = "frame";
-            for (const auto& line : line_boxes) {
-                if (line.length <= 0 || line.start < 0) continue;
-                pulp::view::IRNode fragment;
-                fragment.type = "text";
-                fragment.name = "#text";
-                fragment.text_content =
-                    utf16_slice(node.text, line.start, line.length);
-                if (fragment.text_content.empty()) continue;
-                // Typography only — the box half belongs to the run, and a
-                // fragment repeating it would paint the parent's surfaces once
-                // per line.
-                apply_computed_styles(computed, box, fragment.style,
-                                      ComputedStyleScope::text_only);
-                // A fragment never wraps: its width IS one of Chrome's lines,
-                // so any reflow inside it would be Pulp disagreeing with a
-                // measurement it already has.
-                fragment.style.white_space = "nowrap";
-                fragment.style.position = "absolute";
-                // Relative to the run's union box, which is where this frame
-                // lands. Fragments are not slots, so the assembly pass that
-                // stamps slot geometry leaves these alone — they are already
-                // expressed against their parent.
-                fragment.style.left =
-                    static_cast<float>(line.bounds.left - box.left);
-                fragment.style.top =
-                    static_cast<float>(line.bounds.top - box.top);
-                fragment.style.width = static_cast<float>(line.bounds.width);
-                fragment.style.height = static_cast<float>(line.bounds.height);
-                lowered.children.push_back(std::move(fragment));
-            }
-            ++counts.text;
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
+            // Chrome's own line breaking, kept BESIDE the paragraph rather than
+            // in place of it. The node stays semantic — full text, one style,
+            // one box — and a renderer that finds the basis still holding draws
+            // these verbatim, so no disagreement between our advances and
+            // Blink's can move a line. One that finds it stale reflows.
+            //
+            // This matters most where it is least visible: a box sized BY its
+            // own text (an auto-width tab label) leaves no slack at all, so any
+            // positive epsilon in our advance pushes the last word onto a
+            // second line. Re-deriving a break inside a box that the break
+            // itself determined is not a metrics problem that can be ground
+            // down; the only robust answer is not to re-derive it.
+            // Every run with line boxes, INCLUDING single-line ones. A one-box
+            // run is not a trivial case to skip — it is the assertion "this
+            // text did not break", and it is the one most easily got wrong:
+            // an auto-width label's box was sized BY its own text, so it has
+            // no slack and any positive epsilon in our advance pushes the last
+            // word onto a second line. Caching only multi-line runs would fix
+            // the paragraphs and leave every tab label broken.
+            // A run whose first line box starts right of its own block resumes
+            // a line an earlier inline sibling began. Its cached lines are
+            // correct but need a per-line HORIZONTAL origin to be drawn, and
+            // the renderer stacks lines from the box's left edge — so caching
+            // them today would draw the first line on top of the sibling's
+            // text. Until the renderer carries per-line x, those runs are
+            // marked nowrap: one line, incomplete, but not overprinted.
+            // 8 of 277 runs on the delay capture.
+            const bool resumes_a_line =
+                line_boxes.size() > 1 &&
+                line_boxes.front().bounds.left > box.left + 1.0;
+            if (resumes_a_line) {
+                lowered.style.white_space = "nowrap";
+            } else if (!line_boxes.empty()) {
+                for (const auto& line : line_boxes) {
+                    if (line.length <= 0 || line.start < 0) continue;
+                    pulp::view::IRTextLineBox cached;
+                    cached.left =
+                        static_cast<float>(line.bounds.left - box.left);
+                    cached.top = static_cast<float>(line.bounds.top - box.top);
+                    cached.width = static_cast<float>(line.bounds.width);
+                    cached.height = static_cast<float>(line.bounds.height);
+                    cached.start = line.start;
+                    cached.length = line.length;
+                    lowered.text_line_boxes.push_back(cached);
+                }
+                if (!lowered.text_line_boxes.empty()) {
+                    pulp::view::IRTextLayoutBasis basis;
+                    basis.width = static_cast<float>(box.width);
+                    basis.resolved_face =
+                        index.resolved_face_for_layout(node.layout_index);
+                    lowered.text_layout_basis = std::move(basis);
+                }
+            }
         } else if (node.tag_name == "img") {
             paint_class = PaintClass::image_asset;
             lowered.type = "image";
@@ -718,7 +689,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 ++counts.element_capture_fallback;
                 break;
         }
-        if (is_text && !resumes_a_line) ++counts.text;
+        if (is_text) ++counts.text;
         ++counts.lowered;
 
         node_to_slot[node.node_index] = static_cast<int>(slots.size());

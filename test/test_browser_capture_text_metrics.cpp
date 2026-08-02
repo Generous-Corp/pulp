@@ -294,88 +294,50 @@ TEST_CASE("a nowrap run lowers with white-space present and restrictive",
     CHECK(*unwrapped->style.white_space == "nowrap");
 }
 
-TEST_CASE("a run that resumes a sibling's line lowers one node per line box",
+TEST_CASE("a run that resumes a sibling's line is not cached, and cannot wrap",
           "[browser-capture][text-metrics]") {
     // An inline <span> splits one visual paragraph into sibling runs, and the
     // run after the span resumes mid-line before returning to the left edge.
-    // Its layout box is the UNION of the lines it shares with its siblings, so
-    // no single box says where its text goes: wrapping inside that union puts
-    // the first line on top of the sibling's text, and refusing to wrap freezes
-    // it at one line. Both are wrong, so this run is lowered per line box.
+    // Chrome's boxes for it are correct, but drawing them needs a per-line
+    // HORIZONTAL origin and the renderer stacks every line from the box's left
+    // edge — so caching them today would draw the first line on top of the
+    // sibling's text. Worse than not wrapping, and visibly so.
+    //
+    // Until the renderer carries per-line x, these runs are marked nowrap:
+    // one line, incomplete, but never overprinted. Asserted rather than left
+    // implicit, because "no cache here" is a deliberate exclusion and the next
+    // reader should see that it was chosen.
     const auto result = lower_wrap_fixture();
-    // No node carries text spanning a line break. That substring exists only
-    // if the run was lowered whole; the fragments each stop at their own line,
-    // so asserting on a fragment's own text would pass either way.
-    const auto* spanning =
-        find_text_node_containing(root_of(result), "resumes this sentence");
-    REQUIRE(spanning == nullptr);
+    const auto* resumed = find_text_node_containing(root_of(result), "resumes");
+    REQUIRE(resumed != nullptr);
+    CHECK(resumed->children.empty());
+    // The whole sentence stays on one node, so nothing is lost while the
+    // renderer catches up.
+    CHECK(resumed->text_content.find("for the rest.") != std::string::npos);
 
-    const auto* frame = find_frame_containing(root_of(result), "resumes");
-    REQUIRE(frame != nullptr);
-    REQUIRE(frame->children.size() == 4);
-
-    // Each fragment carries exactly the substring Chrome put on that line, at
-    // that line's own rect expressed against the run's box.
-    const std::vector<std::string> expected_text{
-        " resumes",
-        "this sentence mid-line and then",
-        "returns to the block\u2019s left edge",
-        "for the rest.",
-    };
-    const std::vector<double> expected_left{162.0, 0.0, 0.0, 0.0};
-    const std::vector<double> expected_top{0.0, 20.0, 40.0, 60.0};
-    for (size_t i = 0; i < frame->children.size(); ++i) {
-        const auto& fragment = frame->children[i];
-        CHECK(fragment.type == "text");
-        CHECK(fragment.text_content == expected_text[i]);
-        REQUIRE(fragment.style.left.has_value());
-        REQUIRE(fragment.style.top.has_value());
-        CHECK_THAT(static_cast<double>(*fragment.style.left),
-                   WithinAbs(expected_left[i], 0.5));
-        CHECK_THAT(static_cast<double>(*fragment.style.top),
-                   WithinAbs(expected_top[i], 0.5));
-        // A fragment IS one of Chrome's lines, so it must never re-wrap.
-        REQUIRE(fragment.style.white_space.has_value());
-        CHECK(*fragment.style.white_space == "nowrap");
-    }
-
-    // The first line starting 162px into the run's own block is the whole
-    // point: that offset cannot be expressed by any per-run model.
-    CHECK(*frame->children.front().style.left > 100.0f);
+    CHECK(resumed->text_line_boxes.empty());
+    CHECK_FALSE(resumed->text_layout_basis.has_value());
+    REQUIRE(resumed->style.white_space.has_value());
+    CHECK(*resumed->style.white_space == "nowrap");
 }
 
-TEST_CASE("line offsets are UTF-16, and slicing them as bytes corrupts text",
+TEST_CASE("the run that defeats a per-run model really does start mid-line",
           "[browser-capture][text-metrics]") {
-    // Chrome counts `start` / `length` in UTF-16 code units because that is how
-    // CDP indexes strings; the run's text arrives as UTF-8. The fixture line
-    // below contains a curly apostrophe, so the two disagree from that point
-    // on — and slicing by bytes splits the sequence and emits text that is not
-    // valid UTF-8 at all, which the IR writer then refuses.
-    const auto result = lower_wrap_fixture();
-    const auto* frame = find_frame_containing(root_of(result), "resumes");
-    REQUIRE(frame != nullptr);
-    REQUIRE(frame->children.size() >= 3);
-
-    const auto& with_apostrophe = frame->children[2].text_content;
-    CHECK(with_apostrophe == "returns to the block\u2019s left edge");
-    // Valid UTF-8: every continuation byte follows a lead byte that claims it.
-    size_t i = 0;
-    while (i < with_apostrophe.size()) {
-        const auto lead = static_cast<unsigned char>(with_apostrophe[i]);
-        size_t width = 1;
-        if ((lead & 0xE0u) == 0xC0u) width = 2;
-        else if ((lead & 0xF0u) == 0xE0u) width = 3;
-        else if ((lead & 0xF8u) == 0xF0u) width = 4;
-        REQUIRE(i + width <= with_apostrophe.size());
-        for (size_t k = 1; k < width; ++k) {
-            REQUIRE((static_cast<unsigned char>(with_apostrophe[i + k])
-                     & 0xC0u) == 0x80u);
+    // The exclusion above is only justified if such a run exists in the
+    // fixture; otherwise the case passes vacuously and would keep passing if
+    // the fixture lost its inline span.
+    const auto index = load_wrap_fixture();
+    bool found_continuation = false;
+    for (const auto& node : index.painted_nodes()) {
+        const auto boxes = index.text_boxes_for_layout(node.layout_index);
+        if (boxes.size() <= 1) continue;
+        if (boxes.front().bounds.left > node.bounds.left + 1.0) {
+            found_continuation = true;
+            // ~162px into its own block — an offset no per-run wrap produces.
+            CHECK(boxes.front().bounds.left - node.bounds.left > 100.0);
         }
-        i += width;
     }
-    // The last line must still be the tail of the run, not a byte-shifted
-    // window into it — the off-by-N a byte/UTF-16 mixup produces.
-    CHECK(frame->children.back().text_content == "for the rest.");
+    CHECK(found_continuation);
 }
 
 TEST_CASE("a run that owns its block keeps reflowing text",
@@ -389,4 +351,68 @@ TEST_CASE("a run that owns its block keeps reflowing text",
     CHECK(wrapped->children.empty());
     REQUIRE(wrapped->style.white_space.has_value());
     CHECK(*wrapped->style.white_space == "normal");
+}
+
+// ── Chrome's line breaking, cached beside the paragraph ─────────────────────
+//
+// The node stays one semantic paragraph — full text, one style, one box — and
+// the browser's own breaking rides alongside it as a cache. That keeps
+// accessibility, selection, translation and the tweak layer addressing "this
+// paragraph" as one thing, and it keeps reflow available, while still letting a
+// renderer draw Chrome's exact breaks when the basis still holds.
+
+TEST_CASE("a wrapped run keeps its whole text and carries the line boxes",
+          "[browser-capture][text-metrics]") {
+    const auto result = lower_wrap_fixture();
+    const auto* wrapped = find_text_node(root_of(result), "Chrome breaks this");
+    REQUIRE(wrapped != nullptr);
+
+    // Still ONE node with the WHOLE paragraph — not shredded into fragments.
+    CHECK(wrapped->text_content.find("holds.") != std::string::npos);
+    CHECK(wrapped->children.empty());
+
+    REQUIRE(wrapped->text_line_boxes.size() == 5);
+    const std::vector<float> expected_width{
+        147.109375f, 191.75f, 219.5625f, 197.34375f, 45.78125f};
+    for (size_t i = 0; i < wrapped->text_line_boxes.size(); ++i) {
+        const auto& box = wrapped->text_line_boxes[i];
+        CHECK_THAT(static_cast<double>(box.width),
+                   WithinAbs(static_cast<double>(expected_width[i]), 0.001));
+        // Relative to the run's own box, and stepping by its line height.
+        CHECK_THAT(static_cast<double>(box.top),
+                   WithinAbs(20.0 * static_cast<double>(i), 0.001));
+    }
+}
+
+TEST_CASE("cached line boxes carry the basis that makes them checkable",
+          "[browser-capture][text-metrics]") {
+    // Boxes without a basis are not a cache: nothing can decide whether they
+    // still apply, and adopting a foreign layout on trust is the failure this
+    // design exists to avoid.
+    const auto result = lower_wrap_fixture();
+    const auto* wrapped = find_text_node(root_of(result), "Chrome breaks this");
+    REQUIRE(wrapped != nullptr);
+    REQUIRE(wrapped->text_layout_basis.has_value());
+
+    // The width the text was broken at — the auto-width case depends on this.
+    CHECK_THAT(static_cast<double>(wrapped->text_layout_basis->width),
+               WithinAbs(219.5625, 0.001));
+    // The face Blink SHAPED with, not the family it was asked for. The fixture
+    // serves its own Inter, so this is the repository's own file.
+    CHECK(wrapped->text_layout_basis->resolved_face == "Inter-Regular");
+}
+
+TEST_CASE("a single-line run is cached too", "[browser-capture][text-metrics]") {
+    // A one-box run is not a trivial case to skip — it is the assertion "this
+    // text did not break". An auto-width label's box was sized BY its text, so
+    // it has no slack and any positive epsilon in a re-derived advance pushes
+    // the last word onto a second line.
+    const auto result = lower_wrap_fixture();
+    const auto* unwrapped =
+        find_text_node(root_of(result), "Chrome breaks this", 1);
+    REQUIRE(unwrapped != nullptr);
+    REQUIRE(unwrapped->text_line_boxes.size() == 1);
+    CHECK(unwrapped->text_line_boxes[0].length == 108);
+    REQUIRE(unwrapped->text_layout_basis.has_value());
+    CHECK(unwrapped->text_layout_basis->resolved_face == "Inter-Regular");
 }
