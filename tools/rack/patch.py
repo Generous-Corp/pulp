@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import re
+import time
 import sys
 
 
@@ -1261,15 +1262,100 @@ SETTINGS_DEFAULTS = {
     # dead end.
     "auto_fill_gaps": True,
     # Fetch a FREE module from the VCV library when one would close the gap.
-    # Off by default and useless without a Rack account token, which Rack
-    # stores in its own settings only after you sign in. We never sign in for
-    # you and we never spend money — see never_buy.
-    "auto_download_free": False,
+    # Needs a Rack account token, which Rack stores in its own settings after
+    # you sign in to the library; without one this is inert and says so. We
+    # never sign in for you and we never spend money — see never_buy.
+    "auto_download_free": True,
     # Not a setting. A statement, kept in the file so it is visible to anyone
     # who opens it: nothing here will ever purchase a module. A paid module is
     # named and linked, never acquired.
+    # Restart Rack after installing a module, so it is usable immediately.
+    # Rack loads plugins at startup and has no hot-reload, so without this a
+    # freshly-installed module is present and invisible until the next launch —
+    # which is the "download and restart" the whole feature exists to avoid.
+    # Only ever restarts Rack itself, never a DAW hosting the plugin.
+    "auto_restart_rack": True,
+    # Not a setting, and listed here only so it is visible to anyone who opens
+    # the file: nothing here will ever purchase a module. settings() forces it
+    # true after reading, so a file cannot switch it off — a preference that
+    # could would make "we will never spend your money" a claim rather than a
+    # property. A paid module is named and linked, never acquired.
     "never_buy": True,
 }
+
+
+RACK_PLUGIN_DIR = os.path.expanduser(
+    "~/Library/Application Support/Rack2/plugins-mac-arm64")
+
+
+def install_free_module(plugin: str, version: str, premium: bool) -> tuple:
+    """Fetch a FREE library plugin into Rack's plugin directory.
+
+    Returns (ok, message). Never raises, and never spends money: a premium
+    plugin is refused here as well as upstream, so the guarantee does not
+    depend on every caller remembering it.
+    """
+    if premium:
+        return False, f"{plugin} is a paid plugin — naming it, not buying it"
+    token = rack_library_token()
+    if not token:
+        return False, ("not signed in to the VCV library. Open Rack, use "
+                       "Library -> Log In, then ask again — free modules can "
+                       "be fetched for you after that.")
+    import urllib.parse
+    import urllib.request
+    query = urllib.parse.urlencode({"slug": plugin, "version": version,
+                                    "arch": "mac-arm64", "token": token})
+    dest = os.path.join(RACK_PLUGIN_DIR,
+                        f"{plugin}-{version}-mac-arm64.vcvplugin")
+    try:
+        os.makedirs(RACK_PLUGIN_DIR, exist_ok=True)
+        with urllib.request.urlopen(
+                "https://api.vcvrack.com/download?" + query, timeout=120) as r:
+            if r.status != 200:
+                return False, f"the library returned HTTP {r.status}"
+            data = r.read()
+        # A .vcvplugin is a zstd-compressed tar. Checking the magic before
+        # writing means an error page never lands in the plugin directory
+        # wearing a plugin's name, which Rack would then fail to load with no
+        # useful diagnostic.
+        if data[:4] != b"\x28\xb5\x2f\xfd":
+            return False, ("the library did not return a plugin package "
+                           "(is the token still valid?)")
+        tmp = dest + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)                # atomic: never a half file
+        return True, f"installed {plugin} {version} ({len(data) // 1024} KB)"
+    except Exception as exc:                                # noqa: BLE001
+        return False, f"could not fetch {plugin}: {exc}"
+
+
+def restart_rack() -> tuple:
+    """Quit and relaunch Rack so a new module is usable now.
+
+    Rack loads plugins at startup and has no hot-reload. Only Rack is ever
+    restarted — never a DAW hosting the plugin, which is not ours to close.
+    A polite quit, never a kill: Rack writes its patch on the way out and
+    killing it loses the user's work.
+    """
+    import subprocess                                    # noqa: PLC0415
+    running = subprocess.run(["pgrep", "-f", "VCV Rack"],
+                             capture_output=True).returncode == 0
+    if not running:
+        return True, "Rack was not running; it will pick the module up next launch"
+    subprocess.run(["osascript", "-e", 'tell application "VCV Rack 2 Free" to quit'],
+                   capture_output=True)
+    for _ in range(30):
+        if subprocess.run(["pgrep", "-f", "VCV Rack"],
+                          capture_output=True).returncode != 0:
+            break
+        time.sleep(1)
+    else:
+        return False, ("Rack would not quit — it may be showing a dialog. "
+                       "Restart it yourself to pick up the new module.")
+    subprocess.run(["open", "-a", "VCV Rack 2 Free"], capture_output=True)
+    return True, "restarted Rack"
 
 
 def settings() -> dict:
@@ -1902,12 +1988,52 @@ def main(argv):
         # usually what you want when a vendor module simply fits better.
         prefer = "ForgeModular" if "--prefer-ours" in argv else None
         # Stop before the model call, not after it.
-        pf = preflight(argv[2], inv, module_index(), catalog())
+        # Named, because the fetch path below needs the catalog to look up a
+        # plugin's version and re-runs preflight after installing.
+        cat = catalog()
+        pf = preflight(argv[2], inv, module_index(), cat)
         if not pf["ok"] and "--anyway" not in argv:
             # Free first, and with the link. A refusal whose remedy is a free
             # download should cost one click, not a search: the options were
             # already printed but had to be found by hand in Rack's Library,
             # and the app dropped them entirely on the way to the screen.
+            # Try to CLOSE the gap before reporting it.
+            #
+            # A refusal whose remedy is a free download that we can perform is
+            # not a refusal, it is a chore handed back to the user. Only free
+            # modules, only the best-ranked one per gap, and only when the
+            # setting allows it.
+            st = settings()
+            fetched = []
+            if st["auto_download_free"]:
+                for tag, opts in list(pf["missing"].items()):
+                    best = next((o for o in opts if not o["premium"]), None)
+                    if not best:
+                        continue
+                    version = (cat.get(best["plugin"], {}) or {}).get("version")
+                    if not version:
+                        continue
+                    print(f"  no {tag.lower()} module installed — fetching "
+                          f"{best['plugin']}/{best['module']}…", flush=True)
+                    ok_dl, msg = install_free_module(best["plugin"], version,
+                                                     best["premium"])
+                    print(f"    {msg}")
+                    if ok_dl:
+                        fetched.append(best["plugin"])
+                    elif "not signed in" in msg:
+                        break            # saying it once is enough
+            if fetched:
+                if st["auto_restart_rack"]:
+                    ok_rs, msg = restart_rack()
+                    print(f"  {msg}")
+                # The inventory was read before the download; re-read it, or
+                # the very module just installed is still missing to the
+                # generator that is about to run.
+                inv = inventory()
+                pf = preflight(argv[2], inv, module_index(), cat)
+            if pf["ok"]:
+                print("  gap closed — building.\n")
+        if not pf["ok"] and "--anyway" not in argv:
             print("  hold on — this asks for something you don't have installed:\n")
             only_paid = True
             for tag, opts in pf["missing"].items():
