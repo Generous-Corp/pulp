@@ -350,7 +350,18 @@ ClipRect intersect(const ClipRect& a, const ClipRect& b) {
         if (b_owns) out = std::max(out, rb);
         return out;
     };
-    const auto same = [](double x, double y) { return std::fabs(x - y) < 0.01; };
+    // One Blink layout quantum, matching the tolerance `contains` already uses.
+    // A tighter epsilon reads two edges that differ by a single 1/64px step as
+    // DIFFERENT, concludes the corner was cut away by another clipper, and drops
+    // a radius the design has — squaring off a corner Chrome curves. Snapshots
+    // routinely carry those values: a fractional border width insets a clip box
+    // by a non-integer amount, so a nested clipper's edge lands a quantum off
+    // its parent's. Erring the other way is harmless by comparison: treating two
+    // edges 0.01px apart as the same corner applies a radius that is right to
+    // within a hundredth of a pixel.
+    const auto same = [](double x, double y) {
+        return std::fabs(x - y) < 1.0 / 64.0;
+    };
     r.radius_tl = corner(same(a.left, r.left) && same(a.top, r.top), a.radius_tl,
                          same(b.left, r.left) && same(b.top, r.top), b.radius_tl);
     r.radius_tr = corner(same(a.right, r.right) && same(a.top, r.top), a.radius_tr,
