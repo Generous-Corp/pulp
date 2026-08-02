@@ -20,11 +20,12 @@
 // View's AccessibilityValueInterface.
 //
 // Threading & lifetime: fragments are built once at init (and rebuilt on
-// structural change) and live as long as the session. UIA clients hold
-// refcounts and can call provider methods asynchronously, so the
-// shutdown path (see shutdown_accessibility) disconnects every provider
-// via UiaDisconnectProvider before the session — which the fragments
-// borrow raw View* / UiaSession* from — is destroyed.
+// structural change). UIA clients hold refcounts and can call provider methods
+// asynchronously. Providers advertise UseComThreading so UI Automation
+// marshals an STA provider back to its owning STA, where the View tree and its
+// script callbacks live. Each provider also owns a call gate: retirement closes
+// and drains that gate before borrowed View* / UiaSession* state is released;
+// UiaDisconnectProvider additionally tells UIA that cached elements are gone.
 
 #ifdef _WIN32
 
@@ -32,477 +33,30 @@
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/platform/uia_mapping.hpp>
 #include <pulp/view/view.hpp>
+#include "accessibility_win_fragment_lifecycle.hpp"
+#include "accessibility_win_internal.hpp"
+#include "accessibility_win_providers.hpp"
+#include "accessibility_win_util.hpp"
 #include <pulp/runtime/log.hpp>
 #include <pulp/platform/win32_sane.hpp>  // brings in ObjBase.h + oleidl.h
 #include <UIAutomation.h>
 #include <atomic>
+#include <cassert>
+#include <memory>
+#include <mutex>
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
 
-// Map Pulp AccessRole to Windows UIA Control Type IDs. Delegates to the
-// shared, offline-tested mapping table (uia_mapping.hpp) so the COM TU
-// and the cross-platform unit tests can never drift.
+// Delegate role mapping to the shared offline-tested table.
 static long access_role_to_uia_type(View::AccessRole role) {
     return static_cast<long>(uia::role_to_control_type(role));
 }
 
-struct UiaSession;
-class PulpHostProvider;
-class PulpFragmentProvider;
-
-// ── Small utilities ──────────────────────────────────────────────────────
-// BSTR ownership follows COM rules (caller frees via SysFreeString).
-// Returning BSTR through VARIANT hands ownership to UIA.
-
-static BSTR make_bstr(const std::string& s) {
-    // Convert UTF-8 to UTF-16 for COM. Passing an explicit byte count
-    // makes MultiByteToWideChar return the UTF-16 length without a
-    // terminator, which is exactly what SysAllocStringLen expects.
-    if (s.empty()) return SysAllocString(L"");
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.data(),
-                                    static_cast<int>(s.size()),
-                                    nullptr, 0);
-    if (wlen <= 0) return SysAllocString(L"");
-    BSTR out = SysAllocStringLen(nullptr, static_cast<UINT>(wlen));
-    if (!out) return nullptr;
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
-                        out, wlen);
-    return out;
-}
-
-// ── Session ──────────────────────────────────────────────────────────────
-
-struct UiaSession {
-    HWND hwnd = nullptr;
-    View* root = nullptr;
-    bool clients_listening = false;
-
-    // Atomic so shutdown can null it BEFORE we tell UIA there is no
-    // provider for this HWND. The WM_GETOBJECT handler and every
-    // event-raising helper load this with acquire ordering; shutdown
-    // uses exchange(nullptr, acq_rel) as the publication barrier. See
-    // #514 for the race this closes.
-    std::atomic<PulpHostProvider*> host_provider{nullptr};  // refcounted; released in shutdown
-
-    // Per-widget fragments, depth-first order (root excluded — the root
-    // is the host provider / fragment root). Each entry is AddRef'd once
-    // for the session's ownership and Release'd in shutdown. UIA clients
-    // take their own refs as they walk. Built at init and rebuilt on
-    // structural change. The ordering here defines each fragment's
-    // runtime-id index and its parent/sibling navigation.
-    std::vector<PulpFragmentProvider*> fragments;
-
-    // Root-level (parent == fragment root) first/last child indices into
-    // `fragments`, so PulpHostProvider::Navigate(FirstChild/LastChild) is
-    // O(1). -1 when there are no top-level accessible fragments.
-    int root_first_child = -1;
-    int root_last_child = -1;
-};
-
-// A fragment's static place in the tree, captured when the fragment set
-// is built. Navigation is pure index arithmetic over UiaSession::fragments
-// so the hot Navigate path makes no View-tree walk.
-struct FragmentNode {
-    View* view = nullptr;
-    int index = 0;          // depth-first index into session->fragments
-    int parent_index = -1;  // -1 ⇒ parent is the fragment root (host)
-    int first_child = -1;   // -1 ⇒ leaf
-    int last_child = -1;
-    int prev_sibling = -1;
-    int next_sibling = -1;
-};
-
-// ── Per-widget fragment provider ──────────────────────────────────────────
-
-class PulpFragmentProvider final : public IRawElementProviderSimple,
-                                    public IRawElementProviderFragment,
-                                    public IRangeValueProvider,
-                                    public IValueProvider {
-public:
-    PulpFragmentProvider(UiaSession* session, FragmentNode node)
-        : session_(session), node_(node) {}
-
-    // IUnknown
-    IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        if (riid == __uuidof(IUnknown) ||
-            riid == __uuidof(IRawElementProviderSimple)) {
-            *ppv = static_cast<IRawElementProviderSimple*>(this);
-        } else if (riid == __uuidof(IRawElementProviderFragment)) {
-            *ppv = static_cast<IRawElementProviderFragment*>(this);
-        } else if (riid == __uuidof(IRangeValueProvider) &&
-                   supports_range_value()) {
-            *ppv = static_cast<IRangeValueProvider*>(this);
-        } else if (riid == __uuidof(IValueProvider) && supports_value()) {
-            *ppv = static_cast<IValueProvider*>(this);
-        } else {
-            *ppv = nullptr;
-            return E_NOINTERFACE;
-        }
-        AddRef();
-        return S_OK;
-    }
-    IFACEMETHODIMP_(ULONG) AddRef() override {
-        return static_cast<ULONG>(refs_.fetch_add(1) + 1);
-    }
-    IFACEMETHODIMP_(ULONG) Release() override {
-        auto prev = refs_.fetch_sub(1);
-        if (prev == 1) {
-            delete this;
-            return 0;
-        }
-        return static_cast<ULONG>(prev - 1);
-    }
-
-    // IRawElementProviderSimple
-    IFACEMETHODIMP get_ProviderOptions(ProviderOptions* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = static_cast<ProviderOptions>(
-            ProviderOptions_ServerSideProvider |
-            ProviderOptions_UseComThreading);
-        return S_OK;
-    }
-    IFACEMETHODIMP GetPatternProvider(PATTERNID patternId,
-                                       IUnknown** pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        if (patternId == UIA_RangeValuePatternId && supports_range_value()) {
-            *pRetVal = static_cast<IRangeValueProvider*>(this);
-            AddRef();
-        } else if (patternId == UIA_ValuePatternId && supports_value()) {
-            *pRetVal = static_cast<IValueProvider*>(this);
-            AddRef();
-        }
-        return S_OK;
-    }
-    IFACEMETHODIMP GetPropertyValue(PROPERTYID propertyId,
-                                     VARIANT* pRetVal) override;
-    IFACEMETHODIMP get_HostRawElementProvider(
-        IRawElementProviderSimple** pRetVal) override {
-        // Per UIA docs: only the fragment root returns a host provider;
-        // child fragments return nullptr (they inherit the root's HWND
-        // host). Returning S_OK + null is the documented contract.
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        return S_OK;
-    }
-
-    // IRawElementProviderFragment
-    IFACEMETHODIMP Navigate(NavigateDirection direction,
-                             IRawElementProviderFragment** pRetVal) override;
-    IFACEMETHODIMP GetRuntimeId(SAFEARRAY** pRetVal) override;
-    IFACEMETHODIMP get_BoundingRectangle(UiaRect* pRetVal) override;
-    IFACEMETHODIMP GetEmbeddedFragmentRoots(SAFEARRAY** pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;  // No nested fragment roots.
-        return S_OK;
-    }
-    IFACEMETHODIMP SetFocus() override {
-        if (View* v = node_.view) v->set_focus(true);
-        return S_OK;
-    }
-    IFACEMETHODIMP get_FragmentRoot(
-        IRawElementProviderFragmentRoot** pRetVal) override;
-
-    // IRangeValueProvider
-    IFACEMETHODIMP SetValue(double val) override {
-        // Only claim the write when the pattern is actually advertised —
-        // is_read_only() below must agree with what this returns.
-        if (auto* vif = value_iface();
-            vif && uia::role_supports_value(role_or_none())) {
-            vif->set_current_value(val);
-            return S_OK;
-        }
-        return UIA_E_NOTSUPPORTED;
-    }
-    IFACEMETHODIMP get_Value(double* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = 0.0;
-        if (auto* vif = value_iface()) *pRetVal = vif->get_current_value();
-        return S_OK;
-    }
-    IFACEMETHODIMP get_IsReadOnly(BOOL* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        // IsReadOnly means exactly "SetValue will fail". uia::is_read_only()
-        // is the shared predicate both SetValue overloads are written against;
-        // the old proxy (supports_value()) reported "editable" for a
-        // TextEditor whose SetValue then returned UIA_E_NOTSUPPORTED, and for
-        // a Knob with no value interface at all.
-        *pRetVal = uia::is_read_only(role_or_none(), value_iface() != nullptr,
-                                     editable_text_iface() != nullptr)
-                       ? VARIANT_TRUE
-                       : VARIANT_FALSE;
-        return S_OK;
-    }
-    IFACEMETHODIMP get_Maximum(double* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = 0.0;
-        if (auto* vif = value_iface()) *pRetVal = vif->get_maximum_value();
-        return S_OK;
-    }
-    IFACEMETHODIMP get_Minimum(double* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = 0.0;
-        if (auto* vif = value_iface()) *pRetVal = vif->get_minimum_value();
-        return S_OK;
-    }
-    IFACEMETHODIMP get_LargeChange(double* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = 0.0;
-        if (auto* vif = value_iface()) *pRetVal = vif->get_step_size() * 10.0;
-        return S_OK;
-    }
-    IFACEMETHODIMP get_SmallChange(double* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = 0.0;
-        if (auto* vif = value_iface()) *pRetVal = vif->get_step_size();
-        return S_OK;
-    }
-
-    // IValueProvider
-    // (SetValue collides by name with IRangeValueProvider::SetValue but
-    // has a BSTR signature; declare it explicitly to disambiguate.)
-    IFACEMETHODIMP SetValue(LPCWSTR val) override {
-        // Route the edit into the View's text interface (TextEditor). Without
-        // this every Narrator edit was rejected while get_IsReadOnly claimed
-        // the field was editable.
-        auto* tif = editable_text_iface();
-        if (!tif || !val) return UIA_E_NOTSUPPORTED;
-        const int len = WideCharToMultiByte(CP_UTF8, 0, val, -1, nullptr, 0,
-                                            nullptr, nullptr);
-        if (len <= 0) return UIA_E_NOTSUPPORTED;
-        std::string utf8(static_cast<size_t>(len - 1), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, val, -1, utf8.data(), len, nullptr,
-                            nullptr);
-        tif->set_text(utf8);
-        return S_OK;
-    }
-    IFACEMETHODIMP get_Value(BSTR* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        if (View* v = node_.view) {
-            // Shared resolver: value interface → text interface → access_value.
-            // Returning a NULL BSTR (what the text-interface-less path used to
-            // do for every TextEditor) makes Narrator read nothing at all.
-            const std::string value = accessibility_value_string(*v);
-            if (!value.empty()) *pRetVal = make_bstr(value);
-        }
-        return S_OK;
-    }
-    // IValueProvider::get_IsReadOnly shares the same name/signature as
-    // the IRangeValueProvider one above; a single override satisfies
-    // both vtables.
-
-    View* view() const { return node_.view; }
-
-private:
-    View::AccessRole role_or_none() const {
-        return node_.view ? node_.view->access_role() : View::AccessRole::none;
-    }
-    // Pattern availability = role allows it AND the View can serve it. A
-    // pattern advertised without a source resolves to a null interface (or,
-    // worse, to zeros in a degenerate 0..0 range).
-    bool supports_range_value() const {
-        return uia::exposes_range_value(role_or_none(),
-                                        value_iface() != nullptr);
-    }
-    bool supports_value() const {
-        return uia::exposes_value(
-            role_or_none(), value_iface() != nullptr,
-            text_iface() != nullptr,
-            node_.view && !node_.view->access_value().empty());
-    }
-    AccessibilityValueInterface* value_iface() const {
-        return node_.view
-            ? dynamic_cast<AccessibilityValueInterface*>(node_.view)
-            : nullptr;
-    }
-    AccessibilityTextInterface* text_iface() const {
-        return node_.view
-            ? dynamic_cast<AccessibilityTextInterface*>(node_.view)
-            : nullptr;
-    }
-    AccessibilityTextInterface* editable_text_iface() const {
-        auto* tif = text_iface();
-        return (tif && tif->is_editable()) ? tif : nullptr;
-    }
-
-    std::atomic<LONG> refs_{1};
-    UiaSession* session_;
-    FragmentNode node_;
-};
-
-// ── Root host provider (also the fragment root) ───────────────────────────
-
-class PulpHostProvider final : public IRawElementProviderSimple,
-                               public IRawElementProviderFragment,
-                               public IRawElementProviderFragmentRoot {
-public:
-    explicit PulpHostProvider(UiaSession* session) : session_(session) {}
-
-    // IUnknown
-    IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        if (riid == __uuidof(IUnknown) ||
-            riid == __uuidof(IRawElementProviderSimple)) {
-            *ppv = static_cast<IRawElementProviderSimple*>(this);
-        } else if (riid == __uuidof(IRawElementProviderFragment)) {
-            *ppv = static_cast<IRawElementProviderFragment*>(this);
-        } else if (riid == __uuidof(IRawElementProviderFragmentRoot)) {
-            *ppv = static_cast<IRawElementProviderFragmentRoot*>(this);
-        } else {
-            *ppv = nullptr;
-            return E_NOINTERFACE;
-        }
-        AddRef();
-        return S_OK;
-    }
-    IFACEMETHODIMP_(ULONG) AddRef() override {
-        return static_cast<ULONG>(refs_.fetch_add(1) + 1);
-    }
-    IFACEMETHODIMP_(ULONG) Release() override {
-        auto prev = refs_.fetch_sub(1);
-        if (prev == 1) {
-            delete this;
-            return 0;
-        }
-        return static_cast<ULONG>(prev - 1);
-    }
-
-    // IRawElementProviderSimple
-    IFACEMETHODIMP get_ProviderOptions(ProviderOptions* pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = static_cast<ProviderOptions>(
-            ProviderOptions_ServerSideProvider |
-            ProviderOptions_UseComThreading);
-        return S_OK;
-    }
-    IFACEMETHODIMP GetPatternProvider(PATTERNID /*patternId*/,
-                                       IUnknown** pRetVal) override {
-        // The fragment root exposes no patterns directly — patterns live
-        // on the per-widget fragments. Returning nullptr is the UIA
-        // contract when a pattern isn't supported.
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        return S_OK;
-    }
-    IFACEMETHODIMP GetPropertyValue(PROPERTYID propertyId,
-                                     VARIANT* pRetVal) override;
-    IFACEMETHODIMP get_HostRawElementProvider(
-        IRawElementProviderSimple** pRetVal) override;
-
-    // IRawElementProviderFragment
-    IFACEMETHODIMP Navigate(NavigateDirection direction,
-                             IRawElementProviderFragment** pRetVal) override;
-    IFACEMETHODIMP GetRuntimeId(SAFEARRAY** pRetVal) override {
-        // The fragment root has no runtime id of its own — UIA derives it
-        // from the host HWND provider. Returning null is the contract.
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        return S_OK;
-    }
-    IFACEMETHODIMP get_BoundingRectangle(UiaRect* pRetVal) override;
-    IFACEMETHODIMP GetEmbeddedFragmentRoots(SAFEARRAY** pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = nullptr;
-        return S_OK;
-    }
-    IFACEMETHODIMP SetFocus() override { return S_OK; }
-    IFACEMETHODIMP get_FragmentRoot(
-        IRawElementProviderFragmentRoot** pRetVal) override {
-        if (!pRetVal) return E_POINTER;
-        *pRetVal = this;
-        AddRef();
-        return S_OK;
-    }
-
-    // IRawElementProviderFragmentRoot
-    IFACEMETHODIMP ElementProviderFromPoint(
-        double x, double y, IRawElementProviderFragment** pRetVal) override;
-    IFACEMETHODIMP GetFocus(IRawElementProviderFragment** pRetVal) override;
-
-private:
-    std::atomic<LONG> refs_{1};
-    UiaSession* session_;
-};
-
-// ── Fragment-set construction ─────────────────────────────────────────────
-//
-// Mirror the mac collect_accessible() walk: depth-first, every View with
-// a non-none AccessRole becomes a fragment. We capture parent/child/
-// sibling indices up front so Navigate is pure arithmetic. The recursion
-// threads the parent's fragment index so children link to it; views with
-// AccessRole::none are skipped as fragments but still recursed into so a
-// deeply-nested accessible descendant of a plain container is reachable
-// (the descendant re-parents onto the nearest accessible ancestor, or
-// onto the fragment root if there is none).
-
-namespace {
-
-void build_fragment_nodes(View& v, int parent_index,
-                          std::vector<FragmentNode>& nodes) {
-    int my_index = parent_index;
-    if (is_accessibility_element(v)) {
-        FragmentNode node;
-        node.view = &v;
-        node.index = static_cast<int>(nodes.size());
-        node.parent_index = parent_index;
-        nodes.push_back(node);
-        my_index = node.index;
-        // Sibling / child chains are derived in a second pass
-        // (link_fragment_nodes); here we only record parentage.
-    }
-    for (size_t i = 0; i < v.child_count(); ++i) {
-        if (View* child = v.child_at(i)) {
-            build_fragment_nodes(*child, my_index, nodes);
-        }
-    }
-}
-
-// Second pass: derive first/last child + sibling chains from parentage.
-void link_fragment_nodes(std::vector<FragmentNode>& nodes) {
-    for (auto& n : nodes) {
-        int prev = -1;
-        for (auto& cand : nodes) {
-            if (cand.parent_index != n.index) continue;
-            if (n.first_child == -1) n.first_child = cand.index;
-            n.last_child = cand.index;
-            cand.prev_sibling = prev;
-            if (prev != -1) nodes[static_cast<size_t>(prev)].next_sibling = cand.index;
-            prev = cand.index;
-        }
-    }
-}
-
-// Root-level (parent == -1) first/last/sibling links, computed the same
-// way the per-node pass does for children, so Navigate on the root and
-// on root-level fragments agree.
-struct RootLinks { int first = -1; int last = -1; };
-
-RootLinks link_root_level(std::vector<FragmentNode>& nodes) {
-    RootLinks rl;
-    int prev = -1;
-    for (auto& cand : nodes) {
-        if (cand.parent_index != -1) continue;
-        if (rl.first == -1) rl.first = cand.index;
-        rl.last = cand.index;
-        cand.prev_sibling = prev;
-        if (prev != -1) nodes[static_cast<size_t>(prev)].next_sibling = cand.index;
-        prev = cand.index;
-    }
-    return rl;
-}
-
-}  // namespace
-
 // ── Geometry: View → screen-space UiaRect ─────────────────────────────────
-//
-// Mirror accessibility_mac.mm's root-relative walk, then offset by the
-// HWND's screen position. Windows UIA wants device-pixel screen
-// coordinates (top-left origin), which matches Pulp's top-down view
-// space — no Y flip needed (unlike Cocoa).
-
+// Mirror accessibility_mac.mm's root-relative walk, then offset by the HWND's
+// screen position. Windows UIA wants device-pixel screen coordinates.
 static UiaRect view_to_screen_rect(UiaSession* session, View* view) {
     UiaRect r{0, 0, 0, 0};
     if (!session || !session->hwnd || !view) return r;
@@ -531,7 +85,9 @@ IFACEMETHODIMP PulpFragmentProvider::GetPropertyValue(PROPERTYID propertyId,
                                                        VARIANT* pRetVal) {
     if (!pRetVal) return E_POINTER;
     VariantInit(pRetVal);
-    View* v = node_.view;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    View* v = call.view();
     if (!v) return S_OK;
 
     switch (propertyId) {
@@ -579,13 +135,13 @@ IFACEMETHODIMP PulpFragmentProvider::GetPropertyValue(PROPERTYID propertyId,
         }
         case UIA_IsValuePatternAvailablePropertyId: {
             pRetVal->vt = VT_BOOL;
-            pRetVal->boolVal = supports_value() ? VARIANT_TRUE : VARIANT_FALSE;
+            pRetVal->boolVal = supports_value(v) ? VARIANT_TRUE : VARIANT_FALSE;
             break;
         }
         case UIA_IsRangeValuePatternAvailablePropertyId: {
             pRetVal->vt = VT_BOOL;
             pRetVal->boolVal =
-                supports_range_value() ? VARIANT_TRUE : VARIANT_FALSE;
+                supports_range_value(v) ? VARIANT_TRUE : VARIANT_FALSE;
             break;
         }
         case UIA_ValueValuePropertyId: {
@@ -622,12 +178,17 @@ IFACEMETHODIMP PulpFragmentProvider::Navigate(
     NavigateDirection direction, IRawElementProviderFragment** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    UiaSession* session = call.session();
+    auto fragments = session->fragment_lifecycle.read();
+    if (!fragments) return S_OK;
 
     auto resolve = [&](int idx) -> IRawElementProviderFragment* {
         if (idx < 0 ||
-            idx >= static_cast<int>(session_->fragments.size())) return nullptr;
-        PulpFragmentProvider* f = session_->fragments[static_cast<size_t>(idx)];
+            idx >= static_cast<int>(fragments.providers().size())) return nullptr;
+        PulpFragmentProvider* f =
+            fragments.providers()[static_cast<size_t>(idx)];
         if (!f) return nullptr;
         f->AddRef();
         return static_cast<IRawElementProviderFragment*>(f);
@@ -638,7 +199,7 @@ IFACEMETHODIMP PulpFragmentProvider::Navigate(
             if (node_.parent_index == -1) {
                 // Parent is the fragment root (host provider).
                 PulpHostProvider* hp =
-                    session_->host_provider.load(std::memory_order_acquire);
+                    session->host_provider.load(std::memory_order_acquire);
                 if (hp) {
                     hp->AddRef();
                     *pRetVal = static_cast<IRawElementProviderFragment*>(hp);
@@ -669,6 +230,8 @@ IFACEMETHODIMP PulpFragmentProvider::Navigate(
 IFACEMETHODIMP PulpFragmentProvider::GetRuntimeId(SAFEARRAY** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
     const auto rid = uia::runtime_id_for_index(node_.index);
     SAFEARRAY* sa = SafeArrayCreateVector(VT_I4, 0, uia::RuntimeId::count);
     if (!sa) return E_OUTOFMEMORY;
@@ -686,7 +249,9 @@ IFACEMETHODIMP PulpFragmentProvider::GetRuntimeId(SAFEARRAY** pRetVal) {
 
 IFACEMETHODIMP PulpFragmentProvider::get_BoundingRectangle(UiaRect* pRetVal) {
     if (!pRetVal) return E_POINTER;
-    *pRetVal = view_to_screen_rect(session_, node_.view);
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    *pRetVal = view_to_screen_rect(call.session(), call.view());
     return S_OK;
 }
 
@@ -694,9 +259,10 @@ IFACEMETHODIMP PulpFragmentProvider::get_FragmentRoot(
     IRawElementProviderFragmentRoot** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
     PulpHostProvider* hp =
-        session_->host_provider.load(std::memory_order_acquire);
+        call.session()->host_provider.load(std::memory_order_acquire);
     if (hp) {
         // Host provider implements IRawElementProviderFragmentRoot.
         return hp->QueryInterface(__uuidof(IRawElementProviderFragmentRoot),
@@ -711,11 +277,14 @@ IFACEMETHODIMP PulpHostProvider::GetPropertyValue(PROPERTYID propertyId,
                                                     VARIANT* pRetVal) {
     if (!pRetVal) return E_POINTER;
     VariantInit(pRetVal);
-    if (!session_ || !session_->root) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    UiaSession* session = call.session();
+    if (!session->root) return S_OK;
 
     switch (propertyId) {
         case UIA_NamePropertyId: {
-            const auto& label = session_->root->access_label();
+            const auto& label = session->root->access_label();
             if (!label.empty()) {
                 pRetVal->vt = VT_BSTR;
                 pRetVal->bstrVal = make_bstr(label);
@@ -725,7 +294,7 @@ IFACEMETHODIMP PulpHostProvider::GetPropertyValue(PROPERTYID propertyId,
         case UIA_ControlTypePropertyId: {
             pRetVal->vt = VT_I4;
             pRetVal->lVal = access_role_to_uia_type(
-                session_->root->access_role());
+                session->root->access_role());
             break;
         }
         case UIA_IsControlElementPropertyId:
@@ -751,21 +320,28 @@ IFACEMETHODIMP PulpHostProvider::get_HostRawElementProvider(
     IRawElementProviderSimple** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_ || !session_->hwnd) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!call.session()->hwnd) return S_OK;
     // Chain to the default HWND provider for geometry, focus, etc.
-    return UiaHostProviderFromHwnd(session_->hwnd, pRetVal);
+    return UiaHostProviderFromHwnd(call.session()->hwnd, pRetVal);
 }
 
 IFACEMETHODIMP PulpHostProvider::Navigate(
     NavigateDirection direction, IRawElementProviderFragment** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    UiaSession* session = call.session();
+    auto fragments = session->fragment_lifecycle.read();
+    if (!fragments) return S_OK;
 
     auto resolve = [&](int idx) -> IRawElementProviderFragment* {
         if (idx < 0 ||
-            idx >= static_cast<int>(session_->fragments.size())) return nullptr;
-        PulpFragmentProvider* f = session_->fragments[static_cast<size_t>(idx)];
+            idx >= static_cast<int>(fragments.providers().size())) return nullptr;
+        PulpFragmentProvider* f =
+            fragments.providers()[static_cast<size_t>(idx)];
         if (!f) return nullptr;
         f->AddRef();
         return static_cast<IRawElementProviderFragment*>(f);
@@ -773,10 +349,10 @@ IFACEMETHODIMP PulpHostProvider::Navigate(
 
     switch (direction) {
         case NavigateDirection_FirstChild:
-            *pRetVal = resolve(session_->root_first_child);
+            *pRetVal = resolve(fragments.first_child());
             break;
         case NavigateDirection_LastChild:
-            *pRetVal = resolve(session_->root_last_child);
+            *pRetVal = resolve(fragments.last_child());
             break;
         case NavigateDirection_Parent:
         case NavigateDirection_NextSibling:
@@ -792,9 +368,10 @@ IFACEMETHODIMP PulpHostProvider::Navigate(
 
 IFACEMETHODIMP PulpHostProvider::get_BoundingRectangle(UiaRect* pRetVal) {
     if (!pRetVal) return E_POINTER;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
     // Fragment root bounds = the root View (the whole client area).
-    *pRetVal = view_to_screen_rect(session_,
-                                   session_ ? session_->root : nullptr);
+    *pRetVal = view_to_screen_rect(call.session(), call.session()->root);
     return S_OK;
 }
 
@@ -802,14 +379,18 @@ IFACEMETHODIMP PulpHostProvider::ElementProviderFromPoint(
     double x, double y, IRawElementProviderFragment** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_) return S_OK;
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    UiaSession* session = call.session();
+    auto fragments = session->fragment_lifecycle.read();
+    if (!fragments) return S_OK;
     // Linear hit-test over fragments; deepest (last in DFS) match wins so
     // a child reports over its container. Fragment count is small (UI
     // widgets), so a scan is cheaper than maintaining a spatial index.
     PulpFragmentProvider* hit = nullptr;
-    for (auto* f : session_->fragments) {
+    for (auto* f : fragments.providers()) {
         if (!f || !f->view()) continue;
-        UiaRect r = view_to_screen_rect(session_, f->view());
+        UiaRect r = view_to_screen_rect(session, f->view());
         if (x >= r.left && x < r.left + r.width &&
             y >= r.top && y < r.top + r.height) {
             hit = f;  // keep scanning; later (deeper) wins
@@ -826,8 +407,12 @@ IFACEMETHODIMP PulpHostProvider::GetFocus(
     IRawElementProviderFragment** pRetVal) {
     if (!pRetVal) return E_POINTER;
     *pRetVal = nullptr;
-    if (!session_) return S_OK;
-    for (auto* f : session_->fragments) {
+    Call call(*this);
+    if (!call) return UIA_E_ELEMENTNOTAVAILABLE;
+    UiaSession* session = call.session();
+    auto fragments = session->fragment_lifecycle.read();
+    if (!fragments) return S_OK;
+    for (auto* f : fragments.providers()) {
         if (f && f->view() && f->view()->has_focus()) {
             f->AddRef();
             *pRetVal = static_cast<IRawElementProviderFragment*>(f);
@@ -837,68 +422,101 @@ IFACEMETHODIMP PulpHostProvider::GetFocus(
     return S_OK;
 }
 
-// ── Fragment lifecycle helpers ────────────────────────────────────────────
-
 namespace {
 
-// Build (or rebuild) the session's fragment set from the current View
-// tree. Releases any previously-held fragments first. Must run on the UI
-// thread; UIA navigation is serialized through the COM apartment.
-void rebuild_fragments(UiaSession* session) {
-    if (!session) return;
-    // Disconnect old fragments before dropping our ref so a cached UIA
-    // client holding a stale fragment cannot call into it (and through it
-    // into the about-to-be-replaced FragmentNode) after the swap. New
-    // fragments replace them; UIA re-queries after the StructureChanged
-    // event the caller raises.
-    for (auto* f : session->fragments) {
-        if (f) {
-            UiaDisconnectProvider(f);
-            f->Release();
+class HostProviderReference {
+public:
+    explicit HostProviderReference(PulpHostProvider* provider)
+        : provider_(provider) {
+        if (provider_) provider_->AddRef();
+    }
+    ~HostProviderReference() {
+        if (provider_) provider_->Release();
+    }
+    HostProviderReference(const HostProviderReference&) = delete;
+    HostProviderReference& operator=(const HostProviderReference&) = delete;
+    PulpHostProvider* get() const noexcept { return provider_; }
+
+private:
+    PulpHostProvider* provider_ = nullptr;
+};
+
+PulpFragmentProvider* fragment_for(UiaSession& session, View& target) {
+    auto fragments = session.fragment_lifecycle.read();
+    if (!fragments) return nullptr;
+    for (auto* fragment : fragments.providers()) {
+        if (fragment && fragment->view() == &target) {
+            fragment->AddRef();
+            return fragment;
         }
     }
-    session->fragments.clear();
-    session->root_first_child = -1;
-    session->root_last_child = -1;
-
-    if (!session->root) return;
-
-    std::vector<FragmentNode> nodes;
-    // Walk the root's children (the root itself is the fragment root, not
-    // a fragment), matching snapshot_accessibility_tree / mac behavior.
-    for (size_t i = 0; i < session->root->child_count(); ++i) {
-        if (View* child = session->root->child_at(i)) {
-            build_fragment_nodes(*child, -1, nodes);
-        }
-    }
-    link_fragment_nodes(nodes);
-    RootLinks rl = link_root_level(nodes);
-    session->root_first_child = rl.first;
-    session->root_last_child = rl.last;
-
-    session->fragments.reserve(nodes.size());
-    for (auto& n : nodes) {
-        session->fragments.push_back(new PulpFragmentProvider(session, n));
-    }
+    return nullptr;
 }
 
-void release_fragments(UiaSession* session) {
-    if (!session) return;
-    for (auto* f : session->fragments) {
-        if (f) {
-            // Drain in-flight UIA calls before dropping our ref, same as
-            // the host provider. Cached clients may still call a fragment
-            // method that touches session_ / the borrowed View*.
-            UiaDisconnectProvider(f);
-            f->Release();
+void raise_event(IRawElementProviderSimple& provider, View* live_view,
+                 UiaAccessibilityEvent event) {
+    switch (event) {
+        case UiaAccessibilityEvent::value_changed: {
+            VARIANT old_value, new_value;
+            VariantInit(&old_value);
+            VariantInit(&new_value);
+            if (live_view) {
+                const std::string value =
+                    accessibility_value_string(*live_view);
+                if (!value.empty()) {
+                    new_value.vt = VT_BSTR;
+                    new_value.bstrVal = make_bstr(value);
+                }
+            }
+            UiaRaiseAutomationPropertyChangedEvent(
+                &provider, UIA_ValueValuePropertyId, old_value, new_value);
+            VariantClear(&new_value);
+            return;
+        }
+        case UiaAccessibilityEvent::focus_changed:
+            UiaRaiseAutomationEvent(
+                &provider, UIA_AutomationFocusChangedEventId);
+            return;
+        case UiaAccessibilityEvent::name_changed: {
+            VARIANT old_value, new_value;
+            VariantInit(&old_value);
+            VariantInit(&new_value);
+            UiaRaiseAutomationPropertyChangedEvent(
+                &provider, UIA_NamePropertyId, old_value, new_value);
+            return;
         }
     }
-    session->fragments.clear();
-    session->root_first_child = -1;
-    session->root_last_child = -1;
 }
 
 }  // namespace
+
+void raise_uia_accessibility_event(void* handle, View& target,
+                                   UiaAccessibilityEvent event) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return;
+    UiaSessionOperation operation(session);
+    if (!operation) return;
+    HostProviderReference host_ref(
+        session->host_provider.load(std::memory_order_acquire));
+    auto* host = host_ref.get();
+    if (!host || !UiaClientsAreListening()) return;
+
+    if (auto* fragment = fragment_for(*session, target)) {
+        bool delivered = false;
+        {
+            PulpFragmentProvider::Call call(*fragment);
+            if (call) {
+                raise_event(*fragment, call.view(), event);
+                delivered = true;
+            }
+        }
+        fragment->Release();
+        if (delivered) return;
+    }
+
+    PulpHostProvider::Call host_call(*host);
+    if (host_call) raise_event(*host, nullptr, event);
+}
 
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -910,42 +528,75 @@ void* init_accessibility(View& root, void* hwnd) {
     // Build the fragment tree before publishing the host provider so a
     // concurrent WM_GETOBJECT reader that loads the host provider also
     // sees a complete fragment set when it navigates.
-    rebuild_fragments(session);
+    session->fragment_lifecycle.rebuild(session, session->root);
     // Release store so a concurrent WM_GETOBJECT reader sees a fully
     // constructed PulpHostProvider through its acquire load.
     session->host_provider.store(new PulpHostProvider(session),
                                  std::memory_order_release);
+    detail::register_accessibility_provider(root, session);
     runtime::log_info(
         "Windows UIA: session ready (clients_listening={}, fragments={})",
-        session->clients_listening, session->fragments.size());
+        session->clients_listening,
+        session->fragment_lifecycle.active_size());
     return session;
 }
 
 void shutdown_accessibility(void* handle) {
     auto* session = static_cast<UiaSession*>(handle);
     if (!session) return;
+    if (session->shutdown_in_progress) return;
+    session->shutdown_in_progress = true;
 
-    // #514: Null the atomic FIRST, BEFORE we tell UIA there is no
-    // provider for this HWND. See the host-provider race note below.
-    auto* hp = session->host_provider.exchange(nullptr,
-                                               std::memory_order_acq_rel);
+    if (!session->shutdown_requested) {
+        session->shutdown_requested = true;
 
-    if (session->hwnd) {
-        UiaReturnRawElementProvider(session->hwnd, 0, 0, nullptr);
+        // #514: Null the atomic FIRST, BEFORE we tell UIA there is no
+        // provider for this HWND. See the host-provider race note below.
+        session->retired_host_provider = session->host_provider.exchange(
+            nullptr, std::memory_order_acq_rel);
+
+        // Close fragment call gates immediately. An in-flight fragment moves
+        // into the preallocated retired set, where ScriptedUiSession teardown
+        // can attach the realm owner before this operation unwinds.
+        session->fragment_lifecycle.release();
+
+        if (session->hwnd)
+            UiaReturnRawElementProvider(session->hwnd, 0, 0, nullptr);
     }
+
+    // A disconnect above or in fragment lifecycle code may have re-entered
+    // shutdown from an active provider/session operation. Publication is
+    // already closed; defer deletion until the outermost lease unwinds.
+    if (session->operation_depth != 0) {
+        session->shutdown_in_progress = false;
+        return;
+    }
+
+    // Keep the session discoverable while an active provider call is still
+    // borrowing the View graph. ScriptedUiSession teardown can then attach its
+    // retained realm owner before the outermost operation reaches this
+    // depth-zero finalization point. No new UIA calls can begin because the
+    // host publication and fragment gates are already closed.
+    detail::unregister_accessibility_provider(handle);
+    auto* hp = std::exchange(session->retired_host_provider, nullptr);
 
     // Disconnect + release the per-widget fragments before the host
     // provider. They borrow session_ and a raw View*; UiaDisconnectProvider
     // drains any in-flight client call and rejects new ones so the
     // session deletion below cannot UAF a cached fragment pointer.
-    release_fragments(session);
+    session->fragment_lifecycle.release();
+    session->fragment_lifecycle.drain();
+    // Teardown can itself be reentrant from a provider callback. Any provider
+    // still active here was made inert and detached from the session by
+    // retire(); drop our ownership without a self-blocking disconnect. UIA's
+    // in-flight/client refs keep the COM object alive until those calls return.
+    session->fragment_lifecycle.abandon_retired();
 
     if (hp) {
-        // #500 / #485 / #514: UiaDisconnectProvider is the sanctioned
-        // shutdown barrier — it waits for in-flight UIA calls to drain
-        // AND rejects subsequent calls, so the cached-client UAF window
-        // is closed. After it returns no UIA-originated call can reach
-        // the provider, making the session deletion safe.
+        // Close and drain the local call gate first. UiaDisconnectProvider is
+        // still required to release UIA resources, but session lifetime does
+        // not depend on that outbound COM call succeeding.
+        hp->retire();
         UiaDisconnectProvider(hp);
         hp->Release();
     }
@@ -956,15 +607,57 @@ void shutdown_accessibility(void* handle) {
 void accessibility_tree_changed(void* handle) {
     auto* session = static_cast<UiaSession*>(handle);
     if (!session) return;
+    UiaSessionOperation operation(session);
+    if (!operation) return;
     auto* hp = session->host_provider.load(std::memory_order_acquire);
     if (!hp) return;
     // Rebuild the fragment set to reflect the new tree even when no
     // client is listening (so a client that attaches later walks the
     // current tree). Cheap relative to a structural UI change.
-    rebuild_fragments(session);
+    session->fragment_lifecycle.rebuild(session, session->root);
+    if (session->shutdown_requested) return;
     if (!UiaClientsAreListening()) return;
     UiaRaiseStructureChangedEvent(
         hp, StructureChangeType_ChildrenBulkAdded, nullptr, 0);
+}
+
+void accessibility_tree_will_change(void* handle) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return;
+    UiaSessionOperation operation(session);
+    if (!operation) return;
+    session->fragment_lifecycle.release();
+}
+
+bool accessibility_tree_retirement_ready(void* handle) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return true;
+    UiaSessionOperation operation(session);
+    if (!operation) return true;
+    session->fragment_lifecycle.drain();
+    return session->fragment_lifecycle.retired_size() == 0;
+}
+
+void accessibility_retain_until_retired(void* handle,
+                                        std::shared_ptr<void> owner) noexcept {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session || !owner) return;
+    // This hook is intentionally valid after shutdown_requested while an outer
+    // provider operation is unwinding. The registry keeps the session alive
+    // and serialized on its owner thread until depth-zero finalization.
+    if (session->operation_depth != 0) {
+        assert(!session->retained_owner || session->retained_owner == owner);
+        session->retained_owner = owner;
+    }
+    session->fragment_lifecycle.retain_retired(std::move(owner));
+}
+
+void accessibility_pump(void* handle) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return;
+    UiaSessionOperation operation(session);
+    if (!operation) return;
+    session->fragment_lifecycle.drain();
 }
 
 // ── WM_GETOBJECT handler ──────────────────────────────────────────────────
@@ -986,96 +679,6 @@ extern "C" LRESULT pulp_uia_handle_wm_getobject(void* handle,
     return UiaReturnRawElementProvider(hwnd, wParam, lParam, hp);
 }
 
-// ── Event-raising helpers ─────────────────────────────────────────────────
-//
-// Resolve the target View to its per-widget fragment so the OS event
-// names the precise element. Falls back to the fragment root when the
-// target has no fragment (e.g. an AccessRole::none container, or an
-// event raised before the fragment set was built).
-
-namespace {
-
-PulpFragmentProvider* fragment_for(UiaSession* session, View& target) {
-    if (!session) return nullptr;
-    for (auto* f : session->fragments) {
-        if (f && f->view() == &target) return f;
-    }
-    return nullptr;
-}
-
-}  // namespace
-
-void notify_accessibility_value_changed(void* handle, View& target) {
-    auto* session = static_cast<UiaSession*>(handle);
-    if (!session) return;
-    auto* hp = session->host_provider.load(std::memory_order_acquire);
-    if (!hp) return;
-    if (!UiaClientsAreListening()) return;
-
-    VARIANT old_v, new_v;
-    VariantInit(&old_v);
-    VariantInit(&new_v);
-
-    if (PulpFragmentProvider* frag = fragment_for(session, target)) {
-        // Populate the new value so the reader can announce it directly.
-        //
-        // Resolve through accessibility_value_string(), the same path
-        // GetPropertyValue(UIA_ValueValuePropertyId) uses. Hand-rolling the
-        // lookup here (value interface, else the raw access_value slot) skipped
-        // the text interface, so a TextEditor whose content changed raised
-        // "the value changed" carrying VT_EMPTY — Narrator announced a change
-        // with no new value.
-        if (View* v = frag->view()) {
-            const std::string value = accessibility_value_string(*v);
-            if (!value.empty()) {
-                new_v.vt = VT_BSTR;
-                new_v.bstrVal = make_bstr(value);
-            }
-        }
-        UiaRaiseAutomationPropertyChangedEvent(
-            static_cast<IRawElementProviderSimple*>(frag),
-            UIA_ValueValuePropertyId, old_v, new_v);
-        VariantClear(&new_v);
-        return;
-    }
-    // No fragment for the target — raise at root granularity so clients
-    // at least learn something changed.
-    UiaRaiseAutomationPropertyChangedEvent(
-        hp, UIA_ValueValuePropertyId, old_v, new_v);
-}
-
-void notify_accessibility_focus_changed(void* handle, View& target) {
-    auto* session = static_cast<UiaSession*>(handle);
-    if (!session) return;
-    auto* hp = session->host_provider.load(std::memory_order_acquire);
-    if (!hp) return;
-    if (!UiaClientsAreListening()) return;
-    if (PulpFragmentProvider* frag = fragment_for(session, target)) {
-        UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple*>(frag),
-                                UIA_AutomationFocusChangedEventId);
-        return;
-    }
-    UiaRaiseAutomationEvent(hp, UIA_AutomationFocusChangedEventId);
-}
-
-void notify_accessibility_name_changed(void* handle, View& target) {
-    auto* session = static_cast<UiaSession*>(handle);
-    if (!session) return;
-    auto* hp = session->host_provider.load(std::memory_order_acquire);
-    if (!hp) return;
-    if (!UiaClientsAreListening()) return;
-    VARIANT old_v, new_v;
-    VariantInit(&old_v);
-    VariantInit(&new_v);
-    if (PulpFragmentProvider* frag = fragment_for(session, target)) {
-        UiaRaiseAutomationPropertyChangedEvent(
-            static_cast<IRawElementProviderSimple*>(frag),
-            UIA_NamePropertyId, old_v, new_v);
-        return;
-    }
-    UiaRaiseAutomationPropertyChangedEvent(
-        hp, UIA_NamePropertyId, old_v, new_v);
-}
 
 } // namespace pulp::view
 

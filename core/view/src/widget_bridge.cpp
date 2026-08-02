@@ -449,6 +449,25 @@ void WidgetBridge::unregister_global_dispatch(
     all_bridges_set().erase(this);
 }
 
+std::vector<WidgetBridge::BridgeWidgetState>
+WidgetBridge::foreign_owned_widget_states() const {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    std::size_t count = 0;
+    for (const auto* bridge : all_bridges_set()) {
+        if (bridge != this)
+            count += bridge->owned_widgets_.size();
+    }
+    std::vector<BridgeWidgetState> foreign;
+    foreign.reserve(count);
+    for (const auto* bridge : all_bridges_set()) {
+        if (bridge == this)
+            continue;
+        foreign.insert(foreign.end(), bridge->owned_widgets_.begin(),
+                       bridge->owned_widgets_.end());
+    }
+    return foreign;
+}
+
 void WidgetBridge::begin_root_quarantine() noexcept {
     if (realm_quarantined_)
         root_.refresh_visibility_quarantine();
@@ -667,7 +686,7 @@ View* WidgetBridge::widget(const std::string& id) {
             // `cached` lives under root_, and add_child never detaches, so it must
             // still be there. Only remove_child bumps the generation (and a fresh
             // entry carries the 0 sentinel), forcing the authoritative walk below.
-            const std::uint64_t gen = View::structure_generation();
+            const std::uint64_t gen = root_.root_structure_generation();
             if (it->second.validated_generation == gen) {
                 return cached;
             }

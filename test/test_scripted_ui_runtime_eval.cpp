@@ -372,6 +372,7 @@ TEST_CASE("Ordinary reload retries after a live-only provisional failure",
 
     write_text(script, R"(
         createLabel('partial', 'failed', '');
+        __forgetWidgetCallbacks__ = function () { for (;;) {} };
         if (listValueChannels().length) throw new Error('live-only failure');
     )");
     std::string error;
@@ -386,6 +387,74 @@ TEST_CASE("Ordinary reload retries after a live-only provisional failure",
     REQUIRE(session.bridge() != nullptr);
     REQUIRE(session.bridge()->widget("status") != nullptr);
 
+    std::error_code cleanup_error;
+    fs::remove_all(temp, cleanup_error);
+}
+
+TEST_CASE("Ordinary reload detaches views before retaining their provider lifetime",
+          "[view][scripted-ui][reload][lifetime][detach]") {
+    struct DetachProbe final : View {
+        DetachProbe(int& detaches, int& destructions)
+            : detaches_(detaches), destructions_(destructions) {}
+        ~DetachProbe() override { ++destructions_; }
+        void on_detached() override { ++detaches_; }
+        int& detaches_;
+        int& destructions_;
+    };
+
+    const auto temp = make_temp_dir("pulp-scripted-ui-reload-detach");
+    const auto script = temp / "ui.js";
+    write_text(script, "createLabel('status', 'initial', '');");
+
+    View root;
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script,
+        .granted_capabilities = CapabilitySet{},
+    });
+    REQUIRE(session.load());
+
+    int detaches = 0;
+    int destructions = 0;
+    root.add_child(std::make_unique<DetachProbe>(detaches, destructions));
+    write_text(script, "createLabel('status', 'replacement', '');");
+    REQUIRE(session.reload());
+    CHECK(detaches == 1);
+    CHECK(destructions == 0);
+
+    session.poll();
+    CHECK(destructions == 1);
+
+    std::error_code cleanup_error;
+    fs::remove_all(temp, cleanup_error);
+}
+
+TEST_CASE("ScriptedUiSession destruction contains throwing descendant detach hooks",
+          "[view][scripted-ui][lifetime][exception-safety]") {
+    struct ThrowingDetach final : View {
+        void on_detached() override {
+            throw std::runtime_error("detach failed");
+        }
+    };
+
+    const auto temp = make_temp_dir("pulp-scripted-ui-destroy-detach");
+    const auto script = temp / "ui.js";
+    write_text(script, "createLabel('status', 'ready', '');");
+
+    View root;
+    StateStore store;
+    {
+        ScriptedUiSession session(root, store, {
+            .script_path = script,
+            .granted_capabilities = CapabilitySet{},
+        });
+        REQUIRE(session.load());
+        auto* status = session.bridge()->widget("status");
+        REQUIRE(status != nullptr);
+        status->add_child(std::make_unique<ThrowingDetach>());
+    }
+
+    CHECK(root.child_count() == 0);
     std::error_code cleanup_error;
     fs::remove_all(temp, cleanup_error);
 }

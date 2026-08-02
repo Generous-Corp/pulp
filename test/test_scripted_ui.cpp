@@ -509,6 +509,7 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     root.set_theme(Theme::dark());
 
     StateStore store;
+    int repaint_count = 0;
     ScriptedUiSession session(root, store, {
         .script_path = script_path,
         .enable_hot_reload = true,
@@ -519,7 +520,6 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     REQUIRE(session.load(&error));
     REQUIRE(error.empty());
 
-    int repaint_count = 0;
     session.set_repaint_callback([&] { ++repaint_count; });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
