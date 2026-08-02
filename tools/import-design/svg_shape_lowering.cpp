@@ -410,8 +410,9 @@ SvgSubtree lower_svg_subtree(const CapturedStyleIndex& index,
 
         std::optional<std::string> path_data;
         if (tag == "path") {
-            const std::string d = trim(index.attribute(node, "d"));
-            if (!d.empty()) path_data = d;
+            // An empty `d` is legal and draws nothing, so it falls through to
+            // the no-ink skip below rather than refusing the whole icon.
+            path_data = trim(index.attribute(node, "d"));
         } else if (tag == "rect") {
             path_data = rect_path(index, node);
         } else if (tag == "circle") {
