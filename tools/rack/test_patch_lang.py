@@ -248,6 +248,34 @@ if _worst:
 else:
     ok("every value in the corpus survives %g and the grammar")
 
+
+# The DOC's example must parse too, for the same reason the docstring's does.
+#
+# A contract document that shows a syntax error teaches the error. This one
+# lives at docs/contracts/patch-language-v1.md and is a public description of
+# the format, so it is the version most people will copy from.
+_doc_path = os.path.join(HERE, "..", "..", "docs", "contracts",
+                         "patch-language-v1.md")
+if not os.path.exists(_doc_path):
+    wrong(f"the contract doc is missing: {_doc_path}")
+else:
+    _md = open(_doc_path).read()
+    _blocks = _re.findall(r"```\n(.*?)```", _md, _re.S)
+    _checked = 0
+    for _b in _blocks:
+        # Only the blocks that look like the notation: a declaration line.
+        if not _re.search(r"^\s*\w+\s*:\s*\w+/\w+", _b, _re.M):
+            continue
+        _checked += 1
+        try:
+            L.parse(_b, inv)
+        except L.PatchLangError as _e:
+            wrong(f"the contract doc has an example that does not parse: {_e}")
+    if _checked:
+        ok(f"every notation example in the contract doc parses ({_checked})")
+    else:
+        wrong("the contract doc has no notation example to check")
+
 # The property that makes the language worth having: positions are not
 # expressible, so a hand-written patch cannot have overlapping panels.
 text = "\n".join(f"m{i} : ForgeModular/VCO" for i in range(6)) + "\n"
