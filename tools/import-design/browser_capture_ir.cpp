@@ -1,5 +1,7 @@
 #include "browser_capture_ir.hpp"
 #include "browser_capture_limits.hpp"
+#include "browser_capture_styles.hpp"
+#include "browser_capture_tree.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
@@ -224,6 +226,9 @@ int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
                             double dx, double dy,
                             pulp::view::IRNode& root,
+                            const CapturedStyleIndex* styles,
+                            bool body_is_native_underlay,
+                            int& styled_controls,
                             int& undeclared_paint_boxes,
                             std::string& error) {
     std::ifstream input(path, std::ios::binary);
@@ -298,11 +303,14 @@ int lower_semantic_controls(const fs::path& path,
         control.stable_anchor_id = anchor;
         control.anchor_strategy = "path";
         control.attributes["pulpRouteId"] = anchor;
-        // The body of this control is the captured bitmap beneath it, so it
-        // carries no background of its own and would otherwise fail the
-        // has-a-body test that selects the value-only skin -- and be painted
-        // over by an opaque default widget body.
-        control.attributes["designed_body"] = "capture";
+        // The body of this control is the layer beneath it, so it carries no
+        // background of its own and would otherwise fail the has-a-body test
+        // that selects the value-only skin -- and be painted over by an opaque
+        // default widget body. Stated explicitly per mode: on a natively drawn
+        // panel the rule can no longer be inferred from a bitmap's existence,
+        // because there is no bitmap.
+        control.attributes["designed_body"] =
+            body_is_native_underlay ? "underlay" : "capture";
         // The caption is already in the capture. audio_label would draw a
         // second copy on top of it; the name survives on the node for host
         // parameter naming.
@@ -327,6 +335,28 @@ int lower_semantic_controls(const fs::path& path,
             static_cast<float>(number_member(box, "top", 0.0) + dy);
         control.style.width = static_cast<float>(number_member(box, "width", 0.0));
         control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        // Chrome already solved this element's appearance; record it so the
+        // node carries the gradient, radius, and shadow stack that make it look
+        // like the designed control instead of only a transparent hit box.
+        // Applied after the geometry above and confined to appearance
+        // properties, so the design's paint box stays the placement authority.
+        if (styles != nullptr) {
+            const auto backend_node_id = static_cast<int>(
+                number_member(candidate, "backend_node_id", -1.0));
+            if (backend_node_id >= 0) {
+                CapturedBox paint_box;
+                paint_box.left = number_member(box, "left", 0.0);
+                paint_box.top = number_member(box, "top", 0.0);
+                paint_box.width = number_member(box, "width", 0.0);
+                paint_box.height = number_member(box, "height", 0.0);
+                const auto computed =
+                    styles->styles_for(backend_node_id, paint_box);
+                if (!computed.empty()) {
+                    apply_computed_styles(computed, paint_box, control.style);
+                    ++styled_controls;
+                }
+            }
+        }
         // The value layer's colours come from the DESIGN's tokens, not the
         // widget defaults. DesignedControlSkin's header says exactly this, but
         // its call site passes a default-constructed skin whose accent is a
@@ -780,9 +810,42 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         (surface_width < logical_width - 1.0 ||
          surface_height < logical_height - 1.0);
 
+    // The DOM snapshot is optional evidence: a capture that predates the
+    // computed-style request, or names its snapshot by asset id rather than by
+    // file, still lowers to a faithful capture. It just gains no appearance,
+    // which is strictly what the pipeline did before.
+    std::optional<CapturedStyleIndex> captured_styles;
+    const std::string snapshot_asset =
+        string_member(documents[static_cast<int>(0)], "snapshot_asset");
+    if (!snapshot_asset.empty()) {
+        std::string ignored;
+        if (const auto snapshot_path =
+                contained_sidecar(envelope_path, snapshot_asset, ignored)) {
+            captured_styles = CapturedStyleIndex::load(*snapshot_path);
+        }
+    }
+    // Native drawing needs the painted tree; without a snapshot there is
+    // nothing to draw FROM, and silently falling back to the photograph would
+    // report a native panel that is a picture.
+    const bool native_lowering = options.native_panel_lowering;
+    if (native_lowering && !captured_styles) {
+        result.error =
+            "native panel lowering requires a DOM snapshot with computed "
+            "styles; this capture carries none";
+        return result;
+    }
+
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    if (crop_to_surface) {
+    if (native_lowering) {
+        // No backdrop at all. The panel is its nodes.
+        ir.root.style.width = static_cast<float>(
+            crop_to_surface ? surface_width : logical_width);
+        ir.root.style.height = static_cast<float>(
+            crop_to_surface ? surface_height : logical_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+    } else if (crop_to_surface) {
         ir.root.style.width = static_cast<float>(surface_width);
         ir.root.style.height = static_cast<float>(surface_height);
         ir.root.style.overflow = "hidden";
@@ -813,10 +876,19 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
     ir.root.source_version = "pulp-browser-capture-v1";
-    // The typed capture_asset_id is the render contract. asset_ref keeps the
-    // existing source-agnostic manifest refresh/localization pass aware of the
-    // same backing without teaching that utility a browser-specific field.
-    ir.root.attributes["asset_ref"] = reference_id;
+    if (native_lowering) {
+        // The reference PNG stays in the asset manifest as the A/B oracle, but
+        // it is no longer what the root renders. Naming it `asset_ref` here
+        // would hand the manifest pass a root that reads as an image and put
+        // the photograph back on screen through the side door.
+        ir.root.attributes["browser_reference_asset"] = reference_id;
+    } else {
+        // The typed capture_asset_id is the render contract. asset_ref keeps
+        // the existing source-agnostic manifest refresh/localization pass aware
+        // of the same backing without teaching that utility a browser-specific
+        // field.
+        ir.root.attributes["asset_ref"] = reference_id;
+    }
 
     // The backdrop alone is a picture. These children are the live controls.
     // Their bounds are page coordinates, so when the root is cropped they must
@@ -826,11 +898,72 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double control_dx = crop_to_surface ? -surface_left : 0.0;
     const double control_dy = crop_to_surface ? -surface_top : 0.0;
     int undeclared_paint_boxes = 0;
+
+    // Draw the design before the controls that sit on it. Both are absolutely
+    // positioned siblings, so document order IS paint order here; appending the
+    // controls after the tree is what keeps a value ring above the knob face it
+    // belongs to rather than under it.
+    if (native_lowering) {
+        const auto tree = lower_painted_tree(
+            *captured_styles, control_dx, control_dy, ir.root);
+        ir.root.attributes["native_painted_nodes"] =
+            std::to_string(tree.painted);
+        ir.root.attributes["native_nodes_lowered"] =
+            std::to_string(tree.lowered);
+        ir.root.attributes["native_nodes_native"] =
+            std::to_string(tree.native);
+        ir.root.attributes["native_nodes_image_asset"] =
+            std::to_string(tree.image_asset);
+        ir.root.attributes["native_nodes_element_capture_fallback"] =
+            std::to_string(tree.element_capture_fallback);
+        ir.root.attributes["native_nodes_text"] = std::to_string(tree.text);
+        ir.root.attributes["native_nodes_pooled"] =
+            std::to_string(tree.pooled_into_fallback);
+        // A capture that carries no paint order at all would otherwise lower to
+        // pure document order and look like a plausible panel with its stacking
+        // silently wrong.
+        ir.root.attributes["native_nodes_missing_paint_order"] =
+            std::to_string(tree.missing_paint_order);
+        // The shape of the tree, not just its size. A depth of 1 means the
+        // lowering flattened the design and an agent asked to "tweak the
+        // pickup section" has no section to grab — the number that says so
+        // belongs next to the counts, where a reviewer already looks.
+        ir.root.attributes["native_tree_root_children"] =
+            std::to_string(tree.root_children);
+        ir.root.attributes["native_tree_depth"] =
+            std::to_string(tree.max_depth);
+        // Recorded only when they happened, following the same rule as the
+        // controls counters: a zero here is the normal case and printing it
+        // everywhere buries the one panel where a node went missing.
+        const auto record_if = [&ir](const char* key, int value) {
+            if (value > 0) ir.root.attributes[key] = std::to_string(value);
+        };
+        record_if("native_nodes_skipped_empty_box", tree.skipped_empty_box);
+        record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
+        record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
+        record_if("native_nodes_hoisted", tree.hoisted_escapes);
+        record_if("native_nodes_overlapping_reorders",
+                  tree.overlapping_reorders);
+        // The nested tree clips by DOM parentage while CSS clips along the
+        // containing-block chain, so both of these are known limitations of the
+        // opt-in native path rather than transient regressions. Reported so the
+        // census stops counting the affected nodes as faithfully drawn.
+        record_if("native_nodes_clip_over_applied", tree.clip_over_applied);
+        record_if("native_nodes_clip_lost", tree.clip_lost);
+    }
+
+    int styled_controls = 0;
     const int lowered = lower_semantic_controls(
         *semantic_report, ir, control_dx, control_dy, ir.root,
-        undeclared_paint_boxes, result.error);
+        captured_styles ? &*captured_styles : nullptr, native_lowering,
+        styled_controls, undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
+    // Recorded so a capture that silently lost its solved appearance is
+    // visible as a number rather than as a flat-looking panel nobody can
+    // attribute.
+    ir.root.attributes["controls_with_captured_style"] =
+        std::to_string(styled_controls);
     // Surfaced rather than swallowed: an undeclared paint box means the widget
     // was placed on the component box, which for a captioned control paints its
     // value geometry low. Correct for a meter, wrong for a knob, and nothing

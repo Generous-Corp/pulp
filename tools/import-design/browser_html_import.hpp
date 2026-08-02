@@ -28,6 +28,10 @@ struct BrowserHtmlImportRequest {
     bool allow_browser_network = false;
     bool dry_run = false;
     bool supports_faithful_capture = true;
+    /// Draw the panel from its lowered nodes instead of the captured bitmap.
+    /// See BrowserCaptureIrOptions::native_panel_lowering — off by default
+    /// because the capture is the A-side of the A/B, not a legacy path.
+    bool native_panel_lowering = false;
 };
 
 struct BrowserHtmlNotApplicable {};

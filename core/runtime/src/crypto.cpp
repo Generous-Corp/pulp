@@ -25,6 +25,12 @@ namespace pulp::runtime {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+void secure_zero_memory(void* data, size_t size) noexcept {
+    auto* bytes = static_cast<volatile uint8_t*>(data);
+    while (size-- > 0)
+        *bytes++ = 0;
+}
+
 static std::string bytes_to_hex(const uint8_t* data, size_t size) {
     std::ostringstream ss;
     for (size_t i = 0; i < size; ++i)
@@ -267,7 +273,7 @@ struct TweetNaclRng {
         mbedtls_ctr_drbg_init(&drbg);
         // Personalisation string keeps this DRBG distinct from any other
         // CTR-DRBG instance the runtime might create later.
-        static const char pers[] = "pulp::runtime::ed25519";
+        static const char pers[] = "pulp::runtime::secure-random";
         int rc = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
                                        reinterpret_cast<const uint8_t*>(pers),
                                        sizeof(pers) - 1);
@@ -334,6 +340,28 @@ extern "C" void randombytes(unsigned char* buf, unsigned long long n) {
 }
 
 namespace pulp::runtime {
+
+std::optional<std::vector<uint8_t>> secure_random_bytes(size_t size) {
+    std::lock_guard<std::mutex> lock(ed25519_impl::tweetnacl_rng_mutex());
+    auto& rng = ed25519_impl::tweetnacl_rng();
+    if (!rng.ok)
+        return std::nullopt;
+
+    std::vector<uint8_t> bytes(size);
+    uint8_t* out = bytes.data();
+    size_t remaining = bytes.size();
+    constexpr size_t kChunk = 1024;
+    while (remaining > 0) {
+        const size_t take = std::min(remaining, kChunk);
+        if (mbedtls_ctr_drbg_random(&rng.drbg, out, take) != 0) {
+            std::fill(bytes.begin(), bytes.end(), uint8_t{0});
+            return std::nullopt;
+        }
+        out += take;
+        remaining -= take;
+    }
+    return bytes;
+}
 
 std::optional<Ed25519KeyPair> ed25519_keypair_generate() {
     {

@@ -844,6 +844,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+- Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
+  - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 
 **design-import** — get a design into Pulp
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
@@ -912,6 +914,40 @@ Applies to:
 What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#292`), an atomic-refcount P1 bug (`#281`), and a silent-empty-Ed25519-signature P0 bug (`#295`) — all caught by Codex review comments *after* merge because the PRs had no dedicated unit test. A 20-line Catch2 fixture would have caught each of them during PR development.
 
 **The only acceptable "no test in this PR" justification** is: pre-existing historical coverage gap in a subsystem you are not modifying. In that case, file a follow-up issue linked to `#290` and reference it in the commit trailer. Anything else — ship the test.
+
+### Confirm the failure — a green test proves nothing on its own
+
+A test that passes may be asserting the same thing the code assumes, or never
+reaching the code at all. Before believing a new test covers its fix, **break the
+fix and watch that test fail.** This has repeatedly caught tests that could not
+fail: a guard that skips its check when the thing it needs is absent, an
+assertion that restates the code's own assumption, a probe whose inputs never
+reach the changed path.
+
+Run that loop with **`tools/scripts/confirm_failure.sh`** rather than by hand:
+
+```bash
+tools/scripts/confirm_failure.sh \
+  --file core/midi/include/pulp/midi/synthesiser.hpp \
+  --break "perl -0pi -e 's/policy\.priority/0/'" \
+  --build-dir build --target pulp-test-synthesiser \
+  --test ./build/test/pulp-test-synthesiser
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+```
+
+**Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
+source and rebuilding within the same filesystem second leaves make comparing
+equal mtimes, so the object is judged current and the binary keeps the OLD code —
+`touch` does not reliably fix this, because the touch lands in the same second.
+Both directions give a wrong answer, and the quiet one is worse: a stale object
+during the *break* step makes the control falsely pass, which reads as "my test
+does not cover this" and sends you off to rewrite a test that was already fine.
+The script restores through git, deletes the objects, and refuses to report a
+verdict unless it observed the recompile in the build log. `"Built target"` is
+not evidence; a compile line for your file is.
+
+Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
+`confirm-failure-harness` ctest so it is executed rather than merely present.
 
 **Test hygiene:**
 

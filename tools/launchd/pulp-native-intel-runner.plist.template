@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dedicated physical Intel macOS runner. It registers one JIT runner per job
+  with labels that cannot match Pulp's required ARM64 gate, then removes the
+  job workspace before accepting another branch.
+
+  Install only after the separate `pulp-ci` service account, root-owned worker,
+  and narrow sudoers rule described in docs/guides/local-ci.md exist. Then:
+
+    test -n "$RUNNER_GROUP_ID" # dedicated group, restricted to nightly-intel.yml
+    sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+      -e "s|\$RUNNER_GROUP_ID|$RUNNER_GROUP_ID|g" \
+      tools/launchd/pulp-native-intel-runner.plist.template \
+      > ~/Library/LaunchAgents/com.danielraffel.pulp.native-intel-runner.plist
+    plutil -lint ~/Library/LaunchAgents/com.danielraffel.pulp.native-intel-runner.plist
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.danielraffel.pulp.native-intel-runner.plist
+
+  RunAtLoad + KeepAlive restore the supervisor after an ordinary reboot and
+  login. FileVault still requires a person to unlock the startup volume after a
+  cold power cycle; a user LaunchAgent cannot run before that unlock.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.native-intel-runner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PULP_REPO/tools/ci/native-intel-runner.sh</string>
+        <string>--loop</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp-native-intel-runner.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp-native-intel-runner.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PULP_NATIVE_INTEL_LABELS</key>
+        <string>self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini</string>
+        <key>PULP_NATIVE_INTEL_RUNNER_GROUP_ID</key>
+        <string>$RUNNER_GROUP_ID</string>
+    </dict>
+</dict>
+</plist>

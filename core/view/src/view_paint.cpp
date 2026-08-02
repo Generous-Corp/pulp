@@ -544,23 +544,30 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // The canvas + Skia/CoreGraphics backends implement all three; the View
     // just dispatches on the stored type. cx/cy are box fractions; radial
     // radius is a fraction of the larger box dimension; conic angle is radians.
-    if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
-        const int grad_n = static_cast<int>(bg_gradient_colors_.size());
-        const Color* grad_c = bg_gradient_colors_.data();
-        const float* grad_p = bg_gradient_positions_.data();
-        if (bg_gradient_type_ == 2) {  // radial
+    // CSS lists background layers first-on-top, so paint the stack in reverse:
+    // the last entry goes down first and the first entry lands over it. Each
+    // pass is self-contained (set gradient → fill → clear), so layering needs
+    // only the loop.
+    for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
+        if (layer->type <= 0 || layer->colors.empty()) continue;
+        const int grad_n = static_cast<int>(layer->colors.size());
+        const Color* grad_c = layer->colors.data();
+        const float* grad_p = layer->positions.data();
+        if (layer->type == 2) {  // radial
             canvas.set_fill_gradient_radial(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_radius_ * std::max(bounds_.width, bounds_.height),
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->radius * std::max(bounds_.width, bounds_.height),
                 grad_c, grad_p, grad_n);
-        } else if (bg_gradient_type_ == 3) {  // conic / sweep
-            canvas.set_fill_gradient_conic(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_angle_, grad_c, grad_p, grad_n);
+        } else if (layer->type == 3) {  // conic / sweep
+            // One call for both spellings: a plain conic spans a full turn, so
+            // the repeating entry point resolves to the same shader for it.
+            canvas.set_fill_gradient_conic_repeating(
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
         } else {  // linear
             canvas.set_fill_gradient_linear(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_x1_ * bounds_.width, bg_grad_y1_ * bounds_.height,
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->x1 * bounds_.width, layer->y1 * bounds_.height,
                 grad_c, grad_p, grad_n);
         }
         if (use_per_corner) {
@@ -576,7 +583,7 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     }
 
     // Paint background if set
-    if (has_bg_ && bg_gradient_type_ == 0) {
+    if (has_bg_ && bg_gradients_.empty()) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,
@@ -757,14 +764,44 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     // push_effect_layers opened. Kept as one unit so FU-3's subtree cache can
     // wrap exactly this (background/border/paint()/children/decorations) while
     // the animatable layer wrappers stay outside the cache.
+    // An import-resolved ancestor clip wraps this view's OWN ink — its shadow,
+    // its box, its widget painting — and is released before the children, each
+    // of which carries the rectangle its own CSS clip chain resolves to. That
+    // asymmetry against `overflow` below is the point: `overflow` clips the
+    // subtree, this clips the view, and only the latter can express a child
+    // that escapes a clip its parent is inside.
+    const bool has_ancestor_clip = ancestor_clip_rect().has_value();
+    const auto open_ancestor_clip = [&] {
+        if (!has_ancestor_clip) return;
+        const Rect& r = *ancestor_clip_rect();
+        canvas.save();
+        canvas.clip_rect(r.x, r.y, r.width, r.height);
+    };
+    const auto close_ancestor_clip = [&] {
+        if (has_ancestor_clip) canvas.restore();
+    };
+
+    // The shadow is painted before the view's own `overflow` clip is installed
+    // — a box does not clip its own outset shadow — but an ANCESTOR's clip does
+    // cut it, so when there IS a shadow it gets its own scope. Skipped
+    // otherwise, so the common case installs the rectangle exactly once.
+    const bool clip_shadows = has_ancestor_clip && has_box_shadow();
+    if (clip_shadows) open_ancestor_clip();
     paint_outset_shadows(canvas);
+    if (clip_shadows) close_ancestor_clip();
+
+    // Pushed outside the scope below because `overflow` / `clip-path` DO apply
+    // to the children, and the ancestor clip deliberately does not.
     apply_overflow_and_clip_path(canvas);
+
+    open_ancestor_clip();
     paint_background_and_border(canvas);
 
     // Widget-specific painting. The outer timer wraps the whole paint_all body,
     // so `paint(canvas)` no-op overrides on styled containers still get
     // accurate self-time attribution.
     paint(canvas);
+    close_ancestor_clip();
 
     // Time only the recursive child paint so self_ns = outer - children in
     // paint_all correctly attributes framework drawing to this view.

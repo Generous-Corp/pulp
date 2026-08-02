@@ -8,7 +8,8 @@
 namespace pulp::inspect {
 
 enum class InspectorCapability : std::uint8_t {
-#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable) symbol,
+#define PULP_INSPECT_CAPABILITY( \
+    symbol, id, risk, observe, develop, grantable, publication_bound) symbol,
 #include <pulp/inspect/capability_definitions.inc>
 #undef PULP_INSPECT_CAPABILITY
 };
@@ -45,6 +46,7 @@ struct InspectorCapabilityDescriptor {
     bool in_observe_profile;
     bool in_develop_profile;
     bool grantable;
+    bool publication_bound;
 };
 
 std::span<const InspectorCapabilityDescriptor> inspector_capability_registry();
@@ -60,5 +62,8 @@ const InspectorMethodDescriptor* find_inspector_method(std::string_view method);
 bool capability_is_grantable(InspectorCapability capability);
 InspectorCapabilityRisk capability_risk(InspectorCapability capability);
 bool capability_requires_controller_lease(InspectorCapability capability);
+bool capability_requires_publication_binding(
+    InspectorCapability capability);
+bool inspector_event_is_lossy(std::string_view method);
 
 } // namespace pulp::inspect

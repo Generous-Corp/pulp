@@ -16,9 +16,11 @@ namespace pulp::interchange {
 struct ExportArtifacts;
 }
 
-namespace pulp::tools::timeline::detail {
-
+namespace pulp::project_package {
 class AtomicPublisher;
+}
+
+namespace pulp::tools::timeline::detail {
 
 inline constexpr std::uint64_t kZipStdioReserveBytes = 64u * 1024u;
 inline constexpr std::uint64_t kExternalArtifactMetadataReserveBytes = 64u;
@@ -71,7 +73,7 @@ class BoundedZipArchive {
 
     std::optional<std::span<const std::uint8_t>> find(std::string_view name) const noexcept;
     bool retain_media_path(std::string_view name) noexcept;
-    bool publish_retained_media(AtomicPublisher& publisher) const;
+    bool publish_retained_media(project_package::AtomicPublisher& publisher) const;
     bool acquire_external(std::uint64_t bytes) noexcept;
     void release_external(std::uint64_t bytes) noexcept;
     std::uint64_t peak_bytes() const noexcept;

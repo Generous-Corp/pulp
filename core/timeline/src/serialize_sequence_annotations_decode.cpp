@@ -1,6 +1,7 @@
 #include "serialize_decode_context.hpp"
 
 #include "bounded_increment.hpp"
+#include "document_enum_names.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -81,7 +82,8 @@ decode_marker(const JsonValue& value, DecodeContext& context, std::string path) 
 }
 
 runtime::Result<SequenceRegion, PersistenceError>
-decode_region(const JsonValue& value, DecodeContext& context, std::string path) {
+decode_region(const JsonValue& value, MemberPolicy role_policy, DecodeContext& context,
+              std::string path) {
     const auto increment = bounded_increment(context.counts.regions, context.limits.max_regions);
     if (!increment)
         return fail<SequenceRegion>(PersistenceErrorCode::LimitExceeded, path, value.begin,
@@ -113,10 +115,29 @@ decode_region(const JsonValue& value, DecodeContext& context, std::string path) 
     auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
     if (!decoded_color)
         return runtime::Err(decoded_color.error());
+    // The role is gated on the owning sequence's version, not on a version of
+    // the region envelope. A region only ever exists inside a sequence, so one
+    // number decides the shape; a second one could only ever disagree with it.
+    const auto* role = data.value()->find("role");
+    if ((role_policy == MemberPolicy::Required && !role) ||
+        (role_policy == MemberPolicy::Forbidden && role))
+        return fail<SequenceRegion>(PersistenceErrorCode::MissingField, path + "/data/role",
+                                    value.begin);
+    auto decoded_role = SectionRole::Unspecified;
+    if (role) {
+        if (role->kind != JsonValue::Kind::String)
+            return fail<SequenceRegion>(PersistenceErrorCode::InvalidSchema, path + "/data/role",
+                                        role->begin);
+        const auto named = detail::section_role_from_name(role->scalar);
+        if (!named)
+            return fail<SequenceRegion>(PersistenceErrorCode::InvalidSchema, path + "/data/role",
+                                        role->begin);
+        decoded_role = *named;
+    }
     return runtime::Ok(SequenceRegion{ItemId{decoded_id.value()}, std::move(name).value(),
                                       timebase::TickPosition{decoded_position.value()},
                                       timebase::TickDuration{decoded_duration.value()},
-                                      decoded_color.value()});
+                                      decoded_color.value(), decoded_role});
 }
 
 runtime::Result<Slot, PersistenceError> decode_slot(const JsonValue& value, DecodeContext& context,

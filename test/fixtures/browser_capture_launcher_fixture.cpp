@@ -101,8 +101,15 @@ int main(int argc, char** argv) {
         if (ec || !write_file(
                 output / "deadline-cleanup-finished", "clean"))
             return 72;
+        // Mirror the capture runtime: the resolved browser build is reported
+        // before any work, so the diagnostic code never opens stderr.
         std::cerr
-            << "browser-capture-timeout: browser capture timed out\n";
+            << "[browser-capture] browser=Chrome/151.0.7922.72 "
+               "protocol=1.3 build=@fixture\n"
+            << "browser-capture-timeout: browser capture timed out; "
+               "phase=same-frame-capture "
+               "last-completed=DOMSnapshot.captureSnapshot (12ms) ago "
+               "stalled=Page.captureScreenshot (14988ms)\n";
         return 124;
     }
     const bool has_interactions =

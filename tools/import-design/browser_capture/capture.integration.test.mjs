@@ -174,6 +174,68 @@ test("real browser capture waits through a delayed DOM commit",
     }
   });
 
+// Pixels are read with virtual time running, so the JS freeze is the only
+// thing holding a canvas animation still. A page that repaints on every frame
+// without touching the DOM settles the document sample immediately and then
+// keeps the compositor busy forever, so this fails loudly — as a timeout or as
+// capture-frame-not-deterministic — if the freeze ever stops taking effect.
+test("real browser capture freezes a canvas animation and names its browser",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-canvas-freeze-"));
+    const input = path.join(root, "animated.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  body { margin: 0; background: #111; }
+  canvas { display: block; }
+</style>
+<canvas id="surface" width="320" height="240"></canvas>
+<script>
+  const context = document.getElementById('surface').getContext('2d');
+  let frame = 0;
+  const paint = () => {
+    frame += 1;
+    context.fillStyle = 'hsl(' + (frame * 37 % 360) + ' 80% 50%)';
+    context.fillRect(0, 0, 320, 240);
+    requestAnimationFrame(paint);
+  };
+  requestAnimationFrame(paint);
+</script>
+`);
+      const run = await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.match(envelope.provenance.browser.version, /^\d+\./);
+      assert.match(
+        run.stderr,
+        new RegExp(`\\[browser-capture\\] browser=[^/]+/${
+          envelope.provenance.browser.version.replace(/\./g, "\\.")} `));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser interactions capture a same-document secondary screen",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();
@@ -476,6 +538,221 @@ test("real browser interactions reject and close popup pages",
         diagnostic.code,
         "browser-interaction-navigation-rejected");
       await assert.rejects(access(path.join(output, "capture.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+// `layout.styles` rows are positional against the request order the snapshot
+// records as `computedStyleNames`, and every value is a string-table index.
+// Decoding through the recorded names is the only way to read a row without
+// hardcoding a parallel property list that drifts the first time the capture
+// collects one more property.
+function laidOutNodes(snapshot) {
+  const strings = snapshot.strings;
+  const names = snapshot.computedStyleNames;
+  assert.ok(Array.isArray(names) && names.length > 0,
+    "the snapshot must record the property request order");
+  const document = snapshot.documents[0];
+  const nodes = document.nodes;
+  const layout = document.layout;
+  const decode = (index) =>
+    typeof index === "number" && index >= 0 && index < strings.length
+      ? strings[index]
+      : "";
+  const attributesFor = (nodeIndex) => {
+    const pairs = nodes.attributes?.[nodeIndex] ?? [];
+    const result = {};
+    for (let offset = 0; offset + 1 < pairs.length; offset += 2) {
+      result[decode(pairs[offset])] = decode(pairs[offset + 1]);
+    }
+    return result;
+  };
+  const result = [];
+  // A node can own more than one layout entry -- a box that also lays out an
+  // inline text box contributes two, and a ::before with generated content is
+  // the common case. The first entry is the node's own box; the capture keys
+  // paint order the same way, so this reader must not diverge from it.
+  const seen = new Set();
+  for (let entry = 0; entry < layout.nodeIndex.length; entry++) {
+    const nodeIndex = layout.nodeIndex[entry];
+    if (seen.has(nodeIndex)) continue;
+    seen.add(nodeIndex);
+    const row = layout.styles?.[entry] ?? [];
+    const style = {};
+    names.forEach((name, position) => {
+      style[name] = decode(row[position]);
+    });
+    result.push({
+      node_index: nodeIndex,
+      backend_node_id: nodes.backendNodeId?.[nodeIndex] ?? null,
+      tag: decode(nodes.nodeName?.[nodeIndex]).toLowerCase(),
+      attributes: attributesFor(nodeIndex),
+      paint_order: layout.paintOrders?.[entry] ?? null,
+      style,
+    });
+  }
+  return result;
+}
+
+// The capture is what decides what can ever be drawn. Every assertion here is
+// a property whose absence renders as a plausible wrong picture: a tiled grid
+// collapsed to one hairline, a dashed left edge silently gone, a layered panel
+// stacked by a z-index guess instead of by Chromium's answer.
+test("real browser capture round-trips whole-panel paint properties",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-paint-properties-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 240px; overflow: hidden; }
+  body { background: #111; color: #eee; font: 12px sans-serif; }
+  /* The standard CSS grid idiom: one hard-stop gradient, tiled. The column
+     count exists only in background-size. */
+  #grid-x {
+    position: absolute; inset: 0;
+    background-image: linear-gradient(to right,
+      rgba(255,255,255,.25) 0 1px, transparent 1px 100%);
+    background-size: 12.5% 100%;
+    /* Every value here is deliberately NOT the CSS initial value, so an
+       assertion that passes cannot be passing on a default. */
+    background-position: 4px 6px;
+    background-repeat: repeat-x;
+    background-origin: border-box;
+    background-clip: content-box;
+  }
+  #edges {
+    position: absolute; left: 20px; top: 20px; width: 120px; height: 40px;
+    border-width: 2px 3px 4px 5px;
+    border-color: #f00 #0f0 #00f #ff0;
+    border-top-style: none;
+    border-right-style: solid;
+    border-bottom-style: dotted;
+    border-left-style: dashed;
+    outline: 2px dotted rgb(10, 200, 240);
+    outline-offset: 3px;
+  }
+  #typo {
+    position: absolute; left: 20px; top: 90px;
+    word-spacing: 7px;
+    text-decoration-line: underline;
+    text-decoration-color: rgb(240, 90, 10);
+    text-decoration-style: wavy;
+    text-decoration-thickness: 3px;
+    text-underline-offset: 4px;
+  }
+  #generated::before { content: "GENERATED"; }
+  /* opacity < 1 makes #context a stacking context, so #deep cannot escape it
+     however large its z-index. A z-index sort disagrees with Chromium here. */
+  #context { position: absolute; left: 20px; top: 130px; z-index: 1; opacity: .99; }
+  #deep { position: relative; z-index: 999; }
+  #sibling { position: absolute; left: 20px; top: 170px; z-index: 2; }
+</style>
+<div id="grid-x"></div>
+<div id="edges"></div>
+<div id="typo">spaced out words</div>
+<div id="generated"></div>
+<div id="context"><button id="deep">DEEP</button></div>
+<button id="sibling">SIBLING</button>
+`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "240",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const snapshot = JSON.parse(
+        await readFile(path.join(output, "dom-snapshot.json"), "utf8"));
+      const laidOut = laidOutNodes(snapshot);
+      const byId = new Map(
+        laidOut.filter((node) => node.attributes.id)
+          .map((node) => [node.attributes.id, node]));
+
+      const grid = byId.get("grid-x");
+      assert.ok(grid, "the tiled-gradient node must reach the snapshot");
+      assert.equal(grid.style["background-size"], "12.5% 100%",
+        "without this exact value the grid lowers to a single 1px line");
+      assert.equal(grid.style["background-repeat"], "repeat-x");
+      assert.equal(grid.style["background-position"], "4px 6px");
+      assert.equal(grid.style["background-origin"], "border-box");
+      assert.equal(grid.style["background-clip"], "content-box");
+
+      const edges = byId.get("edges");
+      assert.ok(edges, "the mixed-edge border node must reach the snapshot");
+      assert.equal(edges.style["border-left-style"], "dashed",
+        "a dashed left border must survive a capture that used to read " +
+        "only the top edge");
+      assert.equal(edges.style["border-top-style"], "none");
+      assert.equal(edges.style["border-right-style"], "solid");
+      assert.equal(edges.style["border-bottom-style"], "dotted");
+      assert.equal(edges.style["outline-style"], "dotted");
+      assert.equal(edges.style["outline-width"], "2px");
+      assert.equal(edges.style["outline-offset"], "3px");
+      assert.equal(edges.style["outline-color"], "rgb(10, 200, 240)");
+
+      const typo = byId.get("typo");
+      assert.equal(typo.style["word-spacing"], "7px");
+      assert.equal(typo.style["text-decoration-color"], "rgb(240, 90, 10)");
+      assert.equal(typo.style["text-decoration-style"], "wavy");
+      assert.equal(typo.style["text-decoration-thickness"], "3px");
+      assert.equal(typo.style["text-underline-offset"], "4px");
+
+      // The ::before box is its own laid out node with no DOM text child, so
+      // `content` is the only place its text exists.
+      const generated = laidOut.filter(
+        (node) => node.style.content.includes("GENERATED"));
+      assert.equal(generated.length, 1,
+        "generated content must be recoverable from the capture");
+      assert.equal(generated[0].tag, "::before");
+
+      // Paint order in the report is Chromium's, verified against the array
+      // Chromium returned rather than against a rule we reimplemented.
+      //
+      // The anchor is the node's own id in the page source, NOT the candidate's
+      // backend id: the candidate's backend id comes from the same element walk
+      // as its paint order, so checking one against the other would agree even
+      // when both point at the wrong node. This page puts a ::before ahead of
+      // both buttons for exactly that reason -- counting pseudo boxes as
+      // elements hands #deep the data of #context.
+      const report = JSON.parse(
+        await readFile(path.join(output, "semantic-report.json"), "utf8"));
+      const deep = byId.get("deep");
+      const sibling = byId.get("sibling");
+      const byName = new Map(
+        report.candidates.map((candidate) => [candidate.name, candidate]));
+      for (const [name, node] of [["DEEP", deep], ["SIBLING", sibling]]) {
+        const candidate = byName.get(name);
+        assert.ok(candidate, `${name} must be recognised as a candidate`);
+        assert.equal(candidate.backend_node_id, node.backend_node_id,
+          `${name} must resolve to its own snapshot node`);
+        assert.equal(candidate.paint_order, node.paint_order,
+          `${name} must carry the paint order Chromium reported for it`);
+      }
+      assert.equal(report.summary.paint_ordered, report.candidates.length);
+
+      // A z-index sort would put #deep (999) above #sibling (2). Chromium does
+      // not, because #deep is trapped in the stacking context #context created
+      // with opacity < 1. Consuming the reported order is what gets this right.
+      assert.ok(deep.paint_order < sibling.paint_order,
+        "Chromium paints the stacking-context-trapped node first; a z-index " +
+        "sort would invert this pair");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

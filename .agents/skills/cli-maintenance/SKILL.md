@@ -201,13 +201,13 @@ compare` is an advisory *judgment*, never a gate.
 `127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
 general-purpose class (a deliberate capability it tests, via
 `start_socket_server_on_any_interface`), which is the wrong one here: the
-inspector transport has no authentication and its protocol exposes
-`Runtime.evaluate`, so binding it where the network can reach it publishes
-arbitrary code execution in the host process. `pulp inspect --host` is the
-*client* side and stays — it is how you reach a remote machine's loopback
-through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
-this: loopback must connect (the control) and the host's real IPv4 must be
-refused.
+inspector transport mutually authenticates with nonce/HMAC proof backed by an
+owner-private per-session credential, but its protocol can still expose
+high-authority operations. Loopback is a separate, non-negotiable
+defense-in-depth boundary. `pulp inspect --host` is the *client* side and
+stays — it is how you reach a remote machine's loopback through an SSH tunnel.
+`test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
+(the control) and the host's real IPv4 must be refused.
 
 Normal Pulp standalone and plugin-format launches do **not** construct this
 server. `pulp inspect` is currently an experimental client for an explicitly
@@ -219,7 +219,8 @@ surface as an installed-user or ordinary `pulp run` workflow. Keep
 `docs/reference/cli.md`, and
 `docs/reference/development-inspector-capabilities.md` aligned; the
 `inspector_truth_check.py` mutation gate protects selected documentation and
-client-description claims, but does not prove runtime construction sites.
+client-description claims, including these shipped agent workflows, but does
+not prove runtime construction sites.
 
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
@@ -925,6 +926,20 @@ If you must use `std::system` (e.g. you genuinely need shell features) and the
 command begins with a quoted path, wrap the ENTIRE command in one extra pair of
 double quotes (`command = "\"" + command + "\"";`) so `cmd` strips exactly that
 pair and runs the remainder verbatim.
+
+**Binary-command delegation must bypass `cmd.exe` on Windows (2026-08-02):**
+`delegate_to_build_binary` forwards user-controlled arguments, including URLs
+and design data whose `%`, `&`, `|`, or literal quotes must survive byte-for-byte.
+The outer-quote workaround above fixes `cmd /c`'s leading-quote rule, but it does
+not stop percent expansion or make CRT quoting safe from shell metacharacters.
+Launch the resolved helper with `CreateProcess` and the existing CRT-correct
+`shell_quote` output as its command line. Preserve transparent delegation by
+duplicating each valid parent standard handle as inheritable; substitute an
+inheritable `NUL` handle independently for a missing stdin, stdout, or stderr.
+Do not replace this with `runtime::run_process`: that helper captures unbounded
+output until the child exits, regressing streaming and parent memory use. The
+shell-out coverage pins both the release-smoke `import-design --help` invocation
+and a literal `%PULP_DELEGATE_EXPAND%` argument so a return to `cmd.exe` fails.
 
 ### A CLI subcommand that renders shells out to `pulp-screenshot`
 
