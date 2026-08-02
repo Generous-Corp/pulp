@@ -1028,6 +1028,29 @@ uses, or the golden warms a cache the real jobs never touch.
   escape), and the parity-registration check requires the test source to appear on
   a real `SOURCES`/`add_executable`/`target_sources`/`pulp_add_test_suite` line —
   a bare mention in a dead variable no longer counts.
+- **Skill-path-map lint (`skill_path_map_lint.py`).** Checks the map that
+  skill-sync reads. A pattern in `skill_path_map.json` that matches nothing does
+  not report a problem — it reports nothing, which reads exactly like a clean
+  run, so three dead patterns sat on main unnoticed while the file's own contract
+  test (`test_skill_path_map.py`) was red *and imported by no CI entrypoint*.
+  Four rules: `schema` (validates against `skill_path_map.schema.json`, which
+  previously did not exist despite the map's `"$schema"` pointer — a bare-array
+  entry, unknown key, or malformed pattern is now rejected); `submodule` (a
+  pattern rooted in a git submodule can never fire, because the superproject's
+  diff carries the `planning` gitlink and never a path beneath it — no
+  annotation unlocks this); `empty` (a pattern matching no tracked file, unless
+  the entry carries `_doc.empty-ok`, which is restricted to `external/` SDK paths
+  and to entries claiming no paths at all); and `co-claim` (diff-scoped —
+  *newly* claiming a whole `<root>/<sub>/**` subsystem another skill already
+  claims needs `_doc.scope`, because otherwise every edit under it demands
+  several SKILL.md updates, which trains reflexive `Skill-Update: skip`
+  trailers). The first three are whole-tree, since the usual cause is the tree
+  moving out from under a pattern nobody edited. Runs in `gates.sh`, the pre-push
+  hook, and the `Versioning & Skill-Sync` workflow. Its schema is enforced by
+  `json_schema_lite.py`, a stdlib validator whose defining property is that an
+  unimplemented keyword *raises* rather than being skipped — so no schema
+  constraint can be silently unchecked. **Adding a gate-script test file is not
+  enough: `test_gates.py` must import its `TestCase`, or it runs nowhere.**
 - **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
   diff-scoped): no tracked file may carry a git conflict marker. Born from the
   incident where a squash-merge's stale side collided with an already-advanced
@@ -4373,7 +4396,7 @@ HEAD reporting.
 
 `pulp pr` orchestrates the full shipping flow. CI enforces the fast invariant gates on every PR to `main`:
 
-- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/compat_aggregate.py check`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
+- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, `tools/scripts/skill_path_map_lint.py`, `tools/scripts/compat_sync_check.py`, `tools/scripts/compat_aggregate.py check`, `tools/scripts/node_abi_gate.py`, and `tools/scripts/hotspot_size_guard.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`; the node ABI gate is fixed by preserving existing virtual declarations or appending new virtuals at the tail, and the hotspot-size guard is fixed by shrinking the tracked file, moving code behind a split, or intentionally raising the baseline in `tools/scripts/hotspot_size_guard.json` with the reason in the PR.
 - `.shipyard/config.toml` → `[validation.gates]` pipeline — same scripts via `shipyard run --pipeline gates`. Runs with `PULP_ENFORCE_PREPUSH=1` so warnings become errors.
 
 Locally:
@@ -4381,7 +4404,7 @@ Locally:
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
-- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
+- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + skill-path-map lint + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
 **Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:
 
