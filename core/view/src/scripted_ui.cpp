@@ -1,4 +1,5 @@
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
 #include <atomic>
@@ -151,12 +152,38 @@ ScriptedUiSession::~ScriptedUiSession() {
     // stop that server's reader thread, clear DomainHandler's borrowed runtime
     // evaluator, and destroy the evaluator BEFORE destroying this session.
     inspector_bridge_.detach();
-    // A deadline-failed Runtime.evaluate retains its compromised realm so the
-    // request can return within the absolute fence. Owner teardown is the safe
-    // unbounded point to discard that native tree; do it before bridge_/engine_
-    // destruction so no root-owned widget callback can retain a dead bridge.
-    if (runtime_realm_quarantined_ && bridge_)
-        bridge_->clear_quarantined_realm();
+    // Any live or previously detached realm may still be borrowed by a native
+    // accessibility callback that re-entered owner teardown. Unpublish first,
+    // detach realm-owned Views without destroying them, then transfer their
+    // graph into an owner the active provider lease can retain until unwind.
+    const bool has_runtime_realms =
+        bridge_ != nullptr || !retired_runtime_realms_.empty();
+    if (has_runtime_realms) {
+        try {
+            accessibility_tree_will_change(root_);
+        } catch (...) {
+            // Destructors must not throw. Provider retirement visits every
+            // registered handle even when an individual backend fails.
+        }
+    }
+    if (bridge_) {
+        bridge_->quarantine_realm();
+        try {
+            bridge_->clear_quarantined_realm();
+        } catch (...) {
+            // Selective extraction allocates only during preflight. If that
+            // fails, atomically retain the complete attached tree instead of
+            // leaving callbacks that borrow the realm about to be destroyed.
+            bridge_->force_retire_root_for_owner_teardown();
+        }
+        runtime_realm_teardown_owner_->current_engine = std::move(engine_);
+        runtime_realm_teardown_owner_->current_bridge = std::move(bridge_);
+    }
+    runtime_realm_teardown_owner_->retired =
+        std::move(retired_runtime_realms_);
+    if (has_runtime_realms)
+        accessibility_retain_until_retired(
+            root_, runtime_realm_teardown_owner_);
     store_.flush_deferred_gesture_releases();
 }
 
@@ -246,11 +273,42 @@ bool ScriptedUiSession::poll(std::string* error) {
     // platform hosts or user-supplied widget releasers. Run it before this
     // frame's request pump, never inside the previous response deadline.
     // Destruction may enter host/user widget releasers, which can re-enter
-    // owner-thread Runtime.evaluate and append a fresh retirement. Swap the
-    // previous batch out first so such appends target a stable, empty member
-    // and survive until a later poll.
+    // owner-thread Runtime.evaluate and append a fresh retirement. Reserve the
+    // outgoing batch first, but keep every realm session-owned until the
+    // throwable provider barrier succeeds.
     std::vector<RetiredRuntimeRealm> retired_batch;
-    retired_batch.swap(retired_runtime_realms_);
+    const auto retired_count = retired_runtime_realms_.size();
+    retired_batch.reserve(retired_count);
+    if (accessibility_retirement_pending_) {
+        // Provider shutdown can wait for native clients, so it belongs in this
+        // unbounded owner-thread pump rather than the Runtime.evaluate response
+        // fence. A failed reset keeps the partial realm quarantined and native
+        // providers retired; only a successful replacement is republished.
+        try {
+            accessibility_tree_will_change(root_);
+            if (!runtime_realm_quarantined_)
+                accessibility_tree_changed(root_);
+            accessibility_retirement_pending_ = false;
+        } catch (const std::exception& e) {
+            if (error) *error = e.what();
+            return false;
+        } catch (...) {
+            if (error) *error = describe_exception();
+            return false;
+        }
+    }
+    if (retired_count != 0
+        && accessibility_tree_retirement_ready(root_)) {
+        for (std::size_t i = 0; i < retired_count; ++i)
+            retired_batch.push_back(std::move(retired_runtime_realms_[i]));
+        retired_runtime_realms_.erase(
+            retired_runtime_realms_.begin(),
+            retired_runtime_realms_.begin()
+                + static_cast<std::ptrdiff_t>(retired_count));
+    }
+    // Only destroy the batch that existed on entry. Provider shutdown above
+    // may re-enter Runtime.evaluate and append another retirement; that newer
+    // realm remains in the member until a later owner-thread poll.
     retired_batch.clear();
     // Deadline cleanup may close a gesture lease without synchronously entering
     // host code. Deliver those end notifications on the following UI pump,
@@ -307,6 +365,10 @@ std::string ScriptedUiSession::reset_after_runtime_evaluation(
     if (bridge_)
         bridge_->quarantine_realm();
     runtime_realm_quarantined_ = true;
+    // Provider shutdown can wait on native accessibility clients, so defer it
+    // to poll() outside the Runtime.evaluate deadline even when the timeout
+    // happened before an old realm could be detached.
+    accessibility_retirement_pending_ = true;
     return reset_error;
 }
 
@@ -330,6 +392,24 @@ bool ScriptedUiSession::rebuild_from_code(
     last_reload_metrics_ = ReloadMetrics{};   // reset; stays partial on early failure
     std::unique_ptr<ScriptEngine> next_engine;
     std::unique_ptr<WidgetBridge> next_bridge;
+    bool accessibility_retired = false;
+    const auto republish_accessibility_after_failure = [&] {
+        // Deadline recovery is fail-closed: once native nodes are retired, a
+        // partially cleared or provisional realm must not become observable to
+        // assistive technology. poll() republishes only a successful reset.
+        if (!accessibility_retired || deadline) return;
+        try {
+            accessibility_tree_changed(root_);
+        } catch (const std::exception& e) {
+            accessibility_retirement_pending_ = true;
+            runtime::log_warn(
+                "Scripted UI accessibility recovery failed: {}", e.what());
+        } catch (...) {
+            accessibility_retirement_pending_ = true;
+            runtime::log_warn("Scripted UI accessibility recovery failed");
+        }
+        accessibility_retired = false;
+    };
     const auto retain_provisional_realm = [&] {
         if (!next_bridge)
             return;
@@ -412,31 +492,33 @@ bool ScriptedUiSession::rebuild_from_code(
 
         WidgetReloadSnapshot saved_values;
         if (preserve_state && bridge_) {
-            // Allocate the retirement slot before the old realm's commit. Once
-            // clear_for_realm_replacement succeeds, filling it is pointer moves
-            // only and cannot destroy a realm inside this response fence.
-            if (deadline)
-                retired_runtime_realms_.emplace_back();
             bridge_->snapshot_values(
                 saved_values, check_deadline, /*include_custom_state=*/!deadline);
-            if (deadline) {
-                try {
+            // Native providers borrow Views from the current bridge. Provider
+            // disconnection may be deferred while an accessibility callback is
+            // active, even during an ordinary reload, so retain the detached
+            // realm until poll() proves every retired fragment lease drained.
+            retired_runtime_realms_.emplace_back();
+            // Close native provider call gates before any View detaches. The
+            // deadline path defers only the potentially blocking disconnect
+            // drain and replacement publication to poll(); it must not leave
+            // stale providers callable against an invisible retained realm.
+            accessibility_retired = true;
+            accessibility_tree_will_change(root_);
+            if (deadline)
+                accessibility_retirement_pending_ = true;
+            try {
+                if (deadline)
                     bridge_->clear_for_realm_replacement(check_deadline);
-                } catch (...) {
-                    retired_runtime_realms_.pop_back();
-                    throw;
-                }
-            } else {
-                bridge_->clear();
+                else
+                    bridge_->clear_for_realm_replacement();
+            } catch (...) {
+                retired_runtime_realms_.pop_back();
+                throw;
             }
-            if (deadline) {
-                auto& retired = retired_runtime_realms_.back();
-                retired.engine = std::move(engine_);
-                retired.bridge = std::move(bridge_);
-            } else {
-                // Normal reload has no response fence and can destroy now.
-                bridge_.reset();
-            }
+            auto& retired = retired_runtime_realms_.back();
+            retired.engine = std::move(engine_);
+            retired.bridge = std::move(bridge_);
         }
         check_deadline();
         const auto t_snapshot = clock::now();
@@ -502,14 +584,33 @@ bool ScriptedUiSession::rebuild_from_code(
         last_good_script_path_ = source_path;
         if (!deadline)
             last_good_effective_theme_ = root_.theme();
+        if (!deadline) {
+            // The pre-clear will-change barrier already made every old native
+            // node inert. Republishing the replacement tree is best-effort and
+            // must not turn an otherwise committed reload into a false failure.
+            try {
+                accessibility_tree_changed(root_);
+            } catch (const std::exception& e) {
+                accessibility_retirement_pending_ = true;
+                runtime::log_warn(
+                    "Scripted UI accessibility tree rebuild failed: {}", e.what());
+            } catch (...) {
+                accessibility_retirement_pending_ = true;
+                runtime::log_warn(
+                    "Scripted UI accessibility tree rebuild failed");
+            }
+            accessibility_retired = false;
+        }
         return true;
     } catch (const std::exception& e) {
         retain_provisional_realm();
+        republish_accessibility_after_failure();
         if (error) *error = e.what();
         last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;
     } catch (...) {
         retain_provisional_realm();
+        republish_accessibility_after_failure();
         if (error) *error = describe_exception();
         last_reload_metrics_.total_ms = ms(t0, clock::now());
         return false;

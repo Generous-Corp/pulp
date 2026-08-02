@@ -150,7 +150,8 @@ void GestureRecognizer::fail() {
     pending_callbacks_.clear();
 }
 
-void GestureRecognizer::remove_relationships_to(const GestureRecognizer& other) {
+void GestureRecognizer::remove_relationships_to(
+    const GestureRecognizer& other) noexcept {
     auto remove = [&other](std::vector<GestureRecognizer*>& recognizers) {
         recognizers.erase(
             std::remove(recognizers.begin(), recognizers.end(), &other),

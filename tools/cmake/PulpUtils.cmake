@@ -139,6 +139,7 @@ function(_pulp_apply_view_mac_objc_suffix target)
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/plugin_view_host_mac.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/plugin_view_host_mac_text_input.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/drag_drop_mac.mm"
+        "${_PULP_VIEW_PLATFORM_MAC_DIR}/accessibility_mac_host_lifetime.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/accessibility_mac.mm"
         "${_PULP_VIEW_PLATFORM_MAC_DIR}/text_accessibility_macos.mm"
     )

@@ -177,7 +177,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
 @implementation PulpView {
-    pulp::view::View* _dragTarget;
+    pulp::view::ViewCapture _dragTargetCapture;
     pulp::view::View* _focusedView;
     pulp::view::Point _relativeMouseWindowPoint;
     BOOL _relativeMouseMode;
@@ -226,7 +226,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // ORDER of one `&&` in that block.
     self.framePump = nullptr;
     self.rootView = nullptr;
-    _dragTarget = nullptr;
+    _dragTargetCapture.reset();
     _relativeMouseMode = NO;
     if (_deferredClickAlive)
         _deferredClickAlive->store(false);
@@ -273,7 +273,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)clearInteractionState {
-    _dragTarget = nullptr;
+    _dragTargetCapture.reset();
     if (auto* fv = [self liveFocusedView]) fv->release_input_focus();
     _focusedView = nullptr;
 }
@@ -312,24 +312,37 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // Route an event at window-point `pt` to an open ComboBox popup when the point
 // is inside the popup's (flip/scroll/clamp-aware) menu rect — the single source
 // of truth shared with paint + hit_test. `configure` fills the event-specific
-// fields (button/is_down, or is_wheel + deltas). Returns the routed combo (for
-// drag-target bookkeeping) or nullptr when nothing was handled. Shared by
+// fields (button/is_down, or is_wheel + deltas). Returns whether the event was
+// routed; target liveness is reported separately through `capture`, so a
+// callback that removes the combo cannot make the same event fall through.
+// Shared by
 // mouseDown and scrollWheel so an open menu takes precedence over sibling views
 // and any enclosing ScrollView (whose scroll would otherwise close the popup).
-- (pulp::view::ComboBox*)routeToOpenComboPopup:(pulp::view::Point)pt
-                                     configure:(void (^)(pulp::view::MouseEvent&))configure {
+- (BOOL)routeToOpenComboPopup:(pulp::view::Point)pt
+                                     configure:(void (^)(pulp::view::MouseEvent&))configure
+                                        capture:(pulp::view::ViewCapture*)capture {
     auto* combo = pulp::view::ComboBox::active_popup_;
-    if (!combo) return nullptr;
+    if (!combo) return NO;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
-    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
-    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return NO;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return NO;
     pulp::view::MouseEvent me;
     me.position = to_local(pt, combo, self.rootView);
     me.window_position = pt;
     if (configure) configure(me);
-    combo->on_mouse_event(me);
+    if (capture) capture->set(combo);
+    try {
+        combo->on_mouse_event(me);
+    } catch (...) {
+        // A throwing press did not establish a valid drag bracket. Undo the
+        // eagerly published capture before the AppKit boundary contains it.
+        if (capture) capture->reset();
+        throw;
+    }
     [self setNeedsDisplay:YES];
-    return combo;
+    if (capture && (!self.rootView || !capture->live_in(*self.rootView)))
+        capture->reset();
+    return YES;
 }
 
 - (void)scrollWheel:(NSEvent*)event {
@@ -375,6 +388,34 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 _focusedView = pulp::view::View::focused_input_;
             }
 
+            // One canonical gesture-owner state. Focus delivery may re-enter
+            // scripted UI and replace the target, so resolve through the
+            // capture after the shared focus protocol before returning it.
+            const auto prepareDragTarget = [&](pulp::view::View* candidate)
+                -> pulp::view::View* {
+                _dragTargetCapture.set(candidate);
+                pulp::view::ComboBox::notify_global_click(candidate);
+                auto* root = self.rootView;
+                auto* target = root
+                                   ? _dragTargetCapture.live_in(*root)
+                                   : nullptr;
+                if (!root || !target ||
+                    !pulp::view::transfer_input_focus(*root, target)) {
+                    _dragTargetCapture.reset();
+                    _focusedView = root
+                                       ? pulp::view::focused_input_under_root(*root)
+                                       : nullptr;
+                    return nullptr;
+                }
+                root = self.rootView;
+                _focusedView = root
+                                   ? pulp::view::focused_input_under_root(*root)
+                                   : nullptr;
+                target = root ? _dragTargetCapture.live_in(*root) : nullptr;
+                if (!target) _dragTargetCapture.reset();
+                return target;
+            };
+
         // Inspector intercept — consume clicks when inspector is active.
         //
         {
@@ -398,12 +439,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         // normal hit_test would find the view behind it; the shared helper's
         // flip/scroll/clamp-aware rect ensures a click never falls through to a
         // sibling under the menu or misses a scrolled/flipped-up row.
-        if (auto* combo = [self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
+        if ([self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
                 me.button = pulp::view::MouseButton::left;
                 me.is_down = true; me.phase = pulp::view::MousePhase::press;
                 me.click_count = 1;
-            }]) {
-            _dragTarget = combo;
+            } capture:&_dragTargetCapture]) {
             return;
         }
 
@@ -438,21 +478,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                     // below. Run it here so an open ComboBox dropdown
                     // still closes when the user clicks on a separate
                     // active overlay.
-                    pulp::view::ComboBox::notify_global_click(sub);
-
-                    _dragTarget = sub;
-
-                    if (_dragTarget->focusable()) {
-                        if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
-                            fv->on_focus_changed(false);
-                        _focusedView = _dragTarget;
-                        _focusedView->on_focus_changed(true);
-                        _focusedView->claim_input_focus();
-                    } else if (auto* fv = [self liveFocusedView]) {
-                        fv->on_focus_changed(false);
-                        fv->release_input_focus();
-                        _focusedView = nullptr;
-                    }
+                    auto* dragTarget = prepareDragTarget(sub);
+                    if (!dragTarget || !self.rootView) return;
 
                     // Same portable delivery as the normal path, but with
                     // bubble=false: the overlay-click path has historically NOT
@@ -461,10 +488,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                     // exactly — unifying the bubble here is a separate, flagged
                     // decision, not part of this behavior-preserving extraction.
                     if (!pulp::view::deliver_mouse_down(
-                            *self.rootView, _dragTarget, pt,
+                            *self.rootView, dragTarget, pt,
                             modifiers_from_ns_flags(event.modifierFlags),
-                            static_cast<int>(event.clickCount), /*bubble=*/false))
-                        _dragTarget = nullptr;
+                            static_cast<int>(event.clickCount), /*bubble=*/false)) {
+                        _dragTargetCapture.reset();
+                    }
                     [self setNeedsDisplay:YES];
                     return;
                 }
@@ -489,23 +517,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             }
         }
 
-        if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::press, true)) { _dragTarget = nullptr; [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
-        _dragTarget = self.rootView->hit_test(pt);
-        pulp::view::ComboBox::notify_global_click(_dragTarget);
-
-        if (_dragTarget) {
-            if (_dragTarget->focusable()) {
-                if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
-                    fv->on_focus_changed(false);
-                _focusedView = _dragTarget;
-                _focusedView->on_focus_changed(true);
-                _focusedView->claim_input_focus();
-            } else if (auto* fv = [self liveFocusedView]) {
-                fv->on_focus_changed(false);
-                fv->release_input_focus();
-                _focusedView = nullptr;
-            }
-
+        if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::press, true)) { _dragTargetCapture.reset(); [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
+        auto* dragTarget = prepareDragTarget(self.rootView->hit_test(pt));
+        if (dragTarget && self.rootView) {
             // Delivery — modern press, legacy on_mouse_down, and the W3C
             // pointerdown bubble to registerPointer ancestors (a wrap-div around
             // a canvas child that wins hit_test still sees the press) — is the
@@ -513,10 +527,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // host, with per-hop liveness re-checks. Clear the captured target if
             // a handler unmounted it mid-dispatch.
             if (!pulp::view::deliver_mouse_down(
-                    *self.rootView, _dragTarget, pt,
+                    *self.rootView, dragTarget, pt,
                     modifiers_from_ns_flags(event.modifierFlags),
-                    static_cast<int>(event.clickCount)))
-                _dragTarget = nullptr;
+                    static_cast<int>(event.clickCount))) {
+                _dragTargetCapture.reset();
+            }
         }
             [self setNeedsDisplay:YES];
             // A click can kick off a widget animation (e.g. a Toggle's thumb
@@ -527,11 +542,14 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // animation remains active (see -startAnimationTimerIfNeeded).
             [self startAnimationTimerIfNeeded];
         } catch (const std::exception& e) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseDown error: " << e.what() << "\n";
         } catch (...) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseDown error: unknown exception\n";
         }
     } @catch (NSException* exception) {
+        _dragTargetCapture.reset();
         std::cerr << "MacWindowHost mouseDown NSException: "
                   << [[exception name] UTF8String] << " - "
                   << [[exception reason] UTF8String] << "\n";
@@ -565,31 +583,30 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                     return;
                 }
             }
-            // _dragTarget is captured in mouseDown but the View
-            // it points to may be unmounted (and freed) before the next
-            // drag event arrives, e.g. when a click triggers a React state
-            // change that destroys the widget. Re-validate against the
-            // live tree before any deref.
+            // The capture is established in mouseDown, but the View may be
+            // unmounted before the next event. Resolve it at this boundary.
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
+            auto* dragTarget = _dragTargetCapture.live_in(*self.rootView);
+            if (!dragTarget) _dragTargetCapture.reset();
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) {
                 // Claim landed after the press was delivered — close that
                 // bracket (contract in pointer_dispatch.hpp) and drop it.
-                auto* handoff_target = _dragTarget;
-                _dragTarget = nullptr;
+                pulp::view::ViewCapture handoffCapture = _dragTargetCapture;
+                _dragTargetCapture.reset();
+                auto* handoffTarget = self.rootView
+                                          ? handoffCapture.live_in(*self.rootView)
+                                          : nullptr;
                 pulp::view::deliver_gesture_handoff(
-                    *self.rootView, handoff_target, pt,
+                    *self.rootView, handoffTarget, pt,
                     modifiers_from_ns_flags(event.modifierFlags),
                     static_cast<int>(event.clickCount));
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
                 return;
             }
-            if (!_dragTarget) return;
-            if (!view_is_in_tree(_dragTarget, self.rootView)) {
-                _dragTarget = nullptr;
-                return;
-            }
+            dragTarget = _dragTargetCapture.live_in(*self.rootView);
+            if (!dragTarget) { _dragTargetCapture.reset(); return; }
             // Deliver the drag on the MODERN channel (on_mouse_event, phase =
             // drag, carrying the modifier flags) AND the legacy on_mouse_drag /
             // on_drag pair, then bubble on_drag to ancestors — an inner
@@ -597,16 +614,19 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // handler lives on an outer wrapper. Shared with the plug-in view
             // host; ordering contract in pointer_dispatch.hpp.
             pulp::view::deliver_mouse_drag(
-                *self.rootView, _dragTarget, pt,
+                *self.rootView, dragTarget, pt,
                 modifiers_from_ns_flags(event.modifierFlags),
                 static_cast<int>(event.clickCount));
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseDragged error: " << e.what() << "\n";
         } catch (...) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseDragged error: unknown exception\n";
         }
     } @catch (NSException* exception) {
+        _dragTargetCapture.reset();
         std::cerr << "MacWindowHost mouseDragged NSException: "
                   << [[exception name] UTF8String] << " - "
                   << [[exception reason] UTF8String] << "\n";
@@ -634,19 +654,25 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 }
             }
             auto pt = [self localPoint:event];
+            if (!self.rootView) {
+                _dragTargetCapture.reset();
+                return;
+            }
+            pulp::view::ViewCapture releasedTarget = _dragTargetCapture;
+            _dragTargetCapture.reset();
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) {
                 // A double-tap claims on its SECOND release, by which point
                 // the press was delivered; same bracket rule as the drag.
-                auto* handoff_target = _dragTarget;
-                _dragTarget = nullptr;
+                auto* handoffTarget = releasedTarget.live_in(*self.rootView);
                 pulp::view::deliver_gesture_handoff(
-                    *self.rootView, handoff_target, pt,
+                    *self.rootView, handoffTarget, pt,
                     modifiers_from_ns_flags(event.modifierFlags),
                     static_cast<int>(event.clickCount));
                 [self setNeedsDisplay:YES];
                 return;
             }
-            if (_dragTarget && self.rootView) {
+            auto* dragTarget = releasedTarget.live_in(*self.rootView);
+            if (dragTarget && self.rootView) {
                 // Routing — legacy up, modern release, the W3C pointerup bubble,
                 // and the same-target click-suppression decision (release must
                 // land on the press target) — is the portable
@@ -702,17 +728,19 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                         }
                     });
                 };
-                pulp::view::deliver_mouse_up(*self.rootView, _dragTarget, pt, modifiers,
+                pulp::view::deliver_mouse_up(*self.rootView, dragTarget, pt, modifiers,
                                              static_cast<int>(event.clickCount), up_host);
-                _dragTarget = nullptr;
             }
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseUp error: " << e.what() << "\n";
         } catch (...) {
+            _dragTargetCapture.reset();
             std::cerr << "MacWindowHost mouseUp error: unknown exception\n";
         }
     } @catch (NSException* exception) {
+        _dragTargetCapture.reset();
         std::cerr << "MacWindowHost mouseUp NSException: "
                   << [[exception name] UTF8String] << " - "
                   << [[exception reason] UTF8String] << "\n";
@@ -829,13 +857,32 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             else
                 next = pulp::view::View::focus_next(*self.rootView, old);
             if (next && next != old) {
+                pulp::view::ViewCapture next_capture;
+                next_capture.set(next);
                 if (old) {
-                    old->on_focus_changed(false);
                     old->release_input_focus();
+                    old->on_focus_changed(false);
+                }
+                auto* liveRoot = self.rootView;
+                if (!liveRoot) {
+                    _focusedView = nullptr;
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+                next = next_capture.live_in(*liveRoot);
+                if (!next) {
+                    _focusedView = nullptr;
+                    [self setNeedsDisplay:YES];
+                    return;
                 }
                 _focusedView = next;
                 _focusedView->on_focus_changed(true);
-                _focusedView->claim_input_focus();
+                liveRoot = self.rootView;
+                _focusedView = liveRoot
+                                   ? next_capture.live_in(*liveRoot)
+                                   : nullptr;
+                if (_focusedView)
+                    _focusedView->claim_input_focus();
             }
             [self setNeedsDisplay:YES];
             return;

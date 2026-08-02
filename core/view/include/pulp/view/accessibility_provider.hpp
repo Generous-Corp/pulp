@@ -16,6 +16,7 @@
 // directly and do not route through init_accessibility().
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace pulp::view {
@@ -42,6 +43,33 @@ void shutdown_accessibility(void* handle);
 /// structural changes (tabs switched, panels added, etc.). Focus /
 /// value updates don't need this — those fire per-property events.
 void accessibility_tree_changed(void* handle);
+
+/// Make every cached native node inert before a caller starts destructively
+/// editing the View tree. Pair with accessibility_tree_changed() after the new
+/// structure is installed. Must run on the provider root's owning UI thread.
+void accessibility_tree_will_change(void* handle);
+bool accessibility_tree_retirement_ready(void* handle);
+void accessibility_retain_until_retired(void* handle,
+                                        std::shared_ptr<void> owner) noexcept;
+
+/// Rebuild every native provider currently attached to @p root. This is the
+/// retirement barrier for a scripted tree: Windows disconnects and drains UIA
+/// fragments that borrow Views before the old realm is destroyed; Linux
+/// unregisters its cached AT-SPI nodes. Call on the root's owning UI thread.
+void accessibility_tree_changed(View& root);
+void accessibility_tree_will_change(View& root);
+bool accessibility_tree_retirement_ready(View& root);
+void accessibility_retain_until_retired(View& root,
+                                        std::shared_ptr<void> owner) noexcept;
+
+namespace detail {
+/// Provider-backend lifecycle plumbing. Platform implementations register the
+/// opaque handle after initialization and unregister it before teardown so the
+/// root overload above can find all providers without coupling WidgetBridge to
+/// a particular host type. Not part of the consumer-facing provider API.
+void register_accessibility_provider(View& root, void* handle);
+void unregister_accessibility_provider(void* handle);
+} // namespace detail
 
 /// Service any pending accessibility IPC for this handle. On Linux AT-SPI the
 /// registry / screen reader calls methods on the exported objects over D-Bus;

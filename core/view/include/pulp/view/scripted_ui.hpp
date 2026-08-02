@@ -159,10 +159,20 @@ private:
         std::unique_ptr<ScriptEngine> engine;
         std::unique_ptr<WidgetBridge> bridge;
     };
+    struct RuntimeRealmTeardownOwner {
+        std::vector<RetiredRuntimeRealm> retired;
+        std::unique_ptr<ScriptEngine> current_engine;
+        std::unique_ptr<WidgetBridge> current_bridge;
+    };
     // Owner-thread evaluate may run inline more than once between UI polls, so
     // retain every old realm until the next poll rather than overwriting one
     // slot inside a later response fence.
     std::vector<RetiredRuntimeRealm> retired_runtime_realms_;
+    // Allocated with the session rather than during its noexcept destructor.
+    // A reentrant native accessibility callback may retain this owner after the
+    // ScriptedUiSession itself has gone away.
+    std::shared_ptr<RuntimeRealmTeardownOwner> runtime_realm_teardown_owner_ =
+        std::make_shared<RuntimeRealmTeardownOwner>();
     // Marshals off-thread inspector evaluate/interrupt requests onto the engine
     // thread. Re-attached to the live engine after every rebuild_from_code().
     ScriptInspectorBridge inspector_bridge_;
@@ -176,6 +186,7 @@ private:
     Theme base_theme_;
     Theme last_good_effective_theme_;
     bool runtime_realm_quarantined_ = false;
+    bool accessibility_retirement_pending_ = false;
     ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;

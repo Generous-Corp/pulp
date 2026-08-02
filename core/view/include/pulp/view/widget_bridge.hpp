@@ -186,6 +186,10 @@ public:
     // bridge's root children so a replacement session already attached to the
     // shared root remains intact.
     void clear_quarantined_realm();
+    // Allocation-free destructor fallback when selective quarantined cleanup
+    // could not be prepared. Retires the complete attached root rather than
+    // leave any View callback borrowing a realm that is about to be destroyed.
+    void force_retire_root_for_owner_teardown() noexcept;
     // Constant-work fail-close used when the realm-replacement deadline has
     // already expired. The retained realm is hidden and removed from every
     // host pump/fan-out path, then reclaimed with the owning session.
@@ -344,13 +348,6 @@ public:
 
 private:
     struct NativeGpuBridgeState;
-    // Clearing a live realm may notify its JS callback registry. Realm
-    // replacement must skip that call because evaluated code can replace the
-    // cleanup helper and wedge the bounded reset path.
-    enum class RealmClearPolicy : std::uint8_t {
-        NotifyCurrentRealm,
-        SkipRealmCallbacks,
-    };
     // One capability-gated entry in register_api()'s registration table.
     // Defined in widget_bridge.cpp — the table is an implementation detail.
     struct ApiGroup;
@@ -369,7 +366,7 @@ private:
     // at which that View was last CONFIRMED to live under `root_`. A fresh entry
     // starts unvalidated (generation 0, the reserved sentinel), so the first
     // widget() lookup always runs the authoritative subtree walk; once confirmed,
-    // repeat lookups short-circuit to O(1) while View::structure_generation() is
+    // repeat lookups short-circuit to O(1) while the root-local generation is
     // unchanged (no remove_child has detached anything since). The implicit
     // View* conversions keep this a drop-in for the former
     // `unordered_map<string, View*>` at every call site; assignment resets the
@@ -529,17 +526,17 @@ private:
     bool runtime_import_installed_ = false;
     bool realm_quarantined_ = false;
     bool realm_retired_ = false;
-    // Deadline-mode realm replacement detaches the old native tree without
-    // destroying it. ScriptedUiSession retains this bridge until the next UI
-    // pump, after the Runtime.evaluate response fence has closed.
-    std::vector<std::unique_ptr<View>> retired_root_children_;
-    std::unique_ptr<ActiveDrag> retired_root_drag_;
-    std::unique_ptr<View::RootInteractionState> retired_root_interaction_;
-    // Moving the old bridge-owned root callback here clears the shared root in
-    // constant work while deferring arbitrary capture destruction with the
-    // rest of the retired realm.
-    std::function<void(const std::string&, uint16_t)>
-        retired_root_click_callback_;
+    // Complete root-owned state transferred by the one retirement commit.
+    // The emergency instance is preconstructed so destructor fail-close does
+    // not allocate even when selective realm extraction could not be prepared.
+    struct RetiredRealmState {
+        std::vector<std::unique_ptr<View>> children;
+        std::unique_ptr<ActiveDrag> drag;
+        std::unique_ptr<View::RootInteractionState> interaction;
+        std::function<void(const std::string&, uint16_t)> root_click_callback;
+    };
+    RetiredRealmState retired_realm_;
+    RetiredRealmState emergency_retired_realm_;
 
     // Native-side timer queue for setTimeout / setInterval. Callbacks
     // themselves live in JS (`__timerCallbacks__`); native tracks (id,
@@ -656,11 +653,12 @@ private:
     void forget_widget_subtree(View* node, bool preserve_js_dom_state = false,
                                const DeadlineCheck& deadline_check = {},
                                bool notify_js = true);
-    void clear_realm(RealmClearPolicy policy,
-                     const DeadlineCheck& deadline_check,
-                     bool owned_root_children_only = false);
+    void clear_realm(const DeadlineCheck& deadline_check);
+    void retire_realm(const DeadlineCheck& deadline_check);
+    void commit_realm_retirement(RetiredRealmState& destination) noexcept;
     void unregister_global_dispatch() noexcept;
     void unregister_global_dispatch(const DeadlineCheck& deadline_check);
+    std::vector<BridgeWidgetState> foreign_owned_widget_states() const;
     void begin_root_quarantine() noexcept;
     void end_root_quarantine() noexcept;
     void invalidate_cached_subtrees_everywhere(
