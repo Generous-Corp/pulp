@@ -77,14 +77,17 @@ struct BundledBlob {
 // the CMake SOURCES list in sync — there is intentionally no auto-discovery,
 // so failures show up as a "file not declared" link error rather than a
 // silent runtime miss.
-const std::array<BundledBlob, 2>& bundled_blobs() {
-    static const std::array<BundledBlob, 2> kBlobs = {{
+const std::array<BundledBlob, 3>& bundled_blobs() {
+    static const std::array<BundledBlob, 3> kBlobs = {{
         {"Inter-Regular.ttf",
          pulp_bundled_fonts::Inter_Regular_ttf,
          pulp_bundled_fonts::Inter_Regular_ttf_size},
         {"JetBrainsMono-Regular.ttf",
          pulp_bundled_fonts::JetBrainsMono_Regular_ttf,
          pulp_bundled_fonts::JetBrainsMono_Regular_ttf_size},
+        {"Jost-Regular.ttf",
+         pulp_bundled_fonts::Jost_Regular_ttf,
+         pulp_bundled_fonts::Jost_Regular_ttf_size},
     }};
     return kBlobs;
 }

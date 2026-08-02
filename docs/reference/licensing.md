@@ -74,12 +74,13 @@ Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) 
 
 ### Embedded Fonts
 
-Embedded at build time for deterministic text rendering. Both fonts are redistributed under the SIL OFL 1.1, which explicitly permits bundling in software.
+Embedded at build time for deterministic text rendering. Every font below is redistributed under the SIL OFL 1.1, which explicitly permits bundling in software.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Inter** | SIL OFL 1.1 | Embedded UI font (`Inter-Regular.ttf`, version `4.001;git-9221beed3`) | [github.com/rsms/inter](https://github.com/rsms/inter) |
 | **JetBrains Mono** | SIL OFL 1.1 | Embedded monospace font (`JetBrainsMono-Regular.ttf`, version `2.304`) | [github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
+| **Jost** | SIL OFL 1.1 | Embedded UI font (`Jost-Regular.ttf`, version `3.710`) | [github.com/indestructible-type/Jost](https://github.com/indestructible-type/Jost) |
 | **Noto Color Emoji** | SIL OFL 1.1 | Embedded cross-platform color-emoji typeface (`NotoColorEmoji.ttf`, COLRv1, `noto-emoji main @ 2026-05-17`). Gated by `PULP_BUNDLE_NOTO_COLOR_EMOJI` (defaults ON for Linux/Android/headless, OFF for macOS/Windows where the platform color-emoji typeface is preferred). | [github.com/googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji) |
 
 ### Plugin Format SDKs

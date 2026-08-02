@@ -342,6 +342,24 @@
       ]
     },
     {
+      "name": "Jost",
+      "category": "fonts",
+      "license": "SIL OFL 1.1",
+      "version": "3.710",
+      "source_kind": "vendored",
+      "repository": "https://github.com/indestructible-type/Jost",
+      "upstream": {
+        "kind": "none"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Vendored deterministic UI font. Jost-Regular.ttf SHA-256: c3143e923ed1ca7bdf27f96c351fbafaebcbd3cf3f4c2d30d03e6c7f98e73d7a. Bundled because imported designs specify it and no host ships it, so resolution otherwise falls through to a substitute about 10% wider per glyph.",
+      "source_files": [
+        "external/fonts/Jost-Regular.ttf",
+        "external/fonts/README.md"
+      ]
+    },
+    {
       "name": "json-schema-to-typescript",
       "category": "developer-tooling",
       "license": "MIT",

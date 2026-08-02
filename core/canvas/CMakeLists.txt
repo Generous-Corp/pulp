@@ -154,6 +154,7 @@ if(PULP_HAS_SKIA)
         SOURCES
             ${PULP_ROOT_DIR}/external/fonts/Inter-Regular.ttf
             ${PULP_ROOT_DIR}/external/fonts/JetBrainsMono-Regular.ttf
+            ${PULP_ROOT_DIR}/external/fonts/Jost-Regular.ttf
         NAMESPACE pulp_bundled_fonts
     )
     target_link_libraries(pulp-canvas PRIVATE pulp-bundled-fonts)
