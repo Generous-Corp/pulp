@@ -1,0 +1,112 @@
+{
+  "schema": "pulp-browser-platform-fonts-v1",
+  "version": 1,
+  "summary": {
+    "text_runs": 4,
+    "interrogated": 4,
+    "resolved": 4,
+    "truncated": false
+  },
+  "faces_by_glyph_count": [
+    {
+      "family_name": "Inter",
+      "post_script_name": "Inter-Regular",
+      "is_custom_font": true,
+      "glyph_count": 212
+    },
+    {
+      "family_name": "Funnel Display Light",
+      "post_script_name": "FunnelDisplay-Light_Regular",
+      "is_custom_font": true,
+      "glyph_count": 14
+    },
+    {
+      "family_name": "Funnel Display Light",
+      "post_script_name": "FunnelDisplay-Light_Bold",
+      "is_custom_font": true,
+      "glyph_count": 14
+    }
+  ],
+  "runs": [
+    {
+      "layout_index": 4,
+      "node_index": 19,
+      "owner_node_index": 18,
+      "backend_node_id": 20,
+      "requested": {
+        "font_family": "\"Pulp Fixture Sans\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Inter",
+          "post_script_name": "Inter-Regular",
+          "is_custom_font": true,
+          "glyph_count": 104
+        }
+      ]
+    },
+    {
+      "layout_index": 6,
+      "node_index": 22,
+      "owner_node_index": 21,
+      "backend_node_id": 23,
+      "requested": {
+        "font_family": "\"Pulp Fixture Sans\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Inter",
+          "post_script_name": "Inter-Regular",
+          "is_custom_font": true,
+          "glyph_count": 108
+        }
+      ]
+    },
+    {
+      "layout_index": 8,
+      "node_index": 25,
+      "owner_node_index": 24,
+      "backend_node_id": 26,
+      "requested": {
+        "font_family": "\"Pulp Fixture Variable\"",
+        "font_size": "20px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Funnel Display Light",
+          "post_script_name": "FunnelDisplay-Light_Regular",
+          "is_custom_font": true,
+          "glyph_count": 14
+        }
+      ]
+    },
+    {
+      "layout_index": 10,
+      "node_index": 28,
+      "owner_node_index": 27,
+      "backend_node_id": 29,
+      "requested": {
+        "font_family": "\"Pulp Fixture Variable\"",
+        "font_size": "20px",
+        "font_weight": "700",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Funnel Display Light",
+          "post_script_name": "FunnelDisplay-Light_Bold",
+          "is_custom_font": true,
+          "glyph_count": 14
+        }
+      ]
+    }
+  ]
+}

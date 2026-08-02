@@ -39,6 +39,7 @@ endif()
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_ir.cpp
+    test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
     test_browser_import_cli.cpp
     test_html_intake.cpp

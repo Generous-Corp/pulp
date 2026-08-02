@@ -19,6 +19,13 @@ namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
 
+int Label::effective_font_weight() const {
+    if (has_own_font_weight_) return font_weight_;
+    if (auto inherited = inheritable_font_weight(); inherited.has_value())
+        return inherited.value();
+    return font_weight_;
+}
+
 float Label::intrinsic_height() const {
     // Cascade font_size before computing height so descendants of a parent
     // that called setInheritableFontSize report a height that matches what
@@ -52,7 +59,8 @@ float Label::intrinsic_height() const {
 
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
-                                   effective_family, effective_font_size);
+                                   effective_family, effective_font_size,
+                                   effective_font_weight());
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     float lh;
     if (line_height_ > 0) {
@@ -153,7 +161,8 @@ float Label::measured_height(float available_width) const {
 
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, family, effective_font_size);
+    auto prepared = shaper.prepare(display_text, family, effective_font_size,
+                                   effective_font_weight());
 
     // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
     // Label paint reads `View::word_break()` at draw time, the measure path
@@ -203,7 +212,8 @@ float Label::baseline_y() const {
     // collapse — feed the shaper a single space to pin the metric.
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
-                                   effective_family, effective_font_size);
+                                   effective_family, effective_font_size,
+                                   effective_font_weight());
     float ascent = prepared.ascent();
     if (ascent <= 0.0f) {
         // Fallback when shaper metrics aren't real (no Skia, family
@@ -289,7 +299,8 @@ float Label::intrinsic_width() const {
     if (effective_family.empty()) effective_family = "Inter";
 
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, effective_family, effective_font_size);
+    auto prepared = shaper.prepare(display_text, effective_family,
+                                   effective_font_size, effective_font_weight());
     float width = prepared.total_width();
 
     // Letter-spacing adds extra advance per glyph break that isn't
@@ -328,11 +339,7 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             rs.font_size = inh.value();
     }
-    rs.font_weight = font_weight_;
-    if (!has_own_font_weight_) {
-        if (auto inh = inheritable_font_weight(); inh.has_value())
-            rs.font_weight = inh.value();
-    }
+    rs.font_weight = effective_font_weight();
     rs.letter_spacing = letter_spacing_;
     if (!has_own_letter_spacing_) {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
@@ -614,11 +621,7 @@ void Label::paint(canvas::Canvas& canvas) {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-    int effective_font_weight = font_weight_;
-    if (!has_own_font_weight_) {
-        if (auto inh = inheritable_font_weight(); inh.has_value())
-            effective_font_weight = inh.value();
-    }
+    const int weight = effective_font_weight();
     float effective_letter_spacing = letter_spacing_;
     if (!has_own_letter_spacing_) {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
@@ -629,7 +632,7 @@ void Label::paint(canvas::Canvas& canvas) {
     // the canvas backend so JS calls actually change rasterised glyphs. Empty
     // font_family_ falls back to the default theme face.
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
-    canvas.set_font_full(family, effective_font_size, effective_font_weight,
+    canvas.set_font_full(family, effective_font_size, weight,
                           font_style_, effective_letter_spacing);
 
     // Apply the CSS font-variant CSV as SkShaper OpenType feature tags.
@@ -718,11 +721,13 @@ void Label::paint(canvas::Canvas& canvas) {
         // Without it a Label that first shaped against the fallback face would
         // serve that stale wrap until some other key field happened to change.
         ShapedLayoutKey key{display_text, family, effective_font_size,
-                            bounds().width, lh, static_cast<int>(break_mode),
+                            effective_font_weight(), bounds().width, lh,
+                            static_cast<int>(break_mode),
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
-            auto prepared = shaper.prepare(display_text, family, effective_font_size);
+            auto prepared = shaper.prepare(display_text, family,
+                                           effective_font_size, effective_font_weight());
             shaped_cache_layout_ = shaper.layout_with_lines(
                 prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
             shaped_cache_key_ = std::move(key);

@@ -55,6 +55,14 @@ public:
     float leading() const { return leading_; }
     bool metrics_are_real() const { return metrics_real_; }
 
+    /// The CSS numeric weight these segments were measured at.
+    ///
+    /// Part of the prepared text's identity, not decoration: a Bold face is a
+    /// different set of advances, not a Regular one drawn heavier, so a layout
+    /// computed from segments measured at 400 does not describe text painted
+    /// at 700.
+    int font_weight() const { return font_weight_; }
+
     /// Total width if laid out on a single line
     float total_width() const;
 
@@ -71,6 +79,7 @@ private:
     bool metrics_real_ = false;
     std::string font_family_;
     float font_size_ = 0;
+    int font_weight_ = 400;
 };
 
 /// Result of laying out prepared text at a specific width
@@ -132,7 +141,15 @@ public:
     /// Prepare text for layout — this is the expensive call.
     /// Runs text shaping (HarfBuzz via SkShaper when available) and caches segment widths.
     /// Call once per (text, font) pair. Do NOT call on every resize.
-    PreparedText prepare(std::string_view text, std::string_view font_family, float font_size);
+    ///
+    /// `font_weight` is the CSS numeric weight the text will be PAINTED at, and
+    /// it belongs here because it changes advances. Measuring a bold run
+    /// through the regular face reports a narrower line than the one that gets
+    /// drawn, which shows up as text breaking a word or two late and
+    /// overflowing its box — a wrap bug in appearance, a measurement bug in
+    /// fact. A caller that omits it is stating the text is Regular.
+    PreparedText prepare(std::string_view text, std::string_view font_family,
+                         float font_size, int font_weight = 400);
 
     /// Prepare an attributed string (mixed styles)
     PreparedText prepare(const AttributedString& text);

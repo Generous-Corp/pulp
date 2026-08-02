@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-text-face-and-weight-at-paint",
+  "kind": "change",
+  "created_at": "2026-08-02T18:05:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Text resolved one face for measurement and a different one for paint, and resolved every weight as Regular. Two independent defects with the same signature. First: fill_text resolves an SkFont through FontResolver — bundled faces included — then uses it only for a coverage check and paints through SkParagraph, which re-resolves from a FontCollection. text_font_context.cpp bridged the bundled faces into that collection only when the platform had no font database of its own, so on macOS every family resolved through CoreText and an imported panel painted every run in one system fallback while measuring each correctly; four Labels with four different families measured 253/253/262/317 and painted at an identical 258.5px ink width. The bridge is now unconditional, which is what the deferring comment described as the right fix. Second: TextShaper::prepare took no weight, measure_segment hard-coded SkFontStyle::Normal, and the segment cache was keyed on family and size alone, so a Bold run and its Regular twin shared one set of advances and a variable font could not be measured at the requested weight at all — instancing the wght axis lives in FontResolver and nothing on that path called it. Weight now travels through prepare into both cache keys, and measure_segment's hand-rolled cascade is replaced by the shared resolver, which also ends a quieter divergence where segment widths and line metrics could resolve different faces for one family stack. Label gains effective_font_weight() because an imported design sets weight on the view via set_inheritable_font_weight, leaving Label::font_weight() at its 400 default. Jost is bundled alongside Inter and JetBrains Mono: imported designs ask for it, no host ships it, and the substitute is about 10% wider per glyph. Measured against Chrome on the design corpus, delay improves 0.1020 to 0.0973 area-weighted failing at unchanged 100% ink coverage; bold agrees with Chrome's own weight cost to 0.009px. Pulp-only: the defects and the fixes both originate here, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-canvas-fonts",
+    "pulp-test-text-shaper",
+    "pulp-test-widgets-label",
+    "pulp-test-browser-capture-import"
+  ],
+  "disposition": "pulp-only"
+}

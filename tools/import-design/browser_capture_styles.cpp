@@ -335,8 +335,55 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
         }
     }
 
+    // Per-line text boxes. `includeDOMRects` is what makes Chrome emit these,
+    // and a capture taken without it simply has no `textBoxes` — so their
+    // absence is a capture-age question, not a malformed-snapshot one, and
+    // leaves every node with an empty box list rather than failing the load.
+    index.layout_text_boxes_.resize(index.style_rows_.size());
+    const auto text_boxes = member(document, "textBoxes");
+    if (text_boxes.isObject()) {
+        const auto box_layout = member(text_boxes, "layoutIndex");
+        const auto box_bounds = member(text_boxes, "bounds");
+        const auto box_start = member(text_boxes, "start");
+        const auto box_length = member(text_boxes, "length");
+        if (box_layout.isArray() && box_bounds.isArray()) {
+            for (uint32_t i = 0; i < box_layout.size(); ++i) {
+                const auto at = static_cast<int>(i);
+                const int layout_index = json_int(box_layout[at], -1);
+                if (layout_index < 0 ||
+                    layout_index >=
+                        static_cast<int>(index.layout_text_boxes_.size())) {
+                    continue;
+                }
+                if (i >= box_bounds.size()) break;
+                const auto entry = box_bounds[at];
+                if (!entry.isArray() || entry.size() < 4) continue;
+                CapturedTextBox box;
+                box.bounds.left = entry[0].getWithDefault<double>(0.0);
+                box.bounds.top = entry[1].getWithDefault<double>(0.0);
+                box.bounds.width = entry[2].getWithDefault<double>(0.0);
+                box.bounds.height = entry[3].getWithDefault<double>(0.0);
+                if (box_start.isArray() && i < box_start.size())
+                    box.start = json_int(box_start[at], 0);
+                if (box_length.isArray() && i < box_length.size())
+                    box.length = json_int(box_length[at], 0);
+                index.layout_text_boxes_[static_cast<size_t>(layout_index)]
+                    .push_back(box);
+            }
+        }
+    }
+
     if (index.style_rows_.empty()) return std::nullopt;
     return index;
+}
+
+std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(
+    int layout_index) const {
+    if (layout_index < 0 ||
+        layout_index >= static_cast<int>(layout_text_boxes_.size())) {
+        return {};
+    }
+    return layout_text_boxes_[static_cast<size_t>(layout_index)];
 }
 
 std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
@@ -545,7 +592,18 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     set_string("text-transform", style.text_transform);
     const auto decoration = lookup("text-decoration-line");
     if (!is_absent(decoration)) style.text_decoration = decoration;
-    set_string("white-space", style.white_space);
+    // Read with the raw lookup, NOT `set_string`.
+    //
+    // `is_absent` treats `normal` as "this property contributes nothing",
+    // which is right for `text-transform` and `mix-blend-mode` and wrong for
+    // exactly one property: `white-space: normal` is the value that turns
+    // wrapping ON. Chrome serializes it on every wrapping node, so dropping it
+    // left `white_space` unset — and the materializer cannot tell an unset
+    // field from a capture that never carried the property, so it declined to
+    // enable multi-line and every paragraph drew its first line and dropped
+    // the rest. A gate that cannot fire, reported as if it had been evaluated.
+    const auto white_space = lookup("white-space");
+    if (!white_space.empty()) style.white_space = white_space;
 
     if (scope == ComputedStyleScope::text_only) return;
 

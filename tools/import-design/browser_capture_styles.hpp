@@ -20,6 +20,23 @@ struct CapturedBox {
     double height = 0.0;
 };
 
+/// One inline line box Chrome laid a text run out on.
+///
+/// A run that wraps produces several of these. The layout node's own `bounds`
+/// is their union — the paragraph's block, not any single line — so a measured
+/// advance is only comparable against a line box, never against the run's box.
+/// `start` and `length` are character offsets into the layout node's text,
+/// which is what makes the comparison well-defined: they name exactly the
+/// substring whose advance the box records.
+///
+/// A box can also start to the right of its run's block when the run continues
+/// a line an earlier inline sibling began.
+struct CapturedTextBox {
+    CapturedBox bounds;
+    int start = 0;
+    int length = 0;
+};
+
 /// One node Chrome actually laid out and painted, in the order it painted it.
 ///
 /// The DOM snapshot's layout array holds exactly the nodes that produced a
@@ -81,6 +98,16 @@ public:
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
 
+    /// The inline line boxes Chrome broke one layout node's text across, in
+    /// document order.
+    ///
+    /// Empty for a node that laid out no text. A single-line run returns one
+    /// box, which is why a caller must not treat "one box" as "the run's own
+    /// bounds": the two agree only when the run happens not to wrap, and code
+    /// that reads the bounds instead agrees with this on every unwrapped run
+    /// and is wrong on every wrapped one.
+    std::vector<CapturedTextBox> text_boxes_for_layout(int layout_index) const;
+
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
     std::vector<CapturedPaintNode> painted_nodes() const;
@@ -138,6 +165,9 @@ private:
     std::vector<int> layout_paint_order_;            ///< layout index → order
     std::vector<std::vector<int>> style_rows_;       ///< layout index → strings
     std::vector<CapturedBox> layout_bounds_;
+    /// layout index → its line boxes. Sized with the layout, so a lookup for a
+    /// node that laid out no text is a bounds check rather than a miss.
+    std::vector<std::vector<CapturedTextBox>> layout_text_boxes_;
 };
 
 /// Which half of an element's appearance to fold onto a node.

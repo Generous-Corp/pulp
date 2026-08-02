@@ -64,6 +64,7 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -731,6 +732,10 @@ async function runCapture(options) {
         device_scale_factor: dpr,
       });
     const tokenReport = await evaluateDesignTokens(cdp);
+    // Read before time resumes, like every other DOM-derived sidecar: the
+    // faces reported have to be the ones the frozen frame was shaped with.
+    const platformFontReport = await evaluatePlatformFonts(
+      cdp, snapshot, COMPUTED_STYLES);
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
     await networkGuard.awaitProvenance();
@@ -784,6 +789,8 @@ async function runCapture(options) {
       }),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
+      writeJson(
+        path.join(outputDir, "platform-fonts.json"), platformFontReport),
       ...(interactionReport
         ? [writeFile(
             path.join(outputDir, "interaction-report.json"),
@@ -896,6 +903,18 @@ async function runCapture(options) {
         color_count: Object.keys(tokenReport.colors).length,
         dimension_count: Object.keys(tokenReport.dimensions).length,
         string_count: Object.keys(tokenReport.strings).length,
+      },
+      // Which typefaces the reference pixels were actually shaped with, as
+      // opposed to which the style rows asked for. A consumer comparing its own
+      // text against this capture has to know whether the reference used the
+      // authored family or a substitute, because measuring against a substitute
+      // and "fixing" the difference makes the renderer wrong on purpose.
+      platform_fonts: {
+        schema: platformFontReport.schema,
+        report: "platform-fonts.json",
+        text_run_count: platformFontReport.summary.text_runs,
+        resolved_run_count: platformFontReport.summary.resolved,
+        face_count: platformFontReport.faces_by_glyph_count.length,
       },
       states: [{
         name: "default",
