@@ -42,6 +42,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import unittest
@@ -212,12 +213,47 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
-    def test_cli_and_sdk_build_disable_inspector(self) -> None:
+    def test_cli_and_sdk_build_ship_inspector_sdk(self) -> None:
         self.assertGreaterEqual(
-            self.text.count("-DPULP_ENABLE_INSPECTOR=OFF"),
+            self.text.count("-DPULP_ENABLE_INSPECTOR=ON"),
             2,
-            "release-cli.yml must keep the inspector disabled for both the "
-            "CLI and SDK release configure steps.",
+            "release-cli.yml must enable the inspector component for both "
+            "release configure steps because release_product_matrix.json "
+            "promises the installed pulp-inspect archive family.",
+        )
+        matrix = json.loads(
+            (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        floor = matrix["inspector_sdk_floor"]
+        self.assertGreaterEqual(self.text.count(floor), 2)
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]',
+            self.text,
+        )
+        for step_name in (
+            "Configure (CLI, no WebView on Linux)",
+            "Prepare SDK build dir (Linux)",
+        ):
+            workflow = yaml.safe_load(self.text)
+            step = next(
+                step
+                for step in workflow["jobs"]["build-cli"]["steps"]
+                if step.get("name") == step_name
+            )
+            self.assertEqual(
+                step["env"]["RELEASE_TAG"],
+                "${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}",
+            )
+
+    def test_release_path_gate_matches_inspector_sdk_flag(self) -> None:
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        self.assertIn(
+            "-DPULP_ENABLE_INSPECTOR=ON",
+            gate,
+            "the PR-time release-path configure must match the tagged release "
+            "inspector SDK flag.",
         )
 
     def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
@@ -336,7 +372,10 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_disables_audio_probes(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
-        self.assertIn("-DPULP_ENABLE_INSPECTOR=OFF", run_block)
+
+    def test_windows_release_gate_ships_inspector_sdk(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
@@ -832,7 +871,7 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
 
-    def test_release_finalizer_uses_authoritative_provenance_floor(self) -> None:
+    def test_release_finalizer_uses_authoritative_provenance_floors(self) -> None:
         steps = self.workflow["jobs"]["release"]["steps"]
         finalizer = next(
             step
@@ -851,6 +890,11 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn(
             'selected["sdk_provenance_floor"] = '
             'authoritative["sdk_provenance_floor"]',
+            run_block,
+        )
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = '
+            'authoritative["inspector_sdk_floor"]',
             run_block,
         )
         self.assertIn('--matrix "$publication_matrix"', run_block)

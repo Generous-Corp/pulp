@@ -523,6 +523,22 @@ jobs:
             ln -s ../../tools/import-design "$compat_dir/tools/import-design"
             cp tools/scripts/release_product_matrix.json \
               "$compat_dir/release_product_matrix.json"
+            authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+            curl -fsSL \
+              "https://raw.githubusercontent.com/${repo}/main/tools/scripts/release_product_matrix.json" \
+              -o "$authoritative_matrix"
+            python3 - "$compat_dir/release_product_matrix.json" \
+              "$authoritative_matrix" <<'PY'
+            import json
+            import sys
+            from pathlib import Path
+
+            selected_path = Path(sys.argv[1])
+            selected = json.loads(selected_path.read_text(encoding="utf-8"))
+            authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+            selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+            selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
+            PY
             echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
@@ -664,6 +680,8 @@ jobs:
         # tools/deps/manifest.json). darwin-arm64, linux-x64, and linux-arm64
         # all have published assets today; windows-* continues to build
         # without Skia until its assets ship.
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
@@ -682,6 +700,10 @@ jobs:
             unset SKIA_DIR
             EXTRA_ARCH="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin"
           fi
+          INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
+            INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
+          fi
           # No explicit CMAKE_OSX_DEPLOYMENT_TARGET here: tools/cmake/PulpMinOs.cmake
           # is included BEFORE project() and force-sets the floor to the max of every
           # linked dependency's minimum per tools/deps/min_os.json (macOS 13.4, driven
@@ -693,7 +715,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_ENABLE_INSPECTOR=OFF \
+            $INSPECTOR \
             $REQUIRE_GPU \
             $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
@@ -861,6 +883,8 @@ jobs:
         # the SDK lib must contain the Skia path for platforms where it's
         # supposed to. Both linux-x64 and linux-arm64 have published
         # skia-builder assets and so must trip the gate.
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
@@ -868,11 +892,15 @@ jobs:
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               ;;
           esac
+          INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
+            INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
+          fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_ENABLE_INSPECTOR=OFF \
+            $INSPECTOR \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
@@ -1667,6 +1695,7 @@ jobs:
               authoritative_path.read_text(encoding="utf-8")
           )
           selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
+          selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",
               encoding="utf-8",
