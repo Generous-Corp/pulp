@@ -142,8 +142,42 @@ rsync -a --exclude=__pycache__ -e ssh \
 PORTMAP="$HOME/Library/Application Support/Rack2/forge-portmap.json"
 if [ "$CHECK" -eq 0 ] && [ -f "$PORTMAP" ]; then
     remote 'mkdir -p ~/Library/Application\ Support/Rack2' 2>/dev/null
-    if scp -q "$PORTMAP" "$HOST:Library/Application Support/Rack2/forge-portmap.json" 2>/dev/null; then
-        say "port map copied ($(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["modules"]))' "$PORTMAP" 2>/dev/null || echo '?') modules)"
+    # MERGED on the target, not overwritten.
+    #
+    # The map is merged by contract — entries outlive the scanner that made
+    # them, so a machine keeps measurements nobody else has. A plain scp threw
+    # those away. Here the target's 19 entries happened to be a subset of this
+    # machine's 52, so nothing would have been lost this time, which is exactly
+    # how a rule like this goes unnoticed until it costs something.
+    if scp -q "$PORTMAP" "$HOST:/tmp/forge-portmap-incoming.json" 2>/dev/null &&
+       remote 'python3 - <<'"'"'MERGE'"'"'
+import json, os
+dst = os.path.expanduser("~/Library/Application Support/Rack2/forge-portmap.json")
+inc = "/tmp/forge-portmap-incoming.json"
+def load(p):
+    try:
+        with open(p) as f:
+            return {(m.get("plugin"), m.get("model")): m
+                    for m in json.load(f).get("modules", [])}
+    except Exception:
+        return {}
+have, new = load(dst), load(inc)
+kept = 0
+for key, entry in new.items():
+    old = have.get(key)
+    # Higher scan version wins; same version, take the incoming one. An older
+    # scanner recorded less, so letting it overwrite a newer entry would lose
+    # the controls it never measured.
+    if old is None or int(entry.get("scan", 1)) >= int(old.get("scan", 1)):
+        have[key] = entry
+        kept += 1
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+with open(dst, "w") as f:
+    json.dump({"modules": list(have.values())}, f, indent=1)
+print(f"  port map merged: {len(have)} modules ({kept} updated from this build)")
+os.remove(inc)
+MERGE'; then
+        :   # the merge prints its own count, from the target's own file
     else
         say "PORT MAP FAILED TO COPY — vendor modules will draw without jacks"
     fi

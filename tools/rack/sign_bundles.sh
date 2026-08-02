@@ -88,6 +88,38 @@ else
     KEYCHAIN_ARG=()
 fi
 
+# Is the identity actually reachable by codesign?
+#
+# The keychain SEARCH LIST can be corrupted into entries like
+#   "/Users/x/Library/Keychains/    /Users/x/Library/Keychains/    …pulp-signing.keychain-db"
+# — repeated prefixes, from something rebuilding the list by interpolating
+# `security list-keychains` output unquoted. `security find-identity` against
+# the keychain FILE still lists the certificate, so the credentials look
+# perfect; codesign resolves through the search list and reports "no identity
+# found", which reads as a missing certificate and sends you to look for one
+# that is sitting right there. It cost a whole signing cycle.
+if ! security find-identity -v -p codesigning 2>/dev/null |
+     grep -q "$PULP_SIGN_IDENTITY_HASH"; then
+    say "the identity is not reachable through the keychain search list"
+    if [ -n "${PULP_SIGN_KEYCHAIN:-}" ] && [ -f "$PULP_SIGN_KEYCHAIN" ] &&
+       security find-identity -v -p codesigning "$PULP_SIGN_KEYCHAIN" 2>/dev/null |
+         grep -q "$PULP_SIGN_IDENTITY_HASH"; then
+        say "  it IS in $(basename "$PULP_SIGN_KEYCHAIN") — repairing the list"
+        security list-keychains -d user -s "$PULP_SIGN_KEYCHAIN" \
+                                          "$HOME/Library/Keychains/login.keychain-db"
+        if security find-identity -v -p codesigning 2>/dev/null |
+             grep -q "$PULP_SIGN_IDENTITY_HASH"; then
+            say "  repaired"
+        else
+            say "  STILL not reachable — refusing to sign ad-hoc by accident"
+            exit 1
+        fi
+    else
+        say "  and it is not in the signing keychain either. Run: pulp ship doctor"
+        exit 1
+    fi
+fi
+
 step "3. signing"
 # Inner Mach-O first, container last. A bundle signed before the dylib inside it
 # is invalid the moment the dylib is signed, and `codesign --verify` on the
