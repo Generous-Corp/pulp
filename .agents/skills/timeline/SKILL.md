@@ -947,6 +947,42 @@ neither is ordered the way you would guess:
   match the variant. Appending a new envelope and asserting it at the final index
   is correct.
 
+### A `ConflictCode` is a wire ordinal, and adding one changes nothing outside the process
+
+- **Append at the end, never next to the semantic neighbour.**
+  `tools/mcp/timeline_session_store.cpp` emits `static_cast<unsigned>(error.code)`
+  verbatim as the `numeric_code` field of every transaction-failure envelope, so
+  the ordinals are observable to MCP clients. Nothing *persists* them —
+  `core/timeline/native/` has zero `ConflictCode` hits, so the file journal does
+  not encode one — but the wire is enough. Verified by inserting one enumerator
+  above `JournalDurability`: the tree builds clean and `JournalDurability` silently
+  moves from 20 to 21. `test_timeline_transactions.cpp` pins the ordinals for this
+  reason; extend it when you append.
+- **There is no `switch` over `ConflictCode` anywhere, so a new code is a silent
+  fallthrough rather than a compile-time event.** The only dispatch is the
+  if/else chain in `transaction_failure()`
+  (`tools/mcp/timeline_session_store.cpp`), whose tail maps every unhandled code
+  to the string `"transaction_conflict"`; every other consumer is a two-way `==`.
+  A new enumerator therefore compiles with zero `-Wswitch` warnings and reaches
+  clients as the same generic string it always did. If a client must distinguish
+  the new cause, extend that chain in the same change — the enum alone is
+  invisible past the process boundary.
+- **`CommandJournal::replay` must relabel a reducer failure, not propagate it.**
+  Replay re-reduces each journaled entry; returning the reducer's error unchanged
+  makes "this entry stopped reducing" byte-for-byte identical to "the model
+  refused your live edit" — same `ModelInvariant`, and same *populated*
+  `model_error`, which is the one field that otherwise discriminates the two.
+  Overwrite `code` with `ReplayDivergence` and keep `item`, `related_item`, and
+  `model_error` as the explanation. The general rule for any code path that
+  re-runs recorded work: name the frame that failed, not its callee.
+- **`TransactionError::code` defaults to `Unspecified`, and no producer may rely
+  on that default.** Every site assigns `code` on the next statement or through a
+  code-taking helper (`journal_error()`, `error()`, `reduction_error()`). The
+  default exists only so that a forgotten assignment surfaces an obviously wrong
+  value instead of a plausible real cause; removing it entirely is worse, because
+  `TransactionError error;` would then leave a scalar indeterminate rather than
+  fail the build.
+
 ### The edit vocabulary sits at the editor rung, and "cannot see `view`" is not why
 
 `EditIntent` (`core/timeline_editor/include/pulp/timeline_editor/edit_intent.hpp`)
