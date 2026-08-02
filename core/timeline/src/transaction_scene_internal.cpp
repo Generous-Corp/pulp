@@ -158,16 +158,37 @@ runtime::Result<SceneCommandReduction, TransactionError>
 reduce_scene_command(const Project& project, const Command& command,
                      const Transaction& transaction, CommandId command_id,
                      bool allow_tombstone_restore) {
-    if (const auto* value = std::get_if<InsertScene>(&command))
-        return insert_scene(project, *value, transaction, command_id, allow_tombstone_restore);
-    if (const auto* value = std::get_if<RemoveScene>(&command))
-        return remove_scene(project, *value, transaction, command_id);
-    if (const auto* value = std::get_if<InsertSlot>(&command))
-        return insert_slot(project, *value, transaction, command_id, allow_tombstone_restore);
-    if (const auto* value = std::get_if<RemoveSlot>(&command))
-        return remove_slot(project, *value, transaction, command_id);
-    return reject_reduction<SceneCommandReduction>(ConflictCode::ModelInvariant, transaction,
-                                                   command_id);
+    // The family predicate above this call and the arms below it are two
+    // statements of the same list, and a chain of get_if proves nothing about
+    // its own coverage. Visiting puts a claimed-but-unhandled command in front
+    // of the compiler, which is where the outer dispatch already resolves it.
+    return std::visit(
+        [&]<typename T>(
+            const T& value) -> runtime::Result<SceneCommandReduction, TransactionError> {
+            if constexpr (std::is_same_v<T, InsertScene>)
+                return insert_scene(project, value, transaction, command_id,
+                                    allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveScene>)
+                return remove_scene(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, InsertSlot>)
+                return insert_slot(project, value, transaction, command_id,
+                                   allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveSlot>)
+                return remove_slot(project, value, transaction, command_id);
+            else {
+                static_assert(!is_scene_command_type<T>,
+                              "a command claimed by is_scene_command_type in "
+                              "transaction_dispatch_internal.hpp has no arm here; add "
+                              "one, or drop it from the claim list");
+                // Reached only by an alternative no family claims, which the
+                // caller's predicate already excludes. Kept as a rejection rather
+                // than std::unreachable(): this TU is -fno-exceptions, so being
+                // wrong here would abort the process, not fail one transaction.
+                return reject_reduction<SceneCommandReduction>(ConflictCode::ModelInvariant,
+                                                               transaction, command_id);
+            }
+        },
+        command);
 }
 
 } // namespace pulp::timeline::detail
