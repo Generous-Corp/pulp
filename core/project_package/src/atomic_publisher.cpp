@@ -171,8 +171,12 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
     if (::stat(parent.c_str(), &status) != 0 || !S_ISDIR(status.st_mode))
         return false;
     const bool writable_by_others = (status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
-    if (writable_by_others && (status.st_mode & S_ISVTX) == 0)
-        return false;
+    if (writable_by_others) {
+        const bool trusted_sticky_parent = (status.st_mode & S_ISVTX) != 0 &&
+                                           (status.st_uid == ::geteuid() || status.st_uid == 0);
+        if (!trusted_sticky_parent)
+            return false;
+    }
 #if defined(__APPLE__)
     errno = 0;
     acl_t acl = ::acl_get_file(parent.c_str(), ACL_TYPE_EXTENDED);
