@@ -536,6 +536,20 @@ per-ABI entry point for it.** Go through the plugin's own state:
   playback lane so sparse reuse cannot publish stale browser programs. This also
   does not create a JavaScript authoring surface by itself.
 
+- Registered-content compiler code is portable, but its declaration is
+  process-local. Adding a renderer to the shared playback source resolver makes
+  the implementation available to WAM and WebCLAP; it does **not** install the
+  schema, codec, or `ContentRendererRegistration` into a browser plugin's
+  registries. A plugin that authors or loads that content must declare the same
+  exact schema provenance and bounded renderer before compiling in each wasm
+  instance. Run schema/JSON validation and the registered compile hook in the
+  non-RT producer/Worker, then publish only validated `ProgramWire` bytes to the
+  AudioWorklet; none of that content compilation belongs on the render thread.
+  Keep unresolved content as a named compile failure rather than browser-only
+  silence, and do not carry a nondefault renderer production claim through
+  `ProgramWire`: the remote instance cannot inherit a reproducibility claim
+  without the process-local hook that justified it.
+
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
   alternative count (and an overload set with no generic fallback) precisely so
