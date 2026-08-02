@@ -654,6 +654,43 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     CHECK(border.a > 0.0f);
 }
 
+TEST_CASE("baked native materializer carries a resolved clip rectangle to the view",
+          "[view][import][native-materializer][clip-model]") {
+    // The importer resolves a node's real CSS clip chain to one rectangle in
+    // the node's own space. It reaches the renderer through this slot and NOT
+    // through `overflow`, because `overflow` clips whatever the node's children
+    // turn out to be — DOM parentage — and that is the chain CSS does not use.
+    // Two nodes, so the child proves the clip is per-node rather than something
+    // the parent's rectangle happened to cover.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 200.0f;
+    ir.root.style.clip_rect = IRStyle::ClipRect{5.0f, 5.0f, 90.0f, 90.0f};
+
+    IRNode child;
+    child.type = "frame";
+    child.stable_anchor_id = "escapee";
+    child.style.position = "absolute";
+    child.style.left = 10.0f;
+    child.style.top = 10.0f;
+    child.style.width = 50.0f;
+    child.style.height = 50.0f;
+    ir.root.children.push_back(std::move(child));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->ancestor_clip_rect().has_value());
+    CHECK(root->ancestor_clip_rect()->x == 5.0f);
+    CHECK(root->ancestor_clip_rect()->width == 90.0f);
+
+    // A node with no resolved clip gets none — it is not inherited from the
+    // parent's rectangle, which is the whole reason the slot is per-node.
+    REQUIRE(root->child_count() == 1);
+    CHECK_FALSE(root->child_at(0)->ancestor_clip_rect().has_value());
+}
+
 TEST_CASE("baked native materializer applies the SVG fill rule to the path widget",
           "[view][import][native-materializer][fill-rule]") {
     // The winding rule decides which regions of a multi-subpath path are

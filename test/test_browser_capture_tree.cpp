@@ -46,6 +46,16 @@ BrowserCaptureIrResult lower_fixture(bool native) {
     return lower_browser_capture_to_ir(fixture_envelope(), options);
 }
 
+/// Lower one of the real Chromium captures kept under `test/fixtures`, through
+/// the same entry point a `pulp import-design` run uses.
+BrowserCaptureIrResult lower_capture(std::string_view fixture) {
+    BrowserCaptureIrOptions options;
+    options.native_panel_lowering = true;
+    return lower_browser_capture_to_ir(
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_ROOT) / fixture / "capture.json",
+        options);
+}
+
 /// Depth-first over the whole subtree, not only the direct children: the point
 /// of the amendment is that the interesting nodes are no longer siblings.
 template <typename Predicate>
@@ -201,6 +211,8 @@ struct SnapshotSpec {
 ///   48 matrix(2, 0, 0, 2, 0, 0)                                — 2× scale
 ///   49 SPAN
 ///   50 visible   51 hidden   52 static   53 relative   54 absolute
+///   55 0px       56 1px      57 circle(50%)
+///   58 rgba(0, 0, 0, 0.5) 0px 0px 30px 0px
 /// so a style row of [11,14] is `background-image: none; display: block`.
 constexpr std::string_view kSnapshotStrings =
     R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
@@ -217,12 +229,23 @@ constexpr std::string_view kSnapshotStrings =
     R"J("w-1/2 p-4","a","b","a[0]/div.b",)J"
     R"J("matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)",)J"
     R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN",)J"
-    R"J("visible","hidden","static","relative","absolute")J";
+    R"J("visible","hidden","static","relative","absolute",)J"
+    R"J("0px","1px","circle(50%)","rgba(0, 0, 0, 0.5) 0px 0px 30px 0px")J";
 
-/// The property list the clip cases are parallel to: `overflow` decides what
-/// clips, `position` and `transform` decide what a clip applies TO.
+/// The property list the clip cases are parallel to. `overflow` decides what
+/// clips; `position` and `transform` decide what a clip applies TO; the border
+/// widths turn a clipper's border box into the padding box it actually clips
+/// to; `clip-path` is a clip whose region is a shape rather than a rectangle.
+///
+/// Row order: overflow, position, transform, clip-path, and the four border
+/// widths clockwise from the top.
 constexpr std::string_view kClipProperties =
-    R"(["overflow","position","transform"])";
+    R"(["overflow","position","transform","clip-path",)"
+    R"("border-top-width","border-right-width",)"
+    R"("border-bottom-width","border-left-width"])";
+
+/// A row for the clip property list: no clip of any kind, no border.
+constexpr std::string_view kNoClipRow = "[50,52,11,11,55,55,55,55]";
 
 /// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
 std::string build_snapshot(const SnapshotSpec& spec) {
@@ -258,8 +281,10 @@ struct LoweredSnapshot {
     IRNode root;
 };
 
-LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
-                               const std::string& name) {
+/// Lower into a root the caller already shaped — the panel frame a real caller
+/// passes in, whose own size and `overflow` are part of what the tree lands in.
+PaintedTreeCounts lower_into(const SnapshotSpec& spec, const std::string& name,
+                             IRNode& root) {
     const auto path = write_snapshot(build_snapshot(spec), name);
     const auto index = CapturedStyleIndex::load(path);
     // The index holds no reference to the file, so it goes now rather than at
@@ -267,8 +292,13 @@ LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
     // leave the snapshot behind exactly on the runs someone wants to inspect.
     fs::remove(path);
     REQUIRE(index);
+    return lower_painted_tree(*index, 0.0, 0.0, root);
+}
+
+LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
+                               const std::string& name) {
     LoweredSnapshot out;
-    out.counts = lower_painted_tree(*index, 0.0, 0.0, out.root);
+    out.counts = lower_into(spec, name, out.root);
     return out;
 }
 
@@ -1357,23 +1387,29 @@ TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",
     CHECK(cyclic->stable_anchor_id.has_value());
 }
 
-// ── The clip mismatch ───────────────────────────────────────────────────────
+// ── The clip model ──────────────────────────────────────────────────────────
 //
-// The tree carries `overflow` on a node and the renderer clips that node's
-// CHILDREN, so the emitted clip follows DOM parentage. CSS applies it along the
-// containing-block chain instead. The two disagree in BOTH directions, neither
-// is expressible by re-parenting, and the fix is a clip rectangle carried on
-// the node — a separate piece of work. What these cases pin is that lowering
-// COUNTS the disagreement rather than reporting the nodes as faithfully drawn.
+// A tree carrying `overflow` clips by DOM parentage, because a renderer applies
+// it to whatever the node's children turn out to be. CSS clips along the
+// containing-block chain instead, and the two disagree in BOTH directions — an
+// absolutely positioned node escapes an `overflow: hidden` ancestor it sits
+// inside, and a hoisted node keeps a clip its old parent gave it — so no
+// re-parenting fixes both. Lowering therefore resolves each node's real clip
+// chain and stores the intersection as ONE RECTANGLE ON THE NODE, relative to
+// the node. A rectangle attached to the node travels with the node, so where
+// the node ends up in the tree cannot change what it clips.
+//
+// The two counters stay wired as the audit of that model, read back off the
+// emitted tree rather than off the model that produced it.
 
-TEST_CASE("a clip the containing-block chain escapes is counted",
-          "[browser-capture][native-lowering]") {
+TEST_CASE("a node escaping a clip along the containing-block chain is not clipped",
+          "[browser-capture][native-lowering][clip-model]") {
     // `#esc` is absolutely positioned and its containing block is `#panel`, so
     // `#clip` — statically positioned, in between, `overflow: hidden` — does
-    // not clip it: Chrome paints it in full, outside `#clip` entirely. Nested
-    // under `#clip` here it IS clipped, and because the boxes do not intersect
-    // at all the node disappears. Counted, because the census would otherwise
-    // report a vanished node as `native` and fully drawn.
+    // not clip it: Chrome paints it in full, outside `#clip` entirely. It is
+    // still emitted UNDER `#clip`, because the tree mirrors the DOM, so the
+    // proof is that being there costs it nothing: no clip rectangle, and no
+    // `overflow` left on the parent to impose one.
     //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#panel (relative),
     //        4 DIV#clip (static, hidden), 5 DIV#esc (absolute)
@@ -1384,8 +1420,9 @@ TEST_CASE("a clip the containing-block chain escapes is counted",
             .parents = "[-1,0,1,2,3,4]",
             .attributes = "[[],[],[],[],[],[]]",
             .layout_nodes = "[0,1,2,3,4,5]",
-            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
-                      "[50,53,11],[51,52,11],[50,54,11]]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[50,53,11,11,55,55,55,55],"
+                      "[51,52,11,11,55,55,55,55],[50,54,11,11,55,55,55,55]]",
             .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
                       "[0,0,400,400],[40,40,100,100],[120,260,200,40]]",
             .paint_orders = "[0,1,1,2,3,4]",
@@ -1393,27 +1430,45 @@ TEST_CASE("a clip the containing-block chain escapes is counted",
         },
         "clip-escape");
     CHECK(lowered.counts.lowered == 5);
-    CHECK(lowered.counts.clip_over_applied == 1);
+    CHECK(lowered.counts.clip_over_applied == 0);
     CHECK(lowered.counts.clip_lost == 0);
 
-    // Named on the node, so the defect is locatable and not only countable.
+    // The escaping node itself: full size, no clip rectangle at all.
     const auto* escaped = find_node(lowered.root, [](const IRNode& node) {
-        return attribute(node, "clip_over_applied") == "1";
+        return node.style.width.value_or(0.0f) == 200.0f &&
+               node.style.height.value_or(0.0f) == 40.0f;
     });
     REQUIRE(escaped != nullptr);
-    CHECK(*escaped->style.width == 200.0f);
+    CHECK_FALSE(escaped->style.clip_rect.has_value());
+    CHECK(attribute(*escaped, "clip_over_applied").empty());
+
+    // And its emitted parent no longer carries the `overflow` that would clip
+    // it by parentage. This is the assertion that makes the one above mean
+    // something: an unclipped node under a still-clipping parent is clipped.
+    const auto* clipper = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width.value_or(0.0f) == 100.0f;
+    });
+    REQUIRE(clipper != nullptr);
+    CHECK_FALSE(clipper->style.overflow.has_value());
+    CHECK(contains(*clipper, escaped));
 }
 
-TEST_CASE("a clip a hoist regrafted past is counted",
-          "[browser-capture][native-lowering]") {
+TEST_CASE("a hoisted node keeps the clip its DOM parent gave it",
+          "[browser-capture][native-lowering][clip-model]") {
     // The mirror image. `#under` is absolutely positioned inside `#card`, whose
     // `overflow: hidden` DOES clip it — `#card` is its containing block. But
     // `#under` paints before its own parent, so it is hoisted out from under
-    // `#card`, and the emitted tree no longer has the clip above it: it paints
-    // at full width, outside the box that contained it in the browser.
+    // `#card` and no emitted ancestor carries that clip any more. The rectangle
+    // on the node is what survives the move.
+    //
+    // `#card` is 102x102 at (150,150) with a 1px border, so the padding box it
+    // clips to is the 100x100 at (151,151) — NOT the box the snapshot reports.
+    // `#under` sits at (91,171), so in its own space the clip starts at
+    // x = 151-91 = 60, y = 151-171 = -20.
     //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#panel (relative),
-    //        4 DIV#card (absolute, hidden), 5 DIV#under (absolute) inside it
+    //        4 DIV#card (absolute, hidden, 1px border),
+    //        5 DIV#under (absolute) inside it
     const auto lowered = lower_snapshot(
         {
             .node_names = "[0,1,2,3,3,3]",
@@ -1421,8 +1476,9 @@ TEST_CASE("a clip a hoist regrafted past is counted",
             .parents = "[-1,0,1,2,3,4]",
             .attributes = "[[],[],[],[],[],[]]",
             .layout_nodes = "[0,1,2,3,4,5]",
-            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
-                      "[50,53,11],[51,54,11],[50,54,11]]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[50,53,11,11,55,55,55,55],"
+                      "[51,54,11,11,56,56,56,56],[50,54,11,11,55,55,55,55]]",
             .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
                       "[0,0,400,400],[150,150,102,102],[91,171,200,40]]",
             // #under paints before #card, which is what fires the hoist.
@@ -1432,25 +1488,31 @@ TEST_CASE("a clip a hoist regrafted past is counted",
         "clip-hoisted");
     CHECK(lowered.counts.lowered == 5);
     CHECK(lowered.counts.hoisted_escapes == 1);
-    CHECK(lowered.counts.clip_lost == 1);
+    CHECK(lowered.counts.clip_lost == 0);
     CHECK(lowered.counts.clip_over_applied == 0);
 
-    // The same node carries both notes: hoisting is why the clip was lost, and
-    // `native_nodes_hoisted` alone reads as a neutral structural rearrangement.
     const auto* under = find_node(lowered.root, [](const IRNode& node) {
-        return attribute(node, "clip_lost") == "1";
+        return attribute(node, "paint_order_hoisted") == "1";
     });
     REQUIRE(under != nullptr);
-    CHECK(attribute(*under, "paint_order_hoisted") == "1");
+    REQUIRE(under->style.clip_rect.has_value());
+    CHECK(under->style.clip_rect->x == 60.0f);
+    CHECK(under->style.clip_rect->y == -20.0f);
+    CHECK(under->style.clip_rect->width == 100.0f);
+    CHECK(under->style.clip_rect->height == 100.0f);
+    // The node itself is still its full solved size — the clip constrains what
+    // is drawn, it does not resize the box.
+    CHECK(*under->style.width == 200.0f);
 }
 
-TEST_CASE("a clip that really does apply is not counted as a mismatch",
-          "[browser-capture][native-lowering]") {
-    // Without this, the counter could simply be "an ancestor has overflow" and
-    // both cases above would still pass. Two shapes where the emitted clip and
-    // the CSS clip AGREE: an in-flow child of a clipping parent, and an
-    // absolutely positioned child whose containing block IS that parent — the
-    // case that looks like the escape above and is not one.
+TEST_CASE("a clip that really does apply is carried, and a no-op one is not",
+          "[browser-capture][native-lowering][clip-model]") {
+    // Without this, the model could simply be "never clip anything" and both
+    // cases above would still pass. Two shapes where a clip genuinely applies:
+    // an in-flow child of a clipping parent, and an absolutely positioned child
+    // whose containing block IS that parent — the case that looks like the
+    // escape above and is not one. Both children stick out of their clipper, so
+    // both must carry the rectangle.
     //
     // nodes: 0 #document, 1 HTML, 2 BODY,
     //        3 DIV.wrap (static, hidden), 4 DIV.inner (static) inside it,
@@ -1462,11 +1524,13 @@ TEST_CASE("a clip that really does apply is not counted as a mismatch",
             .parents = "[-1,0,1,2,3,2,5]",
             .attributes = "[[],[],[],[23,24],[23,25],[23,27],[23,26]]",
             .layout_nodes = "[0,1,2,3,4,5,6]",
-            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
-                      "[51,52,11],[50,52,11],[51,53,11],[50,54,11]]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[51,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[51,53,11,11,55,55,55,55],"
+                      "[50,54,11,11,55,55,55,55]]",
             .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
-                      "[10,10,100,100],[20,20,40,40],"
-                      "[200,10,100,100],[210,20,40,40]]",
+                      "[10,10,100,100],[20,20,140,40],"
+                      "[200,10,100,100],[210,20,140,40]]",
             .paint_orders = "[0,1,1,2,3,4,5]",
             .computed_names = std::string(kClipProperties),
         },
@@ -1474,6 +1538,245 @@ TEST_CASE("a clip that really does apply is not counted as a mismatch",
     CHECK(lowered.counts.lowered == 6);
     CHECK(lowered.counts.clip_over_applied == 0);
     CHECK(lowered.counts.clip_lost == 0);
+
+    // `.inner` is in flow inside `.wrap`, so `.wrap`'s box clips it: in its own
+    // space the clip runs from (-10,-10) for 100x100.
+    const auto* inner = find_named(lowered.root, "div.inner");
+    REQUIRE(inner != nullptr);
+    REQUIRE(inner->style.clip_rect.has_value());
+    CHECK(inner->style.clip_rect->x == -10.0f);
+    CHECK(inner->style.clip_rect->y == -10.0f);
+    CHECK(inner->style.clip_rect->width == 100.0f);
+
+    // `.leaf` is out of flow but `.item` IS its containing block, so the clip
+    // applies to it too — the shape that must NOT be mistaken for an escape.
+    const auto* leaf = find_named(lowered.root, "div.leaf");
+    REQUIRE(leaf != nullptr);
+    REQUIRE(leaf->style.clip_rect.has_value());
+    CHECK(leaf->style.clip_rect->width == 100.0f);
+
+    // The clippers themselves are inside nothing that clips, so they carry no
+    // rectangle: a clip is stored where it BITES, not on every node under a
+    // container that happens to have `overflow`.
+    const auto* wrap = find_named(lowered.root, "div.wrap");
+    REQUIRE(wrap != nullptr);
+    CHECK_FALSE(wrap->style.clip_rect.has_value());
+}
+
+TEST_CASE("a clip that cannot bite is not written onto the node",
+          "[browser-capture][native-lowering][clip-model]") {
+    // A rectangle that already holds everything the node draws would make the
+    // renderer install a clip every frame to change nothing, and would put a
+    // clip on essentially every node of any panel with an outer
+    // `overflow: hidden`. It is skipped — but only when the node's ink IS its
+    // box. `.glow` carries a 30px-blur shadow that paints well outside its box,
+    // and CSS clips that overspill, so its clip is kept even though its box
+    // fits.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.wrap (static, hidden),
+    //        4 DIV.inner (static, plain), 5 DIV.item (static, shadowed)
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,3]",
+            .attributes = "[[],[],[],[23,24],[23,25],[23,27]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[50,52,11,11,55,55,55,55,11],"
+                      "[50,52,11,11,55,55,55,55,11],"
+                      "[50,52,11,11,55,55,55,55,11],"
+                      "[51,52,11,11,55,55,55,55,11],"
+                      "[50,52,11,11,55,55,55,55,11],"
+                      "[50,52,11,11,55,55,55,55,58]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,200,200],[20,20,40,40],[80,80,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+            .computed_names =
+                R"(["overflow","position","transform","clip-path",)"
+                R"("border-top-width","border-right-width",)"
+                R"("border-bottom-width","border-left-width","box-shadow"])",
+        },
+        "clip-noop");
+    CHECK(lowered.counts.lowered == 5);
+    CHECK(lowered.counts.clip_over_applied == 0);
+    CHECK(lowered.counts.clip_lost == 0);
+
+    const auto* inner = find_named(lowered.root, "div.inner");
+    REQUIRE(inner != nullptr);
+    CHECK_FALSE(inner->style.clip_rect.has_value());
+
+    const auto* shadowed = find_named(lowered.root, "div.item");
+    REQUIRE(shadowed != nullptr);
+    REQUIRE_FALSE(shadowed->style.box_shadow.empty());
+    REQUIRE(shadowed->style.clip_rect.has_value());
+    CHECK(shadowed->style.clip_rect->width == 200.0f);
+}
+
+TEST_CASE("a shape clip the rectangle cannot carry is counted as lost",
+          "[browser-capture][native-lowering][clip-model]") {
+    // `clip-path` clips everything painted inside the element, whatever its
+    // position, and its region is a shape. One rectangle cannot stand in for a
+    // circle, so the node keeps ink the browser cuts away — which is a real
+    // `clip_lost`, and is what keeps that counter able to fire at all now that
+    // the rectangular chain is resolved correctly. It is named on the node with
+    // the reason, so it reads as a limit of the model rather than as a missing
+    // rectangle someone could go add.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV.wrap (clip-path: circle(50%)), 4 DIV.inner inside it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[23,24],[23,25]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[50,52,11,57,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,100,100],[20,20,40,40]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-shape");
+    CHECK(lowered.counts.lowered == 4);
+    CHECK(lowered.counts.clip_lost == 1);
+    CHECK(lowered.counts.clip_over_applied == 0);
+
+    const auto* inner = find_named(lowered.root, "div.inner");
+    REQUIRE(inner != nullptr);
+    CHECK(attribute(*inner, "clip_lost") == "1");
+    CHECK(attribute(*inner, "clip_inexpressible") == "clip-path");
+}
+
+TEST_CASE("the panel frame's crop is not counted as a clip disagreement",
+          "[browser-capture][native-lowering][clip-model]") {
+    // The root the caller lowers into is a window onto the page, and the crop
+    // IS the panel — a node the frame cuts is out of frame, not mis-clipped.
+    // Counting it would fire on `<html>` for every cropped capture and bury the
+    // one node an ancestor inside the panel clipped by mistake, so the frame is
+    // on both sides of the comparison and the verdict is unchanged by it.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV.wrap — which runs 200px past
+    // the right edge of the 200x200 frame the root declares.
+    const SnapshotSpec spec{
+        .node_names = "[0,1,2,3]",
+        .node_types = "[9,1,1,1]",
+        .parents = "[-1,0,1,2]",
+        .attributes = "[[],[],[],[23,24]]",
+        .layout_nodes = "[0,1,2,3]",
+        .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                  "[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55]]",
+        .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                  "[100,100,300,60]]",
+        .paint_orders = "[0,1,1,2]",
+        .computed_names = std::string(kClipProperties),
+    };
+
+    IRNode clipping_root;
+    clipping_root.style.width = 200.0f;
+    clipping_root.style.height = 200.0f;
+    clipping_root.style.overflow = "hidden";
+    const auto clipped = lower_into(spec, "clip-frame", clipping_root);
+    CHECK(clipped.clip_over_applied == 0);
+    CHECK(clipped.clip_lost == 0);
+
+    // And the frame stays the ONLY thing in the emitted tree that clips by
+    // parentage. `overflow` reappearing on a lowered node would put DOM
+    // parentage back in charge underneath every per-node rectangle, which is
+    // the defect the model exists to remove — so it is asserted structurally
+    // rather than left to a counter to notice.
+    const int with_overflow = count_nodes(clipping_root, [](const IRNode& n) {
+        return n.style.overflow.has_value();
+    });
+    CHECK(with_overflow == 0);
+}
+
+// ── The clip model, against Chrome's own captures ───────────────────────────
+//
+// The cases above build the DOM snapshot by hand, which proves the algorithm
+// and nothing about the data. These three run the SAME lowering over real
+// `DOMSnapshot.captureSnapshot` output from Chrome, entered the way an import
+// enters it, so the property spellings, the serialized `matrix(...)`, the
+// sub-pixel boxes and the paint-order ties are Chrome's rather than ours.
+
+TEST_CASE("a real capture of a containing-block escape clips nothing",
+          "[browser-capture][native-lowering][clip-model]") {
+    // `clip-escape/c.html`: `#esc` is `position: absolute` inside a
+    // `position: static; overflow: hidden` box, and its containing block is the
+    // `#panel` above that box. Chrome paints it in full at (120,260) — 120px
+    // clear of the 100x100 clipper, which does not touch it. Clipped by DOM
+    // parentage the node has no pixels left at all.
+    const auto lowered = lower_capture("browser-capture-clip-escape");
+    REQUIRE(lowered.error.empty());
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    // The counters are absent, not zero: they are recorded only when they fire.
+    CHECK(attribute(root, "native_nodes_clip_over_applied").empty());
+    CHECK(attribute(root, "native_nodes_clip_lost").empty());
+
+    const auto* escaped = find_named(root, "div#esc");
+    REQUIRE(escaped != nullptr);
+    CHECK_FALSE(escaped->style.clip_rect.has_value());
+    CHECK(*escaped->style.width == 200.0f);
+    // It really is emitted under the clipper — the disagreement is resolved by
+    // the clip travelling with the node, not by moving the node.
+    const auto* clipper = find_named(root, "div#clip");
+    REQUIRE(clipper != nullptr);
+    CHECK(contains(*clipper, escaped));
+    CHECK_FALSE(clipper->style.overflow.has_value());
+}
+
+TEST_CASE("a real capture of a hoist keeps the clip on the hoisted node",
+          "[browser-capture][native-lowering][clip-model]") {
+    // `clip-hoist/h.html`: `#under` has `z-index: -1`, so Chrome paints it
+    // before the `#card` that contains it and lowering hoists it out. `#card`
+    // is `position: absolute; overflow: hidden` with a 1px border, so it IS
+    // `#under`'s containing block and DOES clip it — to its padding box, the
+    // 100x100 at (151,151). `#under` is 200 wide at (91,171): without the clip
+    // it paints roughly twice the ink Chrome shows.
+    const auto lowered = lower_capture("browser-capture-clip-hoist");
+    REQUIRE(lowered.error.empty());
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_nodes_clip_over_applied").empty());
+    CHECK(attribute(root, "native_nodes_clip_lost").empty());
+    CHECK(attribute(root, "native_nodes_hoisted") == "1");
+
+    const auto* under = find_named(root, "div#under");
+    REQUIRE(under != nullptr);
+    CHECK(attribute(*under, "paint_order_hoisted") == "1");
+    REQUIRE(under->style.clip_rect.has_value());
+    CHECK(under->style.clip_rect->x == 60.0f);
+    CHECK(under->style.clip_rect->y == -20.0f);
+    CHECK(under->style.clip_rect->width == 100.0f);
+    CHECK(under->style.clip_rect->height == 100.0f);
+}
+
+TEST_CASE("a real capture where the clip agrees reports no disagreement",
+          "[browser-capture][native-lowering][clip-model]") {
+    // `clip-transform/rot.html`: an `overflow: hidden` panel holding a rotated
+    // bar and a scaled box, both `position: absolute` with the panel as their
+    // containing block. Nothing escapes and nothing is hoisted, so both
+    // counters must stay silent — the control that keeps the two cases above
+    // from passing for the trivial reason that the audit never fires.
+    const auto lowered = lower_capture("browser-capture-clip-transform");
+    REQUIRE(lowered.error.empty());
+    REQUIRE(lowered.design_ir);
+    const auto& root = lowered.design_ir->root;
+
+    CHECK(attribute(root, "native_nodes_clip_over_applied").empty());
+    CHECK(attribute(root, "native_nodes_clip_lost").empty());
+    CHECK(attribute(root, "native_nodes_hoisted").empty());
+
+    // The rotated bar is still reported as un-drawable rather than painted as
+    // its bounding box, which is the other claim this capture was made for.
+    const auto* bar = find_named(root, "div#bar");
+    REQUIRE(bar != nullptr);
+    CHECK(attribute(*bar, "capture_fallback_reason") == "transform");
 }
 
 TEST_CASE("the reorder audit counts a real inversion and only a visible one",

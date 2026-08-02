@@ -1341,6 +1341,18 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
+    // The clip an importer resolved for THIS node along CSS's containing-block
+    // chain, in the node's own coordinate space. Applied to the node's own ink
+    // only — its children carry their own — so a node that escapes an
+    // `overflow: hidden` box it is nested inside is not clipped by being there,
+    // and a node moved to a new parent keeps the clip its old one gave it.
+    // Absent on every source that does not resolve a clip chain, which is why
+    // native and authored trees are unaffected.
+    if (style.clip_rect) {
+        view.set_ancestor_clip_rect(Rect{style.clip_rect->x, style.clip_rect->y,
+                                         style.clip_rect->width,
+                                         style.clip_rect->height});
+    }
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) {
             view.set_overflow(*overflow);

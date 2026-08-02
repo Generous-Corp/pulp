@@ -1515,6 +1515,26 @@ public:
     /// clears the slot. URL refs (`url(#id)`) and named shape forms
     /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
     /// `path("...")` form is honored today.
+    /// The clip an IMPORTER resolved for this view, in the view's own
+    /// coordinate space — the rectangle CSS's clip chain leaves of it.
+    ///
+    /// Unlike `overflow`, this clips ONLY this view's own painting, never its
+    /// children: each child carries the rectangle its own chain resolves to.
+    /// That is deliberate and is the whole reason the slot exists. CSS clips
+    /// along the containing-block chain while a view tree clips by parentage,
+    /// so a child can legitimately need a WIDER clip than its parent — an
+    /// absolutely positioned node whose containing block sits above the
+    /// `overflow: hidden` box it is nested in escapes that clip in a browser.
+    /// An inherited clip is an intersection and cannot widen, so no assignment
+    /// of inherited rectangles can express that; a per-view rectangle can.
+    ///
+    /// Native and authored trees never set it and pay nothing.
+    void set_ancestor_clip_rect(Rect r) { style_extras().ancestor_clip = r; }
+    const std::optional<Rect>& ancestor_clip_rect() const {
+        static const std::optional<Rect> kNone;
+        return style_extras_ ? style_extras_->ancestor_clip : kNone;
+    }
+
     void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
     const std::string& clip_path() const {
         static const std::string kEmpty;
@@ -2187,6 +2207,9 @@ private:
     struct ViewStyleExtras {
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
+        // Import-resolved clip on this view's OWN ink; see
+        // set_ancestor_clip_rect for why it does not descend.
+        std::optional<Rect> ancestor_clip;
         std::string clip_path;
         std::string mask_image;
         std::string mask;

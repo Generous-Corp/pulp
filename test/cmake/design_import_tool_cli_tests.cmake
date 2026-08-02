@@ -62,8 +62,15 @@ target_include_directories(pulp-test-browser-capture-import PRIVATE
 # layered shadows. Kept byte-verbatim (the envelope carries the screenshot's
 # sha256) so the computed-style lowering is proven against what Chrome actually
 # serializes rather than against hand-written JSON that agrees with the parser.
+# Three more real Chromium captures, one per shape where the emitted tree's
+# clip and CSS's clip can disagree: a node escaping an `overflow: hidden`
+# ancestor along the containing-block chain, a node hoisted out from under the
+# ancestor that clips it, and a transformed subtree where neither happens. Each
+# keeps the source HTML next to the capture so the document under test is
+# readable without replaying the browser.
 target_compile_definitions(pulp-test-browser-capture-import PRIVATE
-    PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style")
+    PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
+    PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
     pulp::view

@@ -764,14 +764,44 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     // push_effect_layers opened. Kept as one unit so FU-3's subtree cache can
     // wrap exactly this (background/border/paint()/children/decorations) while
     // the animatable layer wrappers stay outside the cache.
+    // An import-resolved ancestor clip wraps this view's OWN ink — its shadow,
+    // its box, its widget painting — and is released before the children, each
+    // of which carries the rectangle its own CSS clip chain resolves to. That
+    // asymmetry against `overflow` below is the point: `overflow` clips the
+    // subtree, this clips the view, and only the latter can express a child
+    // that escapes a clip its parent is inside.
+    const bool has_ancestor_clip = ancestor_clip_rect().has_value();
+    const auto open_ancestor_clip = [&] {
+        if (!has_ancestor_clip) return;
+        const Rect& r = *ancestor_clip_rect();
+        canvas.save();
+        canvas.clip_rect(r.x, r.y, r.width, r.height);
+    };
+    const auto close_ancestor_clip = [&] {
+        if (has_ancestor_clip) canvas.restore();
+    };
+
+    // The shadow is painted before the view's own `overflow` clip is installed
+    // — a box does not clip its own outset shadow — but an ANCESTOR's clip does
+    // cut it, so when there IS a shadow it gets its own scope. Skipped
+    // otherwise, so the common case installs the rectangle exactly once.
+    const bool clip_shadows = has_ancestor_clip && has_box_shadow();
+    if (clip_shadows) open_ancestor_clip();
     paint_outset_shadows(canvas);
+    if (clip_shadows) close_ancestor_clip();
+
+    // Pushed outside the scope below because `overflow` / `clip-path` DO apply
+    // to the children, and the ancestor clip deliberately does not.
     apply_overflow_and_clip_path(canvas);
+
+    open_ancestor_clip();
     paint_background_and_border(canvas);
 
     // Widget-specific painting. The outer timer wraps the whole paint_all body,
     // so `paint(canvas)` no-op overrides on styled containers still get
     // accurate self-time attribution.
     paint(canvas);
+    close_ancestor_clip();
 
     // Time only the recursive child paint so self_ns = outer - children in
     // paint_all correctly attributes framework drawing to this view.

@@ -21,6 +21,11 @@ using pulp::view::IRNode;
 constexpr int kElementNode = 1;
 constexpr int kTextNode = 3;
 
+/// Stands in for "this edge does not clip". Far outside any page coordinate a
+/// capture can hold, and finite so an unclipped edge still survives the
+/// arithmetic that intersects, offsets and rounds a clip.
+constexpr double kUnbounded = 1e7;
+
 /// Elements whose pixels do not come from CSS at all.
 ///
 /// `<canvas>` is imperative drawing; `<video>`/`<iframe>`/`<embed>`/`<object>`
@@ -254,12 +259,199 @@ struct ClipFacts {
     /// non-`static` position, and also a `transform` or `filter`, which take
     /// over as the containing block even on a statically positioned element.
     bool containing_block = false;
+    /// `clip-path` is not `none`. A clip-path clips the whole painted subtree
+    /// regardless of position, and its region is a shape rather than a
+    /// rectangle — so it reaches nodes the `overflow` chain does not, and a
+    /// rectangle cannot stand in for it.
+    bool shape_clips = false;
+    /// Border widths, so a clip can be taken against the PADDING box.
+    /// `overflow` clips descendants to the padding box, not the border box: a
+    /// 1px-bordered card that clips is one pixel tighter on every side than the
+    /// box the snapshot reports for it.
+    double border_left = 0.0;
+    double border_top = 0.0;
+    double border_right = 0.0;
+    double border_bottom = 0.0;
 };
 
 bool boxes_overlap(const CapturedBox& a, const CapturedBox& b) {
     return a.left < b.left + b.width && b.left < a.left + a.width &&
            a.top < b.top + b.height && b.top < a.top + a.height;
 }
+
+/// A clip region in page coordinates, held by edge so intersection is a max/min
+/// per side and an unclipped region is simply the whole plane.
+struct ClipRect {
+    double left = -kUnbounded;
+    double top = -kUnbounded;
+    double right = kUnbounded;
+    double bottom = kUnbounded;
+
+    bool empty() const { return right <= left || bottom <= top; }
+};
+
+ClipRect intersect(const ClipRect& a, const ClipRect& b) {
+    return ClipRect{std::max(a.left, b.left), std::max(a.top, b.top),
+                    std::min(a.right, b.right), std::min(a.bottom, b.bottom)};
+}
+
+ClipRect rect_of(const CapturedBox& box) {
+    return ClipRect{box.left, box.top, box.left + box.width,
+                    box.top + box.height};
+}
+
+/// Whether `outer` holds every pixel of `inner`, allowing for the sub-pixel
+/// values Blink's 1/64px layout grid produces. An empty `inner` is contained by
+/// anything: there is no ink to lose.
+bool contains(const ClipRect& outer, const ClipRect& inner) {
+    if (inner.empty()) return true;
+    if (outer.empty()) return false;
+    constexpr double kGrid = 1.0 / 64.0;
+    return outer.left <= inner.left + kGrid && outer.top <= inner.top + kGrid &&
+           outer.right >= inner.right - kGrid &&
+           outer.bottom >= inner.bottom - kGrid;
+}
+
+/// A parsed CSS length in px, or 0 for anything else. Chrome serializes
+/// computed border widths as `<n>px`, so this is the whole grammar that
+/// reaches here.
+double px_value(const std::string& value) {
+    if (value.empty()) return 0.0;
+    try {
+        return std::stod(value);
+    } catch (const std::exception&) {
+        return 0.0;
+    }
+}
+
+/// Where a browser would actually clip a node, resolved from the snapshot.
+///
+/// A pure function of the captured document — it holds no opinion about the
+/// tree being emitted, which is the point: the emitted clip has to be compared
+/// against something derived independently of it, or the comparison agrees with
+/// itself by construction.
+///
+/// Two chains, because CSS clips along two different ones. `overflow` clips
+/// along the CONTAINING-BLOCK chain, so an absolutely positioned node whose
+/// containing block sits above an `overflow: hidden` ancestor is not clipped by
+/// it — the escape DOM parentage gets wrong in both directions. `clip-path`
+/// clips the painted subtree, so it reaches every DOM descendant whatever its
+/// position, and its region is a shape one rectangle cannot stand in for.
+class CssClipChain {
+public:
+    struct Result {
+        ClipRect rect;              ///< intersection of every rect clipper
+        bool clipped = false;       ///< at least one rect clipper applies
+        bool inexpressible = false; ///< a shape clipper this model cannot carry
+    };
+
+    explicit CssClipChain(const CapturedStyleIndex& index) : index_(index) {
+        for (const auto& node : index.painted_nodes()) {
+            layout_of_[node.node_index] = node.layout_index;
+            box_of_[node.node_index] = node.bounds;
+        }
+    }
+
+    Result resolve(int node_index) {
+        Result out;
+        // The shape chain first: plain DOM ancestry, because a `clip-path`
+        // applies to everything painted inside the element.
+        walk_ancestry(index_, index_.parent_of(node_index), [&](int node) {
+            if (facts_of(node).shape_clips) {
+                out.inexpressible = true;
+                return false;
+            }
+            return true;
+        });
+        const int total = index_.node_count();
+        int current = node_index;
+        for (int steps = 0; steps < total; ++steps) {
+            const auto self = facts_of(current);
+            int ancestor = -1;
+            if (self.out_of_flow) {
+                // Its containing block is the viewport: nothing in the document
+                // clips it.
+                if (self.viewport_relative) break;
+                walk_ancestry(index_, index_.parent_of(current), [&](int node) {
+                    if (!facts_of(node).containing_block) return true;
+                    ancestor = node;
+                    return false;
+                });
+            } else {
+                ancestor = index_.parent_of(current);
+            }
+            if (ancestor < 0) break;
+            if (facts_of(ancestor).clips) {
+                out.rect = intersect(out.rect, clip_box_of(ancestor));
+                out.clipped = true;
+            }
+            current = ancestor;
+        }
+        return out;
+    }
+
+private:
+    ClipFacts facts_of(int node_index) {
+        const auto seen = facts_.find(node_index);
+        if (seen != facts_.end()) return seen->second;
+        ClipFacts facts;
+        // A text run's computed style row IS its parent element's, so reading
+        // `position` off it would report the parent's — and a text run is
+        // always in flow inside the element it belongs to.
+        if (index_.node_type_of(node_index) == kElementNode) {
+            const auto layout = layout_of_.find(node_index);
+            if (layout != layout_of_.end()) {
+                const auto computed = index_.styles_for_layout(layout->second);
+                const auto value = [&](const char* name) {
+                    const auto found = computed.find(name);
+                    return found == computed.end() ? std::string{}
+                                                   : found->second;
+                };
+                const auto overflow = value("overflow");
+                facts.clips = !overflow.empty() && overflow != "visible";
+                const auto position = value("position");
+                facts.viewport_relative = position == "fixed";
+                facts.out_of_flow =
+                    position == "absolute" || facts.viewport_relative;
+                const auto transform = value("transform");
+                const auto filter = value("filter");
+                facts.containing_block =
+                    (!position.empty() && position != "static") ||
+                    (!transform.empty() && transform != "none") ||
+                    (!filter.empty() && filter != "none");
+                const auto clip_path = value("clip-path");
+                facts.shape_clips = !clip_path.empty() && clip_path != "none";
+                facts.border_left = px_value(value("border-left-width"));
+                facts.border_top = px_value(value("border-top-width"));
+                facts.border_right = px_value(value("border-right-width"));
+                facts.border_bottom = px_value(value("border-bottom-width"));
+            }
+        }
+        facts_[node_index] = facts;
+        return facts;
+    }
+
+    /// The rectangle an `overflow` clip confines descendants to: the element's
+    /// PADDING box. CSS clips overflow inside the border, so taking the box the
+    /// snapshot reports verbatim leaks one border width on each side — visible
+    /// as a hairline of content drawn over a card's own frame.
+    ClipRect clip_box_of(int node_index) {
+        const auto found = box_of_.find(node_index);
+        if (found == box_of_.end()) return ClipRect{};
+        const auto facts = facts_of(node_index);
+        auto rect = rect_of(found->second);
+        rect.left += facts.border_left;
+        rect.top += facts.border_top;
+        rect.right -= facts.border_right;
+        rect.bottom -= facts.border_bottom;
+        return rect;
+    }
+
+    const CapturedStyleIndex& index_;
+    std::unordered_map<int, int> layout_of_;
+    std::unordered_map<int, CapturedBox> box_of_;
+    std::unordered_map<int, ClipFacts> facts_;
+};
 
 }  // namespace
 
@@ -407,6 +599,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         // declaration may move it — its sub-pixel values are Blink's 1/64px
         // layout grid arriving as data, consumed verbatim, never rounded.
         lowered.style.position = "absolute";
+        // `overflow` is NOT carried onto a lowered node. A renderer applies it
+        // to whatever the node's children turn out to be, which makes DOM
+        // parentage the clip authority — and DOM parentage is not the chain CSS
+        // clips along. The per-node clip rectangle resolved below is the
+        // authority instead; leaving `overflow` here too would re-impose the
+        // parentage clip underneath it and clip an escaping node twice.
+        lowered.style.overflow.reset();
 
         lowered.attributes["paint_class"] =
             std::string(to_string(paint_class));
@@ -485,105 +684,44 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 .node.stable_anchor_id.value_or("");
     }
 
-    // ── Clip audit ──────────────────────────────────────────────────────────
-    // The tree carries `overflow` on a node and the renderer clips that node's
-    // CHILDREN, so the emitted clip follows DOM parentage. CSS follows the
-    // containing-block chain instead, and the two disagree in both directions.
-    // Neither is fixable by re-parenting — the honest fix is a clip rectangle
-    // carried on the node — so what lowering can do today is say how often it
-    // is wrong rather than report those nodes as faithfully drawn.
-    const int node_total = index.node_count();
-    std::unordered_map<int, ClipFacts> clip_facts;
-    const auto facts_of = [&](int node_index) {
-        const auto seen = clip_facts.find(node_index);
-        if (seen != clip_facts.end()) return seen->second;
-        ClipFacts facts;
-        // A text run's computed style row IS its parent element's, so reading
-        // `position` off it would report the parent's — and a text run is
-        // always in flow inside the element it belongs to.
-        if (index.node_type_of(node_index) == kElementNode) {
-            const auto layout = layout_of.find(node_index);
-            if (layout != layout_of.end()) {
-                const auto computed = index.styles_for_layout(layout->second);
-                const auto value = [&](const char* name) {
-                    const auto found = computed.find(name);
-                    return found == computed.end() ? std::string{}
-                                                   : found->second;
-                };
-                const auto overflow = value("overflow");
-                facts.clips = !overflow.empty() && overflow != "visible";
-                const auto position = value("position");
-                facts.viewport_relative = position == "fixed";
-                facts.out_of_flow =
-                    position == "absolute" || facts.viewport_relative;
-                const auto transform = value("transform");
-                const auto filter = value("filter");
-                facts.containing_block =
-                    (!position.empty() && position != "static") ||
-                    (!transform.empty() && transform != "none") ||
-                    (!filter.empty() && filter != "none");
-            }
-        }
-        clip_facts[node_index] = facts;
-        return facts;
-    };
+    // Where a browser would actually clip each node, resolved from the
+    // snapshot alone.
+    CssClipChain css_chain(index);
 
-    // The ancestors a browser would actually clip this node against.
-    const auto css_clippers = [&](int node_index) {
-        std::vector<int> clippers;
-        int current = node_index;
-        for (int steps = 0; steps < node_total; ++steps) {
-            const auto self = facts_of(current);
-            int ancestor = -1;
-            if (self.out_of_flow) {
-                // Its containing block is the viewport: nothing in the document
-                // clips it.
-                if (self.viewport_relative) break;
-                // Ancestors BETWEEN an absolutely positioned node and its
-                // containing block are not on its clip chain at all — this is
-                // the escape the nested tree cannot express.
-                walk_ancestry(index, index.parent_of(current), [&](int node) {
-                    if (!facts_of(node).containing_block) return true;
-                    ancestor = node;
-                    return false;
-                });
-            } else {
-                ancestor = index.parent_of(current);
-            }
-            if (ancestor < 0) break;
-            if (facts_of(ancestor).clips) clippers.push_back(ancestor);
-            current = ancestor;
-        }
-        return clippers;
-    };
-
+    // ── The clip each node carries ──────────────────────────────────────────
+    // Stored ON the node, relative to the node, so it travels with the node
+    // instead of with its position in the tree. That is what makes hoisting
+    // safe: a node regrafted onto a new ancestor keeps the clip CSS gives it,
+    // and a node nested under an ancestor CSS does not clip is not clipped by
+    // being there. The renderer applies it to the node's own ink only —
+    // descendants carry their own, resolved the same way — so the rectangle
+    // never has to be monotone down the tree, which is exactly the constraint
+    // an inherited clip could not satisfy.
+    std::vector<CssClipChain::Result> css_clip(slots.size());
     for (size_t i = 0; i < slots.size(); ++i) {
-        const auto clippers = css_clippers(slots[i].node_index);
-        std::unordered_set<int> emitted;
-        int walk = slots[i].parent_slot;
-        for (size_t step = 0; walk >= 0 && step < slots.size(); ++step) {
-            emitted.insert(slots[static_cast<size_t>(walk)].node_index);
-            walk = slots[static_cast<size_t>(walk)].parent_slot;
-        }
-        const auto on_css_chain = [&clippers](int node) {
-            return std::find(clippers.begin(), clippers.end(), node) !=
-                   clippers.end();
-        };
-        const bool over = std::any_of(
-            emitted.begin(), emitted.end(), [&](int node) {
-                return facts_of(node).clips && !on_css_chain(node);
-            });
-        const bool lost = std::any_of(
-            clippers.begin(), clippers.end(),
-            [&](int node) { return emitted.count(node) == 0; });
-        if (over) {
-            ++counts.clip_over_applied;
-            slots[i].node.attributes["clip_over_applied"] = "1";
-        }
-        if (lost) {
-            ++counts.clip_lost;
-            slots[i].node.attributes["clip_lost"] = "1";
-        }
+        css_clip[i] = css_chain.resolve(slots[i].node_index);
+        if (!css_clip[i].clipped) continue;
+        const auto& box = slots[i].box;
+        // A clip that already holds everything the node draws is a rectangle
+        // the renderer would install once a frame to change nothing. Skipped —
+        // but only for a node whose ink IS its box: a shadow or a blur paints
+        // outside the border box, and CSS clips that overspill too.
+        const bool draws_outside_box =
+            !slots[i].node.style.box_shadow.empty() ||
+            slots[i].node.style.filter.has_value();
+        if (!draws_outside_box && contains(css_clip[i].rect, rect_of(box)))
+            continue;
+        pulp::view::IRStyle::ClipRect rect{};
+        rect.x = static_cast<float>(css_clip[i].rect.left - box.left);
+        rect.y = static_cast<float>(css_clip[i].rect.top - box.top);
+        // Two clippers that do not overlap leave nothing, which IS the answer —
+        // the node draws no pixels. Held at zero rather than passed on as a
+        // negative extent, which a canvas clip is not defined for.
+        rect.width = static_cast<float>(std::max(
+            0.0, css_clip[i].rect.right - css_clip[i].rect.left));
+        rect.height = static_cast<float>(std::max(
+            0.0, css_clip[i].rect.bottom - css_clip[i].rect.top));
+        slots[i].node.style.clip_rect = rect;
     }
 
     // Children in slot order, which IS Chrome's paint order among siblings.
@@ -608,11 +746,40 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // plus `dx`/`dy` — unchanged from the flat lowering — and every deeper
     // child subtracts one more solved box. The sums therefore telescope back to
     // Chrome's absolute box exactly.
+    //
+    // The clip audit rides along here, because this is where the ARTIFACT
+    // exists: the rectangle a consumer will read off the node, composed with
+    // the clips its emitted ancestors impose, against the page coordinates the
+    // offsets telescope back to. Deriving the emitted side from the model that
+    // produced it would agree with itself by construction; reading it back is
+    // what makes a rectangle written in the wrong space, dropped, or silently
+    // re-inherited from a parent's `overflow` show up as a number.
+    const auto overflow_clip_of = [](const IRNode& node, double left,
+                                     double top) {
+        ClipRect clip;
+        if (!node.style.overflow) return clip;
+        const auto& value = *node.style.overflow;
+        if (value.empty() || value == "visible") return clip;
+        // A clip needs a box. A node that says it clips but never says how big
+        // it is would otherwise clip to a point and read as every descendant
+        // being over-clipped — a counter storm from a missing field.
+        if (!node.style.width || !node.style.height) return clip;
+        clip.left = left;
+        clip.top = top;
+        clip.right = left + *node.style.width;
+        clip.bottom = top + *node.style.height;
+        return clip;
+    };
+
+    // The panel frame's own clip. The caller sizes the frame to the crop it
+    // asked for, so this is the window every lowered node is drawn through.
+    const ClipRect root_clip = overflow_clip_of(root, -dx, -dy);
+
     std::vector<int> composed_order;   // slots in composed pre-order
     composed_order.reserve(slots.size());
     const auto place = [&](auto&& self, int slot, double frame_left,
-                           double frame_top, int depth,
-                           IRNode& parent) -> void {
+                           double frame_top, int depth, IRNode& parent,
+                           ClipRect ancestor_clip) -> void {
         auto& entry = slots[static_cast<size_t>(slot)];
         entry.node.style.left = static_cast<float>(entry.box.left - frame_left);
         entry.node.style.top = static_cast<float>(entry.box.top - frame_top);
@@ -627,20 +794,66 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         counts.max_depth = std::max(counts.max_depth, depth);
         composed_order.push_back(slot);
 
+        // What the emitted tree clips this node's own ink to: whatever its
+        // emitted ancestors impose, plus the rectangle the node itself carries.
+        // The node's own rectangle deliberately does NOT descend — a child
+        // resolves its own chain, and a child can legitimately need a WIDER
+        // clip than its parent when it escapes a clipper the parent is inside.
+        ClipRect emitted = ancestor_clip;
+        if (const auto& own = entry.node.style.clip_rect) {
+            emitted = intersect(
+                emitted, ClipRect{entry.box.left + own->x,
+                                  entry.box.top + own->y,
+                                  entry.box.left + own->x + own->width,
+                                  entry.box.top + own->y + own->height});
+        }
+        const auto& css = css_clip[static_cast<size_t>(slot)];
+        if (css.inexpressible) {
+            // A shape clip the rectangle model cannot carry, so the node keeps
+            // ink the browser cuts away. Named as the reason rather than folded
+            // into the geometric verdict, which would report it as an ordinary
+            // missing rectangle someone could go "fix".
+            ++counts.clip_lost;
+            entry.node.attributes["clip_lost"] = "1";
+            entry.node.attributes["clip_inexpressible"] = "clip-path";
+        } else {
+            const auto box = rect_of(entry.box);
+            // The panel frame is on BOTH sides of the comparison. A frame is a
+            // window onto the page and the crop is its definition, so a node
+            // the frame cuts is not a node the tree got wrong — counting it
+            // would report `<html>` on every cropped capture and bury the one
+            // node an ancestor inside the panel clipped by mistake.
+            const auto ink_css = intersect(intersect(box, css.rect), root_clip);
+            const auto ink_emitted = intersect(box, emitted);
+            if (!contains(ink_emitted, ink_css)) {
+                ++counts.clip_over_applied;
+                entry.node.attributes["clip_over_applied"] = "1";
+            }
+            if (!contains(ink_css, ink_emitted)) {
+                ++counts.clip_lost;
+                entry.node.attributes["clip_lost"] = "1";
+            }
+        }
+
         const auto children = entry.children;
         const double child_left = entry.box.left;
         const double child_top = entry.box.top;
+        const ClipRect child_clip =
+            intersect(ancestor_clip,
+                      overflow_clip_of(entry.node, entry.box.left,
+                                       entry.box.top));
         parent.children.push_back(std::move(entry.node));
         IRNode& placed = parent.children.back();
         for (const int child : children)
-            self(self, child, child_left, child_top, depth + 1, placed);
+            self(self, child, child_left, child_top, depth + 1, placed,
+                 child_clip);
     };
 
     int z = 0;
     for (const int slot : root_slots)
         slots[static_cast<size_t>(slot)].node.style.z_index = z++;
     for (const int slot : root_slots)
-        place(place, slot, -dx, -dy, 1, root);
+        place(place, slot, -dx, -dy, 1, root, root_clip);
     counts.root_children = static_cast<int>(root_slots.size());
 
     // ── Fidelity audit ──────────────────────────────────────────────────────

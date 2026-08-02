@@ -40,6 +40,40 @@ TEST_CASE("parse coerces CSS string dimensions to floats", "[view][import][parse
     REQUIRE_FALSE(ir2.root.style.height.has_value());
 }
 
+TEST_CASE("a resolved clip rectangle survives canonical IR serialization",
+          "[view][import][ir-v1][clip-model]") {
+    // The clip an importer resolved along CSS's containing-block chain is the
+    // node's authority for what is drawn of it. A field the C++ writes and the
+    // round-trip drops sends an imported panel back to clipping by parentage
+    // after one save/load, which looks like a rendering bug and is a schema
+    // one — so both directions are pinned here, not just the writer.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    IRNode clipped;
+    clipped.type = "frame";
+    clipped.name = "Escapee";
+    clipped.style.clip_rect = IRStyle::ClipRect{60.0f, -20.0f, 100.0f, 100.0f};
+    ir.root.children.push_back(std::move(clipped));
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+
+    REQUIRE(parsed.root.children.size() == 1);
+    const auto& rect = parsed.root.children[0].style.clip_rect;
+    REQUIRE(rect.has_value());
+    REQUIRE(rect->x == 60.0f);
+    REQUIRE(rect->y == -20.0f);
+    REQUIRE(rect->width == 100.0f);
+    REQUIRE(rect->height == 100.0f);
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+
+    // Absent stays absent: a node with no resolved clip must not gain an
+    // all-zero rectangle, which would clip it away entirely.
+    REQUIRE_FALSE(parsed.root.style.clip_rect.has_value());
+}
+
 TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");

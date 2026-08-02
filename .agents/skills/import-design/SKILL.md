@@ -316,21 +316,49 @@ knowing before you touch that file:
 - **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
   of 1 means the lowering reflattened and every per-node count still looks
   right, so check the shape, not only the census.
-- **Clipping is KNOWN WRONG in both directions, and counted rather than fixed.**
-  The tree carries `overflow` on a node and the renderer clips that node's
-  children, so the emitted clip follows DOM parentage; CSS follows the
-  containing-block chain. `native_nodes_clip_over_applied` counts nodes the tree
-  clips that a browser would not — an absolutely positioned node whose
-  containing block sits above an `overflow: hidden` ancestor escapes that clip
-  in Chrome, and where the boxes do not intersect it disappears here entirely.
-  `native_nodes_clip_lost` counts the mirror: a hoisted node regrafted past the
-  ancestor that was clipping it, which then paints outside the box that
-  contained it. Neither is expressible by re-parenting, because the clip has to
-  travel with the node rather than with its position in the tree — the fix is a
-  per-node clip rectangle computed from the real CSS clip chain, which the
-  capture already has the data for (`position` and `transform` are both among
-  the captured computed properties). Until then, treat a non-zero value of
-  either as ink the panel is drawing wrongly, not as a structural note.
+- **Clipping travels with the node, NOT with its place in the tree — never put
+  `overflow` back on a lowered node.** A tree that carries `overflow` clips by
+  DOM parentage, because a renderer applies it to whatever the node's children
+  turn out to be. CSS clips along the containing-block chain, and the two
+  disagree in both directions: an absolutely positioned node whose containing
+  block sits above an `overflow: hidden` ancestor escapes that clip in Chrome
+  (nested under it, where the boxes do not intersect, the node disappears
+  entirely), and a hoisted node regrafted past the ancestor that clipped it
+  paints outside the box that contained it. No re-parenting fixes both. So
+  lowering resolves each node's real clip chain — `overflow` along the
+  containing-block chain, taken against each clipper's PADDING box — intersects
+  it to one rectangle, and stores it on the node in the node's own space
+  (`IRStyle::clip_rect`, `clipRect` in the IR JSON). `overflow` is dropped from
+  every lowered node; the rectangle is the only authority.
+  - **It is applied to the node's own ink, never inherited.** The engine slot is
+    `View::set_ancestor_clip_rect`, and `paint_content` releases it before the
+    children, each of which carries its own. That asymmetry is load-bearing: a
+    child can legitimately need a WIDER clip than its parent (it escapes a
+    clipper the parent is inside), and an inherited clip is an intersection and
+    cannot widen. Merging it into `overflow` re-creates the original defect.
+  - **`native_nodes_clip_over_applied` / `native_nodes_clip_lost` are now the
+    audit, and both should be absent.** They are computed off the emitted tree —
+    each node's stored rectangle composed with whatever its emitted ancestors
+    clip — against the CSS chain resolved independently, so a rectangle written
+    in the wrong space, dropped, or re-inherited from a parent's `overflow`
+    shows up as a number. A non-zero value is ink the panel draws wrongly.
+  - **The panel frame's crop is not a disagreement.** The root's own `overflow`
+    is on both sides of the audit: a node the frame cuts is out of frame, not
+    mis-clipped, and counting it would fire on `<html>` for every cropped
+    capture.
+  - **Known limits of one rectangle.** A `clip-path` ancestor clips to a shape
+    the rectangle cannot carry, so those nodes are counted in
+    `native_nodes_clip_lost` and carry `clip_inexpressible="clip-path"` — they
+    draw too much, not too little. A clipper's `border-radius` is likewise not
+    carried, so a rounded clipper under-clips at its corners; the audit compares
+    axis-aligned rectangles and cannot see that, deliberately — counting every
+    rounded card would bury the defects it exists to find. A rotated clipper
+    cannot arise at all: a
+    rotated element is `element_capture_fallback` and its whole subtree pools
+    into it.
+  - **JS and Swift codegen do not lower it yet** (allowlisted in
+    `test_design_import_parity.cpp`); the JS lane needs a `setClipRect` bridge
+    verb first. Both degrade by not clipping — too much ink, never a lost node.
 - **Anchors are DOM paths, not capture positions.** `stable_anchor_id` is
   `capture:tag#id-or-.class[ordinal]/…`, with ordinals counted over ALL
   same-signature siblings in the document rather than over the painted ones, so
