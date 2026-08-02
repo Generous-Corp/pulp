@@ -360,7 +360,8 @@ public:
         backend_ = backend.get();
         context_ = choc::javascript::Context(std::move(backend));
         set_quickjs_stack_size(*backend_, 1024 * 1024);  // 1MB (up from 256KB)
-        install_quickjs_rejection_tracker(*backend_);    // pulp #3206
+        // Surface unhandled promise failures through the host's console path.
+        install_quickjs_rejection_tracker(*backend_);
         setup_console();
     }
 
