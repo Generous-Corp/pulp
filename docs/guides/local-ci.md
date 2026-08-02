@@ -35,6 +35,144 @@ Same-repo pull requests, pushes, and `workflow_dispatch` runs are unaffected.
 Covered as defense in depth by `tools/scripts/test_fork_pr_runner_routing.py`
 (ctest: `fork-pr-runner-routing`), which runs the resolver the workflow actually
 embeds; that test does not prove the runners are inaccessible.
+
+## The physical Intel lane is advisory and isolated
+
+The Intel Mac mini serves `nightly-intel.yml` through an ephemeral JIT
+supervisor, not the persistent required-gate pool. Its selector is exact:
+
+```text
+self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini
+```
+
+`PULP_NATIVE_INTEL_RUNS_ON_JSON` is intentionally unset until the host passes
+`tools/ci/native-intel-runner.sh --check` and a manual dispatch proves a cold
+workspace can claim and finish the job. While unset, the native job uses
+`macos-15-intel`. To pilot without changing the variable, dispatch
+`nightly-intel.yml` with `use_physical_intel` enabled; that boolean maps
+internally to the exact selector above and cannot target another pool. To roll
+back after enabling it, unset the variable and redispatch any job
+already queued for the local labels; GitHub does not reroute an assigned job.
+
+Before starting the supervisor, create a dedicated organization runner group
+for the Mac mini, restrict it to `Generous-Corp/pulp` and the protected
+default-branch `.github/workflows/nightly-intel.yml`, and set its numeric ID as
+`PULP_NATIVE_INTEL_RUNNER_GROUP_ID` in the LaunchAgent. The supervisor refuses
+the default group and an unset/non-numeric ID, then reads the organization
+runner-group API and requires the group to contain only this repository and
+only `nightly-intel.yml@refs/heads/main`. The GitHub credential therefore needs
+runner-group read access as well as repository runner administration. Prove that
+a workflow revision from a PR branch cannot target the group before enabling
+the repository selector; labels alone are not an access boundary.
+
+The GitHub credential and controller must never share a uid with workflow jobs.
+The login account runs only the controller and holds `gh`/`ghapp` auth. Jobs run
+as the fixed hidden service identity `pulp-ci` (uid 499, primary group `staff`),
+which owns only its current disposable job root. Its directory-service home is
+the root-owned `/var/empty`, its login shell and authentication are disabled,
+and the worker supplies a new private `HOME` and `TMPDIR` for each job. It must
+not be an administrator and must not be able to write the controller checkout
+or worker shim. Do not copy the controller account's GitHub credential into it.
+
+Creating that OS boundary is a one-time administrator operation:
+
+1. Confirm uid 499 is unused, then create the fixed non-login identity. These
+   are deliberate directory-service writes, so inspect the first command before
+   continuing; do not choose another uid and weaken the fixed-identity check.
+
+   ```sh
+   dscl . -list /Users UniqueID | awk '$2 == 499 { print; found=1 } END { exit found ? 1 : 0 }'
+   sudo dscl . -create /Users/pulp-ci
+   sudo dscl . -create /Users/pulp-ci RealName 'Pulp native Intel CI worker'
+   sudo dscl . -create /Users/pulp-ci UniqueID 499
+   sudo dscl . -create /Users/pulp-ci PrimaryGroupID 20
+   sudo dscl . -create /Users/pulp-ci NFSHomeDirectory /var/empty
+   sudo dscl . -create /Users/pulp-ci UserShell /usr/bin/false
+   sudo dscl . -create /Users/pulp-ci IsHidden 1
+   sudo dscl . -create /Users/pulp-ci AuthenticationAuthority ';DisabledUser;'
+   sudo dscl . -create /Users/pulp-ci Password '*'
+   ```
+
+   Do not create `/Users/pulp-ci`, enable automatic login, or enable remote
+   login for this identity.
+2. Put the shared, Apple-signed Xcode at `/Applications/Xcode.app` and accept
+   its license once. Put a verified, **unconfigured** GitHub Actions runner
+   archive at `/usr/local/share/pulp-native-intel/actions-runner-mini`, verified
+   CMake, Ninja, ccache, and Git LFS tools under
+   `/usr/local/share/pulp-native-intel`, and a prewarmed cache at
+   `/usr/local/share/pulp-native-intel/ccache`. The commands exposed in `bin/`
+   may be relative symlinks into the same trusted root (for example, into a
+   complete CMake bundle); no link may escape it. Recursively set Xcode and this
+   entire trusted root to `root:wheel`, then remove group/world write bits:
+
+   ```sh
+   sudo chmod -RN /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   sudo chown -R root:wheel /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   sudo chmod -R go-w /Applications/Xcode.app \
+     /usr/local/share/pulp-native-intel
+   ```
+
+   The golden runner must never be configured or run in place. Jobs consume the
+   warm ccache read-only with ccache depend mode explicitly disabled through
+   `CCACHE_NODEPEND=1` (decision
+   20); they use an ephemeral writable temp directory and cannot poison the
+   cache. To refresh it, stop the LaunchAgent, build a new cache in a staging
+   directory, install that directory as `root:wheel` without group/world write,
+   run `--check`, and only then restart the controller.
+3. Install the checked-in lifecycle shim immutably:
+
+   ```sh
+   sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+   sudo install -o root -g wheel -m 0755 \
+     tools/ci/native-intel-runner-worker.sh \
+     /usr/local/libexec/pulp-native-intel-worker
+   ```
+
+4. Use `sudo visudo -f /etc/sudoers.d/pulp-native-intel` to install this narrow
+   rule, replacing `daniel` only if the controller login is different:
+
+   ```text
+   daniel ALL=(root) NOPASSWD: /usr/local/libexec/pulp-native-intel-worker --check, /usr/local/libexec/pulp-native-intel-worker --clean, /usr/local/libexec/pulp-native-intel-worker --run
+   ```
+
+The root-owned shim accepts only those three fixed operations. Before each job
+it removes any job-installed crontab, kills leftover uid-499 processes, removes
+that uid's state from the host's mutable data roots (including macOS temp roots,
+`/Users/Shared`, and `/Library/Caches`), removes the fixed job root, and copies
+the immutable golden runner into it. The private per-job `HOME`, `TMPDIR`, ccache temp directory, runner, and
+workspace are all uid-owned only for the lifetime of that job. After the runner
+exits the shim kills leftovers and removes all of them again. Runner executables
+never survive into the next job; only the root-owned read-only warm ccache does.
+The worker also requires macOS's `com.apple.atrun` service to remain disabled
+and removes any uid-499 `at`/`batch` jobs before serving another workflow.
+JIT registration,
+runner-group verification, stale-registration removal, and all authenticated
+GitHub API calls remain in the controller. The shim receives only the ephemeral
+one-job JIT payload on standard input, drops to `pulp-ci`, runs `run.sh` with a clean environment,
+and contains no GitHub client or persistent credential. Both sides fail closed
+if the fixed account identity is absent or altered, the worker is mutable or
+has a write-granting ACL,
+passwordless delegation is absent, the shared Xcode/tools/cache have unsafe
+ownership, permissions, or escaping symlinks, or group verification fails.
+Xcode signature, Gatekeeper, license, `xcodebuild`, and clang probes run only
+after dropping to uid 499, so a root-only success cannot mask an unusable worker
+toolchain. A later identity, ownership, signature, or toolchain validation
+failure returns a terminal configuration status and leaves the controller alive
+but its lane offline; launchd therefore does not turn an integrity failure into
+a restart/retry storm. Restart the controller only after correcting the failed
+preflight.
+
+The LaunchAgent template is
+`tools/launchd/pulp-native-intel-runner.plist.template`. `RunAtLoad` and
+`KeepAlive` restore the controller after the login account logs in. FileVault prevents the
+startup volume from mounting unattended after a cold power cycle, so the host
+is not available until a person unlocks it. Keep this lane advisory and do not
+weaken FileVault or give it any of the required ARM64 gate labels.
+The controller prefers `ghapp` when it is installed and otherwise uses its own
+authenticated rootless `gh`. The job account receives neither client nor token.
+
 ## The dispatch-only Linux x64 lane runs on macpro (Proxmox)
 
 Operator-dispatched `build.yml` runs may route the `Linux (x64)` leg via

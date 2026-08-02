@@ -134,6 +134,14 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
+    if(UNIX)
+        add_test(NAME native-intel-runner-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_native_intel_runner.py")
+        add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
+    endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the
     # pre-landing bytes of every file a recent commit changed. Includes a replay

@@ -665,6 +665,29 @@ Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in 
 same change, or the hourly topology check reports an unset lane as having no route
 at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
 it.
+
+The native Intel Mac mini follows this pattern through
+`PULP_NATIVE_INTEL_RUNS_ON_JSON`. Its dedicated selector is
+`self-hosted,macOS,X64,pulp-intel-native,pulp-host-macmini`, and the workflow
+falls back to `macos-15-intel` while the variable is unset. The launchd
+supervisor mints one JIT identity per job and cleans its exact work directory;
+never add `pulp-build`, `pulp-build-vm`, or `pulp-gate-fast`, because those would
+let advisory Intel work contend for the required ARM64 gate. FileVault requires
+a human unlock after a cold power cycle; treat the lane as offline until login,
+not as a reason to weaken disk encryption. Preflight verifies through GitHub's
+organization API that the runner group contains only `Generous-Corp/pulp` and
+is workflow-restricted only to `nightly-intel.yml@refs/heads/main`; a numeric
+group ID by itself is not proof of an access boundary. The credentialed
+controller and workflow process also use different OS accounts: `gh`/`ghapp`
+stays in the login account, while `run.sh` executes as non-admin `pulp-ci`
+through the root-owned fixed-operation worker. Never put GitHub auth in the
+build account or let it modify the controller/worker; the one-time hidden
+uid-499 account, Xcode, immutable runner/tool golden, protected read-only warm
+ccache, shim, and sudoers setup is in `docs/guides/local-ci.md`. The worker must
+give each job an ephemeral home/temp root, copy the golden, kill uid-owned
+processes, and remove all uid-owned temp state every cycle; cleaning only
+`_work` leaves attacker-modified runner executables behind. Ccache depend mode
+stays off via `CCACHE_NODEPEND=1` per the decisions contract.
 ## Windows is nightly-only, and that is deliberate
 
 Windows does not run on `pull_request` **or** `merge_group`. It runs on `schedule`
