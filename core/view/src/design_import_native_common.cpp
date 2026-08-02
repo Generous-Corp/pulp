@@ -1630,12 +1630,22 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     boxes.push_back({b.left, b.top, b.width, b.height,
                                      b.start, b.length});
                 }
+                const bool browser_wrapped = boxes.size() > 1;
                 label->set_cached_line_boxes(
                     std::move(boxes), node.text_layout_basis->width,
                     node.text_layout_basis->resolved_face);
-                // Cached breaking is line breaking, so the Label must be in
-                // its multi-line mode for the layout to be consulted at all.
-                label->set_multi_line(true);
+                // THE CAPTURE DECIDES WHETHER THIS RUN WRAPS, not our own
+                // measurement of it. If the browser put the text on one line
+                // then one line is the right answer, and re-deriving that from
+                // advances we compute ourselves can only lose: a label sized to
+                // fit its own text has no slack, so any positive epsilon breaks
+                // the last word onto a second line. Roughly fifteen labels on
+                // one panel wrapped that way — "Select model", "My projects",
+                // "Browse marketplace" — every one of them a run the browser
+                // kept whole.
+                //
+                // `white-space` still applies where the capture says nothing.
+                label->set_multi_line(browser_wrapped);
             }
             return label;
         }

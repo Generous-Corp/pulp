@@ -213,6 +213,22 @@ public:
         int length = 0;
     };
 
+    /// How many Labels took each line-breaking path since the last reset.
+    ///
+    /// Three paths now decide where text breaks, and pixels cannot tell them
+    /// apart: a captured layout used verbatim, a captured layout rejected and
+    /// reflowed, and text that never had one. A render that looks wrong is a
+    /// different bug in each case, so the counts are reported rather than
+    /// inferred — and a cache that never activates and one that always does
+    /// look identical without them.
+    struct LineBreakPathCounts {
+        int cached = 0;      ///< captured layout used verbatim
+        int reflowed = 0;    ///< captured layout present but rejected
+        int uncached = 0;    ///< no captured layout at all
+    };
+    static LineBreakPathCounts line_break_path_counts();
+    static void reset_line_break_path_counts();
+
     /// Adopt a browser's own line breaking for this text.
     ///
     /// The Label stays a paragraph — full text, one style, one box — and this
