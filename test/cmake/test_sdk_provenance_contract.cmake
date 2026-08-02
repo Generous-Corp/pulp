@@ -32,11 +32,11 @@ file(WRITE "${_sdk}/sdk-provenance.json"
     "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
     "\"source_git_sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
     "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
-    "\"features\":{\"audio_probes\":false,\"inspector\":false}}")
+    "\"features\":{\"audio_probes\":false,\"inspector\":true}}")
 include("${_module}")
 if(PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
    NOT PULP_SDK_PROVENANCE_KIND STREQUAL "release" OR
-   PULP_SDK_AUDIO_PROBES_ENABLED OR PULP_SDK_INSPECTOR_ENABLED OR
+   PULP_SDK_AUDIO_PROBES_ENABLED OR NOT PULP_SDK_INSPECTOR_ENABLED OR
    NOT PULP_SDK_PLATFORM STREQUAL "darwin-arm64" OR
    NOT PULP_SDK_SOURCE_GIT_SHA STREQUAL "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     message(FATAL_ERROR "official release SDK contract was not exported")
@@ -56,7 +56,9 @@ if(_unsafe_result EQUAL 0)
     message(FATAL_ERROR "unsafe development provenance did not fail closed")
 endif()
 if(NOT "${_unsafe_stdout}\n${_unsafe_stderr}" MATCHES "unknown or unsafe contract")
-    message(FATAL_ERROR "unsafe provenance failed without the expected diagnostic")
+    message(FATAL_ERROR
+        "unsafe provenance failed without the expected diagnostic:\n"
+        "${_unsafe_stdout}\n${_unsafe_stderr}")
 endif()
 
 file(WRITE "${_sdk}/sdk-provenance.json"
@@ -64,7 +66,7 @@ file(WRITE "${_sdk}/sdk-provenance.json"
     "\"profile\":\"official-release\",\"distribution_eligible\":true,"
     "\"source_git_sha\":\"cccccccccccccccccccccccccccccccccccccccc\","
     "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
-    "\"features\":{\"audio_probes\":false,\"inspector\":true}}")
+    "\"features\":{\"audio_probes\":false,\"inspector\":false}}")
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
         "-DPULP_SDK_DIR=${_sdk}"
@@ -77,5 +79,7 @@ if(_unsafe_release_result EQUAL 0)
 endif()
 if(NOT "${_unsafe_release_stdout}\n${_unsafe_release_stderr}"
        MATCHES "unknown or unsafe release contract")
-    message(FATAL_ERROR "unsafe release failed without the expected diagnostic")
+    message(FATAL_ERROR
+        "unsafe release failed without the expected diagnostic:\n"
+        "${_unsafe_release_stdout}\n${_unsafe_release_stderr}")
 endif()

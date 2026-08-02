@@ -459,7 +459,7 @@ def verify_sdk_archive(
                 "source_git_dirty": False,
                 "platform": platform,
                 "build_type": "Release",
-                "features": {"audio_probes": False, "inspector": False},
+                "features": {"audio_probes": False, "inspector": True},
             }
             mismatches = {
                 key: (provenance.get(key), value)

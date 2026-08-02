@@ -112,7 +112,7 @@ if(EXISTS "${_pulp_sdk_provenance}")
            NOT _pulp_sdk_profile STREQUAL "official-release" OR
            NOT _pulp_sdk_eligible OR _pulp_sdk_dirty OR
            NOT _pulp_sdk_build_type STREQUAL "Release" OR
-           _pulp_sdk_audio_probes OR _pulp_sdk_inspector OR
+           _pulp_sdk_audio_probes OR NOT _pulp_sdk_inspector OR
            NOT _pulp_sdk_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
            NOT _pulp_sdk_source_ref STREQUAL "v${_pulp_sdk_version}" OR
            NOT _pulp_sdk_platform MATCHES "^(darwin|linux|windows)-(arm64|x64)$" OR
@@ -124,7 +124,7 @@ if(EXISTS "${_pulp_sdk_provenance}")
         set(PULP_SDK_DISTRIBUTION_ELIGIBLE TRUE)
         set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
         set(PULP_SDK_AUDIO_PROBES_ENABLED FALSE)
-        set(PULP_SDK_INSPECTOR_ENABLED FALSE)
+        set(PULP_SDK_INSPECTOR_ENABLED TRUE)
     else()
         message(FATAL_ERROR
             "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "

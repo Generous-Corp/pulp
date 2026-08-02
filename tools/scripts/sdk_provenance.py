@@ -95,17 +95,10 @@ def build_release_marker(
 
     audio_probes = _cache_bool(build_dir, "PULP_ENABLE_AUDIO_PROBES")
     inspector = _cache_bool(build_dir, "PULP_ENABLE_INSPECTOR")
-    if audio_probes or inspector:
-        enabled = [
-            name
-            for name, value in (
-                ("audio_probes", audio_probes),
-                ("inspector", inspector),
-            )
-            if value
-        ]
+    if audio_probes or not inspector:
         raise ProvenanceError(
-            f"release SDK enables development-only feature(s): {', '.join(enabled)}"
+            "official release SDK feature contract requires "
+            "audio_probes=OFF and inspector=ON"
         )
 
     return {
@@ -121,7 +114,7 @@ def build_release_marker(
         "build_type": build_type,
         "features": {
             "audio_probes": False,
-            "inspector": False,
+            "inspector": True,
         },
     }
 
@@ -181,7 +174,7 @@ def verify_release_marker(
         raise ProvenanceError(
             f"{path}: platform is {marker.get('platform')!r}, expected {expected_platform!r}"
         )
-    if marker.get("features") != {"audio_probes": False, "inspector": False}:
+    if marker.get("features") != {"audio_probes": False, "inspector": True}:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
     if _read_text(prefix / "version.txt") != version:
         raise ProvenanceError(f"{path}: marker version does not match selected SDK prefix")

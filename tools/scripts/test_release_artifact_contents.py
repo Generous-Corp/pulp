@@ -167,7 +167,7 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
                     "source_git_dirty": False,
                     "platform": platform,
                     "build_type": "Release",
-                    "features": {"audio_probes": False, "inspector": False},
+                    "features": {"audio_probes": False, "inspector": True},
                 }
             )
             + "\n"
@@ -534,7 +534,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             def unsafe_payload(name: str, platform: str = "linux-x64") -> bytes:
                 if name == "pulp-sdk/sdk-provenance.json":
                     marker = json.loads(original_payload(name, platform))
-                    marker["features"]["inspector"] = True
+                    marker["features"]["inspector"] = False
                     return json.dumps(marker).encode()
                 return original_payload(name, platform)
 

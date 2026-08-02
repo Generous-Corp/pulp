@@ -37,7 +37,7 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.prefix / "sdk_build_type.txt").write_text("Release\n", encoding="utf-8")
         (self.build / "CMakeCache.txt").write_text(
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
+            "PULP_ENABLE_INSPECTOR:BOOL=ON\n",
             encoding="utf-8",
         )
         subprocess.run(["git", "init", "-q", self.source], check=True)
@@ -80,7 +80,7 @@ class SdkProvenanceTests(unittest.TestCase):
             ),
             marker,
         )
-        self.assertEqual(marker["features"], {"audio_probes": False, "inspector": False})
+        self.assertEqual(marker["features"], {"audio_probes": False, "inspector": True})
         self.assertEqual(
             stat.S_IMODE((self.prefix / "sdk-provenance.json").stat().st_mode),
             0o644,
@@ -113,13 +113,22 @@ class SdkProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(provenance.ProvenanceError, "identify one commit"):
             self.marker(source_sha=later)
 
-    def test_rejects_development_features(self) -> None:
+    def test_rejects_missing_release_inspector_component(self) -> None:
         (self.build / "CMakeCache.txt").write_text(
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(provenance.ProvenanceError, "inspector=ON"):
+            self.marker()
+
+    def test_rejects_release_audio_probes(self) -> None:
+        (self.build / "CMakeCache.txt").write_text(
+            "PULP_ENABLE_AUDIO_PROBES:BOOL=ON\n"
             "PULP_ENABLE_INSPECTOR:BOOL=ON\n",
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(provenance.ProvenanceError, "inspector"):
+        with self.assertRaisesRegex(provenance.ProvenanceError, "audio_probes=OFF"):
             self.marker()
 
     def test_rejects_dirty_tracked_source(self) -> None:

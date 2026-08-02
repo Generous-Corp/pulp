@@ -212,12 +212,22 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
-    def test_cli_and_sdk_build_disable_inspector(self) -> None:
+    def test_cli_and_sdk_build_ship_inspector_sdk(self) -> None:
         self.assertGreaterEqual(
-            self.text.count("-DPULP_ENABLE_INSPECTOR=OFF"),
+            self.text.count("-DPULP_ENABLE_INSPECTOR=ON"),
             2,
-            "release-cli.yml must keep the inspector disabled for both the "
-            "CLI and SDK release configure steps.",
+            "release-cli.yml must enable the inspector component for both "
+            "release configure steps because release_product_matrix.json "
+            "promises the installed pulp-inspect archive family.",
+        )
+
+    def test_release_path_gate_matches_inspector_sdk_flag(self) -> None:
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        self.assertIn(
+            "-DPULP_ENABLE_INSPECTOR=ON",
+            gate,
+            "the PR-time release-path configure must match the tagged release "
+            "inspector SDK flag.",
         )
 
     def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
@@ -336,7 +346,10 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_disables_audio_probes(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
-        self.assertIn("-DPULP_ENABLE_INSPECTOR=OFF", run_block)
+
+    def test_windows_release_gate_ships_inspector_sdk(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
