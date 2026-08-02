@@ -835,6 +835,14 @@ TEST_CASE("Atomic project-package publisher refuses unsafe paths and publication
     TemporaryPackage temporary("atomic");
     const auto destination = temporary.path / "published";
     fs::create_directories(temporary.path);
+    auto nul_name = fs::path("victim").native();
+    nul_name.push_back(fs::path::value_type{});
+    nul_name += fs::path(".dawproject").native();
+    const auto nul_destination = temporary.path / fs::path(nul_name);
+    const auto nul_publisher = AtomicPublisher::create_file(nul_destination);
+    REQUIRE_FALSE(nul_publisher);
+    REQUIRE(nul_publisher.error().code == PackageErrorCode::InvalidPath);
+    REQUIRE_FALSE(fs::exists(temporary.path / "victim"));
     auto publisher = AtomicPublisher::create(destination);
     REQUIRE(publisher);
     REQUIRE_FALSE(publisher.value().write("../escape", "bad"));

@@ -496,7 +496,9 @@ AtomicPublisher::create_file(const fs::path& destination) noexcept {
 
 runtime::Result<AtomicPublisher, PackageError>
 AtomicPublisher::create_impl(const fs::path& destination, bool file) noexcept {
-    if (destination.empty())
+    const auto& native_destination = destination.native();
+    if (destination.empty() || std::find(native_destination.begin(), native_destination.end(),
+                                         fs::path::value_type{}) != native_destination.end())
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
     std::error_code error;
     const auto absolute_destination = fs::absolute(destination, error);
