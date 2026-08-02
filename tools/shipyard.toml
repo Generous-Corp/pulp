@@ -56,7 +56,10 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.81.0 (current pin) — adds expected metal-host inventory, complete runner
+# v0.81.1 (current pin) — emits valid shell tag extraction in regenerated
+#   post-tag workflows so the dedicated queue-authority hook can run.
+#
+# v0.81.0 (earlier pin) — adds expected metal-host inventory, complete runner
 #   observation, Tart disk/ccache admission checks, hosted Linux routing drift,
 #   and conservative release-staleness fallback to the fleet watchdog.
 #
@@ -84,7 +87,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.81.0"
+version = "v0.81.1"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

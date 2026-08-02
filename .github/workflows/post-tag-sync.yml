@@ -2,11 +2,6 @@ name: Post-tag docs sync
 
 # Installed by `shipyard release-bot hook install`. Shipyard-owned file:
 # re-running the install command overwrites this file in place.
-#
-# Fires after any tag matching the configured pattern lands on the
-# default branch. Installs the pinned shipyard CLI, then hands off to
-# `shipyard release-bot hook run` which reads `[release.post_tag_hook]`
-# from `.shipyard/config.toml` to know what to do.
 
 on:
   push:
@@ -20,46 +15,26 @@ permissions:
   contents: write
 
 env:
-  # Must stay >= the post_tag_hook push_mode floor (v0.78.0). This workflow
-  # is the ACTUAL post-tag path — it runs `shipyard release-bot hook run`,
-  # which reads `[release.post_tag_hook]` from .shipyard/config.toml. An
-  # older CLI here does not understand `push_mode = "pr"`, silently ignores
-  # it, and reverts to a direct push to main that the main-merge-queue
-  # ruleset refuses — so the changelog sync fails even though the local
-  # fleet CLI is current. Keep this in lockstep with tools/shipyard.toml.
-  # Floor is 0.79.0, NOT 0.78.0. `push_mode = "pr"` was honoured from 0.78.0
-  # onward, but until 0.79.0 the changelog commit was still stamped
-  # `[skip ci]` — correct for the direct-push path, fatal on the PR path,
-  # because Actions then skips every workflow and the PR can never obtain
-  # the required checks it needs to merge. Nine changelog PRs accumulated
-  # unmergeable that way (v0.751.0 → v0.759.0) and blocked the release
-  # pipeline behind them. Keep in lockstep with tools/shipyard.toml.
-  SHIPYARD_VERSION: "0.81.0"
+  SHIPYARD_VERSION: "v0.81.1"
 
 jobs:
   sync:
     name: Regenerate docs for ${{ github.ref_name }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pulp-queue-authority-studio]
     steps:
-      - name: Checkout main with full history
+      - name: Checkout release tag with full history
         uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: true
-          # RELEASE_BOT_TOKEN if present so the subsequent commit re-
-          # triggers CI checks that are gated to non-GITHUB_TOKEN
-          # pushes; fall back to GITHUB_TOKEN for bootstrap.
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Install shipyard (pinned)
         shell: bash
         run: |
           set -euo pipefail
-          # Pipe to bash, not sh — install.sh uses `set -o pipefail`,
-          # which dash (Ubuntu's /bin/sh) doesn't support. Caught
-          # dogfooding shipyard's own first post-tag-sync run.
           curl -fsSL "https://generouscorp.com/Shipyard/install.sh" | SHIPYARD_VERSION="$SHIPYARD_VERSION" bash
           shipyard --version
 
