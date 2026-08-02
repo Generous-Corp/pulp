@@ -70,6 +70,12 @@ is not a reason to add a model feature.
 | `clip.media-window` | yes | A media clip that plays a source subrange rather than the referenced asset's complete frame range. |
 | `clip.fade-shape` | yes | A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like. |
 | `clip.midi-expression-lane` | yes | A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note. |
+| `sequence.section-role` | yes | A region that names the structural part it spans, beyond its free-text name. |
+| `context.chord-bass` | yes | A chord statement naming the pitch class in the bass, rather than sounding root position. |
+| `context.chord-extension` | yes | A chord statement carrying added scale degrees beyond its quality. |
+| `context.chord-voicing` | yes | A chord statement carrying a hint for how a generator should spread its tones. |
+| `tuning.project` | yes | A document-wide statement of the tuning every instrument plays in. |
+| `tuning.instrument` | yes | One instrument overriding the document-wide tuning with its own. |
 
 ## DAWproject
 
@@ -130,6 +136,12 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
 | `clip.midi-expression-lane` | none | per-clip controller and expression streams |
+| `sequence.section-role` | none | not declared |
+| `context.chord-bass` | none | not declared |
+| `context.chord-extension` | none | not declared |
+| `context.chord-voicing` | none | not declared |
+| `tuning.project` | none | not declared |
+| `tuning.instrument` | none | not declared |
 
 ### Export
 
@@ -186,6 +198,12 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.media-window` | drop |  | dropped | the writer references the complete media asset, so a nonzero source start or partial frame count is dropped |
 | `clip.fade-shape` | drop |  | dropped | the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped |
 | `clip.midi-expression-lane` | drop |  | dropped | the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted |
+| `sequence.section-role` | drop |  | dropped | DAWproject arrangement markers carry a name and span but no typed structural role |
+| `context.chord-bass` | drop |  | dropped | the DAWproject chord representation carries quality and root but no bass |
+| `context.chord-extension` | drop |  | dropped | the DAWproject chord representation carries no added scale degrees |
+| `context.chord-voicing` | drop |  | dropped | the DAWproject chord representation carries no voicing hint |
+| `tuning.project` | drop |  | dropped | DAWproject has no document-wide tuning statement |
+| `tuning.instrument` | drop |  | dropped | DAWproject has no per-instrument tuning statement |
 
 ## Standard MIDI File
 
@@ -246,6 +264,12 @@ Format id `smf`. Writer registered: yes.
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
 | `clip.midi-expression-lane` | none | per-clip controller and expression streams |
+| `sequence.section-role` | none | not declared |
+| `context.chord-bass` | none | not declared |
+| `context.chord-extension` | none | not declared |
+| `context.chord-voicing` | none | not declared |
+| `tuning.project` | none | not declared |
+| `tuning.instrument` | none | not declared |
 
 ### Export
 
@@ -302,6 +326,12 @@ Format id `smf`. Writer registered: yes.
 | `clip.media-window` | drop | | dropped | not declared |
 | `clip.fade-shape` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped |
 | `clip.midi-expression-lane` | drop |  | dropped | Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it |
+| `sequence.section-role` | drop |  | dropped | the bounded writer emits a region's name and span but not the part it names |
+| `context.chord-bass` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `context.chord-extension` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `context.chord-voicing` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `tuning.project` | drop |  | dropped | Standard MIDI Files have no document-wide tuning statement |
+| `tuning.instrument` | drop |  | dropped | Standard MIDI Files have no per-instrument tuning statement |
 
 ## Adding a format
 

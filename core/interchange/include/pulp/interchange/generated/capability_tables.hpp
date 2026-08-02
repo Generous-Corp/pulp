@@ -125,6 +125,12 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
+        {ImportLevel::None, "", ""}, // sequence.section-role
+        {ImportLevel::None, "", ""}, // context.chord-bass
+        {ImportLevel::None, "", ""}, // context.chord-extension
+        {ImportLevel::None, "", ""}, // context.chord-voicing
+        {ImportLevel::None, "", ""}, // tuning.project
+        {ImportLevel::None, "", ""}, // tuning.instrument
     },
     // smf
     {
@@ -179,6 +185,12 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
+        {ImportLevel::None, "", ""}, // sequence.section-role
+        {ImportLevel::None, "", ""}, // context.chord-bass
+        {ImportLevel::None, "", ""}, // context.chord-extension
+        {ImportLevel::None, "", ""}, // context.chord-voicing
+        {ImportLevel::None, "", ""}, // tuning.project
+        {ImportLevel::None, "", ""}, // tuning.instrument
     },
 };
 
@@ -236,6 +248,12 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"}, // clip.midi-expression-lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject arrangement markers carry a name and span but no typed structural role"}, // sequence.section-role
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries quality and root but no bass"}, // context.chord-bass
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries no added scale degrees"}, // context.chord-extension
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries no voicing hint"}, // context.chord-voicing
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no document-wide tuning statement"}, // tuning.project
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no per-instrument tuning statement"}, // tuning.instrument
     },
     // smf
     {
@@ -290,6 +308,12 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"}, // clip.midi-expression-lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer emits a region's name and span but not the part it names"}, // sequence.section-role
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-bass
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-extension
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-voicing
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no document-wide tuning statement"}, // tuning.project
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-instrument tuning statement"}, // tuning.instrument
     },
 };
 } // namespace detail

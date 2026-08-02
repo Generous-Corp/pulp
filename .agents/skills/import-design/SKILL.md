@@ -206,6 +206,43 @@ reproduces the design; the others below do NOT and waste hours:
   If system discovery is insufficient, run
   `pulp tool install chrome-for-testing`; use
   `pulp tool doctor chrome-for-testing --run` for diagnostics.
+**Chrome's solved appearance reaches the IR through `dom-snapshot.json`.**
+`DOMSnapshot.captureSnapshot` is asked for the `COMPUTED_STYLES` list in
+`browser_capture/semantics.mjs`, and the values land in
+`documents[0].layout.styles` — rows of string-table indices, one row per
+*layout* node, each row **positional** against the requested property list.
+`browser_capture_styles.cpp` owns the join and the CSS→`IRStyle` mapping.
+Facts worth knowing before touching any of it:
+
+- **The rows are addressed by layout node; the semantic report is addressed by
+  `backend_node_id`.** The join is three hops: backend id → node index
+  (`nodes.backendNodeId`) → layout index (`layout.nodeIndex`) → style row.
+- **A control's own node usually carries only its label's styling.** The
+  gradient, radius, and shadow stack that make it look like a knob sit on an
+  inner face element. Resolve through the candidate's `paint_bounds` — match it
+  against `layout.bounds` within the candidate's subtree — or you get the
+  caption's font where you expected the knob's fill.
+- **`computedStyleNames` in the snapshot is the property order.** It is written
+  alongside the data precisely so no consumer hardcodes a parallel copy of
+  `COMPUTED_STYLES`; a drifted copy does not fail loudly, it maps a background
+  into a border. A snapshot without that key is skipped rather than decoded
+  against a guess.
+- **Gotcha — the capture's path-redaction pass used to eat the CSS alpha
+  separator.** `sanitizeSnapshot` (`security.mjs`) rewrites bare local paths to
+  `<local-path>`, and a lone `/` surrounded by spaces matched. Chrome serializes
+  translucent modern colours as `oklab(L a b / 0.34)` — and `color-mix(in oklab,
+  … )` resolves to exactly that — so every translucent colour and every
+  box-shadow layer arrived unparseable, silently, with no error and no log. The
+  regex now requires at least one character after the slash. If you touch those
+  redaction regexes, re-run the capture on a panel built from `color-mix()` and
+  grep the snapshot for `<local-path>`: zero hits is the pass condition.
+- **Do not carry `transform` onto a control node.** It is placed by its
+  `paint_bounds`, which is already the transformed rectangle; re-applying the
+  matrix transforms it twice, off its own artwork.
+- **Do not carry a border colour without a border width.** Computed style
+  reports `border-*-color` on every element whether or not one is drawn, so an
+  ungated mapping paints borders the design never had.
+
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
   route. It runs Chromium and `--offline` separately, renders the candidate
@@ -1248,6 +1285,39 @@ detached `std::unique_ptr<View>` subtree, and catches API-boundary failures into
 diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
 from IR attributes.
+
+**A manifest `local_path` is a HINT, not an address — resolve it, don't trust
+it.** Runtime lanes must go through `resolved_asset_uri()` /
+`resolve_asset_file()` (`core/view/src/design_ir_helpers.hpp`), never
+`"file://" + *asset.local_path`. A writer can persist a bare
+`<content_hash>.<ext>` filename, which then resolves against the DesignIR
+document's own directory while the bytes actually sit in a shared
+`design-assets/` folder BESIDE that directory (Forge's project store does
+exactly this). Because the same node also carries an absolute `asset_path`, the
+web-compat lane reads the node and renders correctly while the native lane
+reads the manifest and drops the image — the two lanes disagree, and the native
+one is silently wrong. Diagnosing that from a screenshot costs hours.
+
+The resolver tries: the recorded `local_path`, then a `file://` `original_uri`,
+then `<content_hash><ext>` under the document directory, a `design-assets/`
+inside it, and a `design-assets/` beside it. Recovery-by-hash logs a warning,
+and an asset that resolves to nothing returns `""` plus a logged line — the
+materializer then emits `native-materialize-unresolved-asset` and a placeholder
+instead of an ImageView pointed at nothing.
+
+Two consequences when writing code or tests here:
+
+- Pass a search root. `NativeMaterializeOptions::asset_base_directory` must be
+  the directory the DesignIR was loaded from (`pulp-design-ir-observe` and the
+  standalone import example do this). Without it, relative paths fall back to
+  process CWD and hash recovery has nowhere to look.
+- A test that asserts on a resolved image must write real bytes where the
+  manifest points. A synthetic path (`/resolved/cache/logo.png`) now
+  materializes the placeholder, so `dynamic_cast<ImageView*>` returns null.
+
+`asset_uri()` in the same header is deliberately NOT existence-checked: it is
+the codegen lowering, naming where bytes are supposed to be for a generated
+program that runs elsewhere. Do not "fix" it to check the filesystem.
 
 **Self-contained JS export (relative asset paths).** The emitted `ui.js`
 never references decode-time locations: after `resolve_sprite_skins` stamps
@@ -3284,6 +3354,45 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated
   plugins do not embed or require either one.
+- **Never read pixels with virtual time paused.** `Emulation.setVirtualTimePolicy
+  {policy:"pause"}` suppresses the compositor's BeginFrame source, and Chromium's
+  screenshot path waits for a fresh presented frame. From Chrome 151 the *first*
+  `Page.captureScreenshot` after a pause still resolves — `captureBeyondViewport`
+  resizes the capture surface and forces one commit — and every call after it
+  hangs forever. That is why `settle.mjs` pauses virtual time for the DOM,
+  semantics, token, and health reads and then calls `resumeDynamicTime` before
+  the screenshot loop. Determinism does not rest on the pause: tracked
+  timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
+  and transition are disabled, and `captureStableScreenshot` requires a
+  byte-identical trailing run as the observable proof of stillness.
+- **Browser discovery has a version FLOOR and no ceiling.**
+  `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
+  version comparison in the probe — nothing rejects a browser for being too
+  new, so a discovery failure on a current Chrome is never a version-range
+  problem. Selection order is `--browser` → `PULP_DESIGN_BROWSER` → managed
+  (`~/.pulp/tools/chrome-for-testing`, via its `current.json`) → system paths,
+  and the default `auto` mode prefers the pinned browser over a system one.
+  `pulp config set import_design.browser {auto,managed,system}` picks the mode;
+  `managed-browser-unavailable` fires only when `managed` is selected
+  explicitly and nothing is installed.
+- **"Could not read the version" is not "wrong version".** Reading `--version`
+  has been observed to fail once and then succeed moments later on the same
+  browser, and it used to surface as "too old or incompatible" — a message that
+  sends you hunting for a version range that does not exist. The probe now
+  retries the read once, classifies a persistent failure as
+  `browser-version-unreadable` (distinct from `browser-incompatible`), and
+  records the exit code, attempt number, and elapsed time so a recurrence
+  explains itself. CPU load is NOT the cause: `--version` measures ~70-80 ms
+  idle and under saturation against a 15 s budget.
+- **A capture that hangs is a single unresolved CDP call, not a slow loop.**
+  Every settle loop is bounded to seconds, so a multi-minute stall can only be
+  one awaited call. Diagnose by timestamping `cdp.call` start/resolve to stderr
+  and diffing the last line printed between two Chrome versions on one machine —
+  do not theorize from the code. The capture runtime now reports the phase, the
+  last completed browser call, and the calls still in flight when its deadline
+  expires, and writes the resolved browser build to stderr as a
+  `[browser-capture]` line before any page work, so a failed capture already
+  names both the Chrome and the stalled call.
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
@@ -3879,6 +3988,41 @@ Spec + design:
 [`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
 
 ## Automated Validation Loop
+
+### Score the artifact that ships, not the render beside it
+
+The importer's own A/B — the `Similarity: 98% — Validation: PASS` in a
+design-import log — measures the **DesignIR render it built in memory**. It
+does not measure the emitted `ui.js`, which is what a plugin loads. Those
+diverge, and when they do the log certifies the panel anyway: a panel scoring
+**0.13** was reported at **0.98** by that gate, twice, to a user looking at
+an "IMG" placeholder.
+
+`tools/import-validation/verify_rendered_panel.py` closes that hole. It renders
+the artifact on disk and scores it against the importer's own reference render.
+Run it on the emitted artifact after a design import, and prefer the
+**installed** copy over the freshly generated one — an asset path that resolves
+during the run can be gone by the time the plugin opens.
+
+```bash
+tools/import-validation/verify_rendered_panel.py \
+  --artifact <project>/build.ui.js \
+  --reference <capture>/validation-proof/render/render.png \
+  --tokens <capture>/tokens.json --width 900 --height 602 --scale 2
+```
+
+Two things that decide whether its number means anything, both enforced:
+the render must have `PULP_SHOT_NO_RECONCILE=1` (the viewport clamp rescales a
+capture backdrop out from under its controls, and errs in *both* directions —
+0.33/0.44 clamped where the truth was 0.13/0.98), and the renderer must come
+from the same tree as the importer (a stale one no-ops the artifact's token
+calls and scores near zero, looking exactly like a broken design).
+
+Its similarity is blind to palette regressions — an artifact whose tokens never
+reach the widget theme keys renders blue knobs on a cream faceplate and still
+scores **0.940**. The `--tokens` foreign-colour check is the only thing that
+catches that class. Full rationale, thresholds and the acceptance record:
+[`tools/import-validation/RENDERED-PANEL-GATE.md`](../../../tools/import-validation/RENDERED-PANEL-GATE.md).
 
 ### Freshness check (MUST run first)
 
@@ -4735,6 +4879,21 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **A slow `pulp-import-design` run is usually the scratch sweep, not the
+  import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
+  removes stale scratch siblings before every run by walking the temp root, so
+  its cost tracks how many entries the *machine* has in `$TMPDIR` — not the size
+  of the design. The name is now matched before any `stat`, which keeps the
+  syscalls proportional to Pulp's own dirs, but the `readdir` still covers the
+  whole shared root. On a box that had reached ~148k temp entries the `.fig`
+  lane took 117-140s while the decode itself was 136ms, and the Catch2 case —
+  which spawns the CLI once per SECTION against a 30s per-invocation timeout —
+  failed as `exit_code -1` in a different section on each run. Before blaming a
+  decoder, time the Node subtool directly (`node tools/import-design/
+  fig_decode.mjs outline <file>`) and compare. Any test that drives the CLI
+  repeatedly should take a private temp root (`ScopedTempRoot` in
+  `test_import_design_tool.cpp`) rather than a larger timeout.
+
 - **Sub-pixel geometry survives end-to-end, through TWO former rounding
   layers.** Concentric compositions (knob body ellipse + value-ring arc)
   are aligned only at fractional coordinates: "A Channel FX" solves the
@@ -5122,3 +5281,33 @@ Before concluding anything from an import run, confirm the binary matches the
 worktree you edited: check `git log --oneline -1` in the checkout you built
 from, and rebuild if the change you are validating is not in it. Testing an old
 worktree and reporting the result as current has burned real debugging hours.
+
+## Node.js discovery must not depend on the caller's PATH
+
+macOS hands a Finder-launched app a minimal `PATH`
+(`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew, mise, nvm, fnm and asdf all install
+outside it, so a PATH-only lookup reports "Node.js was not found" for a Node.js
+that is installed and new enough — while the same binary launched from a
+terminal works, because it inherits the shell's PATH. Any import path that
+resolves a helper executable has this failure mode, and it only shows up in the
+double-click launch that most users actually take.
+
+`tools/import-design/node_runtime.{hpp,cpp}` is the resolver: PATH first, then
+the fixed install locations, then the version-manager roots (mise, nvm, fnm,
+asdf), taking the first installation that meets the version floor. Version
+directories are ordered by the version parsed out of the name, numerically —
+lexical order puts `9.1.0` above `22.22.3`. Candidates are de-duplicated by
+canonical path, which collapses mise's `22`/`22.22`/`latest`/`lts-jod` aliases
+onto the one real install instead of probing it five times.
+
+Two rules when working on it:
+
+- **Verify under a stripped environment, not your shell.** `env -i
+  PATH=/usr/bin:/bin <binary>` is the only run that proves the GUI case; a pass
+  under your own PATH proves nothing, and that blind spot is what shipped the
+  bug. `NodeSearchOptions::search_path` reproduces it in-process without
+  touching the environment.
+- **"Not found" and "too old" are different messages.** A failure names the
+  Node.js installations it checked (with versions) or, when there were none, the
+  locations it searched. Listing the *browsers* it probed — the pre-fix
+  behaviour — tells the user nothing about a missing Node.js.

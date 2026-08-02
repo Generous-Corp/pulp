@@ -216,6 +216,36 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "the bounded writer does not apply or serialize authored groove context"
+    },
+    "sequence.section-role": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer emits a region's name and span but not the part it names"
+    },
+    "context.chord-bass": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "context.chord-extension": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "context.chord-voicing": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "tuning.project": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no document-wide tuning statement"
+    },
+    "tuning.instrument": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no per-instrument tuning statement"
     }
   }
 }
