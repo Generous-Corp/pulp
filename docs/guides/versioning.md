@@ -396,11 +396,12 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.81.1 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.81.2 — fleet health and the merge queue are load-bearing
 
-v0.81.1 preserves the v0.81.0 fleet-health surface and fixes regenerated
-post-tag workflows to use valid shell tag extraction on the dedicated mutation
-authority. v0.81.0 makes `runner fleet-status` account for the full registered-runner
+v0.81.2 preserves the v0.81.0 fleet-health surface, keeps v0.81.1's valid shell
+tag extraction, and fully qualifies the release bot's branch push refspec so a
+detached tag checkout can publish its queue-bound PR branch from the dedicated
+mutation authority. v0.81.0 makes `runner fleet-status` account for the full registered-runner
 inventory and configured expected metal hosts, including machines that have not
 registered yet. It also fails visibly when Tart disk headroom falls below its
 admission floor, ccache exceeds its configured maximum, or a merge-group Linux

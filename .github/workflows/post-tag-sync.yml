@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  SHIPYARD_VERSION: "v0.81.1"
+  SHIPYARD_VERSION: "v0.81.2"
 
 jobs:
   sync:
