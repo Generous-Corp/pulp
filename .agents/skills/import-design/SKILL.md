@@ -5568,6 +5568,16 @@ because a harness that lowers in-process and dumps `native.ir.json` never sees a
 CLI print, which is exactly how this stayed invisible. **Re-capture before
 debugging the lowering.**
 
+**A re-capture regenerates the oracle too — check whether it actually moved.**
+`browser.png` comes out of the same run, so a score that shifts after a
+re-capture can be the reference changing (different Chrome build, font
+resolution, settle timing) rather than the render improving. Do not attribute
+it until you have hashed both. Measured on forge: two captures of the same
+source taken hours apart produced a **byte-identical** `browser.png`
+(sha256 `76bbd8f2…`) on the same Chrome build, so the whole confound
+evaporated and every point of movement was ours. That is the good case; assume
+it only after `shasum` says so.
+
 **The capture runtime is STAGED into the build directory** (`browser_capture-v1/`
 beside `pulp-import-design`, copied by a CMake custom target). A capture taken
 before that copy runs is old even though the source tree is current — so
