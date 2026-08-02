@@ -5470,64 +5470,11 @@ fixture you derived from the same matrices as the code agrees with it by
 construction. On an out-of-gamut `oklch` the hand-written expectation was simply
 wrong and Chrome settled it.
 
-**Gradient geometry cannot be resolved when the CSS is parsed.** The importer
-runs its whole style pass *before* Yoga sizes anything, so
-`apply_css_background_gradient` sees a degenerate 1x1 box. Every box-dependent
-number therefore has to travel as CSS *intent* on `View::BackgroundGradient` and
-be resolved in `View::paint_background_and_border` against real `bounds_`:
-
-- a linear `<angle>`'s endpoints (the line's length is the box's projection onto
-  it, so the aspect ratio is in the answer);
-- a `to <corner>` keyword's angle, which is itself a function of the aspect;
-- a radial's radii, which are percentages of width and height *independently*.
-
-`View::resolve_radial` is the single place that turns a radial's CSS sizing into
-pixels, shared by the painter, the parser's calc()-stop resolution, and the
-tests, so the three cannot drift.
-
-**Three things about radial gradients that are easy to get wrong:**
-
-- **The default shape is an ELLIPSE, not a circle**, and a two-value size
-  (`90% 70%`) can only be an ellipse. Skia has no elliptical gradient — put the
-  y-squash in a **local matrix on the shader** (`set_fill_gradient_radial_-
-  elliptical`), never on the canvas: a background gradient is routinely filled
-  through a rounded-rect or per-corner path, and a canvas scale would stretch
-  those corners with it.
-- **The corner keywords are not the corner distance.** For an ellipse the spec
-  takes the matching `-side` aspect and scales it until it passes through the
-  corner, which works out to exactly `sqrt(2)` per axis — noticeably larger.
-- **`to bottom right` is `atan2(HEIGHT, width)`, not `atan2(width, height)`.**
-  The gradient line is perpendicular to the *other* diagonal `(w, -h)`, whose
-  perpendicular is `(h, w)`. The transposed form is a plausible-looking
-  expression that is only correct on a square box; on 160x100 it misses Chrome's
-  boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
-
-**A geometry fixture MUST be non-square and off-centre.** The pre-existing test
-for radial sizing asserted `closest-side → 0.5` and `farthest-corner → 0.7071`
-on a **200x200 box with the gradient at 50% 50%** — and on a square, centred box
-those wrong constants give exactly the right answer. The test could not have
-failed for the defect it was named after. The same trap makes a 45° angle its
-own reflection and an ellipse a circle. Use a box like 160x100 with the centre
-at something like `20% 20%`, and the wrong model and the correct one stop
-agreeing. This generalises past gradients: **any test whose subject is
-arithmetic over a box needs a fixture where the plausible-but-wrong formula
-gives a different answer**, or it is only asserting that two expressions
-coincide on the one input you chose.
-
-**Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
-premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
-fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
-the colour toward **black** as the alpha falls instead of just fading. Opaque
-gradients are bit-identical either way, which is why every existing gradient test
-passed over it. It only shows on a stop with alpha < 1, and that is exactly the
-form real panels use for a soft screen-sized wash. `skia_gradient_compat.hpp`
-now routes all four makers through `css_interpolation()`.
-
-**Symptom to recognise:** a wash that is present, correctly positioned, and
-*too weak and too grey* — the tint reads roughly a third of Chrome's over most
-of its area while matching near the hot centre. Compute the expected delta both
-ways (`α·(C−B)` vs `α·(lerp(C,black,f)−B)`) at one off-centre pixel; the two
-predictions differ by ~3x and pick the answer immediately.
+**Still open, diagnosed not fixed:** `apply_css_background_gradient` reads
+`local_bounds()` *before* layout, so the box is 1:1 and **every angled gradient
+resolves in the wrong direction**. Confirmed arithmetically against Chrome. It
+needs paint-time resolution. Radial `farthest-corner` separately uses a constant
+`0.7071·max(w,h)` and ignores an off-centre `at`, running ~28% short.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
@@ -5544,49 +5491,6 @@ the code, and both were found by measuring rather than reasoning:
   ink-bearing nodes pass on every real design. Quote the area-weighted number and
   say the per-node gate is not live.
 
-**Its feature classifier lied about `background-blend-mode`, and the shape of
-that lie generalises.** `background-blend-mode` carries **one value per
-background layer**, so a node with two background layers and no blending at all
-computes to the string `"normal, normal"` — which is not `"normal"`. Comparing
-the whole computed value against the keyword classified every multi-layer
-background as a blend. That mislabelled *the single largest node on the panel* on
-three of four designs, and it read as "59-70% of failing area is
-`background-blend-mode`" when the corpus contains **zero** non-normal
-`background-blend-mode` anywhere; the node was two ordinary radial gradients.
-**Any CSS property that takes a comma-separated list per background layer or per
-transition needs its value split before a keyword comparison** — `background-*`,
-`transition-*`, `animation-*`, `mask-*` are all like this. A grep-shaped check
-over a computed style is not a check.
-
-**Always report a coverage statistic beside the failing fraction.** Take the
-reference's modal colour, call pixels beyond a threshold from it "ink", and
-report both `covered = |render ink ∩ ref ink| / |ref ink|` and
-`inkRatio = |render ink| / |ref ink|`. **Both, not one:** a solid-black render
-against SPECTR scores `covered = 1.00` (black is far from the modal colour
-everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
-blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
-
-**Two ways a background-build waiter lies, and both look like a result.**
-Measurement work runs long builds, so agents wrap them in wait loops. Two
-failure modes have each burned a session here:
-
-- **`pgrep -f "cmake --build ..."` matches ANOTHER agent's build in another
-  worktree.** Several worktrees share this machine and every one of them runs a
-  byte-identical command line, so `until ! pgrep -f …` either blocks on someone
-  else's build or — if your pattern does not match your own invocation — exits
-  instantly and reports "finished" before yours started. Match on something
-  unique to your run (a marker file the command writes on exit, or the build
-  log's own last line), never on the shared command line. A wait loop can also
-  match ITSELF: the shell running `pgrep -f "ctest …"` has that string in its
-  own argv, so the loop never ends.
-- **A pipeline ending in `grep -c` reports failure on a zero count.** `grep`
-  exits 1 when it finds nothing, so `… ; grep -cE " error:" build.log` makes a
-  perfectly clean build's task exit 1 and read as "build failed". Put the grep
-  anywhere but last, or `|| true` it.
-
-In both cases the honest move is the same: **read the build log's own tail
-rather than trusting the wrapper's verdict.**
-
 **Prove the bitmap is absent by substitution, not by scanning.** A static scan
 shows no node *references* the capture; it cannot show no pixel *comes from* it.
 Replace `browser.png` with solid magenta at identical dimensions, re-lower,
@@ -5602,87 +5506,64 @@ Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects famil
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
 
-## Text: the capture knows more than the IR reads
+## `content:` in a stylesheet is mostly `justify-content:`
 
-Three things about captured text that are invisible until you go looking, all
-found while chasing what looked like a wrapping bug and was not one.
+A substring grep for `content:` over a design's CSS counts `justify-content` and
+`align-content` too, and in a flexbox-heavy panel those are the overwhelming
+majority. On the halo panel a reported "`content:` ×42" was **31 flex
+declarations and 13 real ones**, and all 13 were `content: ""`. Match on a word
+boundary before quoting a number:
 
-**Bundled faces were invisible to the paint path.** `fill_text` resolves an
-`SkFont` through `FontResolver` — correctly, bundled faces and all — and then
-uses it only for a coverage check before painting through SkParagraph, which
-re-resolves from a `FontCollection`. `text_font_context.cpp` bridged the bundled
-faces into that collection ONLY when the platform had no font DB (browser
-builds), so on macOS every family resolved through CoreText and every run in an
-imported panel painted in one system fallback while measuring correctly. Symptom:
-four Labels with four different families measure 253/253/262/317 and paint at an
-identical ink width. If you are chasing "our text is the wrong face", check what
-`fill_text` actually draws with, not what `make_font` returns.
-
-**`font-family` is a request; `platform-fonts.json` is the answer.** The capture
-now writes a sidecar (`tools/import-design/browser_capture/platform_fonts.mjs`,
-via `CSS.getPlatformFontsForNode`) recording, per text run, the face Blink
-actually shaped it with — `family_name`, `post_script_name`, `is_custom_font`,
-and `glyph_count`. Read it before concluding anything about text width. On
-`delay`, 85.6% of glyphs are `Jost-Regular` and 13.9% `JetBrainsMono-Regular`,
-both `is_custom_font: true` — the design carries its own webfonts as inline
-base64 keyed by UUID, which page JS rewires into the `url()`s, so a `@font-face`
-whose `url()` looks like a dangling opaque token is usually **not** dangling.
-Two faces appear at single-digit glyph counts (`Menlo-Regular`, `LucidaGrande`):
-that is Blink's per-cluster fallback for characters the primary face lacks, and
-`glyph_count` is the only thing that makes it visible.
-
-Do not ask that CDP method for a whole-document census. `#document` and `<html>`
-both answer with an **empty list** rather than an error on a page full of text,
-and `<body>` answers on some pages and not others — an empty census is
-indistinguishable from "this page used no fonts". Sum the per-run answers.
-
-**A run's `layout.bounds` is the union of its line boxes, not a line.** Chrome
-returns per-line boxes in `documents[0].textBoxes` (`layoutIndex`, `bounds`,
-`start`, `length`) whenever the capture requested `includeDOMRects`, which it
-always has; `CapturedStyleIndex::text_boxes_for_layout()` reads them. For an
-unwrapped run the box and the bounds coincide **exactly**, so a fixture whose
-runs all fit on one line cannot tell a correct reader from one that returns the
-bounds — `test/fixtures/browser-capture-text-wrap` exists to have a run that
-breaks five ways. A box can also start to the right of its own block, where the
-run continues a line an earlier inline sibling began; no per-node Label expresses
-that.
-
-**Comparing a measured advance to a `textBoxes` width has a systematic residual.**
-Pulp measures ~0.65% wider than Chrome's box on the same string in the same
-face at the same size. It is not segmentation (summed segments equal a single
-whole-string advance to four decimals) and not ink-vs-advance (Skia's ink extent
-is *wider* than its advance, while Chrome is narrower than both). Bound text
-parity **relatively**, and size the bound against what it must distinguish:
-wrong weight in the right face costs ~2%, the wrong face entirely ~10%.
-
-## `is_absent` swallows `normal`, and `white-space: normal` means "wrap"
-
-`browser_capture_styles.cpp`'s `is_absent()` treats `normal` as "this property
-contributes nothing", which is right for `font-style` and `background-blend-mode`
-and wrong for `white-space`: `normal` is the value that turns wrapping ON.
-Swept against a whole capture, `white-space` is the ONLY property where the
-swallowed keyword is meaningful — `text-align: start`, `letter-spacing: normal`
-and `line-height: normal` are all genuine defaults and are correctly dropped,
-so do not "fix" them.
-Chrome serializes it on every wrapping node, `apply_computed_styles` drops it,
-`style.white_space` stays `nullopt`, and so `apply_label_style`'s
-
-```cpp
-if (style.white_space && lower_copy(*style.white_space) != "nowrap")
-    label.set_multi_line(true);
+```bash
+rg -oP '(?<![-a-zA-Z])content\s*:\s*("[^"]*"|'"'"'[^'"'"']*'"'"'|[^;}\n]*)' styles.css
 ```
 
-never fires — on `delay`, for all 987 nodes. `Label`'s soft-wrap path is live
-and correct; nothing reaches it, so every paragraph draws its first line and
-drops the rest. Grepping the IR for `"nowrap"` finds none and reads as "nothing
-is set to nowrap, so wrapping should work" — the property is **absent**, not
-permissive. When a captured property seems not to be applied, check whether its value is one
-of `is_absent`'s keywords before looking at the consumer — and assert the
-lowered node CARRIES the property, because an absent field and a permissive one
-render identically and no pixel test can tell them apart.
+The same mistake sizes the work wrong in both directions. `content: ""` is the
+decorative-pseudo idiom — an empty box positioned and painted with a background
+— and it needs no text support at all, only the pseudo's own box, which the
+snapshot already carries.
 
-Enabling wrap then exposes the run that starts mid-line. A run whose first
-`textBoxes` entry begins right of its own block is continuing a line an earlier
-inline sibling began; wrapping it inside its own (union) box lays its first line
-on top of the sibling's text. The lowering marks those `nowrap` until per-line-box
-lowering exists — 8 of 277 runs on `delay`, 13.9% of its text-box area.
+## Generated content arrives as text runs on an ELEMENT row
+
+Chrome resolves `content` before it serializes. A `::before` produces one layout
+row for its box and one more **per generated text run**, and every one of them
+maps back to the pseudo's own node, whose `nodeType` is 1 (element) — there is no
+text node. So:
+
+- A lowering that decides "is this a text run?" from the DOM node type drops
+  every generated string, and the run lowers as an empty frame. The predicate has
+  to be **"this layout row carries text"**. No element row in any corpus capture
+  carries text, so widening it that way fires on generated content and nothing
+  else — worth re-checking on a new corpus before assuming it still holds.
+- `counter()` and `attr()` need no evaluation: Chrome already resolved them into
+  the run text (`counter(n) ". "` arrives as two runs, `'1'` and `'. '`). Reading
+  the rows gets both value forms for free. `url()` content does not arrive this
+  way — it is an image with no text.
+- Several runs share one pseudo node, so they share an anchor path unless the
+  run's index is appended (`…/::before[0]/#text[k]`), and DOM parentage points at
+  the pseudo's HOST, not the pseudo — the run has to be parented to its own box
+  slot explicitly or it lands as that box's sibling.
+
+## A backdrop-filter colour matrix floods the whole panel without a crop
+
+`SkImageFilters::ColorFilter` reports UNBOUNDED output, so `saveLayer` treats its
+bounds argument as a hint and grows the layer to the device clip. Installed as
+`SaveLayerRec::fBackdrop`, the filtered result then composites over everything
+already painted and **the entire panel floods with one colour** — which looks
+like a broken renderer, not like a filter with the wrong extent. Wrap the whole
+composed chain in `SkImageFilters::Crop(bounds, …)`; cropping only the blur entry
+(which is what the blur-only path did, because a blur was the only unbounded
+thing it could produce) is not enough.
+
+The same trap is already documented one function away for `crt` in
+`save_layer_with_shader_effect`. Two independent instances make it the rule for
+this file: **any filter installed as a backdrop gets cropped to the element rect.**
+
+## Growing `View::ViewStyleExtras` needs a full build, not a target build
+
+`ViewStyleExtras` sits behind `style_extras_`, so adding a field changes the
+layout of a type many libraries include. Building only the feature target links
+stale objects against the new layout and the symptom is not a crash — it is a
+**render that comes back a uniform near-white**, with the tool reporting success.
+`cmake --build build -j<N>` over everything, then re-render, before believing any
+pixel measurement of such a change.

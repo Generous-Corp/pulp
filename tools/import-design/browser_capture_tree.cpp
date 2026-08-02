@@ -239,6 +239,11 @@ struct LoweredNode {
     CapturedBox box;              ///< absolute page coordinates, verbatim
     int parent_slot = -1;         ///< -1 means "child of the IR root"
     int dom_parent_slot = -1;     ///< where DOM parentage alone would put it
+    /// The slot that OWNS this one when DOM parentage cannot say so: a
+    /// pseudo-element's generated run maps back to the pseudo's own node, so
+    /// walking its `parentIndex` reaches the pseudo's host and would make the
+    /// run a sibling of the box it belongs inside. -1 for every other node.
+    int owner_slot = -1;
     std::vector<int> children;    ///< slots, already in Chrome's paint order
 };
 
@@ -565,6 +570,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // and the reverse map that turns DOM parentage into tree parentage.
     std::vector<LoweredNode> slots;
     std::unordered_map<int, int> node_to_slot;
+    // How many generated text runs a pseudo-element has already contributed.
+    // A `content: counter(n) ". "` renders as TWO runs, so the count is what
+    // separates their anchors — and it is a position among that pseudo's own
+    // runs, which is content order, not a position in the serialization.
+    std::unordered_map<int, int> generated_runs;
 
     for (const auto& node : painted) {
         if (node.node_type != kElementNode && node.node_type != kTextNode) {
@@ -587,7 +597,18 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             ++counts.skipped_empty_box;
             continue;
         }
-        const bool is_text = node.node_type == kTextNode;
+        // A layout row that carries text IS a text run, whatever DOM node it
+        // maps back to. `content` reaches the capture only this way: Chrome
+        // gives a pseudo-element one row for its box and one more per generated
+        // run, and every one of them maps back to the pseudo's ELEMENT node —
+        // so a text run identified by its DOM node type misses all of them and
+        // the string lowers as an empty frame. Reading the rows also resolves
+        // `counter()` and `attr()` for free, because Chrome evaluated both
+        // before serializing. No element row in the corpus carries text, so
+        // this widens the predicate over generated content alone.
+        const bool generated_text =
+            node.node_type == kElementNode && !node.text.empty();
+        const bool is_text = node.node_type == kTextNode || generated_text;
         if (is_text && (node.text.empty() || is_blank(node.text))) {
             ++counts.skipped_blank_text;
             continue;
@@ -713,6 +734,16 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         lowered.attributes["paint_order"] = std::to_string(node.paint_order);
         lowered.attributes["source_tag"] = node.tag_name;
         lowered.stable_anchor_id = anchor_path(index, ordinal, node.node_index);
+        if (generated_text) {
+            // The pseudo's box already claims the path that names the pseudo,
+            // so its runs need a segment of their own or every run of one
+            // pseudo shares an anchor and a stored edit lands on whichever the
+            // walk reached first. `#text[k]` is the segment a real text child
+            // would carry, which also keeps the pseudo selectable by prefix.
+            *lowered.stable_anchor_id +=
+                "/#text[" +
+                std::to_string(generated_runs[node.node_index]++) + "]";
+        }
         // NOT `path`: that name is already owned by `AnchorStrategy::path`,
         // which is `Type[idx]` over the IR's own node types with no prefix. A
         // consumer re-deriving one of those against an anchor built here would
@@ -729,8 +760,16 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         if (is_text && !resumes_a_line) ++counts.text;
         ++counts.lowered;
 
-        node_to_slot[node.node_index] = static_cast<int>(slots.size());
         LoweredNode slot;
+        // A pseudo-element occupies several slots — its box and each of its
+        // generated runs. The FIRST is the one parentage should resolve to:
+        // it is the box, and the runs belong inside it. `emplace` keeps it;
+        // `operator[]` would leave the map pointing at the last run.
+        const auto claim =
+            node_to_slot.emplace(node.node_index,
+                                 static_cast<int>(slots.size()));
+        if (generated_text && !claim.second)
+            slot.owner_slot = claim.first->second;
         slot.node = std::move(lowered);
         slot.node_index = node.node_index;
         slot.paint_order = node.paint_order;
@@ -742,14 +781,15 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // The nearest EMITTED DOM ancestor, so a skipped wrapper (a zero-area box,
     // a collapsed whitespace run) elides rather than orphaning its subtree.
     for (size_t i = 0; i < slots.size(); ++i) {
-        int parent = -1;
-        walk_ancestry(index, index.parent_of(slots[i].node_index),
-                      [&](int walk) {
-                          const auto found = node_to_slot.find(walk);
-                          if (found == node_to_slot.end()) return true;
-                          parent = found->second;
-                          return false;
-                      });
+        int parent = slots[i].owner_slot;
+        if (parent < 0)
+            walk_ancestry(index, index.parent_of(slots[i].node_index),
+                          [&](int walk) {
+                              const auto found = node_to_slot.find(walk);
+                              if (found == node_to_slot.end()) return true;
+                              parent = found->second;
+                              return false;
+                          });
         // A node that reaches itself is a `parentIndex` cycle, not parentage.
         // Left alone it becomes its own child, and materializing the tree then
         // recurses until the stack is gone.

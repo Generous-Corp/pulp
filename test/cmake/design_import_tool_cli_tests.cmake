@@ -38,6 +38,7 @@ endif()
 # from the subprocess/backend target so protocol validation and intake policy
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
+    test_browser_capture_backdrop_filter.cpp
     test_browser_capture_ir.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
@@ -68,7 +69,9 @@ target_include_directories(pulp-test-browser-capture-import PRIVATE
 # ancestor along the containing-block chain, a node hoisted out from under the
 # ancestor that clips it, and a transformed subtree where neither happens. Each
 # keeps the source HTML next to the capture so the document under test is
-# readable without replaying the browser.
+# readable without replaying the browser. Two more cover the value forms a
+# stylesheet reaches paint through rather than the tree's shape: generated
+# `content` on ::before / ::after, and a non-blur `backdrop-filter` list.
 target_compile_definitions(pulp-test-browser-capture-import PRIVATE
     PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/fixtures/browser-capture-computed-style"
     PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")

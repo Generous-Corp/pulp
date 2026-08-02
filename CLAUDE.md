@@ -415,6 +415,24 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 
 ---
 
+## Reporting to the user — absolute paths, and verified claims
+
+**Every path you show the user is a complete absolute path.** Never abbreviate
+with `…/`, never a bare repo-relative path in prose, never a path that assumes
+the reader shares your working directory. They are reading in a terminal or
+opening the file in another app; an elided prefix cannot be clicked or pasted.
+Repeat the full prefix for every entry even when several share one, and even in
+a table. The only exception is a `file:line` code citation, where the
+repo-relative form is the established convention.
+
+**Verify an outcome before reporting it, not the artifact.** "The tests pass"
+and "the build is green" are not evidence that the change does what it claims.
+For anything with a visible or measurable result — a render, a score, a fixed
+defect — check the result itself: render it and look, run the measurement, open
+the image. A task marked complete is a claim, not a fact; treat a subagent's
+report the same way. This repo has repeatedly shipped instruments that could not
+fail in the relevant direction, and every one of them reported success.
+
 ## Repo Standards
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.

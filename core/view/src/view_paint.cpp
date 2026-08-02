@@ -268,6 +268,47 @@ void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     }
 }
 
+namespace {
+
+/// `View::FilterOp` in the shape the canvas layer verbs take. The two types
+/// carry the same ten kinds and are kept separate so a canvas-side change is
+/// not an ABI change for every View; the translation lives here once and
+/// serves both the element layer (`filter`) and the backdrop layer
+/// (`backdrop-filter`) rather than each keeping its own copy. The switch has
+/// no `default:` so adding a kind to either enum surfaces here.
+std::vector<canvas::Canvas::FilterChainEntry> to_canvas_filter_chain(
+    const std::vector<View::FilterOp>& ops) {
+    using ViewK = View::FilterOp::Kind;
+    using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+    std::vector<canvas::Canvas::FilterChainEntry> chain;
+    chain.reserve(ops.size());
+    for (const auto& op : ops) {
+        canvas::Canvas::FilterChainEntry e{};
+        switch (op.kind) {
+            case ViewK::blur:        e.kind = CanvK::blur;        break;
+            case ViewK::brightness:  e.kind = CanvK::brightness;  break;
+            case ViewK::contrast:    e.kind = CanvK::contrast;    break;
+            case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
+            case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
+            case ViewK::invert:      e.kind = CanvK::invert;      break;
+            case ViewK::opacity:     e.kind = CanvK::opacity;     break;
+            case ViewK::saturate:    e.kind = CanvK::saturate;    break;
+            case ViewK::sepia:       e.kind = CanvK::sepia;       break;
+            case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
+        }
+        e.amount      = op.amount;
+        e.angle_deg   = op.angle_deg;
+        e.ds_offset_x = op.ds_offset_x;
+        e.ds_offset_y = op.ds_offset_y;
+        e.ds_blur     = op.ds_blur;
+        e.ds_color    = op.ds_color;
+        chain.push_back(e);
+    }
+    return chain;
+}
+
+}  // namespace
+
 View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     EffectLayerState state;
 
@@ -276,7 +317,9 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // in pop_effect_layers.
-    bool needs_backdrop_layer = (backdrop_blur() > 0.0f);
+    const auto& backdrop_chain = backdrop_filter_chain();
+    bool needs_backdrop_layer =
+        !backdrop_chain.empty() || backdrop_blur() > 0.0f;
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
             warn_capability_fallback_once(
@@ -284,8 +327,26 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                 "canvas backend has no backdrop-filter blur; backdrop-filter "
                 "renders as an unblurred tint");
         }
-        canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
-                                    backdrop_blur());
+        if (backdrop_chain.empty()) {
+            canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
+                                        backdrop_blur());
+        } else {
+            // A list beyond a bare blur — `saturate()`, `invert()`, a pair of
+            // them. A backend without the chain keeps whatever blur the list
+            // carries and drops the colour half, so the frosting survives but
+            // the tint does not; say so rather than let it pass as faithful.
+            if (!canvas.supports(
+                    canvas::CanvasCapability::backdrop_filter_chain)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::backdrop_filter_chain,
+                    "canvas backend does not honor backdrop-filter color ops; "
+                    "backdrop-filter collapses to its blur");
+            }
+            const auto chain = to_canvas_filter_chain(backdrop_chain);
+            canvas.save_backdrop_filter_chain(0, 0, bounds_.width,
+                                              bounds_.height, chain.data(),
+                                              static_cast<int>(chain.size()));
+        }
     }
     state.backdrop_pushed = needs_backdrop_layer;
 
@@ -362,32 +423,7 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor CSS filter color ops; "
                     "filter chain collapses to blur/opacity only");
             }
-            std::vector<pulp::canvas::Canvas::FilterChainEntry> chain;
-            chain.reserve(filter_chain_.size());
-            for (const auto& op : filter_chain_) {
-                pulp::canvas::Canvas::FilterChainEntry e{};
-                using ViewK = View::FilterOp::Kind;
-                using CanvK = pulp::canvas::Canvas::FilterChainEntry::Kind;
-                switch (op.kind) {
-                    case ViewK::blur:        e.kind = CanvK::blur;        break;
-                    case ViewK::brightness:  e.kind = CanvK::brightness;  break;
-                    case ViewK::contrast:    e.kind = CanvK::contrast;    break;
-                    case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
-                    case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
-                    case ViewK::invert:      e.kind = CanvK::invert;      break;
-                    case ViewK::opacity:     e.kind = CanvK::opacity;     break;
-                    case ViewK::saturate:    e.kind = CanvK::saturate;    break;
-                    case ViewK::sepia:       e.kind = CanvK::sepia;       break;
-                    case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
-                }
-                e.amount      = op.amount;
-                e.angle_deg   = op.angle_deg;
-                e.ds_offset_x = op.ds_offset_x;
-                e.ds_offset_y = op.ds_offset_y;
-                e.ds_blur     = op.ds_blur;
-                e.ds_color    = op.ds_color;
-                chain.push_back(e);
-            }
+            const auto chain = to_canvas_filter_chain(filter_chain_);
             canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
