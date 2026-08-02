@@ -108,6 +108,17 @@ public:
     /// and is wrong on every wrapped one.
     std::vector<CapturedTextBox> text_boxes_for_layout(int layout_index) const;
 
+    /// The PostScript name of the face Blink actually shaped this run with, or
+    /// empty when the capture recorded none.
+    ///
+    /// Read from the `platform-fonts.json` sidecar beside the snapshot. The
+    /// computed `font-family` is a REQUEST — a list whose entries may be
+    /// webfonts that failed to load or families the host lacks — so it cannot
+    /// answer which typeface produced the recorded line breaks. Anything
+    /// validating captured layout has to compare against the face, and an
+    /// empty answer must be treated as "cannot validate" rather than "matches".
+    std::string resolved_face_for_layout(int layout_index) const;
+
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
     std::vector<CapturedPaintNode> painted_nodes() const;
@@ -168,6 +179,9 @@ private:
     /// layout index → its line boxes. Sized with the layout, so a lookup for a
     /// node that laid out no text is a bounds check rather than a miss.
     std::vector<std::vector<CapturedTextBox>> layout_text_boxes_;
+    /// layout index → the PostScript name Blink resolved, when the capture
+    /// carried a platform-fonts sidecar.
+    std::unordered_map<int, std::string> layout_resolved_face_;
 };
 
 /// Which half of an element's appearance to fold onto a node.

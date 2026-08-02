@@ -373,8 +373,49 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
         }
     }
 
+    // Which face Blink actually shaped each run with, from the sidecar beside
+    // the snapshot. Optional by design: a capture taken before that sidecar
+    // existed simply has no faces, and every consumer must already treat an
+    // empty answer as unusable rather than as agreement.
+    const auto fonts_path = snapshot_path.parent_path() / "platform-fonts.json";
+    std::ifstream fonts_input(fonts_path, std::ios::binary);
+    if (fonts_input) {
+        std::ostringstream font_bytes;
+        font_bytes << fonts_input.rdbuf();
+        try {
+            const auto report = choc::json::parse(font_bytes.str());
+            const auto runs = member(report, "runs");
+            if (runs.isArray()) {
+                for (uint32_t i = 0; i < runs.size(); ++i) {
+                    const auto run = runs[static_cast<int>(i)];
+                    if (!run.isObject()) continue;
+                    const int layout_index =
+                        json_int(member(run, "layout_index"), -1);
+                    if (layout_index < 0) continue;
+                    const auto resolved = member(run, "resolved");
+                    if (!resolved.isArray() || resolved.size() == 0) continue;
+                    // The FIRST face is the one that shaped the run's primary
+                    // text; later entries are per-cluster fallback for
+                    // codepoints it lacked.
+                    const auto face = member(resolved[0], "post_script_name");
+                    if (!face.isString()) continue;
+                    index.layout_resolved_face_[layout_index] =
+                        std::string(face.getString());
+                }
+            }
+        } catch (const std::exception&) {
+            // A malformed sidecar leaves the map empty, which is the same
+            // state as no sidecar: nothing validates, everything reflows.
+        }
+    }
+
     if (index.style_rows_.empty()) return std::nullopt;
     return index;
+}
+
+std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const {
+    const auto it = layout_resolved_face_.find(layout_index);
+    return it == layout_resolved_face_.end() ? std::string{} : it->second;
 }
 
 std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(

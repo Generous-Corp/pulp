@@ -202,6 +202,35 @@ public:
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
+    /// One captured line of text: where it sits in this Label's box, and which
+    /// slice of the text it holds (UTF-16 code units, as the capture indexes).
+    struct CachedLineBox {
+        float left = 0.0f;
+        float top = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+        int start = 0;
+        int length = 0;
+    };
+
+    /// Adopt a browser's own line breaking for this text.
+    ///
+    /// The Label stays a paragraph — full text, one style, one box — and this
+    /// is a CACHE of how the text was already broken, not a replacement for
+    /// breaking it. Paint uses it verbatim while `basis_width` and
+    /// `basis_face` still describe the situation, and reflows through the
+    /// shaper the moment they do not. Adopting a foreign layout is only sound
+    /// while the thing that produced it still holds.
+    ///
+    /// `basis_face` is the PostScript name of the face the boxes were laid out
+    /// with, not the requested family. Empty means unverifiable, and an
+    /// unverifiable cache is never used.
+    void set_cached_line_boxes(std::vector<CachedLineBox> boxes,
+                               float basis_width, std::string basis_face);
+    const std::vector<CachedLineBox>& cached_line_boxes() const {
+        return cached_line_boxes_;
+    }
+
     /// The CSS numeric weight this Label will actually be painted at — its own
     /// when it was given one, otherwise the nearest ancestor's.
     ///
@@ -383,6 +412,23 @@ private:
                    break_mode == o.break_mode && font_gen == o.font_gen;
         }
     };
+    /// Whether the captured line boxes still describe this Label.
+    ///
+    /// CONSERVATIVE BY CONSTRUCTION: every condition that could move a break
+    /// must match, and anything unknown counts as a mismatch. Reusing a cache
+    /// that no longer applies reintroduces exactly the defect it exists to
+    /// prevent; discarding one that still applies costs a reflow.
+    bool cached_line_layout_usable(const std::string& display_text) const;
+
+    /// Build a ShapedLayout from the captured boxes, so the rest of paint —
+    /// line-clamp, vertical-align, alignment — is the same code either way.
+    canvas::ShapedLayout layout_from_cached_lines(const std::string& text,
+                                                  float line_height) const;
+
+    std::vector<CachedLineBox> cached_line_boxes_;
+    float cached_line_basis_width_ = 0.0f;
+    std::string cached_line_basis_face_;
+
     ShapedLayoutKey shaped_cache_key_;
     canvas::ShapedLayout shaped_cache_layout_;
     bool shaped_cache_valid_ = false;

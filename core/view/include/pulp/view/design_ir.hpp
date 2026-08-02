@@ -300,6 +300,43 @@ struct IRProvenance {
 /// (a bold word, a colored span, a different size mid-string) becomes an ordered
 /// list of these so codegen can emit per-range <span>s instead of collapsing to
 /// the first-char dominant style.
+/// One line box Chrome laid a text run out on, kept as CACHED LAYOUT beside the
+/// paragraph rather than in place of it.
+///
+/// The node stays one semantic paragraph — full text, one style, one container
+/// box — and these describe how the browser broke it. A renderer that finds the
+/// cache valid draws these verbatim, so no disagreement between our advances
+/// and Blink's can move a line; a renderer that finds it stale reflows and the
+/// paragraph behaves like any other text.
+///
+/// `rect` is relative to the node's own box. `start` / `length` are UTF-16 code
+/// units into `text_content`, because that is how the capture protocol indexes
+/// strings — see `utf16_slice` in the importer.
+struct IRTextLineBox {
+    float left = 0.0f;
+    float top = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    int start = 0;
+    int length = 0;
+};
+
+/// What the cached line boxes above were laid out AGAINST.
+///
+/// The cache is only usable if the conditions that produced it still hold, and
+/// this records them so the check is against captured fact rather than against
+/// an assumption. Deliberately conservative: any difference reflows, because a
+/// wrongly-reused cache is the bug this exists to prevent while a wrongly-
+/// discarded one costs only a reflow.
+struct IRTextLayoutBasis {
+    /// The container width Chrome broke the text at.
+    float width = 0.0f;
+    /// The face Blink actually shaped with — a PostScript name, not the
+    /// requested family. Empty when the capture recorded no platform font,
+    /// which makes the cache unusable rather than usable-on-trust.
+    std::string resolved_face;
+};
+
 struct IRTextRun {
     int start = 0;
     int end = 0;
@@ -493,6 +530,12 @@ struct IRNode {
     std::string name;
     std::string text_content;            // For text nodes
     std::vector<IRTextRun> text_runs;    // Per-range style overrides (mixed text)
+    /// Chrome's own line breaking for `text_content`, cached. Empty when the
+    /// capture carried none or the run fit on one line.
+    std::vector<IRTextLineBox> text_line_boxes;
+    /// The conditions `text_line_boxes` was captured under. Absent means the
+    /// cache cannot be validated and must not be used.
+    std::optional<IRTextLayoutBasis> text_layout_basis;
     IRStyle style;
     IRLayout layout;
     AudioWidgetType audio_widget = AudioWidgetType::none;

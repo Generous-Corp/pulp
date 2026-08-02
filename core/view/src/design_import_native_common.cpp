@@ -1620,6 +1620,23 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
+            // Adopt the browser's own line breaking when the capture carried
+            // it. Label validates the basis before using it, so a stale cache
+            // costs a reflow rather than a wrong layout.
+            if (!node.text_line_boxes.empty() && node.text_layout_basis) {
+                std::vector<Label::CachedLineBox> boxes;
+                boxes.reserve(node.text_line_boxes.size());
+                for (const auto& b : node.text_line_boxes) {
+                    boxes.push_back({b.left, b.top, b.width, b.height,
+                                     b.start, b.length});
+                }
+                label->set_cached_line_boxes(
+                    std::move(boxes), node.text_layout_basis->width,
+                    node.text_layout_basis->resolved_face);
+                // Cached breaking is line breaking, so the Label must be in
+                // its multi-line mode for the layout to be consulted at all.
+                label->set_multi_line(true);
+            }
             return label;
         }
         case NativeWidgetKind::text_button:
