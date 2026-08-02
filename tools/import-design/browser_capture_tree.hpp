@@ -50,6 +50,18 @@ struct PaintedTreeCounts {
     /// descendant, so that order is unrepresentable in place; the node is
     /// hoisted and flagged rather than silently drawn in the wrong order.
     int hoisted_escapes = 0;
+    /// Nodes the emitted tree clips that CSS would not, because the tree
+    /// applies `overflow` by DOM parentage while CSS applies it along the
+    /// containing-block chain. An absolutely positioned node whose containing
+    /// block sits ABOVE an `overflow: hidden` ancestor escapes that ancestor's
+    /// clip in a browser; nested under it here, it is clipped — and where the
+    /// boxes do not intersect, it disappears entirely.
+    int clip_over_applied = 0;
+    /// Nodes that lose a clip CSS would apply, because the ancestor carrying it
+    /// is no longer above them in the emitted tree — a hoisted node regrafted
+    /// past its clipping parent, which then paints outside the box that
+    /// contained it in the browser.
+    int clip_lost = 0;
     /// Composed-order inversions against Chrome that are actually VISIBLE:
     /// a pair whose relative paint order differs from Chrome's AND whose boxes
     /// overlap. Re-expressing a flat paint order hierarchically reorders

@@ -316,6 +316,21 @@ knowing before you touch that file:
 - **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
   of 1 means the lowering reflattened and every per-node count still looks
   right, so check the shape, not only the census.
+- **Clipping is KNOWN WRONG in both directions, and counted rather than fixed.**
+  The tree carries `overflow` on a node and the renderer clips that node's
+  children, so the emitted clip follows DOM parentage; CSS follows the
+  containing-block chain. `native_nodes_clip_over_applied` counts nodes the tree
+  clips that a browser would not — an absolutely positioned node whose
+  containing block sits above an `overflow: hidden` ancestor escapes that clip
+  in Chrome, and where the boxes do not intersect it disappears here entirely.
+  `native_nodes_clip_lost` counts the mirror: a hoisted node regrafted past the
+  ancestor that was clipping it, which then paints outside the box that
+  contained it. Neither is expressible by re-parenting, because the clip has to
+  travel with the node rather than with its position in the tree — the fix is a
+  per-node clip rectangle computed from the real CSS clip chain, which the
+  capture already has the data for (`position` and `transform` are both among
+  the captured computed properties). Until then, treat a non-zero value of
+  either as ink the panel is drawing wrongly, not as a structural note.
 - **Anchors are DOM paths, not capture positions.** `stable_anchor_id` is
   `capture:tag#id-or-.class[ordinal]/…`, with ordinals counted over ALL
   same-signature siblings in the document rather than over the painted ones, so

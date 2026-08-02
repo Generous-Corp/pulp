@@ -200,6 +200,7 @@ struct SnapshotSpec {
 ///   47 matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)   — 45° rotation
 ///   48 matrix(2, 0, 0, 2, 0, 0)                                — 2× scale
 ///   49 SPAN
+///   50 visible   51 hidden   52 static   53 relative   54 absolute
 /// so a style row of [11,14] is `background-image: none; display: block`.
 constexpr std::string_view kSnapshotStrings =
     R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
@@ -215,7 +216,13 @@ constexpr std::string_view kSnapshotStrings =
     R"J("panel\tactive","\n  card  x"," panel",)J"
     R"J("w-1/2 p-4","a","b","a[0]/div.b",)J"
     R"J("matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)",)J"
-    R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN")J";
+    R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN",)J"
+    R"J("visible","hidden","static","relative","absolute")J";
+
+/// The property list the clip cases are parallel to: `overflow` decides what
+/// clips, `position` and `transform` decide what a clip applies TO.
+constexpr std::string_view kClipProperties =
+    R"(["overflow","position","transform"])";
 
 /// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
 std::string build_snapshot(const SnapshotSpec& spec) {
@@ -1350,6 +1357,125 @@ TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",
     CHECK(cyclic->stable_anchor_id.has_value());
 }
 
+// ── The clip mismatch ───────────────────────────────────────────────────────
+//
+// The tree carries `overflow` on a node and the renderer clips that node's
+// CHILDREN, so the emitted clip follows DOM parentage. CSS applies it along the
+// containing-block chain instead. The two disagree in BOTH directions, neither
+// is expressible by re-parenting, and the fix is a clip rectangle carried on
+// the node — a separate piece of work. What these cases pin is that lowering
+// COUNTS the disagreement rather than reporting the nodes as faithfully drawn.
+
+TEST_CASE("a clip the containing-block chain escapes is counted",
+          "[browser-capture][native-lowering]") {
+    // `#esc` is absolutely positioned and its containing block is `#panel`, so
+    // `#clip` — statically positioned, in between, `overflow: hidden` — does
+    // not clip it: Chrome paints it in full, outside `#clip` entirely. Nested
+    // under `#clip` here it IS clipped, and because the boxes do not intersect
+    // at all the node disappears. Counted, because the census would otherwise
+    // report a vanished node as `native` and fully drawn.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#panel (relative),
+    //        4 DIV#clip (static, hidden), 5 DIV#esc (absolute)
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
+                      "[50,53,11],[51,52,11],[50,54,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[0,0,400,400],[40,40,100,100],[120,260,200,40]]",
+            .paint_orders = "[0,1,1,2,3,4]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-escape");
+    CHECK(lowered.counts.lowered == 5);
+    CHECK(lowered.counts.clip_over_applied == 1);
+    CHECK(lowered.counts.clip_lost == 0);
+
+    // Named on the node, so the defect is locatable and not only countable.
+    const auto* escaped = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "clip_over_applied") == "1";
+    });
+    REQUIRE(escaped != nullptr);
+    CHECK(*escaped->style.width == 200.0f);
+}
+
+TEST_CASE("a clip a hoist regrafted past is counted",
+          "[browser-capture][native-lowering]") {
+    // The mirror image. `#under` is absolutely positioned inside `#card`, whose
+    // `overflow: hidden` DOES clip it — `#card` is its containing block. But
+    // `#under` paints before its own parent, so it is hoisted out from under
+    // `#card`, and the emitted tree no longer has the clip above it: it paints
+    // at full width, outside the box that contained it in the browser.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#panel (relative),
+    //        4 DIV#card (absolute, hidden), 5 DIV#under (absolute) inside it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3]",
+            .node_types = "[9,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4]",
+            .attributes = "[[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
+                      "[50,53,11],[51,54,11],[50,54,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[0,0,400,400],[150,150,102,102],[91,171,200,40]]",
+            // #under paints before #card, which is what fires the hoist.
+            .paint_orders = "[0,1,1,2,5,3]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-hoisted");
+    CHECK(lowered.counts.lowered == 5);
+    CHECK(lowered.counts.hoisted_escapes == 1);
+    CHECK(lowered.counts.clip_lost == 1);
+    CHECK(lowered.counts.clip_over_applied == 0);
+
+    // The same node carries both notes: hoisting is why the clip was lost, and
+    // `native_nodes_hoisted` alone reads as a neutral structural rearrangement.
+    const auto* under = find_node(lowered.root, [](const IRNode& node) {
+        return attribute(node, "clip_lost") == "1";
+    });
+    REQUIRE(under != nullptr);
+    CHECK(attribute(*under, "paint_order_hoisted") == "1");
+}
+
+TEST_CASE("a clip that really does apply is not counted as a mismatch",
+          "[browser-capture][native-lowering]") {
+    // Without this, the counter could simply be "an ancestor has overflow" and
+    // both cases above would still pass. Two shapes where the emitted clip and
+    // the CSS clip AGREE: an in-flow child of a clipping parent, and an
+    // absolutely positioned child whose containing block IS that parent — the
+    // case that looks like the escape above and is not one.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV.wrap (static, hidden), 4 DIV.inner (static) inside it,
+    //        5 DIV.item (relative, hidden), 6 DIV.leaf (absolute) inside it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,3]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,2,5]",
+            .attributes = "[[],[],[],[23,24],[23,25],[23,27],[23,26]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[50,52,11],[50,52,11],[50,52,11],"
+                      "[51,52,11],[50,52,11],[51,53,11],[50,54,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,100,100],[20,20,40,40],"
+                      "[200,10,100,100],[210,20,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-agrees");
+    CHECK(lowered.counts.lowered == 6);
+    CHECK(lowered.counts.clip_over_applied == 0);
+    CHECK(lowered.counts.clip_lost == 0);
+}
+
 TEST_CASE("the reorder audit counts a real inversion and only a visible one",
           "[browser-capture][native-lowering]") {
     // The other cases assert this diagnostic is zero, which a counter wired to
@@ -1680,6 +1806,8 @@ TEST_CASE("whole-tree lowering census over a real captured design",
                                 "native_tree_depth",
                                 "native_nodes_hoisted",
                                 "native_nodes_overlapping_reorders",
+                                "native_nodes_clip_over_applied",
+                                "native_nodes_clip_lost",
                                 "native_nodes_skipped_empty_box",
                                 "native_nodes_skipped_blank_text",
                                 "native_nodes_skipped_non_visual",

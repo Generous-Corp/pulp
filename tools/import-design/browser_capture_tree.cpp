@@ -245,6 +245,17 @@ bool is_axis_preserving_transform(const std::string& value) {
            (std::abs(numbers[0]) < kFlat && std::abs(numbers[3]) < kFlat);
 }
 
+/// The computed facts about one element that decide what clips what.
+struct ClipFacts {
+    bool clips = false;             ///< `overflow` is not `visible`
+    bool out_of_flow = false;       ///< `position` is `absolute` or `fixed`
+    bool viewport_relative = false; ///< `position: fixed`
+    /// Establishes a containing block for out-of-flow descendants: any
+    /// non-`static` position, and also a `transform` or `filter`, which take
+    /// over as the containing block even on a statically positioned element.
+    bool containing_block = false;
+};
+
 bool boxes_overlap(const CapturedBox& a, const CapturedBox& b) {
     return a.left < b.left + b.width && b.left < a.left + a.width &&
            a.top < b.top + b.height && b.top < a.top + a.height;
@@ -472,6 +483,107 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         slots[i].node.attributes["hoisted_from"] =
             slots[static_cast<size_t>(slots[i].dom_parent_slot)]
                 .node.stable_anchor_id.value_or("");
+    }
+
+    // ── Clip audit ──────────────────────────────────────────────────────────
+    // The tree carries `overflow` on a node and the renderer clips that node's
+    // CHILDREN, so the emitted clip follows DOM parentage. CSS follows the
+    // containing-block chain instead, and the two disagree in both directions.
+    // Neither is fixable by re-parenting — the honest fix is a clip rectangle
+    // carried on the node — so what lowering can do today is say how often it
+    // is wrong rather than report those nodes as faithfully drawn.
+    const int node_total = index.node_count();
+    std::unordered_map<int, ClipFacts> clip_facts;
+    const auto facts_of = [&](int node_index) {
+        const auto seen = clip_facts.find(node_index);
+        if (seen != clip_facts.end()) return seen->second;
+        ClipFacts facts;
+        // A text run's computed style row IS its parent element's, so reading
+        // `position` off it would report the parent's — and a text run is
+        // always in flow inside the element it belongs to.
+        if (index.node_type_of(node_index) == kElementNode) {
+            const auto layout = layout_of.find(node_index);
+            if (layout != layout_of.end()) {
+                const auto computed = index.styles_for_layout(layout->second);
+                const auto value = [&](const char* name) {
+                    const auto found = computed.find(name);
+                    return found == computed.end() ? std::string{}
+                                                   : found->second;
+                };
+                const auto overflow = value("overflow");
+                facts.clips = !overflow.empty() && overflow != "visible";
+                const auto position = value("position");
+                facts.viewport_relative = position == "fixed";
+                facts.out_of_flow =
+                    position == "absolute" || facts.viewport_relative;
+                const auto transform = value("transform");
+                const auto filter = value("filter");
+                facts.containing_block =
+                    (!position.empty() && position != "static") ||
+                    (!transform.empty() && transform != "none") ||
+                    (!filter.empty() && filter != "none");
+            }
+        }
+        clip_facts[node_index] = facts;
+        return facts;
+    };
+
+    // The ancestors a browser would actually clip this node against.
+    const auto css_clippers = [&](int node_index) {
+        std::vector<int> clippers;
+        int current = node_index;
+        for (int steps = 0; steps < node_total; ++steps) {
+            const auto self = facts_of(current);
+            int ancestor = -1;
+            if (self.out_of_flow) {
+                // Its containing block is the viewport: nothing in the document
+                // clips it.
+                if (self.viewport_relative) break;
+                // Ancestors BETWEEN an absolutely positioned node and its
+                // containing block are not on its clip chain at all — this is
+                // the escape the nested tree cannot express.
+                walk_ancestry(index, index.parent_of(current), [&](int node) {
+                    if (!facts_of(node).containing_block) return true;
+                    ancestor = node;
+                    return false;
+                });
+            } else {
+                ancestor = index.parent_of(current);
+            }
+            if (ancestor < 0) break;
+            if (facts_of(ancestor).clips) clippers.push_back(ancestor);
+            current = ancestor;
+        }
+        return clippers;
+    };
+
+    for (size_t i = 0; i < slots.size(); ++i) {
+        const auto clippers = css_clippers(slots[i].node_index);
+        std::unordered_set<int> emitted;
+        int walk = slots[i].parent_slot;
+        for (size_t step = 0; walk >= 0 && step < slots.size(); ++step) {
+            emitted.insert(slots[static_cast<size_t>(walk)].node_index);
+            walk = slots[static_cast<size_t>(walk)].parent_slot;
+        }
+        const auto on_css_chain = [&clippers](int node) {
+            return std::find(clippers.begin(), clippers.end(), node) !=
+                   clippers.end();
+        };
+        const bool over = std::any_of(
+            emitted.begin(), emitted.end(), [&](int node) {
+                return facts_of(node).clips && !on_css_chain(node);
+            });
+        const bool lost = std::any_of(
+            clippers.begin(), clippers.end(),
+            [&](int node) { return emitted.count(node) == 0; });
+        if (over) {
+            ++counts.clip_over_applied;
+            slots[i].node.attributes["clip_over_applied"] = "1";
+        }
+        if (lost) {
+            ++counts.clip_lost;
+            slots[i].node.attributes["clip_lost"] = "1";
+        }
     }
 
     // Children in slot order, which IS Chrome's paint order among siblings.

@@ -944,6 +944,12 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_nodes_hoisted", tree.hoisted_escapes);
         record_if("native_nodes_overlapping_reorders",
                   tree.overlapping_reorders);
+        // The nested tree clips by DOM parentage while CSS clips along the
+        // containing-block chain, so both of these are known limitations of the
+        // opt-in native path rather than transient regressions. Reported so the
+        // census stops counting the affected nodes as faithfully drawn.
+        record_if("native_nodes_clip_over_applied", tree.clip_over_applied);
+        record_if("native_nodes_clip_lost", tree.clip_lost);
     }
 
     int styled_controls = 0;
