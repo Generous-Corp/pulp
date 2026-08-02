@@ -2074,6 +2074,21 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--host",
             "kind": "option",
             "required": false
@@ -2486,7 +2501,17 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
-            "name": "--host",
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
             "kind": "option",
             "required": false
           },
@@ -2547,17 +2572,6 @@
           {
             "name": "list-traces",
             "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "load-fixture",
-            "arguments": [
-              {
-                "name": "path",
-                "kind": "positional",
-                "required": true
-              }
-            ],
             "subcommands": []
           },
           {
@@ -3733,6 +3747,21 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--port",
             "kind": "option",
             "required": false
@@ -3749,11 +3778,6 @@
             "arguments": [
               {
                 "name": "--categories",
-                "kind": "option",
-                "required": false
-              },
-              {
-                "name": "--out",
                 "kind": "option",
                 "required": false
               },
@@ -4548,10 +4572,6 @@
         "disposition": "candidate-shared-later"
       },
       {
-        "name": "pulp_motion_load_fixture",
-        "disposition": "candidate-shared-later"
-      },
-      {
         "name": "pulp_motion_pause",
         "disposition": "candidate-shared-later"
       },
@@ -4620,7 +4640,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.405.0",
+        "version": "0.406.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4635,13 +4655,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.405.0",
+        "catalog_version": "0.406.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.405.0",
+        "version": "0.406.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

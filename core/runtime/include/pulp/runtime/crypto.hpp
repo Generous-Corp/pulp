@@ -7,11 +7,22 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 
 namespace pulp::runtime {
+
+// ── Secure random bytes ─────────────────────────────────────────────────
+
+/// Generate bytes from the runtime's entropy-seeded CTR-DRBG. Returns nullopt
+/// when entropy initialization or generation fails.
+std::optional<std::vector<uint8_t>> secure_random_bytes(size_t size);
+
+/// Overwrite sensitive bytes through volatile stores so the wipe is not
+/// removed as a dead store when the containing object is destroyed.
+void secure_zero_memory(void* data, size_t size) noexcept;
 
 // ── Encoding ────────────────────────────────────────────────────────────
 

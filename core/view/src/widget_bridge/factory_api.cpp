@@ -45,7 +45,8 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
         auto id = args.get<std::string>(0, "");
         auto knob = std::make_unique<Knob>();
         knob->set_id(id);
-        knob->set_label(id);
+        // No caption: `id` is an addressing handle, not the control's name, and
+        // a widget paints its label. See make_widget_for_tag.
 
         if (isNewApi(args)) {
             auto pid = args.get<std::string>(1, "");
@@ -83,7 +84,6 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
                               (float)args.get<double>(3,24), (float)args.get<double>(4,200)});
             auto orient = args.get<std::string>(5, "vertical");
             if (orient == "horizontal") fader->set_orientation(Fader::Orientation::horizontal);
-            fader->set_label(id);
             auto* ptr = fader.get();
             self.widgets_[id] = ptr;
             self.wire_callbacks(id, ptr);
@@ -107,7 +107,6 @@ void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) 
         } else {
             toggle->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                                (float)args.get<double>(3,50), (float)args.get<double>(4,30)});
-            toggle->set_label(id);
             auto* ptr = toggle.get();
             self.widgets_[id] = ptr;
             self.wire_callbacks(id, ptr);

@@ -113,12 +113,144 @@ canvas::Color parse_css_color(const std::string& str) {
 
 namespace {
 
-// Paren-aware comma split (so rgba(...) stays intact) + trailing position peel
-// (Npx / N%). Fills colors/positions in parallel.
-void parse_stops(const std::string& colorStr,
+// Evaluate a `calc(...)` stop position far enough to place a stop: a chain of
+// `+` / `-` terms, each a number carrying `%` or `px`.
+//
+// Percentages are already a fraction of the gradient line. Pixels are not —
+// they need the line's LENGTH, which only the caller knows, so a px term
+// without a length is REFUSED rather than approximated. A stop in the wrong
+// place is indistinguishable downstream from one the author asked for.
+//
+// CSS requires whitespace around a binary `+`/`-` inside calc() (without it
+// the `-` is part of the number), and that rule is enforced here rather than
+// guessed at, so `calc(100%-7px)` is refused exactly as a browser refuses it.
+// Anything richer — nested calc, var(), min/max/clamp, `*`, `/` — is refused
+// too; this is a stop-position reader, not a CSS engine.
+std::optional<float> eval_calc_position(const std::string& token,
+                                        std::optional<float> length_px) {
+    if (token.size() < 6 || token.compare(0, 5, "calc(") != 0 || token.back() != ')')
+        return std::nullopt;
+    const std::string expr = token.substr(5, token.size() - 6);
+
+    float percent = 0.0f, pixels = 0.0f;
+    float sign = 1.0f;
+    bool expect_term = true;
+    std::size_t i = 0;
+    while (i < expr.size()) {
+        if (std::isspace(static_cast<unsigned char>(expr[i]))) { ++i; continue; }
+        if (!expect_term) {
+            if (expr[i] != '+' && expr[i] != '-') return std::nullopt;
+            // A binary operator must be surrounded by whitespace; leading
+            // space was already consumed above, so only check the trailing one.
+            if (i + 1 >= expr.size() ||
+                !std::isspace(static_cast<unsigned char>(expr[i + 1])))
+                return std::nullopt;
+            sign = (expr[i] == '-') ? -1.0f : 1.0f;
+            ++i;
+            expect_term = true;
+            continue;
+        }
+        std::size_t consumed = 0;
+        float value = 0.0f;
+        try {
+            value = std::stof(expr.substr(i), &consumed);
+        } catch (...) { return std::nullopt; }
+        if (consumed == 0) return std::nullopt;
+        i += consumed;
+        const std::size_t unit_begin = i;
+        while (i < expr.size() &&
+               (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '%'))
+            ++i;
+        const std::string unit = expr.substr(unit_begin, i - unit_begin);
+        if (unit == "%")       percent += sign * value;
+        else if (unit == "px") pixels  += sign * value;
+        else                   return std::nullopt;  // bare number or em/rem/deg
+        expect_term = false;
+    }
+    if (expect_term) return std::nullopt;  // empty, or a trailing operator
+
+    float position = percent / 100.0f;
+    if (pixels != 0.0f) {
+        if (!length_px || !(*length_px > 0.0f)) return std::nullopt;
+        position += pixels / *length_px;
+    }
+    return position;
+}
+
+// A stop position resolved to the gradient's own 0..1 parameter, or nullopt
+// when the token is not a position at all.
+//
+// `angular` selects the units the gradient measures its stops in. A conic
+// measures them as <angle-percentage>, and CSS conics are almost always
+// authored in degrees — dropping the unit and keeping the number put `180deg`
+// at 180.0, which is 18000% and clamps to the end of the ramp, so a two-colour
+// sweep rendered as one flat colour. Linear and radial gradients measure
+// lengths instead, where an angle is meaningless and is left alone.
+std::optional<float> parse_stop_position(const std::string& tail, bool angular,
+                                         std::optional<float> length_px) {
+    if (tail.compare(0, 5, "calc(") == 0) return eval_calc_position(tail, length_px);
+    const auto unit_at = [&](std::string_view unit) {
+        return tail.size() > unit.size() &&
+               tail.compare(tail.size() - unit.size(), unit.size(), unit) == 0;
+    };
+    std::string number = tail;
+    float scale = 1.0f;  // bare number: already the 0..1 parameter
+    if (!tail.empty() && tail.back() == '%') {
+        number = tail.substr(0, tail.size() - 1);
+        scale = 1.0f / 100.0f;
+    } else if (unit_at("px")) {
+        // A pixel offset needs the box to resolve against, which this parser
+        // does not have. Kept as the historical raw-number reading rather than
+        // silently becoming something else.
+        number = tail.substr(0, tail.size() - 2);
+    } else if (angular && unit_at("grad")) {
+        number = tail.substr(0, tail.size() - 4);
+        scale = 1.0f / 400.0f;
+    } else if (angular && unit_at("turn")) {
+        number = tail.substr(0, tail.size() - 4);
+    } else if (angular && unit_at("deg")) {
+        number = tail.substr(0, tail.size() - 3);
+        scale = 1.0f / 360.0f;
+    } else if (angular && unit_at("rad")) {
+        number = tail.substr(0, tail.size() - 3);
+        scale = 1.0f / 6.28318531f;
+    }
+    if (number.empty() ||
+        !(std::isdigit(static_cast<unsigned char>(number[0])) ||
+          number[0] == '.' || number[0] == '-'))
+        return std::nullopt;
+    // The number must be the WHOLE token. Without this, `calc(100% - 7px)`
+    // reaches here as `7px)`, parses as 7, and lands the stop at 700%.
+    try {
+        std::size_t consumed = 0;
+        const float value = std::stof(number, &consumed);
+        if (consumed != number.size()) return std::nullopt;
+        return value * scale;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+// Paren-aware comma split (so rgba(...) stays intact) + trailing position peel.
+// Fills colors/positions in parallel. `angular` selects the stop-position units
+// (see parse_stop_position).
+// `length_px` is the gradient line's length in pixels, used to resolve a `px`
+// term inside a calc() stop position. Absent when the box is not yet laid out
+// (the importer applies style before Yoga resolves bounds) or when the axis is
+// angular, in which case a px-bearing position is refused rather than resolved
+// against a zero-sized box.
+// Returns false when a stop states a position this parser cannot evaluate. A
+// stop with NO position of its own is spread evenly, which is what CSS asks
+// for; a stop that names `calc(...)` and cannot be resolved is a different
+// thing entirely, and spreading it evenly would put it somewhere the author
+// did not ask for while looking like an ordinary render. Refusing the gradient
+// is the loud answer, and it is what a browser does with the same declaration.
+bool parse_stops(const std::string& colorStr,
                  const CssColorParser& parseColor,
                  std::vector<canvas::Color>& colors,
-                 std::vector<float>& positions) {
+                 std::vector<float>& positions,
+                 bool angular = false,
+                 std::optional<float> length_px = std::nullopt) {
     std::vector<std::string> tokens;
     std::string cur; int paren = 0;
     for (char c : colorStr) {
@@ -134,30 +266,76 @@ void parse_stops(const std::string& colorStr,
     while (!cur.empty() && cur.front() == ' ') cur.erase(0, 1);
     while (!cur.empty() && cur.back() == ' ') cur.pop_back();
     if (!cur.empty()) tokens.push_back(cur);
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        std::string tok = tokens[i];
-        std::optional<float> explicitPos;
-        auto sp = tok.find_last_of(' ');
-        if (sp != std::string::npos) {
-            std::string tail = tok.substr(sp + 1);
-            bool isPct = false;
-            if (!tail.empty() && tail.back() == '%') { isPct = true; tail.pop_back(); }
-            else if (tail.size() >= 2 && tail.substr(tail.size() - 2) == "px")
-                tail = tail.substr(0, tail.size() - 2);
-            if (!tail.empty() && (std::isdigit(static_cast<unsigned char>(tail[0])) ||
-                                  tail[0] == '.' || tail[0] == '-')) {
-                try {
-                    float vv = std::stof(tail);
-                    explicitPos = isPct ? vv / 100.0f : vv;
-                    tok = tok.substr(0, sp);
-                    while (!tok.empty() && tok.back() == ' ') tok.pop_back();
-                } catch (...) {}
-            }
+    // Peel positions off the RIGHT, up to two of them. One stop may carry two —
+    // `#fff 0deg 2deg` is the shorthand for a hard band running from the first
+    // to the second — and peeling only one left the other glued to the colour,
+    // which took the colour down with it and made the whole stop unreadable.
+    // Where the last whitespace-separated token starts, treating a parenthesised
+    // group as part of the token it belongs to. `#fff calc(100% - 7px)` is a
+    // colour and ONE position: splitting on the last space lands inside the
+    // calc, peels `7px)`, and leaves `#fff calc(100% -` to be read as a colour —
+    // which is how a hairline mask became a full spoke and why the render
+    // differed with the spacing.
+    const auto last_token_start = [](const std::string& s) -> std::size_t {
+        std::size_t i = s.size();
+        while (i > 0 && s[i - 1] == ' ') --i;
+        int paren = 0;
+        while (i > 0) {
+            const char c = s[i - 1];
+            if (c == ')') ++paren;
+            else if (c == '(') { if (paren > 0) --paren; }
+            else if (c == ' ' && paren == 0) return i;
+            --i;
         }
-        colors.push_back(parseColor(tok));
-        positions.push_back(explicitPos.value_or(
-            tokens.size() > 1 ? static_cast<float>(i) / (tokens.size() - 1) : 0));
+        return std::string::npos;  // no separator: the whole token is the colour
+    };
+    // A stop that names calc() and cannot be evaluated makes the whole gradient
+    // unreadable rather than merely position-less.
+    bool refused = false;
+    const auto peel = [&](std::string& tok) -> std::optional<float> {
+        const auto start = last_token_start(tok);
+        if (start == std::string::npos) return std::nullopt;
+        const auto tail = tok.substr(start);
+        const auto value = parse_stop_position(tail, angular, length_px);
+        if (!value) {
+            if (tail.compare(0, 5, "calc(") == 0) refused = true;
+            return std::nullopt;
+        }
+        tok = tok.substr(0, start);
+        while (!tok.empty() && tok.back() == ' ') tok.pop_back();
+        return value;
+    };
+
+    // A stop with no position of its own is spread evenly, which needs the
+    // final stop COUNT — and a two-position stop contributes two. Resolve the
+    // tokens first, then fill the gaps.
+    struct Stop {
+        canvas::Color color;
+        std::optional<float> position;
+    };
+    std::vector<Stop> stops;
+    stops.reserve(tokens.size());
+    for (auto& token : tokens) {
+        std::string tok = token;
+        const auto second = peel(tok);
+        const auto first = second ? peel(tok) : std::nullopt;
+        const auto color = parseColor(tok);
+        if (first) {
+            stops.push_back({color, first});
+            stops.push_back({color, second});
+        } else {
+            stops.push_back({color, second});
+        }
     }
+
+    if (refused) return false;
+
+    for (size_t i = 0; i < stops.size(); ++i) {
+        colors.push_back(stops[i].color);
+        positions.push_back(stops[i].position.value_or(
+            stops.size() > 1 ? static_cast<float>(i) / (stops.size() - 1) : 0));
+    }
+    return true;
 }
 
 // First top-level (paren-depth 0) comma — splits an optional shape/position/
@@ -209,13 +387,31 @@ float parse_angle(const std::string& t) {
 
 }  // namespace
 
-bool apply_css_background_gradient(View& v, std::string_view css_view,
-                                   const CssColorParser& parse_color) {
-    std::string gradient(css_view);
+namespace {
+
+// Parse ONE background-image layer. `box` is the view's local bounds, used to
+// resolve a `px` term inside a calc() stop position; a degenerate box means the
+// view is not laid out yet and such a position is refused rather than resolved
+// against zero.
+bool parse_one_gradient(const std::string& gradient,
+                        const CssColorParser& color_of,
+                        const Rect& box,
+                        View::BackgroundGradient& out) {
     if (gradient.empty()) return false;
-    const CssColorParser color_of = parse_color
-        ? parse_color
-        : CssColorParser(&parse_css_color);
+
+    // The box a `px` term inside a calc() stop position resolves against.
+    // Absent when the view has not been laid out yet — the importer applies
+    // style before Yoga resolves bounds — so such a position is refused rather
+    // than divided by a zero-sized box, which would place every stop at
+    // infinity while looking like an ordinary parse.
+    const bool box_known = box.width > 0.0f && box.height > 0.0f;
+    const auto line_length = [&](float x0, float y0, float x1, float y1)
+        -> std::optional<float> {
+        if (!box_known) return std::nullopt;
+        const float dx = (x1 - x0) * box.width;
+        const float dy = (y1 - y0) * box.height;
+        return std::sqrt(dx * dx + dy * dy);
+    };
 
     // Simple parser for "linear-gradient(to right, color1, color2, ...)"
     if (gradient.substr(0, 16) == "linear-gradient(") {
@@ -229,9 +425,13 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        parse_stops(inner.substr(color_start), color_of, colors, positions);
+        if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
+                         /*angular=*/false, line_length(x0, y0, x1, y1)))
+            return false;
         if (!colors.empty()) {
-            v.set_background_gradient_linear(x0, y0, x1, y1, colors, positions);
+            out = {}; out.type = 1;
+            out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
+            out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
         return false;
@@ -260,9 +460,19 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         }
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        parse_stops(inner.substr(color_start), color_of, colors, positions);
+        // A radial stop position measures along the RADIUS, which the renderer
+        // takes as radius_frac of the box's larger side.
+        const std::optional<float> radius_px =
+            box_known ? std::optional<float>(radius_frac *
+                                             std::max(box.width, box.height))
+                      : std::nullopt;
+        if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
+                         /*angular=*/false, radius_px))
+            return false;
         if (!colors.empty()) {
-            v.set_background_gradient_radial(cx, cy, radius_frac, colors, positions);
+            out = {}; out.type = 2;
+            out.x0 = cx; out.y0 = cy; out.radius = radius_frac;
+            out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
         return false;
@@ -271,8 +481,15 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
     // conic-gradient([from <angle>] [at <pos>],] stop, stop, ...). CSS measures
     // `from` clockwise from the top (12 o'clock); the canvas sweep starts at +x
     // (3 o'clock), so we offset by -90deg to keep `from 0deg` pointing up.
-    if (gradient.substr(0, 15) == "conic-gradient(") {
-        std::string inner = gradient.substr(15, gradient.size() - 16);
+    // `repeating-conic-gradient` differs from `conic-gradient` only in what
+    // happens past the last stop: the band tiles instead of clamping. Same
+    // prefix grammar, same stops, so the two share this branch and part ways
+    // at the sweep span handed to the View.
+    const bool conic_repeats =
+        gradient.compare(0, 25, "repeating-conic-gradient(") == 0;
+    if (conic_repeats || gradient.substr(0, 15) == "conic-gradient(") {
+        const std::size_t open = conic_repeats ? 25 : 15;
+        std::string inner = gradient.substr(open, gradient.size() - open - 1);
         float cx = 0.5f, cy = 0.5f, from_rad = 0.0f;
         size_t color_start = 0;
         size_t fc = top_level_comma(inner);
@@ -291,15 +508,86 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         }
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        parse_stops(inner.substr(color_start), color_of, colors, positions);
-        if (!colors.empty()) {
-            v.set_background_gradient_conic(cx, cy, from_rad - 1.57079633f, colors, positions);
-            return true;
+        // Conic stops are angles, not lengths, so there is no length for a `px`
+        // term inside a calc() position to resolve against.
+        if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
+                         /*angular=*/true, /*length_px=*/std::nullopt))
+            return false;
+        if (colors.empty()) return false;
+        // The band a repeating conic tiles runs from 0 to its LAST stop, and
+        // the shader wants that band expressed as 0..1. `repeating-conic-
+        // gradient(#fff 0deg 2deg, #000 2deg 12deg)` therefore spans 12/360 of  docs-noise-lint: skip #000 is a CSS colour in an example
+        // a turn with its stops rescaled onto it -- which is also why a band
+        // that already covers a full turn simply degrades to a plain conic.
+        float sweep_turns = 1.0f;
+        if (conic_repeats) {
+            const float span = *std::max_element(positions.begin(), positions.end());
+            if (span > 0.0f && span < 1.0f) {
+                sweep_turns = span;
+                for (auto& p : positions) p /= span;
+            }
         }
-        return false;
+        out = {}; out.type = 3;
+        out.x0 = cx; out.y0 = cy;
+        out.angle = from_rad - 1.57079633f;
+        out.sweep_turns = sweep_turns;
+        out.colors = std::move(colors); out.positions = std::move(positions);
+        return true;
     }
 
     return false;
+}
+
+// Split a background-image value into its layers on TOP-LEVEL commas only —
+// every comma inside `linear-gradient(...)` separates stops, not layers, so a
+// depth-0 scan is what tells the two apart. A single gradient wraps all of its
+// commas in one paren pair and comes back as one layer.
+std::vector<std::string> split_background_layers(const std::string& css) {
+    std::vector<std::string> layers;
+    std::string cur;
+    int paren = 0;
+    for (char c : css) {
+        if (c == '(') ++paren;
+        else if (c == ')') --paren;
+        if (c == ',' && paren <= 0) {
+            layers.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    layers.push_back(cur);
+    for (auto& layer : layers) {
+        const auto a = layer.find_first_not_of(" \t\r\n");
+        const auto b = layer.find_last_not_of(" \t\r\n");
+        layer = (a == std::string::npos) ? std::string() : layer.substr(a, b - a + 1);
+    }
+    return layers;
+}
+
+}  // namespace
+
+bool apply_css_background_gradient(View& v, std::string_view css_view,
+                                   const CssColorParser& parse_color) {
+    const std::string css(css_view);
+    if (css.empty()) return false;
+    const CssColorParser color_of = parse_color
+        ? parse_color
+        : CssColorParser(&parse_css_color);
+
+    // One unreadable layer refuses the whole list rather than painting the
+    // rest. A stack missing a layer is a wrong render that looks like a right
+    // one — the same reason an unevaluable calc() refuses its gradient.
+    std::vector<View::BackgroundGradient> layers;
+    for (const auto& layer_css : split_background_layers(css)) {
+        View::BackgroundGradient layer;
+        if (!parse_one_gradient(layer_css, color_of, v.local_bounds(), layer))
+            return false;
+        layers.push_back(std::move(layer));
+    }
+    if (layers.empty()) return false;
+    v.set_background_gradient_layers(std::move(layers));
+    return true;
 }
 
 }  // namespace pulp::view

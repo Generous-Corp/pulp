@@ -2,24 +2,113 @@
 #include "../core/view/src/design_import_internal.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
 
+#include <pulp/view/design_tokens.hpp>
 #include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace pulp::view;
 
 namespace {
+
+namespace fs = std::filesystem;
+
+struct TempTree {
+    fs::path path = fs::temp_directory_path() /
+                    ("pulp-asset-resolution-" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    TempTree() { fs::create_directories(path); }
+    ~TempTree() {
+        std::error_code error;
+        fs::remove_all(path, error);
+    }
+};
+
+fs::path write_bytes(const fs::path& path, std::string_view bytes) {
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    REQUIRE(out.is_open());
+    out << bytes;
+    REQUIRE(out.good());
+    return path;
+}
+
+int duplicate_fd(int fd) {
+#ifdef _WIN32
+    return ::_dup(fd);
+#else
+    return ::dup(fd);
+#endif
+}
+
+void restore_fd(int saved, int fd) {
+#ifdef _WIN32
+    ::_dup2(saved, fd);
+    ::_close(saved);
+#else
+    ::dup2(saved, fd);
+    ::close(saved);
+#endif
+}
+
+int stderr_fd() {
+#ifdef _WIN32
+    return ::_fileno(stderr);
+#else
+    return ::fileno(stderr);
+#endif
+}
+
+// Captures stderr for the scope. runtime::log_* always writes to stderr, so
+// this is what turns "and it logs" into an assertion rather than a claim.
+class StderrCapture {
+public:
+    explicit StderrCapture(fs::path sink) : sink_(std::move(sink)) {
+        std::fflush(stderr);
+        saved_ = duplicate_fd(stderr_fd());
+        REQUIRE(std::freopen(sink_.string().c_str(), "w", stderr) != nullptr);
+    }
+
+    ~StderrCapture() {
+        std::fflush(stderr);
+        if (saved_ >= 0) restore_fd(saved_, stderr_fd());
+    }
+
+    std::string text() const {
+        std::fflush(stderr);
+        std::ifstream in(sink_, std::ios::binary);
+        return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    }
+
+private:
+    fs::path sink_;
+    int saved_ = -1;
+};
 
 bool has_diag(const ResolvedNativeNode& node, std::string_view code) {
     for (const auto& diagnostic : node.diagnostics) {
@@ -718,6 +807,145 @@ TEST_CASE("shared asset_uri prefers a local file and rejects remote", "[design-i
     CHECK(asset_uri(asset).empty());
 }
 
+// The manifest's local_path is not always usable. A writer that records a bare
+// `<content_hash>.<ext>` filename produces an entry that resolves against the
+// document's own directory while the bytes were materialized into a shared
+// content-addressed folder beside it. The node kept an absolute path, so the
+// web-compat lane (which reads the node) rendered while the native lane (which
+// reads the manifest) dropped the image with no error at all.
+TEST_CASE("runtime asset resolution recovers a manifest asset by content hash",
+          "[design-ir-helpers][asset-resolution]") {
+    const std::string hash =
+        "713d7f1edd0000000000000000000000000000000000000000000000000f5a9a";
+
+    TempTree tree;
+    const auto document_directory = tree.path / "1785608386335-001";
+    fs::create_directories(document_directory);
+    // Bytes live one level up, in the asset folder shared by sibling documents.
+    const auto bytes = write_bytes(tree.path / "design-assets" / (hash + ".png"),
+                                   "pulp-test-asset-bytes");
+
+    IRAssetRef asset;
+    asset.asset_id = "reference:browser";
+    asset.original_uri = "pulp-capture:///browser.png";
+    asset.local_path = hash + ".png";  // bare filename — not under the document
+    asset.content_hash = hash;
+    asset.mime = "image/png";
+
+    // The recorded path resolves to nothing under the document directory.
+    CHECK_FALSE(fs::exists(document_directory / *asset.local_path));
+
+    auto resolved = resolve_asset_file(asset, document_directory);
+    REQUIRE(resolved.has_value());
+    CHECK(*resolved == bytes.lexically_normal());
+    CHECK(resolved_asset_uri(asset, document_directory) ==
+          "file://" + bytes.lexically_normal().generic_string());
+
+    // An algorithm-prefixed hash names the same file.
+    asset.content_hash = "sha256:" + hash;
+    CHECK(resolved_asset_uri(asset, document_directory) ==
+          "file://" + bytes.lexically_normal().generic_string());
+}
+
+TEST_CASE("runtime asset resolution leaves a resolvable manifest path alone",
+          "[design-ir-helpers][asset-resolution]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "doc";
+    const auto relative = write_bytes(document_directory / "assets" / "browser.png",
+                                      "pulp-test-asset-bytes");
+    const auto absolute = write_bytes(tree.path / "elsewhere" / "logo.png",
+                                      "pulp-test-asset-bytes");
+
+    IRAssetRef relative_asset;
+    relative_asset.asset_id = "browser";
+    relative_asset.local_path = "assets/browser.png";
+    relative_asset.content_hash = "unused-because-the-path-resolves";
+    CHECK(resolved_asset_uri(relative_asset, document_directory) ==
+          "file://" + relative.lexically_normal().generic_string());
+
+    IRAssetRef absolute_asset;
+    absolute_asset.asset_id = "logo";
+    absolute_asset.local_path = absolute.string();
+    CHECK(resolved_asset_uri(absolute_asset, document_directory) ==
+          "file://" + absolute.lexically_normal().generic_string());
+
+    // A self-contained URI still wins over an absent file, unchanged.
+    IRAssetRef inline_asset;
+    inline_asset.asset_id = "inline";
+    inline_asset.original_uri = "data:image/png;base64,AA==";
+    CHECK(resolved_asset_uri(inline_asset, document_directory) ==
+          "data:image/png;base64,AA==");
+}
+
+TEST_CASE("an unresolvable manifest asset reports empty and logs",
+          "[design-ir-helpers][asset-resolution]") {
+    TempTree tree;
+    const auto document_directory = tree.path / "doc";
+    fs::create_directories(document_directory);
+
+    IRAssetRef asset;
+    asset.asset_id = "reference:missing";
+    asset.original_uri = "pulp-capture:///missing.png";
+    asset.local_path = "deadbeef.png";
+    asset.content_hash = "deadbeef";
+    asset.mime = "image/png";
+
+    std::string uri;
+    std::string logged;
+    {
+        StderrCapture capture(tree.path / "stderr.log");
+        uri = resolved_asset_uri(asset, document_directory);
+        logged = capture.text();
+    }
+
+    // Never a file:// URI naming a file that is not there — the loader
+    // downstream drops that silently, which is how this read as a rendering bug.
+    CHECK(uri.empty());
+    CHECK(logged.find("reference:missing") != std::string::npos);
+    CHECK(logged.find("deadbeef.png") != std::string::npos);
+    CHECK(logged.find("unresolvable") != std::string::npos);
+}
+
+TEST_CASE("the native materializer renders a hash-recovered manifest asset",
+          "[design-ir-helpers][asset-resolution][native-materializer]") {
+    const std::string hash =
+        "713d7f1edd0000000000000000000000000000000000000000000000000f5a9a";
+
+    TempTree tree;
+    const auto document_directory = tree.path / "1785608386335-001";
+    fs::create_directories(document_directory);
+    const auto bytes = write_bytes(tree.path / "design-assets" / (hash + ".png"),
+                                   "pulp-test-asset-bytes");
+
+    DesignIR ir;
+    ir.root.type = "image";
+    ir.root.attributes["srcAssetId"] = "reference:browser";
+    ir.root.style.width = 2560.0f;
+    ir.root.style.height = 1708.0f;
+
+    IRAssetRef asset;
+    asset.asset_id = "reference:browser";
+    asset.original_uri = "pulp-capture:///browser.png";
+    asset.local_path = hash + ".png";
+    asset.content_hash = hash;
+    asset.mime = "image/png";
+    asset.width = 2560;
+    asset.height = 1708;
+    ir.asset_manifest.assets.push_back(std::move(asset));
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(
+        ir, ir.asset_manifest,
+        {.diagnostics_out = &diagnostics, .asset_base_directory = document_directory});
+    REQUIRE(root != nullptr);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image != nullptr);
+    CHECK(image->image_source() ==
+          "file://" + bytes.lexically_normal().generic_string());
+    for (const auto& diagnostic : diagnostics)
+        CHECK(diagnostic.code != "native-materialize-unresolved-asset");
+}
+
 TEST_CASE("shared lower_copy lowercases ASCII only", "[design-ir-helpers]") {
     CHECK(lower_copy("Flex-Start") == "flex-start");
     CHECK(lower_copy("") == "");
@@ -768,4 +996,65 @@ TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
     REQUIRE(root->subpixel_layout());
+}
+
+TEST_CASE("an imported design names the widget colours it did not state",
+          "[view][import][native][tokens]") {
+    // A widget key the design supplies no colour for is left unset, and the
+    // widget paints its own built-in default. That is invisible in the pixels
+    // — the render simply carries a colour from nowhere — so materialization
+    // has to say which keys went unfilled. Without this the "no fallback
+    // palette" contract has no observable failure mode.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    ir.tokens.colors["css/accent"] = "#C4622A";  // stated; must NOT be named
+
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.diagnostics_out = &diagnostics;
+    auto root = build_native_view_tree(ir, {}, options);
+    REQUIRE(root != nullptr);
+
+    const auto gap = std::find_if(
+        diagnostics.begin(), diagnostics.end(),
+        [](const ImportDiagnostic& d) { return d.code == "design-token-unmapped"; });
+    REQUIRE(gap != diagnostics.end());
+    CHECK(gap->severity == ImportDiagnosticSeverity::warning);
+    CHECK(gap->kind == ImportDiagnosticKind::fallback_used);
+    // The design said nothing about a signal ramp, so the meter's zones are
+    // unfilled and must be named.
+    CHECK(gap->message.find("meter.green") != std::string::npos);
+    // It DID state an accent, so the keys that accent supplies are not gaps.
+    CHECK(gap->message.find("control.fill") == std::string::npos);
+    CHECK(gap->message.find("knob.arc,") == std::string::npos);
+}
+
+TEST_CASE("a design that states every widget colour reports no gap",
+          "[view][import][native][tokens]") {
+    // The other half of the contract: the diagnostic must be able to be
+    // absent, or its presence above proves nothing.
+    // Ask the mapper which keys it cannot fill, then state exactly those. This
+    // stays true as the rule table grows — a hardcoded list would go stale the
+    // next time a key is added and would then assert nothing. It is also the
+    // stronger property: every key reported as a gap must be closable by
+    // stating it.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    std::vector<std::string> gaps;
+    ir_tokens_to_theme(ir.tokens, &gaps);
+    REQUIRE_FALSE(gaps.empty());
+    for (const auto& key : gaps) ir.tokens.colors[key] = "#C4622A";
+
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.diagnostics_out = &diagnostics;
+    auto root = build_native_view_tree(ir, {}, options);
+    REQUIRE(root != nullptr);
+
+    CHECK(std::none_of(diagnostics.begin(), diagnostics.end(),
+                       [](const ImportDiagnostic& d) {
+                           return d.code == "design-token-unmapped";
+                       }));
 }

@@ -114,4 +114,38 @@ constexpr std::optional<ScaleMode> scale_mode_from_name(std::string_view name) n
     return std::nullopt;
 }
 
+constexpr std::string_view chord_voicing_name(ChordVoicing voicing) noexcept {
+    switch (voicing) {
+    case ChordVoicing::Close:
+        return "close";
+    case ChordVoicing::Open:
+        return "open";
+    case ChordVoicing::Drop2:
+        return "drop2";
+    case ChordVoicing::Drop3:
+        return "drop3";
+    case ChordVoicing::Rootless:
+        return "rootless";
+    case ChordVoicing::Shell:
+        return "shell";
+    }
+    return {};
+}
+
+constexpr std::optional<ChordVoicing> chord_voicing_from_name(std::string_view name) noexcept {
+    if (name == "close")
+        return ChordVoicing::Close;
+    if (name == "open")
+        return ChordVoicing::Open;
+    if (name == "drop2")
+        return ChordVoicing::Drop2;
+    if (name == "drop3")
+        return ChordVoicing::Drop3;
+    if (name == "rootless")
+        return ChordVoicing::Rootless;
+    if (name == "shell")
+        return ChordVoicing::Shell;
+    return std::nullopt;
+}
+
 } // namespace pulp::timeline::detail

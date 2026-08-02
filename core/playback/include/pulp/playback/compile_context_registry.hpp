@@ -27,8 +27,8 @@ struct ContextRegistryGeneration;
 ///
 /// The content kind is named by the schema type of the RegisteredContent it
 /// compiles, because that is the identity the document itself carries. Built-in
-/// content (media, notes) is not registered here and therefore declares no
-/// context, which is exactly true of the built-in renderers today.
+/// MIDI declares its Groove dependency directly in the playback index; media
+/// and empty content declare no context dependency.
 struct ContentRendererRegistration {
     std::string content_type_name;
     timeline::CompileContextSubscriptions subscriptions;
@@ -47,8 +47,10 @@ struct ContextRegistrationError {
 
 /// The declaration side of the compile-context subscription contract.
 ///
-/// A registry is built on the control thread before compiles are submitted and
-/// then only read. Registration is refused rather than overwritten on a
+/// A registry is mutated only on the control thread. Each compile invalidation
+/// input takes an immutable declaration snapshot, so later control-thread
+/// changes apply to the next request and never race a worker. Registration is
+/// refused rather than overwritten on a
 /// duplicate type name: two renderers disagreeing about what a content kind
 /// reads is a configuration bug, and silently keeping one of them would make
 /// the invalidation depend on registration order.
@@ -75,8 +77,16 @@ class CompileContextRegistry {
         return registrations_.size();
     }
 
+    /// Monotonic version within this registry generation's declarations.
+    ///
+    /// A compiler pairs this with the opaque generation identity. Copies and
+    /// assignments begin a new generation even when they contain the same
+    /// declarations, so replacement cannot alias an older revision number.
+    std::uint64_t revision() const noexcept;
+
   private:
     friend class CompileInvalidationIndex;
+    friend struct CompileInvalidationInput;
 
     // Sorted by content_type_name so lookup is a binary search on a hot path.
     std::vector<ContentRendererRegistration> registrations_;
