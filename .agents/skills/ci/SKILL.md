@@ -1626,11 +1626,20 @@ down this list before touching build code:
    host budget fits exactly one, so `release-cli`'s `darwin-arm64` leg cannot run
    alongside anything else that wants that VM. Anything that *waits* on another
    workflow while holding it deadlocks the release outright.
-2. **`release-path-pr-gate.yml` routes its macOS leg at that same release VM**
-   (via `PULP_RELEASE_MACOS_RUNS_ON_JSON`). So **every PR competes with actual
-   releases** for the one VM. A release job queued 90 minutes will keep losing to
-   PR jobs queued 2 minutes — meanwhile the Studios sit idle. The tell is a
-   `darwin-arm64` leg stuck `queued` for hours with no failure.
+2. **Tagged releases and the release-path PR gate need distinct runner classes.**
+   `release-cli.yml` and `release-publish.yml` use
+   `PULP_RELEASE_MACOS_RUNS_ON_JSON` and the exclusive
+   `pulp-release-tagged` label. `release-path-pr-gate.yml` prefers
+   `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON` and the exclusive
+   `pulp-release-pr-gate` label; its legacy fallback to the tagged-release
+   selector is migration-only and must remain until the separate selector has
+   been deployed and proven. The TartCI release supervisor scans tagged-release
+   demand before PR-gate demand, registers a runner with only the selected
+   class label, and force-refreshes higher-priority demand immediately before
+   minting a lower-priority runner. GitHub remains FIFO within each class. Do
+   not collapse the selectors or put both exclusive class labels on one runner:
+   that recreates the starvation incident where fresh PR jobs repeatedly claim
+   the capacity-1 VM ahead of a tagged release.
 3. **GitHub-hosted macOS concurrency is effectively ~1 job at a time.** The
    release's `darwin-x64` and universal-arch-gate legs both land on hosted
    `macos-15`, where they queue behind *advisory* lanes — sanitizers (×4 per PR),
