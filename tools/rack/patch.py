@@ -1195,7 +1195,16 @@ TAG_WORDS = {
     "chorus": "Chorus", "phaser": "Phaser", "flanger": "Flanger",
     "sampler": "Sampler", "sample player": "Sampler",
     "drum": "Drum", "kick": "Drum", "snare": "Drum", "hat": "Drum",
-    "physical model": "Physical modeling", "pluck": "Physical modeling",
+    # "pluck" is NOT here, deliberately. It describes an envelope shape — a
+    # fast attack and short decay — and is standard subtractive-synth
+    # vocabulary; "to create a percussive pluck" appeared in the same sentence
+    # as the ADSR values that produce it, and the gate demanded a
+    # physical-modelling module for a Moroder disco patch. A word that names a
+    # RESULT or a TECHNIQUE must not require a DEVICE. Only unambiguous
+    # multi-word phrases for the synthesis method belong here.
+    "physical model": "Physical modeling", "karplus": "Physical modeling",
+    "plucked string": "Physical modeling", "struck string": "Physical modeling",
+    "modal resonator": "Physical modeling",
     "speech": "Speech", "vocal": "Speech", "formant": "Speech",
     "ring mod": "Ring modulator", "ringmod": "Ring modulator",
     "low-pass gate": "Low-pass gate", "lpg": "Low-pass gate",
@@ -1224,11 +1233,54 @@ TAG_WORDS = {
 # genuinely cannot be faked from an oscillator, and pretending otherwise would
 # produce a patch that quietly is not what was asked for — which is worse than
 # saying so. Only entries where the parts really do make the thing belong here.
+# Capabilities that are a FINISH, not the instrument.
+#
+# "Finish with a touch of analog saturation, short plate reverb, and a
+# tempo-synced delay mixed quietly underneath" is the last clause of a five
+# sentence prompt whose voice was entirely buildable. Refusing the whole
+# request over it is disproportionate — and it is what made a refusal feel
+# like a wall. These degrade to a note: build the patch, leave the effect out,
+# and say where to get one.
+GARNISH = {"Reverb", "Delay", "Chorus", "Flanger", "Phaser"}
+
 BUILDABLE_FROM = {
     "Arpeggiator": ["Sequencer", "Quantizer"],
     "Chorus": ["Delay", "Low-frequency oscillator"],
     "Flanger": ["Delay", "Low-frequency oscillator"],
 }
+
+
+def _options_for(tags, inv: dict, midx: dict, cat: dict) -> dict:
+    """The modules that would provide each tag, best answer first.
+
+    Ranked by RELEVANCE, not by the alphabet. The first version sorted
+    `(premium, plugin)` — free before paid, then plugin slug — so a request for
+    a physical-modelling module was answered with `Agave/MS20VCF`, a Korg MS-20
+    FILTER clone that carries the tag because its filter circuit is modelled,
+    purely because "Agave" sorts before "Ambivalent". The genuinely correct
+    answers, AudibleInstruments' Elements and Rings, were 5th and 6th out of 64
+    candidates and were truncated away by the top-four cut.
+
+    A vendor lists a module's PRIMARY classification first, so a module whose
+    first tag is the wanted one is answering the question; a module carrying it
+    fourth is incidental.
+    """
+    options: dict = {}
+    for tag in sorted(tags):
+        cands = []
+        for pslug, mods in midx.items():
+            p = cat.get(pslug, {})
+            for mslug, m in mods.items():
+                mtags = m.get("tags") or []
+                if tag not in mtags:
+                    continue
+                cands.append({"plugin": pslug, "module": mslug,
+                              "name": m["name"], "brand": p.get("brand", ""),
+                              "premium": bool(p.get("premium")),
+                              "rank": mtags.index(tag)})
+        cands.sort(key=lambda c: (c["premium"], c["rank"], c["plugin"]))
+        options[tag] = cands[:4]
+    return options
 
 
 def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
@@ -1279,24 +1331,16 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
             from_parts[tag] = parts
     missing -= set(from_parts)
 
-    if not missing:
-        return {"ok": True, "missing": {}, "from_parts": from_parts}
+    # A missing FINISH is a note, not a refusal.
+    omitted = {t for t in missing if t in GARNISH}
+    missing -= omitted
 
-    # What would provide each gap, cheapest first: a free plugin the user can
-    # install right now beats a premium one they may not own.
-    options: dict = {}
-    for tag in sorted(missing):
-        cands = []
-        for pslug, mods in midx.items():
-            p = cat.get(pslug, {})
-            for mslug, m in mods.items():
-                if tag in (m.get("tags") or []):
-                    cands.append({"plugin": pslug, "module": mslug,
-                                  "name": m["name"], "brand": p.get("brand", ""),
-                                  "premium": bool(p.get("premium"))})
-        cands.sort(key=lambda c: (c["premium"], c["plugin"]))
-        options[tag] = cands[:4]
-    return {"ok": False, "missing": options}
+    if not missing:
+        return {"ok": True, "missing": {}, "from_parts": from_parts,
+                "omitted": _options_for(omitted, inv, midx, cat)}
+
+    return {"ok": False, "missing": _options_for(missing, inv, midx, cat),
+            "from_parts": from_parts, "omitted": {}}
 
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
@@ -1884,6 +1928,22 @@ def main(argv):
                   open(out[:-4] + ".why.json", "w"), indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
+        # What was asked for and left out, said AFTER the patch exists.
+        #
+        # A finishing effect nobody has is not a reason to refuse a voice that
+        # is entirely buildable — but it is a reason to say so, or the patch
+        # quietly lacks something that was asked for and the user has to
+        # notice.
+        for tag, opts in (pf.get("omitted") or {}).items():
+            print(f"  note: no {tag.lower()} module is installed, so the patch "
+                  f"was built without it.")
+            for o in opts[:2]:
+                mark = "PREMIUM" if o["premium"] else "free"
+                print(f"      {mark:8} {o['plugin']}/{o['module']:16} "
+                      f"{o['name']}")
+                print(f"               https://library.vcvrack.com/"
+                      f"{o['plugin']}/{o['module']}")
+            print()
         print(explain(patch, inv, why))
         return 0
 

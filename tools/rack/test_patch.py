@@ -599,6 +599,71 @@ def check_buildable_from_parts() -> tuple:
         bad += 1
     else:
         print("  ok     generate() lays panels out before it judges them")
+
+    # A word that names a RESULT must not require a DEVICE.
+    #
+    # Reported with a screenshot: a five-sentence Giorgio Moroder disco prompt
+    # was refused for "no physical modeling module is installed". The trigger
+    # was `pluck`, in "to create a percussive pluck" — the same sentence that
+    # gives the ADSR values which produce it. A pluck is an envelope shape and
+    # standard subtractive-synth vocabulary; the canonical "I Feel Love" sound
+    # has nothing to do with physical modelling.
+    MORODER = (
+        "Create a classic late-1970s Giorgio Moroder-inspired disco synth "
+        "voice, bright, punchy, sequenced. Use a single analog sawtooth "
+        "oscillator into a 24 dB/oct ladder low-pass filter with moderate "
+        "resonance. Apply a fast envelope to the filter (attack 0-5 ms, decay "
+        "150-300 ms) to create a percussive pluck. Sequence a tight 16th-note "
+        "pattern. Keep modulation minimal, a slow LFO on cutoff. Finish with a "
+        "touch of saturation, short plate reverb, and a tempo-synced delay.")
+    ran += 1
+    pf = P.preflight(MORODER, P.inventory(), P.module_index(), P.catalog())
+    if not pf["ok"]:
+        print(f"  WRONG  the Moroder prompt is still refused: "
+              f"{list(pf.get('missing') or {})}")
+        bad += 1
+    elif "Physical modeling" in (pf.get("missing") or {}):
+        print("  WRONG  it still demands a physical-modelling module")
+        bad += 1
+    else:
+        print("  ok     a 'percussive pluck' does not demand physical modelling")
+
+    # The reverb it genuinely lacks is NOTED, not fatal — and not silent
+    # either, or the patch quietly lacks something that was asked for.
+    ran += 1
+    if "Reverb" in (pf.get("omitted") or {}):
+        print("  ok     a missing finishing effect is noted, not refused")
+    else:
+        print(f"  WRONG  the missing reverb was neither noted nor refused: {pf}")
+        bad += 1
+
+    # The negative control. A prompt that really does ask for the synthesis
+    # METHOD must still be refused, or a version that waved everything through
+    # would pass every check above.
+    ran += 1
+    thin = {"Vendor": {"modules": {"Osc": {"tags": ["Oscillator"]}}}}
+    pf2 = P.preflight("a plucked string physical model", thin, {}, {})
+    if pf2["ok"]:
+        print("  WRONG  'physical model' is no longer required by anything")
+        bad += 1
+    else:
+        print("  ok     'physical model' still requires the real thing")
+
+    # And the suggestions must ANSWER the question. The lookup sorted by
+    # plugin slug, so a request for physical modelling was answered with
+    # Agave/MS20VCF — a Korg MS-20 FILTER clone carrying the tag because its
+    # filter circuit is modelled — while Elements and Rings were truncated
+    # away by the top-four cut.
+    ran += 1
+    opts = P._options_for({"Physical modeling"}, P.inventory(),
+                          P.module_index(), P.catalog())
+    top = opts.get("Physical modeling") or []
+    if top and all(o["rank"] == 0 for o in top):
+        print("  ok     suggestions lead with modules whose PRIMARY tag matches")
+    else:
+        print(f"  WRONG  a suggestion carries the tag incidentally: "
+              f"{[(o['module'], o['rank']) for o in top]}")
+        bad += 1
     return bad, ran
 
 
