@@ -762,16 +762,51 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     const auto radius = lookup("border-radius");
     if (!is_absent(radius)) {
-        // The shorthand may carry up to four corners and an optional second
-        // axis after a slash. The IR's single radius takes the first corner;
-        // per-corner fidelity is a separate field set no source populates yet.
+        // Expand the shorthand to all four corners. Taking only the first
+        // collapses `12px 12px 0 0` — a card whose media area rounds at the top
+        // and squares off where it meets its caption — into one value, so the
+        // background paints a plain rectangle inside a rounded border.
+        //
+        // A second axis after a slash makes the corners elliptical. Nothing
+        // downstream carries two radii per corner, so an elliptical value keeps
+        // only its horizontal axis rather than being dropped: a wrong-but-round
+        // corner is closer than a square one, and the alternative silently
+        // discards the whole declaration.
         const auto horizontal = split_top_level(radius, '/').front();
         const auto corners = split_tokens(horizontal);
-        if (!corners.empty()) {
-            if (const auto length = parse_length(corners.front(),
-                                                 reference_min)) {
-                style.border_radius = *length;
-            }
+        const auto corner_at = [&](std::size_t i) -> std::optional<float> {
+            if (i >= corners.size()) return std::nullopt;
+            return parse_length(corners[i], reference_min);
+        };
+        // CSS box-corner shorthand: 1 value sets all four; 2 sets TL/BR then
+        // TR/BL; 3 sets TL, TR/BL, BR; 4 sets TL TR BR BL, clockwise from
+        // top-left.
+        std::optional<float> tl, tr, br, bl;
+        switch (corners.size()) {
+            case 0: break;
+            case 1: tl = tr = br = bl = corner_at(0); break;
+            case 2: tl = br = corner_at(0); tr = bl = corner_at(1); break;
+            case 3:
+                tl = corner_at(0);
+                tr = bl = corner_at(1);
+                br = corner_at(2);
+                break;
+            default:
+                tl = corner_at(0);
+                tr = corner_at(1);
+                br = corner_at(2);
+                bl = corner_at(3);
+                break;
+        }
+        if (tl) style.border_top_left_radius = *tl;
+        if (tr) style.border_top_right_radius = *tr;
+        if (br) style.border_bottom_right_radius = *br;
+        if (bl) style.border_bottom_left_radius = *bl;
+        // The single-radius slot stays populated for consumers that read only
+        // it, and only when every corner agrees — a uniform value it can
+        // represent without lying about the other three.
+        if (tl && tr && br && bl && *tl == *tr && *tr == *br && *br == *bl) {
+            style.border_radius = *tl;
         }
     }
 

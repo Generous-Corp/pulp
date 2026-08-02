@@ -758,6 +758,19 @@ TEST_CASE("a lowered control carries the appearance Chrome solved",
         REQUIRE(style.border_radius.has_value());
         CHECK(*style.border_radius == Catch::Approx(49.0f).margin(0.5));
 
+        // A uniform radius populates all four corners as well as the single
+        // slot. Asserting the corners here — not only that a circle renders —
+        // is the point: the four fields existed and had a consumer long before
+        // anything wrote to them, so a render test passed while the IR carried
+        // nothing. Absence and agreement are different states.
+        REQUIRE(style.border_top_left_radius.has_value());
+        REQUIRE(style.border_top_right_radius.has_value());
+        REQUIRE(style.border_bottom_right_radius.has_value());
+        REQUIRE(style.border_bottom_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(49.0f).margin(0.5));
+        CHECK(*style.border_bottom_right_radius ==
+              Catch::Approx(49.0f).margin(0.5));
+
         // Three layered shadows, two of them inset. Collapsing the declaration
         // to one string would drop every layer past the first.
         REQUIRE(style.box_shadow.size() == 3);
@@ -827,6 +840,59 @@ TEST_CASE("computed style mapping folds CSS onto the IR",
         CHECK(layers[1].offset_x == Catch::Approx(4.0f));
         CHECK(layers[1].offset_y == Catch::Approx(-8.0f));
         CHECK(layers[1].spread == Catch::Approx(2.0f));
+    }
+
+    SECTION("a per-corner radius keeps all four corners") {
+        // The card idiom: a media area rounded at the top and square where it
+        // meets its caption. Taking only the first corner of the shorthand
+        // renders a plain rectangle inside a rounded border — the corners are
+        // where the two disagree, so a uniform-radius fixture cannot catch it.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-radius", "12px 12px 0px 0px"}}, box,
+                              style);
+        REQUIRE(style.border_top_left_radius.has_value());
+        REQUIRE(style.border_top_right_radius.has_value());
+        REQUIRE(style.border_bottom_right_radius.has_value());
+        REQUIRE(style.border_bottom_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(12.0f));
+        CHECK(*style.border_top_right_radius == Catch::Approx(12.0f));
+        CHECK(*style.border_bottom_right_radius == Catch::Approx(0.0f));
+        CHECK(*style.border_bottom_left_radius == Catch::Approx(0.0f));
+        // The single slot must stay empty when the corners disagree: a
+        // consumer reading it alone would otherwise round all four.
+        CHECK_FALSE(style.border_radius.has_value());
+    }
+
+    SECTION("two- and three-value radius shorthands expand per CSS") {
+        // 2 values: TL/BR then TR/BL. 3 values: TL, TR/BL, BR. Both are
+        // diagonal pairings that a left-to-right reading gets wrong.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle two;
+        apply_computed_styles({{"border-radius", "4px 16px"}}, box, two);
+        CHECK(*two.border_top_left_radius == Catch::Approx(4.0f));
+        CHECK(*two.border_bottom_right_radius == Catch::Approx(4.0f));
+        CHECK(*two.border_top_right_radius == Catch::Approx(16.0f));
+        CHECK(*two.border_bottom_left_radius == Catch::Approx(16.0f));
+
+        pulp::view::IRStyle three;
+        apply_computed_styles({{"border-radius", "2px 6px 10px"}}, box, three);
+        CHECK(*three.border_top_left_radius == Catch::Approx(2.0f));
+        CHECK(*three.border_top_right_radius == Catch::Approx(6.0f));
+        CHECK(*three.border_bottom_left_radius == Catch::Approx(6.0f));
+        CHECK(*three.border_bottom_right_radius == Catch::Approx(10.0f));
+    }
+
+    SECTION("an elliptical radius keeps its horizontal axis") {
+        // Nothing downstream carries two radii per corner. Keeping the
+        // horizontal axis is wrong-but-round; dropping the declaration would
+        // paint a square corner, which is further from the design.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-radius", "10px 10px 10px 10px / 20px"}},
+                              box, style);
+        REQUIRE(style.border_top_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(10.0f));
     }
 
     SECTION("a zero-width border contributes no colour") {
