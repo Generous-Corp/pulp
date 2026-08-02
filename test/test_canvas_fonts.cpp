@@ -81,10 +81,10 @@ sk_sp<SkFontMgr> test_platform_font_mgr() {
 
 TEST_CASE("Bundled font count matches the embedded asset list (#932)",
           "[canvas][skia][fonts][issue-932]") {
-    // Three faces ship today: Inter-Regular, JetBrainsMono-Regular and
-    // Jost-Regular. If a future PR grows the bundle, bump this expectation
-    // deliberately so we catch accidental drops.
-    REQUIRE(pulp::canvas::bundled_font_count() == 3);
+    // Six faces ship today: Inter-Regular, JetBrainsMono-Regular, and Jost at
+    // Regular/Medium/SemiBold/Bold. If a future PR grows the bundle, bump this
+    // expectation deliberately so we catch accidental drops.
+    REQUIRE(pulp::canvas::bundled_font_count() == 6);
 }
 
 TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",

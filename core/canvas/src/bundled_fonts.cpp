@@ -77,8 +77,8 @@ struct BundledBlob {
 // the CMake SOURCES list in sync — there is intentionally no auto-discovery,
 // so failures show up as a "file not declared" link error rather than a
 // silent runtime miss.
-const std::array<BundledBlob, 3>& bundled_blobs() {
-    static const std::array<BundledBlob, 3> kBlobs = {{
+const std::array<BundledBlob, 6>& bundled_blobs() {
+    static const std::array<BundledBlob, 6> kBlobs = {{
         {"Inter-Regular.ttf",
          pulp_bundled_fonts::Inter_Regular_ttf,
          pulp_bundled_fonts::Inter_Regular_ttf_size},
@@ -88,6 +88,19 @@ const std::array<BundledBlob, 3>& bundled_blobs() {
         {"Jost-Regular.ttf",
          pulp_bundled_fonts::Jost_Regular_ttf,
          pulp_bundled_fonts::Jost_Regular_ttf_size},
+        // Jost's other weights, because a family bundled at ONE weight is a
+        // family that abandons itself: `match_bundled_typeface` refuses a face
+        // whose weight is too far from the request, so a 600 heading fell all
+        // the way past the bundle to a platform substitute ~10% wider.
+        {"Jost-Medium.ttf",
+         pulp_bundled_fonts::Jost_Medium_ttf,
+         pulp_bundled_fonts::Jost_Medium_ttf_size},
+        {"Jost-SemiBold.ttf",
+         pulp_bundled_fonts::Jost_SemiBold_ttf,
+         pulp_bundled_fonts::Jost_SemiBold_ttf_size},
+        {"Jost-Bold.ttf",
+         pulp_bundled_fonts::Jost_Bold_ttf,
+         pulp_bundled_fonts::Jost_Bold_ttf_size},
     }};
     return kBlobs;
 }
