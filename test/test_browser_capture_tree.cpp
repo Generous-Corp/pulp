@@ -1234,6 +1234,58 @@ TEST_CASE("each refusal names the construct that caused it",
           }) == 0);
 }
 
+TEST_CASE("a capture with no SVG paint says so out loud",
+          "[browser-capture][native-lowering][svg]") {
+    // The same six icons, byte-identical, with ONLY the seven SVG paint
+    // columns removed — exactly the shape of a snapshot taken before the
+    // capture collected them. Every icon then refuses, and a reader sees a
+    // panel with no icons and no error: indistinguishable from the defect this
+    // lowering exists to remove. It happened; the whole design lost its icons
+    // silently because the capture, not the code, was old.
+    //
+    // Held against the LIVE fixture in the same case, because the claim is a
+    // difference between two inputs and asserting one of them alone would pass
+    // just as well if the lowering had stopped working entirely.
+    const auto stale = lower_capture("browser-capture-svg-stale-protocol");
+    REQUIRE(stale.design_ir);
+    const auto live = lower_capture("browser-capture-svg-icons");
+    REQUIRE(live.design_ir);
+
+    CHECK(attribute(live.design_ir->root, "native_svg_lowered") == "4");
+    CHECK(live.warnings.empty());
+
+    CHECK(stale.design_ir->root.attributes.count("native_svg_lowered") == 0);
+    CHECK(attribute(stale.design_ir->root, "native_svg_refused") == "6");
+    CHECK(count_nodes(stale.design_ir->root, [](const IRNode& node) {
+              return node.attributes.count("path_data") != 0;
+          }) == 0);
+
+    // The warning has to name the ACTION, not just the symptom: nothing about
+    // the design tells a reader that re-capturing is the fix.
+    // On the IR too, not only in the warning: a harness that lowers in-process
+    // and dumps `native.ir.json` never sees a CLI print, which is exactly how a
+    // whole design's missing icons read as a code failure for a full round of
+    // debugging.
+    CHECK(attribute(stale.design_ir->root, "native_svg_stale_capture") == "6");
+    CHECK(live.design_ir->root.attributes.count("native_svg_stale_capture") == 0);
+
+    REQUIRE(stale.warnings.size() == 1);
+    INFO(stale.warnings.front());
+    CHECK(stale.warnings.front().find("6 of 6") != std::string::npos);
+    CHECK(stale.warnings.front().find("Re-run the browser capture") !=
+          std::string::npos);
+
+    // And the per-node reason separates "your capture is old" from "this
+    // design uses a construct we cannot draw" — the two have different fixes
+    // and only one of them is the caller's.
+    const auto* icon = find_node(stale.design_ir->root, [](const IRNode& node) {
+        return attribute(node, "capture_fallback_element") == "svg";
+    });
+    REQUIRE(icon != nullptr);
+    CHECK(attribute(*icon, "capture_fallback_reason") ==
+          "svg-paint-unavailable");
+}
+
 TEST_CASE("a drawn icon's vector nodes sit under it and share its box",
           "[browser-capture][native-lowering][svg]") {
     const auto lowered = lower_capture("browser-capture-svg-icons");

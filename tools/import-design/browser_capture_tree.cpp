@@ -709,6 +709,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         }
     }
 
+
     for (const auto& node : painted) {
         if (node.node_type != kElementNode && node.node_type != kTextNode) {
             ++counts.skipped_non_visual;
@@ -781,6 +782,41 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             svg_root ? resolved_svg->second : kNoSvgSubtree;
 
         PaintClass paint_class = PaintClass::native;
+
+        // The ONE place a node becomes a captured element.
+        //
+        // TWO conditions reach it — an element whose pixels style cannot
+        // describe, and an `<svg>` whose shape tree refused — and everything
+        // that is true of BOTH belongs in here rather than in the branch that
+        // happened to decide it. A property attached to one branch alone reads
+        // as a property of every fallback while silently omitting the other
+        // half of them, and the two then disagree with the `element_capture_
+        // fallback` tally below, which counts them together.
+        const auto capture_fallback = [&](const std::string& reason,
+                                          const std::string& detail) {
+            paint_class = PaintClass::element_capture_fallback;
+            lowered.type = "frame";
+            lowered.attributes["capture_fallback_element"] = node.tag_name;
+            lowered.attributes["capture_fallback_reason"] = reason;
+            if (!detail.empty())
+                lowered.attributes["capture_fallback_detail"] = detail;
+            // Nothing attaches a raster to a fallback node, so the frame emitted
+            // paints only whatever background the element's own styles carry —
+            // for a `<canvas>` or an `<svg>`, nothing at all. Saying so on the
+            // node is the difference between a hole a consumer can find and a
+            // classification that reads as "handled by a capture".
+            //
+            // The AREA is what ranks these, and it belongs here for the same
+            // reason the rest of this lambda does: it is true of both kinds of
+            // fallback. Accumulating it in only one branch leaves the tally
+            // disagreeing with the `element_capture_fallback` count beside it —
+            // which is exactly what happened, and read as eighteen icons
+            // covering no area at all.
+            lowered.attributes["unpainted"] = "true";
+            counts.unpainted_fallback_area +=
+                node.bounds.width * node.bounds.height;
+        };
+
         if (svg_root && svg_subtree.drawable()) {
             lowered.type = "frame";
             lowered.attributes["svg_shapes"] =
@@ -791,32 +827,18 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // that owns its subtree, so it falls back to the captured element —
             // carrying WHICH construct refused, because that is the whole
             // can't-draw list for this design in one string.
-            paint_class = PaintClass::element_capture_fallback;
-            lowered.type = "frame";
-            lowered.attributes["capture_fallback_element"] = node.tag_name;
-            lowered.attributes["capture_fallback_reason"] =
-                "svg-" + std::string(to_string(svg_subtree.refusal));
-            if (!svg_subtree.refusal_detail.empty())
-                lowered.attributes["capture_fallback_detail"] =
-                    svg_subtree.refusal_detail;
+            capture_fallback("svg-" + std::string(to_string(svg_subtree.refusal)),
+                             svg_subtree.refusal_detail);
             ++counts.svg_refused;
+            if (svg_subtree.refusal == SvgRefusal::paint_unavailable)
+                ++counts.svg_refused_stale_capture;
         } else if (capture_only) {
-            paint_class = PaintClass::element_capture_fallback;
-            lowered.type = "frame";
-            // Nothing attaches a raster to this node, so the frame emitted here
-            // paints only whatever background the element's own styles carry —
-            // for a `<canvas>` or an `<svg>`, nothing at all. Saying so on the
-            // node is the difference between a hole a consumer can find and a
-            // classification that reads as "handled by a capture".
-            lowered.attributes["unpainted"] = "true";
-            counts.unpainted_fallback_area +=
-                node.bounds.width * node.bounds.height;
-            lowered.attributes["capture_fallback_element"] = node.tag_name;
             // WHY it cannot be drawn, because the two reasons have different
             // fixes: a `<canvas>` is the permanent answer, a rotation is a
             // transform the IR does not carry yet.
-            lowered.attributes["capture_fallback_reason"] =
-                is_capture_only_element(node.tag_name) ? "element" : "transform";
+            capture_fallback(
+                is_capture_only_element(node.tag_name) ? "element" : "transform",
+                {});
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
