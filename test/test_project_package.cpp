@@ -547,20 +547,27 @@ TEST_CASE("Project package root entry points reject embedded NUL pathnames",
     const auto nul_root = temporary.path / fs::path(nul_name);
     const auto truncated_root = temporary.path / "victim";
     const std::vector<std::uint8_t> bytes{'d', 'a', 't', 'a'};
-    const BlobReference reference{BlobStore::Media, hash_bytes(bytes)};
+    const auto hash = hash_bytes(bytes);
+    const BlobReference reference{BlobStore::Media, hash};
+    fs::create_directory(truncated_root);
 
     const auto writer = PackageWriter::create(nul_root, registry());
     REQUIRE_FALSE(writer);
     REQUIRE(writer.error().code == PackageErrorCode::InvalidPath);
+    REQUIRE(fs::is_empty(truncated_root));
+
+    publish_baseline(truncated_root, hash, bytes, make_project("nul", "media", hash));
+    REQUIRE(fs::remove_all(truncated_root / "cache") > 0);
 
     const auto opened = open_package(nul_root, registry());
     REQUIRE_FALSE(opened);
     REQUIRE(opened.error().code == PackageErrorCode::InvalidPath);
+    REQUIRE_FALSE(fs::exists(truncated_root / "cache"));
 
     const auto blob = read_blob(nul_root, reference, 1024);
     REQUIRE_FALSE(blob);
     REQUIRE(blob.error().code == PackageErrorCode::InvalidPath);
-    REQUIRE_FALSE(fs::exists(truncated_root));
+    REQUIRE(fs::is_regular_file(truncated_root / "media" / hash.to_hex()));
 }
 
 TEST_CASE("Project package lock rejects symbolic-link redirection",
