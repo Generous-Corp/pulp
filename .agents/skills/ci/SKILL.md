@@ -3141,6 +3141,16 @@ Pair with launchd / systemd so the watchdog survives reboots. JSON
 contract: `runner.watch` envelopes with `event=auto_kill_worker`,
 `phase ∈ {attempt, killed, failed, no-pid-found}`.
 
+`shipyard runner fleet-status --repo Generous-Corp/pulp --json` also audits
+registered runner labels, Tart disk-floor/ccache admission health, and expected
+metal hosts declared under `[runner.fleet.expected_host.<name>]` in
+`.shipyard/config.toml`. MacPro requires two online ephemeral Linux runners;
+Mac Mini requires one online native Intel JIT runner even before its first
+registration; the planned MacBook Air is recorded with `active = false` until
+commissioned. Expected hosts match stable label subsets, never disposable runner
+names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
+not an intentional absence.
+
 ### Prevent: build-dir ODR guard (interrupted-build sentinel)
 
 The self-hosted macОS lane uses `clean: false` (warm `build-<key>` dir for

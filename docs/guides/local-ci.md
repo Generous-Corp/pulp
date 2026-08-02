@@ -560,6 +560,22 @@ with the `SHIPYARD_VERSION` every workflow declares.
 Nothing about it is required: a public cloner runs `install-shipyard.sh` once
 and never thinks about this again. It exists for the local Macs.
 
+v0.81.0 also gives the fleet watchdog an expected-host inventory independent of
+ephemeral runner names. Pulp declares the MacPro and Mac Mini active in
+`.shipyard/config.toml`; absence or insufficient online matches produces
+`expected_host_unavailable`. The planned MacBook Air is declared with
+`active = false`, so it remains visible without claiming capacity. Matching uses
+stable label subsets (`pulp-host-macpro`, `pulp-host-macmini`, and architecture),
+never a JIT runner identity. Inspect the combined view with:
+
+```bash
+shipyard runner fleet-status --repo Generous-Corp/pulp --json
+```
+
+The same report calls out Tart disk-floor and ccache-size admission failures and
+merge-group Linux jobs left on `ubuntu-latest` while online self-hosted Linux x64
+capacity is idle.
+
 ```bash
 # What would happen, without touching anything:
 python3 tools/scripts/shipyard_autoupdate.py --check --json
