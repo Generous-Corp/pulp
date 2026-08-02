@@ -37,6 +37,12 @@ for candidate in python3 python3.14 python3.13 python3.12 python3.11 \
         break
     fi
 done
+if [ -z "$PYTHON" ] && command -v uv >/dev/null 2>&1; then
+    resolved="$(uv python find 3.12 2>/dev/null || true)"
+    if [ -n "$resolved" ] && "$resolved" -c 'import tomllib' >/dev/null 2>&1; then
+        PYTHON="$resolved"
+    fi
+fi
 [ -n "$PYTHON" ] || exit 0
 
 # ── Resolve the edited file path from the tool payload (agent-neutral) ────────

@@ -89,7 +89,7 @@ versioning_config   = "tools/scripts/versioning.json"
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+configure = "ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\""
 build     = "tools/ci/governed-build.sh cmake --build build"
 # `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
 # cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
