@@ -397,6 +397,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: verify-rendered-panel
+    path: tools/import-validation/verify_rendered_panel.py
+    category: visual-compare
+    use_when: Prove the artifact that actually ships renders the design, not just that the importer says it did.
+    invocation: python3 tools/import-validation/verify_rendered_panel.py --artifact <build.ui.js> --reference <designir-render.png> --tokens <tokens.json>
+    inputs: The emitted UI script and the importer's own DesignIR render (never Chrome's browser.png, which can never match its size), plus the design's token file as the colour allow-list.
+    outputs: "similarity + foreign-colour ratio on every run; distinct exit codes: below-threshold 5, failed direct assertion 6, harness that cannot measure 7."
+    caveat: "The sibling diff_against_reference tools score two PNGs a caller already produced; this one renders the artifact itself under the conditions that make a render faithful — PULP_SHOT_NO_RECONCILE=1, the Skia backend, and a renderer built from the same tree as the importer — and refuses to score when it cannot. Similarity alone is blind to a palette regression: a panel painting stock colours over the design scored 0.940 and passed on pixels."
+    availability: always
+    skill: import-design
+    docs: reference/design-import.md
+
   - name: check-source-contracts
     path: tools/import-validation/check-source-contracts.py
     category: import-roundtrip
