@@ -1,3 +1,4 @@
+#include "support/timeline_schema_version.hpp"
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/timeline/schema_registry.hpp>
@@ -12,8 +13,14 @@
 #include <utility>
 
 using namespace timeline_test;
+using timeline_test_support::current_schema_version;
+using timeline_test_support::track_version_stamp;
 
 namespace {
+
+std::uint32_t current_track_version() {
+    return current_schema_version("pulp.timeline.track");
+}
 
 // `detail::track_input_of` names every TrackInput member so an identity rewrite
 // can copy the whole authored input and overwrite only the identities. That
@@ -48,7 +55,7 @@ template <typename T, std::size_t Count = 0> constexpr std::size_t field_count()
         return Count;
 }
 
-constexpr std::size_t kTrackInputFields = 11;
+constexpr std::size_t kTrackInputFields = 14;
 static_assert(field_count<TrackInput>() == kTrackInputFields,
               "TrackInput gained or lost a member. Carry it in detail::track_input_of "
               "(core/timeline/src/track.cpp) so an id remap stops resetting it, then update "
@@ -145,12 +152,14 @@ TEST_CASE("A default track mixer is written as absence", "[timeline][mixer]") {
 
 TEST_CASE("Track schema migrates v6 to v7 and back", "[timeline][mixer][migration]") {
     const auto reg = registry();
-    // A saved track is current-version and states no tuning of its own, so the
-    // step down to v7 is lossless and leaves the mixer as the only thing v6
-    // cannot hold.
-    const auto plain = take_result(
-        reg.migrate(SchemaDomain::Document, "pulp.timeline.track", 8, 7,
-                    track_envelope(serialized(mixer_project(TrackMixer{}))), {}));
+    // A saved track is current-version, states no tuning of its own and carries
+    // no modulation, so the step down to v7 is lossless and leaves the mixer as
+    // the only thing v6 cannot hold. The step starts from whatever version is
+    // current rather than a literal, so this stays a test of the v6/v7 pair.
+    const auto authored_now = track_envelope(serialized(mixer_project(TrackMixer{})));
+    REQUIRE(authored_now.find(track_version_stamp()) != std::string::npos);
+    const auto plain = take_result(reg.migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 7, authored_now, {}));
     REQUIRE(plain.find("\"version\":7") != std::string::npos);
 
     const auto downgraded = take_result(
@@ -168,8 +177,8 @@ TEST_CASE("Downgrading a track that carries a mixer is refused", "[timeline][mix
     // how the document sounds, so the migration refuses instead.
     const auto authored = track_envelope(serialized(mixer_project(TrackMixer{0.25f, 0.5f})));
     REQUIRE(authored.find("\"mixer\"") != std::string::npos);
-    const auto downgraded =
-        registry().migrate(SchemaDomain::Document, "pulp.timeline.track", 8, 6, authored, {});
+    const auto downgraded = registry().migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 6, authored, {});
     REQUIRE_FALSE(downgraded);
 }
 
@@ -177,8 +186,8 @@ TEST_CASE("Downgrading a track with mixer automation is refused", "[timeline][mi
     const auto authored = track_envelope(serialized(mixer_project(
         TrackMixer{}, {mixer_lane({40}, {41}, TrackMixerParameter::Gain, 0.25f, 0.75f)})));
     REQUIRE(authored.find("pulp.timeline.automation_target.track_mixer") != std::string::npos);
-    const auto downgraded =
-        registry().migrate(SchemaDomain::Document, "pulp.timeline.track", 8, 6, authored, {});
+    const auto downgraded = registry().migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                               current_track_version(), 6, authored, {});
     REQUIRE_FALSE(downgraded);
 }
 

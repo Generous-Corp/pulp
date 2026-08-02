@@ -153,7 +153,10 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"device_chain", SchemaValueKind::Array},
         {"freeze", SchemaValueKind::Object, false},
         {"id", SchemaValueKind::U64String},
+        {"macros", SchemaValueKind::Array, false},
         {"mixer", SchemaValueKind::Object, false},
+        {"modulation_routes", SchemaValueKind::Array, false},
+        {"modulators", SchemaValueKind::Array, false},
         {"name", SchemaValueKind::String},
         {"record_armed", SchemaValueKind::Boolean},
         {"take_lanes", SchemaValueKind::Array},
@@ -161,6 +164,24 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     static constexpr ExpectedField device_placement_fields[] = {
         {"id", SchemaValueKind::U64String},
+    };
+    static constexpr ExpectedField modulator_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"kind", SchemaValueKind::String},
+        {"name", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField macro_control_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"value_bits", SchemaValueKind::U32},
+    };
+    static constexpr ExpectedField modulation_route_fields[] = {
+        {"depth_bits", SchemaValueKind::U32},
+        {"enabled", SchemaValueKind::Boolean},
+        {"id", SchemaValueKind::U64String},
+        {"source_id", SchemaValueKind::U64String},
+        {"source_kind", SchemaValueKind::String},
+        {"target", SchemaValueKind::Object},
     };
     static constexpr ExpectedField take_lane_fields[] = {
         {"comp_segments", SchemaValueKind::Array},
@@ -235,6 +256,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_target.track_mixer",
          track_mixer_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
+        {SchemaDomain::Document, "pulp.timeline.modulator", modulator_fields},
+        {SchemaDomain::Document, "pulp.timeline.macro_control", macro_control_fields},
+        {SchemaDomain::Document, "pulp.timeline.modulation_route", modulation_route_fields},
         {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, clip_schema_policy.type_name, clip_fields,

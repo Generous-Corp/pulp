@@ -558,6 +558,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "velocity_strength", kind: "U32", jsType: "number", required: true }),
     ]),
   }),
+  "pulp.timeline.macro_control": Object.freeze({
+    schemaType: "pulp.timeline.macro_control",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "value_bits", kind: "U32", jsType: "number", required: true }),
+    ]),
+  }),
   "pulp.timeline.marker": Object.freeze({
     schemaType: "pulp.timeline.marker",
     domain: "Document",
@@ -567,6 +577,29 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "position", kind: "I64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.modulation_route": Object.freeze({
+    schemaType: "pulp.timeline.modulation_route",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "depth_bits", kind: "U32", jsType: "number", required: true }),
+      Object.freeze({ name: "enabled", kind: "Boolean", jsType: "boolean", required: true }),
+      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "source_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "source_kind", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "target", kind: "Object", jsType: "object", required: true }),
+    ]),
+  }),
+  "pulp.timeline.modulator": Object.freeze({
+    schemaType: "pulp.timeline.modulator",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "kind", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.project": Object.freeze({
@@ -666,7 +699,7 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.track": Object.freeze({
     schemaType: "pulp.timeline.track",
     domain: "Document",
-    version: 8,
+    version: 9,
     fields: Object.freeze([
       Object.freeze({ name: "active_take_lane_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "automation_lanes", kind: "Array", jsType: "array", required: true }),
@@ -674,7 +707,10 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "device_chain", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "freeze", kind: "Object", jsType: "object", required: false }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "macros", kind: "Array", jsType: "array", required: false }),
       Object.freeze({ name: "mixer", kind: "Object", jsType: "object", required: false }),
+      Object.freeze({ name: "modulation_routes", kind: "Array", jsType: "array", required: false }),
+      Object.freeze({ name: "modulators", kind: "Array", jsType: "array", required: false }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "record_armed", kind: "Boolean", jsType: "boolean", required: true }),
       Object.freeze({ name: "take_lanes", kind: "Array", jsType: "array", required: true }),
@@ -749,7 +785,10 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.device_placement",
   "pulp.timeline.groove_step",
   "pulp.timeline.groove_template",
+  "pulp.timeline.macro_control",
   "pulp.timeline.marker",
+  "pulp.timeline.modulation_route",
+  "pulp.timeline.modulator",
   "pulp.timeline.project",
   "pulp.timeline.region",
   "pulp.timeline.scene",

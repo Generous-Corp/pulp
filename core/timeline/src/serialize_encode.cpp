@@ -147,6 +147,12 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "automation_lane";
     case ItemKind::AutomationPoint:
         return "automation_point";
+    case ItemKind::Modulator:
+        return "modulator";
+    case ItemKind::MacroControl:
+        return "macro_control";
+    case ItemKind::ModulationRoute:
+        return "modulation_route";
     case ItemKind::TakeLane:
         return "take_lane";
     case ItemKind::Take:
@@ -555,6 +561,73 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
     });
 }
 
+// A target's envelope. Modulation and automation address the same parameters,
+// so the two share one spelling on the wire; what differs is the entity that
+// carries it. Every alternative owes an envelope: a target kind that fell off
+// the end of this dispatch would be a route saved without what it drives, so
+// the visit is exhaustive by construction rather than by a trailing else.
+bool write_modulation_target(EncodeContext& context, const ModulationTarget& target) {
+    return std::visit(
+        ModulationTargetCases{
+            [&](const DeviceParameterTarget& device) {
+                return write_envelope(
+                    context, "pulp.timeline.automation_target.device_parameter", 1, [&] {
+                        return context.writer.append("{\"device_placement_id\":") &&
+                               context.writer.u64(device.device_placement_id.value, true) &&
+                               context.writer.append(",\"parameter_id\":") &&
+                               context.writer.u64(device.param_id) &&
+                               context.writer.character('}');
+                    });
+            },
+            [&](const TrackMixerTarget& mixer) {
+                return write_envelope(
+                    context, "pulp.timeline.automation_target.track_mixer", 1, [&] {
+                        return context.writer.append("{\"parameter\":") &&
+                               context.writer.quoted(
+                                   track_mixer_parameter_name(mixer.parameter)) &&
+                               context.writer.character('}');
+                    });
+            },
+        },
+        target);
+}
+
+bool write_modulator(EncodeContext& context, const Modulator& modulator) {
+    return write_envelope(context, "pulp.timeline.modulator", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(modulator.id.value, true) &&
+               context.writer.append(",\"kind\":") &&
+               context.writer.quoted(modulator_kind_name(modulator.kind)) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(modulator.name) &&
+               context.writer.character('}');
+    });
+}
+
+bool write_macro_control(EncodeContext& context, const MacroControl& macro) {
+    return write_envelope(context, "pulp.timeline.macro_control", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(macro.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(macro.name) &&
+               context.writer.append(",\"value_bits\":") &&
+               context.writer.u64(std::bit_cast<std::uint32_t>(macro.value), true) &&
+               context.writer.character('}');
+    });
+}
+
+bool write_modulation_route(EncodeContext& context, const ModulationRoute& route) {
+    return write_envelope(context, "pulp.timeline.modulation_route", 1, [&] {
+        return context.writer.append("{\"depth_bits\":") &&
+               context.writer.u64(std::bit_cast<std::uint32_t>(route.depth), true) &&
+               context.writer.append(",\"enabled\":") &&
+               context.writer.append(route.enabled ? "true" : "false") &&
+               context.writer.append(",\"id\":") && context.writer.u64(route.id.value, true) &&
+               context.writer.append(",\"source_id\":") &&
+               context.writer.u64(route.source.id.value, true) &&
+               context.writer.append(",\"source_kind\":") &&
+               context.writer.quoted(modulation_source_kind_name(route.source.kind)) &&
+               context.writer.append(",\"target\":") &&
+               write_modulation_target(context, route.target) && context.writer.character('}');
+    });
+}
+
 bool write_take(EncodeContext& context, const Take& take) {
     return write_envelope(context, "pulp.timeline.take", 1, [&] {
         return context.writer.append("{\"asset_id\":") &&
@@ -670,6 +743,20 @@ bool write_track(EncodeContext& context, const Track& track) {
             }
             if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true))
                 return false;
+            // Empty modulation collections are written as absence, so a
+            // document that authored no modulation stays byte-identical to its
+            // pre-modulation form. `macros` sorts before `mixer`; the other two
+            // sort after it, so this member interleaves with the mixer below.
+            if (!track.macros().empty()) {
+                if (!context.writer.append(",\"macros\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.macros().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_macro_control(context, track.macros()[index]))
+                        return false;
+                if (!context.writer.character(']'))
+                    return false;
+            }
             // A default mixer is written as absence, so a document that never
             // touched a fader stays byte-identical to its pre-mixer form.
             if (track.mixer() != TrackMixer{}) {
@@ -679,6 +766,26 @@ bool write_track(EncodeContext& context, const Track& track) {
                     !context.writer.append(",\"pan_bits\":") ||
                     !context.writer.u64(std::bit_cast<std::uint32_t>(track.mixer().pan), true) ||
                     !context.writer.character('}'))
+                    return false;
+            }
+            if (!track.modulation_routes().empty()) {
+                if (!context.writer.append(",\"modulation_routes\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.modulation_routes().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_modulation_route(context, track.modulation_routes()[index]))
+                        return false;
+                if (!context.writer.character(']'))
+                    return false;
+            }
+            if (!track.modulators().empty()) {
+                if (!context.writer.append(",\"modulators\":["))
+                    return false;
+                for (std::size_t index = 0; index < track.modulators().size(); ++index)
+                    if ((index != 0 && !context.writer.character(',')) ||
+                        !write_modulator(context, track.modulators()[index]))
+                        return false;
+                if (!context.writer.character(']'))
                     return false;
             }
             if (!context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||

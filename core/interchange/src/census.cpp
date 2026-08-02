@@ -117,6 +117,26 @@ void record_track(ConceptCensus& out, const timeline::Project& project,
                    lane.target());
     }
 
+    for (const timeline::Modulator& modulator : track.modulators())
+        out.record(Concept::ModulationModulator, modulator.id, limits);
+    for (const timeline::MacroControl& macro : track.macros())
+        out.record(Concept::ModulationMacro, macro.id, limits);
+    // A route is recorded once per connection, so a macro reaching four
+    // parameters is four routes against one macro. That ratio is the fan-out an
+    // export has to carry, and a format that can only bind a control to one
+    // destination loses three of them — which a per-source recording would hide.
+    for (const timeline::ModulationRoute& route : track.modulation_routes()) {
+        std::visit(timeline::ModulationTargetCases{
+                       [&](const timeline::DeviceParameterTarget&) {
+                           out.record(Concept::ModulationRouteDeviceParam, route.id, limits);
+                       },
+                       [&](const timeline::TrackMixerTarget&) {
+                           out.record(Concept::ModulationRouteTrackMixer, route.id, limits);
+                       },
+                   },
+                   route.target);
+    }
+
     for (const timeline::TakeLane& lane : track.take_lanes()) {
         out.record(Concept::TakeLane, lane.id(), limits);
         if (!lane.comp_segments().empty())

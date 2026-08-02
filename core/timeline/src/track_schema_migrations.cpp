@@ -52,6 +52,9 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
     const auto* freeze = mutable_member(data, "freeze");
     const auto* mixer = mutable_member(data, "mixer");
     const auto* tuning = mutable_member(data, "tuning");
+    const auto* modulators = mutable_member(data, "modulators");
+    const auto* macros = mutable_member(data, "macros");
+    const auto* routes = mutable_member(data, "modulation_routes");
     return id && id->kind == JsonValue::Kind::String && name &&
            name->kind == JsonValue::Kind::String && clips &&
            clips->kind == JsonValue::Kind::Array &&
@@ -76,7 +79,12 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
                 : !mixer) &&
            (track_schema_policy.supports_tuning(version)
                 ? !tuning || tuning->kind == JsonValue::Kind::Object
-                : !tuning);
+                : !tuning) &&
+           (track_schema_policy.supports_modulation(version)
+                ? (!modulators || modulators->kind == JsonValue::Kind::Array) &&
+                      (!macros || macros->kind == JsonValue::Kind::Array) &&
+                      (!routes || routes->kind == JsonValue::Kind::Array)
+                : !modulators && !macros && !routes);
 }
 
 bool has_track_mixer_automation(JsonValue& data) noexcept {
@@ -511,6 +519,52 @@ migrate_track_v8_to_v7(std::string_view source, BoundedJsonSink& output, const v
         mutable_member(*data, "tuning") || version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{version->begin, version->end, "7"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v8_to_v9(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // A v8 track has no modulation, and absent collections are exactly how v9
+    // spells empty ones, so the upgrade is the version stamp and nothing else.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.tuning_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.tuning_introduced_version) ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "9"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v9_to_v8(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // An authored modulator, macro, or route has no v8 spelling. Dropping one
+    // would silently unwire the document, so a track carrying any of the three
+    // refuses to downgrade rather than losing what drives its parameters.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.modulation_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.modulation_introduced_version) ||
+        mutable_member(*data, "modulators") || mutable_member(*data, "macros") ||
+        mutable_member(*data, "modulation_routes") || version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "8"}};
     if (!valid_raw_edits(source, edits))
         return migration_fail<SchemaWriteSuccess>();
     apply_raw_edits(source, edits, output);

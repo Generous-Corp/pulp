@@ -935,6 +935,28 @@ Project. Lanes persist in snapshots and are reachable through typed commands
 and `DocumentSession`. `pulp::playback` compiles attached lanes into immutable
 cursor programs, while host-graph parameter delivery remains outside Timeline.
 
+`parameter_target.hpp` holds the format-neutral vocabulary for naming a
+document parameter — a placed device parameter, or one of the owning track's own
+mixer controls. One vocabulary serves every consumer that addresses a parameter,
+because "which parameter" is addressing rather than a property of what writes
+there. `AutomationTarget` and `ModulationTarget` are both names for it.
+
+`modulation.hpp` provides modulators, macro controls, and modulation routes as
+Track-owned document entities distinct from automation. The difference is what
+they write: an automation lane authors a parameter's *base* value over time,
+while a modulation route contributes a depth-scaled *relative offset* on top of
+whatever base is in force, which is CLAP's `param_value`/`param_mod` separation.
+Two consequences the document preserves: several routes may reach one parameter
+and their offsets sum, where two automation lanes on one parameter is a
+contradiction the model rejects; and depth belongs to the connection rather than
+to the source, so one macro reaches many parameters with a different amount for
+each. A route names its source by identity *and* kind, so a macro can never
+stand in for a modulator that shared its ID. Track attachment proves the source
+is a modulator or macro of the matching kind on the same track and that any
+referenced placement exists in that track's chain. No modulator runtime ships
+yet; the schema exists so routing authored now survives to the phase that adds
+one.
+
 `device_placement.hpp` defines the durable identity of one logical placement in
 a Track-owned device chain. The chain preserves authored processing order
 through immutable clip edits, persistence, and ID remapping. A placement is

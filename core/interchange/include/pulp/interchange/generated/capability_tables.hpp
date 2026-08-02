@@ -130,6 +130,10 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // context.chord-voicing
         {ImportLevel::None, "", ""}, // tuning.project
         {ImportLevel::None, "", ""}, // tuning.instrument
+        {ImportLevel::None, "", ""}, // modulation.modulator
+        {ImportLevel::None, "", ""}, // modulation.macro
+        {ImportLevel::None, "", ""}, // modulation.route-device-param
+        {ImportLevel::None, "", ""}, // modulation.route-track-mixer
     },
     // smf
     {
@@ -189,6 +193,10 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // context.chord-voicing
         {ImportLevel::None, "", ""}, // tuning.project
         {ImportLevel::None, "", ""}, // tuning.instrument
+        {ImportLevel::None, "", ""}, // modulation.modulator
+        {ImportLevel::None, "", ""}, // modulation.macro
+        {ImportLevel::None, "", ""}, // modulation.route-device-param
+        {ImportLevel::None, "", ""}, // modulation.route-track-mixer
     },
 };
 
@@ -251,6 +259,10 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries no voicing hint"}, // context.chord-voicing
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no document-wide tuning statement"}, // tuning.project
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no per-instrument tuning statement"}, // tuning.instrument
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for modulation.modulator"}, // modulation.modulator
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for modulation.macro"}, // modulation.macro
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for modulation.route-device-param"}, // modulation.route-device-param
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for modulation.route-track-mixer"}, // modulation.route-track-mixer
     },
     // smf
     {
@@ -310,6 +322,10 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-voicing
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no document-wide tuning statement"}, // tuning.project
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-instrument tuning statement"}, // tuning.instrument
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for modulation.modulator"}, // modulation.modulator
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for modulation.macro"}, // modulation.macro
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for modulation.route-device-param"}, // modulation.route-device-param
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for modulation.route-track-mixer"}, // modulation.route-track-mixer
     },
 };
 } // namespace detail

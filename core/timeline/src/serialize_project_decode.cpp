@@ -9,6 +9,7 @@
 #include "sequence_schema_policy.hpp"
 #include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
+#include "serialize_modulation_decode.hpp"
 #include "serialize_decode_context.hpp"
 #include "serialize_decode_support.hpp"
 #include "track_schema_policy.hpp"
@@ -663,6 +664,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     const auto* mixer = data.find("mixer");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
+    const auto* modulators = data.find("modulators");
+    const auto* macros = data.find("macros");
+    const auto* routes = data.find("modulation_routes");
     const auto* take_lanes = data.find("take_lanes");
     const auto* record = data.find("record_armed");
     const auto* tuning = data.find("tuning");
@@ -680,6 +684,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.supports_mixer(envelope.value().version);
     const auto supports_tuning =
         detail::track_schema_policy.supports_tuning(envelope.value().version);
+    const auto supports_modulation =
+        detail::track_schema_policy.supports_modulation(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -693,7 +699,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
          (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
         (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object) ||
         (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object) ||
-        (!supports_tuning && tuning))
+        (!supports_tuning && tuning) ||
+        (!supports_modulation && (modulators || macros || routes)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     std::optional<TuningReference> decoded_tuning;
     if (tuning) {
@@ -749,6 +756,32 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
             return runtime::Err(decoded.error());
         decoded_automation = std::move(decoded).value();
     }
+    // Each collection is optional: absence is the empty one, which is exactly
+    // how a track that authored no modulation is spelled.
+    std::vector<Modulator> decoded_modulators;
+    if (modulators) {
+        auto decoded = detail::decode_modulators(*modulators, limits, counts.modulators,
+                                                 path + "/data/modulators");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_modulators = std::move(decoded).value();
+    }
+    std::vector<MacroControl> decoded_macros;
+    if (macros) {
+        auto decoded = detail::decode_macro_controls(*macros, limits, counts.macro_controls,
+                                                     path + "/data/macros");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_macros = std::move(decoded).value();
+    }
+    std::vector<ModulationRoute> decoded_routes;
+    if (routes) {
+        auto decoded = detail::decode_modulation_routes(
+            *routes, limits, counts.modulation_routes, path + "/data/modulation_routes");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_routes = std::move(decoded).value();
+    }
     std::vector<TakeLane> decoded_take_lanes;
     if (take_lanes) {
         decoded_take_lanes.reserve(take_lanes->array.size());
@@ -781,6 +814,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .clips = std::move(decoded_clips),
                                             .device_chain = std::move(decoded_devices),
                                             .automation_lanes = std::move(decoded_automation),
+                                            .modulators = std::move(decoded_modulators),
+                                            .macros = std::move(decoded_macros),
+                                            .modulation_routes = std::move(decoded_routes),
                                             .take_lanes = std::move(decoded_take_lanes),
                                             .record_armed = decoded_record_armed,
                                             .active_take_lane_id = decoded_active_take_lane,

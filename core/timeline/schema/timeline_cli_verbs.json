@@ -1700,6 +1700,35 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "U32",
+          "name": "value-bits",
+          "required": true,
+          "schema_field": "value_bits",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:macro-control",
+      "schema_type": "pulp.timeline.macro_control",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "U32",
           "name": "color",
           "required": false,
@@ -1730,6 +1759,85 @@
       ],
       "name": "timeline:marker",
       "schema_type": "pulp.timeline.marker",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U32",
+          "name": "depth-bits",
+          "required": true,
+          "schema_field": "depth_bits",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Boolean",
+          "name": "enabled",
+          "required": true,
+          "schema_field": "enabled",
+          "value_type": "bool"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "source-id",
+          "required": true,
+          "schema_field": "source_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "source-kind",
+          "required": true,
+          "schema_field": "source_kind",
+          "value_type": "string"
+        },
+        {
+          "kind": "Object",
+          "name": "target",
+          "required": true,
+          "schema_field": "target",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:modulation-route",
+      "schema_type": "pulp.timeline.modulation_route",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "kind",
+          "required": true,
+          "schema_field": "kind",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        }
+      ],
+      "name": "timeline:modulator",
+      "schema_type": "pulp.timeline.modulator",
       "version": 1
     },
     {
@@ -2151,10 +2259,31 @@
           "value_type": "uint"
         },
         {
+          "kind": "Array",
+          "name": "macros",
+          "required": false,
+          "schema_field": "macros",
+          "value_type": "json"
+        },
+        {
           "kind": "Object",
           "name": "mixer",
           "required": false,
           "schema_field": "mixer",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "modulation-routes",
+          "required": false,
+          "schema_field": "modulation_routes",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "modulators",
+          "required": false,
+          "schema_field": "modulators",
           "value_type": "json"
         },
         {
@@ -2189,7 +2318,7 @@
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 8
+      "version": 9
     },
     {
       "domain": "Document",

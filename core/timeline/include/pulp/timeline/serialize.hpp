@@ -53,6 +53,12 @@ struct ProjectSnapshotCounts {
     std::size_t automation_lanes = 0;
     /// Number of automation points across all lanes.
     std::size_t automation_points = 0;
+    /// Number of modulators across all tracks.
+    std::size_t modulators = 0;
+    /// Number of macro controls across all tracks.
+    std::size_t macro_controls = 0;
+    /// Number of modulation routes across all tracks.
+    std::size_t modulation_routes = 0;
     /// Number of take lanes across all tracks.
     std::size_t take_lanes = 0;
     /// Number of takes across all take lanes.

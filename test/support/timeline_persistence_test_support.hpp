@@ -1,5 +1,7 @@
 #pragma once
 
+#include "timeline_schema_version.hpp"
+
 #include <pulp/timeline/command.hpp>
 #include <pulp/timeline/serialize.hpp>
 
@@ -14,6 +16,9 @@
 
 using namespace pulp::timeline;
 using namespace pulp::timebase;
+using timeline_test_support::current_schema_version;
+using timeline_test_support::track_version_stamp;
+using timeline_test_support::version_stamp;
 namespace runtime = pulp::runtime;
 
 namespace {
@@ -88,6 +93,8 @@ Project mixed_project() {
 SchemaRegistry builtins() {
     return take(make_builtin_timeline_registry());
 }
+
+
 
 runtime::Result<std::shared_ptr<const void>, PersistenceError>
 decode_counter(const JsonValue& data, const void*) noexcept {

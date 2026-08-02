@@ -84,6 +84,11 @@
     { "id": "context.chord-extension", "detect": "model", "summary": "A chord statement carrying added scale degrees beyond its quality." },
     { "id": "context.chord-voicing", "detect": "model", "summary": "A chord statement carrying a hint for how a generator should spread its tones." },
     { "id": "tuning.project", "detect": "model", "summary": "A document-wide statement of the tuning every instrument plays in." },
-    { "id": "tuning.instrument", "detect": "model", "summary": "One instrument overriding the document-wide tuning with its own." }
+    { "id": "tuning.instrument", "detect": "model", "summary": "One instrument overriding the document-wide tuning with its own." },
+
+    { "id": "modulation.modulator", "detect": "model", "summary": "A track-owned generator of modulation signal, by identity and declared kind." },
+    { "id": "modulation.macro", "detect": "model", "summary": "A track-owned named performer control that drives parameters through modulation routes." },
+    { "id": "modulation.route-device-param", "detect": "model", "summary": "A modulation route contributing a depth-scaled offset to a device parameter, on top of whatever base value is in force." },
+    { "id": "modulation.route-track-mixer", "detect": "model", "summary": "A modulation route contributing a depth-scaled offset to a track's own gain or pan." }
   ]
 }
