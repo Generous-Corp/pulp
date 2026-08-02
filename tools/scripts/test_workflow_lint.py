@@ -19,6 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
+POST_TAG_SYNC_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 
 
 def _workflow_text() -> str:
@@ -76,6 +77,23 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertRegex(
             config,
             r"(?m)^\s{4}-\s+pulp-queue-authority-studio\s*$",
+        )
+
+    def test_post_tag_sync_runs_on_the_authority_runner(self) -> None:
+        self.assertTrue(
+            POST_TAG_SYNC_WORKFLOW.exists(),
+            f"missing workflow: {POST_TAG_SYNC_WORKFLOW}",
+        )
+        post_tag_sync = POST_TAG_SYNC_WORKFLOW.read_text(encoding="utf-8")
+        self.assertRegex(
+            post_tag_sync,
+            r"(?m)^\s{4}runs-on:\s*\[self-hosted, pulp-queue-authority-studio\]\s*$",
+        )
+
+    def test_workflow_lint_gate_runs_this_regression_suite(self) -> None:
+        self.assertIn(
+            "python3 tools/scripts/test_workflow_lint.py",
+            self.text,
         )
 
     def test_workflow_has_minimal_permissions_and_concurrency(self) -> None:
