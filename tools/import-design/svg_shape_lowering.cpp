@@ -34,8 +34,11 @@ bool is_ignorable_subtree(std::string_view tag) {
 /// by the shapes below — which Chrome has already resolved for us, so a group
 /// is transparent here as long as it does not composite (`opacity`) or move
 /// (`transform`) its children as a unit.
+/// `<switch>` is deliberately NOT here: it renders the FIRST child whose
+/// requirement attributes evaluate true, not all of them, so treating it as a
+/// plain group draws every alternative at once.
 bool is_group_element(std::string_view tag) {
-    return tag == "g" || tag == "a" || tag == "switch";
+    return tag == "g" || tag == "a";
 }
 
 bool is_shape_element(std::string_view tag) {
@@ -296,6 +299,17 @@ SvgSubtree lower_svg_subtree(const CapturedStyleIndex& index,
     // picture that reads as a rendering bug rather than a stale capture.
     if (!index.has_property("fill") || !index.has_property("stroke")) {
         refuse(out, SvgRefusal::paint_unavailable, "fill");
+        return out;
+    }
+
+    // The renderer maps the viewBox into the node's box with `xMidYMid meet`,
+    // which is SVG's own default. Any other `preserveAspectRatio` — `none`
+    // stretches, `slice` overflows and crops — puts the geometry somewhere
+    // else, and the refusal names the value so the gap is readable.
+    if (const std::string aspect =
+            trim(index.attribute(svg_node_index, "preserveAspectRatio"));
+        !aspect.empty() && aspect != "xMidYMid" && aspect != "xMidYMid meet") {
+        refuse(out, SvgRefusal::element, "preserveAspectRatio=" + aspect);
         return out;
     }
 
