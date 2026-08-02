@@ -5502,6 +5502,18 @@ tests, so the three cannot drift.
   expression that is only correct on a square box; on 160x100 it misses Chrome's
   boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
 
+**A geometry fixture MUST be non-square and off-centre.** The pre-existing test
+for radial sizing asserted `closest-side → 0.5` and `farthest-corner → 0.7071`
+on a **200x200 box with the gradient at 50% 50%** — and on a square, centred box
+those wrong constants give exactly the right answer. The test could not have
+failed for the defect it was named after. The same trap makes a 45° angle its
+own reflection and an ellipse a circle. Use a box like 160x100 with the centre
+at something like `20% 20%`, and the wrong model and the correct one stop
+agreeing. This generalises past gradients: **any test whose subject is
+arithmetic over a box needs a fixture where the plausible-but-wrong formula
+gives a different answer**, or it is only asserting that two expressions
+coincide on the one input you chose.
+
 **Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
 premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
 fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
@@ -5553,6 +5565,27 @@ report both `covered = |render ink ∩ ref ink| / |ref ink|` and
 against SPECTR scores `covered = 1.00` (black is far from the modal colour
 everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
 blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
+
+**Two ways a background-build waiter lies, and both look like a result.**
+Measurement work runs long builds, so agents wrap them in wait loops. Two
+failure modes have each burned a session here:
+
+- **`pgrep -f "cmake --build ..."` matches ANOTHER agent's build in another
+  worktree.** Several worktrees share this machine and every one of them runs a
+  byte-identical command line, so `until ! pgrep -f …` either blocks on someone
+  else's build or — if your pattern does not match your own invocation — exits
+  instantly and reports "finished" before yours started. Match on something
+  unique to your run (a marker file the command writes on exit, or the build
+  log's own last line), never on the shared command line. A wait loop can also
+  match ITSELF: the shell running `pgrep -f "ctest …"` has that string in its
+  own argv, so the loop never ends.
+- **A pipeline ending in `grep -c` reports failure on a zero count.** `grep`
+  exits 1 when it finds nothing, so `… ; grep -cE " error:" build.log` makes a
+  perfectly clean build's task exit 1 and read as "build failed". Put the grep
+  anywhere but last, or `|| true` it.
+
+In both cases the honest move is the same: **read the build log's own tail
+rather than trusting the wrapper's verdict.**
 
 **Prove the bitmap is absent by substitution, not by scanning.** A static scan
 shows no node *references* the capture; it cannot show no pixel *comes from* it.
