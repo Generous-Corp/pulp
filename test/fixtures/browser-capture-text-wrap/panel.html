@@ -51,6 +51,15 @@
      between these two line boxes is the whole bold-measurement question. */
   #regular { top: 220px; font-weight: 400; }
   #bold { top: 260px; font-weight: 700; }
+  /* An inline span splits one visual paragraph into three sibling runs. The
+     run AFTER the span resumes mid-line before returning to the left edge, so
+     its layout box is the union of lines it shares with its siblings and no
+     single box describes where its text goes. Non-ASCII on purpose: the line
+     offsets Chrome reports are UTF-16 code units while the text is UTF-8. */
+  #inline { position: absolute; left: 320px; top: 24px; width: 240px;
+            color: #101010; font-family: 'Pulp Fixture Sans'; font-size: 16px;
+            line-height: 20px; white-space: normal; }
+  #inline b { font-weight: 400; color: #b03030; }
 </style>
 </head>
 <body>
@@ -58,5 +67,6 @@
 <div class="run" id="unwrapped">Chrome breaks this paragraph across several line boxes because the block is narrower than the text it holds.</div>
 <div class="weight" id="regular">Handgloves 123</div>
 <div class="weight" id="bold">Handgloves 123</div>
+<div id="inline">An inline <b>span — 3×4</b> resumes this sentence mid-line and then returns to the block’s left edge for the rest.</div>
 </body>
 </html>

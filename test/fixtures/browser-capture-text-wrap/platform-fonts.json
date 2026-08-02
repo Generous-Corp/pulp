@@ -2,9 +2,9 @@
   "schema": "pulp-browser-platform-fonts-v1",
   "version": 1,
   "summary": {
-    "text_runs": 4,
-    "interrogated": 4,
-    "resolved": 4,
+    "text_runs": 7,
+    "interrogated": 7,
+    "resolved": 7,
     "truncated": false
   },
   "faces_by_glyph_count": [
@@ -12,7 +12,7 @@
       "family_name": "Inter",
       "post_script_name": "Inter-Regular",
       "is_custom_font": true,
-      "glyph_count": 212
+      "glyph_count": 430
     },
     {
       "family_name": "Funnel Display Light",
@@ -105,6 +105,66 @@
           "post_script_name": "FunnelDisplay-Light_Bold",
           "is_custom_font": true,
           "glyph_count": 14
+        }
+      ]
+    },
+    {
+      "layout_index": 12,
+      "node_index": 31,
+      "owner_node_index": 30,
+      "backend_node_id": 32,
+      "requested": {
+        "font_family": "\"Pulp Fixture Sans\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Inter",
+          "post_script_name": "Inter-Regular",
+          "is_custom_font": true,
+          "glyph_count": 104
+        }
+      ]
+    },
+    {
+      "layout_index": 14,
+      "node_index": 33,
+      "owner_node_index": 32,
+      "backend_node_id": 34,
+      "requested": {
+        "font_family": "\"Pulp Fixture Sans\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Inter",
+          "post_script_name": "Inter-Regular",
+          "is_custom_font": true,
+          "glyph_count": 10
+        }
+      ]
+    },
+    {
+      "layout_index": 15,
+      "node_index": 34,
+      "owner_node_index": 30,
+      "backend_node_id": 32,
+      "requested": {
+        "font_family": "\"Pulp Fixture Sans\"",
+        "font_size": "16px",
+        "font_weight": "400",
+        "font_style": "normal"
+      },
+      "resolved": [
+        {
+          "family_name": "Inter",
+          "post_script_name": "Inter-Regular",
+          "is_custom_font": true,
+          "glyph_count": 104
         }
       ]
     }
