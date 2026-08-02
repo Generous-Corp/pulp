@@ -654,11 +654,11 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
     // nullptr for any non-widget tag so __domAppend falls through to its
     // container/HTML defaults (div/span/canvas/svg-prims/input are handled by
     // their own branches before this is consulted).
+    // No widget gets a caption here: `id` is an addressing handle (`__el_N__`
+    // through the web-compat DOM) and widgets paint their label.
     std::unique_ptr<View> w;
     if (tag == "knob") {
-        auto k = std::make_unique<Knob>();
-        k->set_label(id);  // match createKnob's default label
-        w = std::move(k);
+        w = std::make_unique<Knob>();
     } else if (tag == "fader") {
         w = std::make_unique<Fader>();
     } else if (tag == "toggle") {

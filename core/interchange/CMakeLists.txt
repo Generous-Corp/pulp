@@ -34,5 +34,9 @@ endif()
 # configured on mobile, which is where the binary most needs to exist, and this
 # module's CI-enforced dependency floor is what keeps the portability claim
 # honest — an outside-floor include added to the runner fails the gate.
+#
+# This declares the DESKTOP build. The wasm build of the same source is a
+# separate Emscripten-only root (wasm/CMakeLists.txt) because the top-level
+# project does not configure under that toolchain; see the header there.
 add_executable(pulp-fixture-runner tools/fixture_runner_main.cpp)
 target_link_libraries(pulp-fixture-runner PRIVATE pulp::timeline pulp::interchange)

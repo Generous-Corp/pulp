@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -141,6 +142,61 @@ bool states_identity_track_order(const JsonValue& order, const JsonValue& tracks
             return false;
     }
     return true;
+}
+
+
+// v7 adds no top-level sequence member: the chord detail lives on each event
+// and the section role inside each region envelope, so the v6 key list is also
+// the v7 one. Deliberately aliased rather than duplicated, since two identical
+// lists can only ever drift apart.
+constexpr auto& v7_members = v6_members;
+// The three members a v7 chord event carries beyond a v6 one, and the defaults
+// that make an upgraded event mean exactly what the v6 one meant. They are
+// written as one canonical run so the upgrade and the downgrade cannot spell
+// them differently.
+constexpr std::string_view kChordDetailPrefix = "\"chord_bass\":null,\"chord_extensions\":0,";
+constexpr std::string_view kChordDetailSuffix = ",\"voicing\":null";
+constexpr std::string_view kDefaultSectionRole = ",\"role\":\"unspecified\"";
+constexpr std::string_view v6_chord_event_members[] = {"chord_quality", "chord_root", "position",
+                                                       "scale_mode", "scale_root"};
+constexpr std::string_view v7_chord_event_members[] = {
+    "chord_bass", "chord_extensions", "chord_quality", "chord_root",
+    "position",   "scale_mode",       "scale_root",    "voicing"};
+
+// A region's data carries an optional color, so its shape cannot be an exact
+// member list. Ascending key order plus the required members is what any
+// offset-based reasoning below depends on.
+bool canonical_region_data(const JsonValue& data, bool expect_role) noexcept {
+    if (data.kind != JsonValue::Kind::Object)
+        return false;
+    for (std::size_t index = 1; index < data.object.size(); ++index)
+        if (!(data.object[index - 1].first < data.object[index].first))
+            return false;
+    for (const auto required : {"duration", "id", "name", "position"})
+        if (std::find_if(data.object.begin(), data.object.end(), [required](const auto& entry) {
+                return entry.first == required;
+            }) == data.object.end())
+            return false;
+    const auto& last = data.object.back();
+    return expect_role ? last.first == "role" && last.second.kind == JsonValue::Kind::String
+                       : last.first == "position";
+}
+
+const JsonValue* region_data(const JsonValue& region) noexcept {
+    if (region.kind != JsonValue::Kind::Object)
+        return nullptr;
+    const auto* data = region.find("data");
+    return data && data->kind == JsonValue::Kind::Object ? data : nullptr;
+}
+
+// Whether a v7 chord event says exactly what a v6 one could have said. A bass,
+// any extension, or a voicing hint is authored harmony with no v6 spelling.
+bool states_no_chord_detail(const JsonValue& event) noexcept {
+    if (!has_exact_members(event, v7_chord_event_members))
+        return false;
+    return event.object[0].second.kind == JsonValue::Kind::Null &&
+           scalar_is(event.object[1].second, JsonValue::Kind::Number, "0") &&
+           event.object[7].second.kind == JsonValue::Kind::Null;
 }
 
 } // namespace
@@ -372,6 +428,94 @@ migrate_sequence_v6_to_v5(std::string_view source, BoundedJsonSink& output, cons
         return fail();
     std::array edits{RawEdit{order_comma, track_order.end, {}},
                      RawEdit{version->begin, version->end, "5"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v6_to_v7(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 6) || !has_exact_members(*data, v6_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& lane = data->object[1].second;
+    const auto& regions = data->object[7].second;
+    if (lane.kind != JsonValue::Kind::Array || regions.kind != JsonValue::Kind::Array)
+        return fail();
+    std::vector<RawEdit> edits;
+    edits.reserve(lane.array.size() * 2 + regions.array.size() + 1);
+    edits.push_back(RawEdit{version->begin, version->end, "7"});
+    // Every event gains the same defaults, which is what makes the upgraded
+    // lane state exactly the harmony the v6 lane stated.
+    for (const auto& event : lane.array) {
+        if (!has_exact_members(event, v6_chord_event_members) || event.end <= event.begin + 1)
+            return fail();
+        edits.push_back(RawEdit{event.begin + 1, event.begin + 1, kChordDetailPrefix});
+        edits.push_back(RawEdit{event.end - 1, event.end - 1, kChordDetailSuffix});
+    }
+    // A region that stated no part upgrades to one that states Unspecified,
+    // which is the same claim.
+    for (const auto& region : regions.array) {
+        const auto* region_body = region_data(region);
+        if (!region_body || !canonical_region_data(*region_body, false) ||
+            region_body->end <= region_body->begin + 1)
+            return fail();
+        edits.push_back(
+            RawEdit{region_body->end - 1, region_body->end - 1, kDefaultSectionRole});
+    }
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v7_to_v6(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 7) || !has_exact_members(*data, v7_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& lane = data->object[1].second;
+    const auto& regions = data->object[7].second;
+    if (lane.kind != JsonValue::Kind::Array || regions.kind != JsonValue::Kind::Array)
+        return fail();
+    std::vector<RawEdit> edits;
+    edits.reserve(lane.array.size() * 2 + regions.array.size() + 1);
+    edits.push_back(RawEdit{version->begin, version->end, "6"});
+    for (const auto& event : lane.array) {
+        // Refuse rather than drop: a v6 reader that lost a slash bass or an
+        // added ninth would state a different chord, not a less annotated one.
+        if (!states_no_chord_detail(event))
+            return fail();
+        const auto quality_key = source.find("\"chord_quality\"", event.object[1].second.end);
+        const auto voicing_comma = source.find(',', event.object[6].second.end);
+        const auto& voicing = event.object[7].second;
+        if (quality_key == std::string_view::npos || quality_key <= event.begin ||
+            voicing_comma == std::string_view::npos || voicing_comma >= voicing.begin)
+            return fail();
+        edits.push_back(RawEdit{event.begin + 1, quality_key, {}});
+        edits.push_back(RawEdit{voicing_comma, voicing.end, {}});
+    }
+    for (const auto& region : regions.array) {
+        // Drop rather than refuse: the region survives with the same identity,
+        // name, position, and span, so a v6 reader sees the same span of music
+        // with one fewer label on it.
+        const auto* region_body = region_data(region);
+        if (!region_body || !canonical_region_data(*region_body, true))
+            return fail();
+        const auto& position = region_body->object[region_body->object.size() - 2].second;
+        const auto& role = region_body->object.back().second;
+        const auto role_comma = source.find(',', position.end);
+        if (role_comma == std::string_view::npos || role_comma >= role.begin)
+            return fail();
+        edits.push_back(RawEdit{role_comma, role.end, {}});
+    }
     return finish(output, apply_edits(source, edits, output));
 }
 

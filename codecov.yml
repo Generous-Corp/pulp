@@ -297,6 +297,10 @@ flags:
     paths:
       - core/timeline_editor/
     carryforward: true
+  timeline_view:
+    paths:
+      - core/timeline_view/
+    carryforward: true
   view:
     paths:
       - core/view/
@@ -515,6 +519,9 @@ component_management:
     - component_id: timeline_editor
       name: timeline_editor
       paths: ["core/timeline_editor/**"]
+    - component_id: timeline_view
+      name: timeline_view
+      paths: ["core/timeline_view/**"]
     - component_id: view
       name: view
       paths:

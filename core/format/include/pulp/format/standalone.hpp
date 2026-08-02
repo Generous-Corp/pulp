@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -77,6 +78,16 @@ struct StandaloneConfig {
     // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
+
+    // A screenshot-only launch creates NO audio system and NO audio device: it
+    // paints a few frames, writes the PNG, and exits, so the render callback
+    // could only ever push silence at whoever is at the machine. Set this true
+    // (or export PULP_SCREENSHOT_KEEP_AUDIO=1) when the capture must show a UI
+    // driven by live audio — a meter or scope reading real signal. Requesting
+    // any live readout (audio_probe_json_path, audio_scope_json_path,
+    // audio_capture_wav_path, audio_capture_rolling_path) keeps audio on its
+    // own; this flag is for the case where only the pixels need it.
+    bool screenshot_keeps_audio = false;
 
     // When non-empty, run_with_editor() arms the same one-shot frame-delay
     // path as `screenshot_path` and, after the delay, writes the live output
@@ -194,6 +205,12 @@ public:
     Processor* processor() { return processor_.get(); }
     state::StateStore& state() { return store_; }
 
+    /// True when this launch skipped the audio backend entirely because it is a
+    /// screenshot-only capture (see StandaloneConfig::screenshot_keeps_audio).
+    /// No audio system, no device, and no render callback exist for such a run,
+    /// so a headless capture never opens an audio device on the host machine.
+    bool audio_skipped_for_capture() const { return audio_skipped_for_capture_; }
+
     TestSignalSource& test_signal() { return test_signal_; }
     view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
     view::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
@@ -262,6 +279,11 @@ private:
     // render path is allocation/lock-free. Mirrors the @internal hook precedent.
     friend struct StandaloneRenderTestAccess;
 
+    // Test-only accessor (defined in test/test_standalone_capture_audio.cpp)
+    // that injects `audio_system_factory_` so the device lifecycle can be
+    // asserted without opening real hardware.
+    friend struct StandaloneAudioDeviceTestAccess;
+
     ProcessorFactory factory_;
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -280,6 +302,12 @@ private:
 
     std::unique_ptr<audio::AudioSystem> audio_system_;
     std::unique_ptr<audio::AudioDevice> audio_device_;
+    // Set by start(): this launch is a screenshot-only capture, so it created
+    // no audio system and no device. Reported by audio_skipped_for_capture().
+    bool audio_skipped_for_capture_ = false;
+    // Test seam: when set, start() builds the audio system from this factory
+    // instead of audio::create_audio_system(). Never set in shipped code.
+    std::function<std::unique_ptr<audio::AudioSystem>()> audio_system_factory_;
     std::unique_ptr<midi::MidiSystem> midi_system_;
     std::unique_ptr<midi::MidiInput> midi_input_;
 

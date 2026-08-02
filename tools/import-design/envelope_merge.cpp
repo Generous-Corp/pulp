@@ -235,9 +235,14 @@ fs::path make_scratch_dir(const std::string& tag, const std::string& input_file)
     const auto now = fs::file_time_type::clock::now();
     constexpr auto kStaleAge = std::chrono::hours(24);
     std::error_code ec;
+    // Match on the name FIRST. The name comes with the directory entry, while
+    // `is_directory` / `last_write_time` may each cost a stat — and the temp
+    // root is shared with the whole machine, so the loop runs over however many
+    // entries happen to live there (a developer box reached ~148k). Testing the
+    // prefix first keeps the syscalls proportional to Pulp's own scratch dirs.
     for (const auto& entry : fs::directory_iterator(tmp_root, ec)) {
-        if (!entry.is_directory(ec)) continue;
         if (entry.path().filename().string().rfind(prefix, 0) != 0) continue;
+        if (!entry.is_directory(ec)) { ec.clear(); continue; }
         const auto mtime = fs::last_write_time(entry.path(), ec);
         if (ec) { ec.clear(); continue; }
         if (now - mtime < kStaleAge) continue;
