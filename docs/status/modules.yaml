@@ -233,7 +233,7 @@ modules:
       during recording so goldens can't silently compare across policies.
       `MotionScrubber` (in `inspect/`) loads a `.motion.jsonl` fixture and
       re-emits the prefix of events with `frame <= playhead` over the inspector
-      wire via `Motion.loadFixture` / `.scrubTo` / `.play` / `.pause` — passive
+      wire in-process fixture loading plus `Motion.scrubTo` / `.play` / `.pause` — passive
       timeline replay for design review and CI artifact triage.
       Visual-analyzer (`tools/motion/visual/analyze_sequence.py`) adds
       `--grid` (alphanumeric A1..H12 cell overlay), `--trim` (drop idle

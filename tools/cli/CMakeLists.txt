@@ -20,6 +20,17 @@ configure_file(
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+if(TARGET pulp::inspect-client)
+    set(_pulp_inspect_command_source cmd_inspect.cpp)
+else()
+    set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
+endif()
+if(TARGET pulp::inspect-authoring)
+    set(_pulp_tweaks_command_source cmd_tweaks.cpp)
+else()
+    set(_pulp_tweaks_command_source cmd_tweaks_unavailable.cpp)
+endif()
+
 set(_pulp_migration_index_src "${CMAKE_CURRENT_BINARY_DIR}/generated/migration_index.cpp")
 file(GLOB _pulp_migration_docs
      LIST_DIRECTORIES FALSE
@@ -102,8 +113,8 @@ add_executable(pulp-cli
     kit_commands.cpp
     kit_manifest_validation.cpp
     cmd_pr.cpp
-    cmd_inspect.cpp
-    cmd_tweaks.cpp
+    ${_pulp_inspect_command_source}
+    ${_pulp_tweaks_command_source}
     design_binding.cpp
     create_build_commands.cpp
     create_targets.cpp
@@ -140,7 +151,15 @@ add_executable(pulp-cli
 # all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::tool-timeline pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
+target_link_libraries(pulp-cli PRIVATE
+    pulp::runtime pulp::tool-audio pulp::tool-timeline pulp::audio-analysis
+    pulp::ship pulp::view pulp::render pulp::format pulp::host)
+if(TARGET pulp::inspect-client)
+    target_link_libraries(pulp-cli PRIVATE pulp::inspect-client)
+endif()
+if(TARGET pulp::inspect-authoring)
+    target_link_libraries(pulp-cli PRIVATE pulp::inspect-authoring)
+endif()
 if(WIN32)
     target_link_libraries(pulp-cli PRIVATE Advapi32 User32)
 endif()

@@ -9,10 +9,21 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
 namespace pulp_mcp {
+
+struct InspectorMcpToolDescriptor {
+    std::string_view name;
+    std::string_view method;
+};
+
+std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry();
+const InspectorMcpToolDescriptor* find_inspector_mcp_tool(std::string_view name);
+std::string_view inspector_mcp_tool_capability(const InspectorMcpToolDescriptor& tool);
+bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json);
 
 std::string handle_build(const std::string& params_json);
 std::string handle_test(const std::string& params_json);

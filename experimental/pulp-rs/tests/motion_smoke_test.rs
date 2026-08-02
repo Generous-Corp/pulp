@@ -47,7 +47,7 @@ fn motion_with_no_verb_prints_usage() {
     assert!(stdout.contains("stop"), "stdout: {stdout}");
     assert!(stdout.contains("snapshot"), "stdout: {stdout}");
     assert!(stdout.contains("list-traces"), "stdout: {stdout}");
-    assert!(stdout.contains("load-fixture"), "stdout: {stdout}");
+    assert!(!stdout.contains("load-fixture"), "stdout: {stdout}");
     assert!(stdout.contains("scrub"), "stdout: {stdout}");
     assert!(stdout.contains("play"), "stdout: {stdout}");
     assert!(stdout.contains("pause"), "stdout: {stdout}");
@@ -78,10 +78,21 @@ fn motion_unknown_verb_exits_two_with_supported_list() {
 #[test]
 fn motion_snapshot_with_no_inspector_exits_one_with_hint() {
     let bin = env!("CARGO_BIN_EXE_pulp");
+    let runtime_dir = tempfile::tempdir().expect("temporary inspector runtime");
+    let current_cpp_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../build/tools/cli");
+    let mut search_paths = vec![current_cpp_dir];
+    if let Some(existing) = std::env::var_os("PATH") {
+        search_paths.extend(std::env::split_paths(&existing));
+    }
+    let search_path =
+        std::env::join_paths(search_paths).expect("inspector test PATH");
 
     let output = Command::new(bin)
         .args(["motion", "snapshot", "--port", UNLIKELY_PORT])
         .env_remove("PULP_INSPECTOR_PORT")
+        .env("PULP_INSPECTOR_RUNTIME_DIR", runtime_dir.path())
+        .env("PATH", search_path)
         .output()
         .expect("failed to run pulp binary");
 
@@ -92,17 +103,14 @@ fn motion_snapshot_with_no_inspector_exits_one_with_hint() {
         String::from_utf8_lossy(&output.stderr),
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // The clear "start the host" hint should be visible.
+    // The authenticated client reports the exact discovery failure; it does
+    // not probe a guessed port or advertise an unimplemented launcher.
     assert!(
-        stderr.contains("no inspector listening"),
+        stderr.contains("No live inspector sessions were discovered"),
         "stderr: {stderr}"
     );
     assert!(
-        stderr.contains("PULP_MOTION_SERVER=1"),
-        "stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains(UNLIKELY_PORT),
+        !stderr.contains("PULP_MOTION_SERVER=1"),
         "stderr: {stderr}"
     );
 }
@@ -150,17 +158,21 @@ fn motion_cost_requires_action_arg() {
 }
 
 #[test]
-fn motion_load_fixture_requires_path() {
+fn motion_load_fixture_is_explicitly_unavailable() {
     let bin = env!("CARGO_BIN_EXE_pulp");
 
     let output = Command::new(bin)
-        .args(["motion", "load-fixture"])
+        .args(["motion", "load-fixture", "/tmp/a.motion.jsonl"])
         .output()
         .expect("failed to run pulp binary");
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("missing <PATH>"), "stderr: {stderr}");
+    assert!(stderr.contains("unavailable"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("server-side filesystem path"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -284,6 +296,12 @@ fn motion_stop_accepts_trace_id_arg() {
             "stop",
             "--trace-id",
             "42",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+            "--publication",
+            "publication-c",
             "--port",
             UNLIKELY_PORT,
         ])
