@@ -98,5 +98,38 @@ else:
     wrong(f"expected a clean no-op, got {r2.returncode}: {r2.stdout!r}")
 
 shutil.rmtree(tmp, ignore_errors=True)
+
+# A stranded module whose source does not compile must be REFUSED, not copied.
+#
+# Both modules this script had been advising be copied back — on every proof
+# run for days — do not compile: HOLDEN has a syntax error, MONOVOICE calls
+# pulp::signal::VaOscillator, which does not exist. They are failed generations
+# left in the installed pack because generating them is what put them there.
+# Copying one in registers it in plugin.json, and a module the pack registers
+# but cannot build fails the WHOLE Rack plugin at load — not just that module.
+broken_repo = pack(os.path.join(tmp, "brepo"), [("vco", "VCO", True)])
+broken_inst = pack(os.path.join(tmp, "binst"),
+                   [("vco", "VCO", True), ("bad", "BAD", True)])
+open(os.path.join(broken_inst, "src", "BAD.cpp"), "w").write(
+    "this is not c++ at all ;;;\n")
+
+r3 = run(broken_repo, broken_inst, "--apply")
+if "WILL NOT COMPILE" in r3.stdout:
+    ok("a module that does not compile is refused, with the reason")
+else:
+    wrong(f"a non-compiling module was not refused: {r3.stdout!r}")
+
+# The assertion that carries the weight: refusing must mean NOT COPYING.
+# A refusal that still copies is the bug with an apology attached.
+if not os.path.exists(os.path.join(broken_repo, "src", "BAD.cpp")):
+    ok("and it really was not copied into the checkout")
+else:
+    wrong("BAD.cpp was copied in despite the refusal")
+
+if r3.returncode != 0:
+    ok("and the run reports failure rather than success")
+else:
+    wrong("copying nothing safe still exited 0")
+
 print("\nall good" if bad == 0 else "\nFAILED")
 sys.exit(1 if bad else 0)
