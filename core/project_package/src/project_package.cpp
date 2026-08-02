@@ -397,12 +397,12 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
         return runtime::Result<BlobReference, PackageError>(runtime::Ok(reference));
     }
     const auto temporary = stage_path(destination.parent_path());
-    if (!detail::write_exclusive_and_fence(temporary, bytes,
-                                           detail::PackageFaultPoint::StagedFileWritten,
-                                           detail::PackageFaultPoint::StagedFileFenced))
+    auto staged_file = detail::PinnedFile::write_exclusive_and_fence(
+        temporary, bytes, detail::PackageFaultPoint::StagedFileWritten,
+        detail::PackageFaultPoint::StagedFileFenced);
+    if (!staged_file)
         return failure<BlobReference>(PackageErrorCode::IoError, temporary);
     auto destination_parent = impl_->root_anchor.open_directory(path_from_utf8(store_name(store)));
-    auto staged_file = detail::PinnedFile::open(temporary, true, true, true);
     if (!destination_parent || !staged_file || !staged_file->still_named_by(temporary)) {
         fs::remove(temporary, error);
         return failure<BlobReference>(PackageErrorCode::IoError, temporary);
@@ -479,11 +479,11 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
         reinterpret_cast<const std::uint8_t*>(serialized->json.data()), serialized->json.size());
     const auto destination = impl_->root / kProjectFile;
     const auto temporary = stage_path(impl_->root);
-    if (!detail::write_exclusive_and_fence(temporary, bytes,
-                                           detail::PackageFaultPoint::GenerationWritten,
-                                           detail::PackageFaultPoint::GenerationFenced))
+    auto staged_file = detail::PinnedFile::write_exclusive_and_fence(
+        temporary, bytes, detail::PackageFaultPoint::GenerationWritten,
+        detail::PackageFaultPoint::GenerationFenced);
+    if (!staged_file)
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, temporary);
-    auto staged_file = detail::PinnedFile::open(temporary, true, true, true);
     if (!staged_file || !staged_file->still_named_by(temporary)) {
         std::error_code ignored;
         fs::remove(temporary, ignored);

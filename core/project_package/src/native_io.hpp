@@ -84,6 +84,10 @@ class PinnedFile {
     static std::optional<PinnedFile> open(const AnchoredDirectory& parent,
                                           const std::filesystem::path& relative, bool fence_capable,
                                           bool allow_rename = false) noexcept;
+    static std::optional<PinnedFile>
+    write_exclusive_and_fence(const std::filesystem::path& path,
+                              std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,
+                              PackageFaultPoint fenced_point) noexcept;
     /// Creates or opens a single-linked regular file beneath `parent` without following reparses.
     /// The returned handle is exclusive and remains the lock for its lifetime.
     static std::optional<PinnedFile> acquire_lock(const AnchoredDirectory& parent,
@@ -104,9 +108,6 @@ class PinnedFile {
     std::intptr_t native_ = -1;
 };
 
-bool write_exclusive_and_fence(const std::filesystem::path& path,
-                               std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,
-                               PackageFaultPoint fenced_point) noexcept;
 bool fence_file(const std::filesystem::path& path) noexcept;
 bool fence_directory(const std::filesystem::path& directory) noexcept;
 NoReplaceOutcome publish_no_replace(const std::filesystem::path& source,

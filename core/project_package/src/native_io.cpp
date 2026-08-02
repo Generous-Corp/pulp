@@ -1117,47 +1117,54 @@ void AnchoredDirectory::close() noexcept {
     native_ = -1;
 }
 
-bool write_exclusive_and_fence(const std::filesystem::path& path,
-                               std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,
-                               PackageFaultPoint fenced_point) noexcept {
+std::optional<PinnedFile> PinnedFile::write_exclusive_and_fence(
+    const std::filesystem::path& path, std::span<const std::uint8_t> bytes,
+    PackageFaultPoint written_point, PackageFaultPoint fenced_point) noexcept {
 #if defined(_WIN32)
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
         return false;
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
-    const auto handle =
-        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &attributes,
-                      CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    const auto handle = ::CreateFileW(
+        path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        &attributes, CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     LocalFree(descriptor);
     if (handle == INVALID_HANDLE_VALUE)
-        return false;
+        return std::nullopt;
     const bool written = write_all(handle, bytes);
     if (written)
         invoke_fault_hook(written_point);
     const bool fenced = written && ::FlushFileBuffers(handle) != 0;
     if (fenced)
         invoke_fault_hook(fenced_point);
-    const bool closed = ::CloseHandle(handle) != 0;
-    return fenced && closed;
+    if (!fenced) {
+        ::CloseHandle(handle);
+        return std::nullopt;
+    }
+    return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
 #else
     const auto descriptor = ::open(path.c_str(),
-                                   O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC
+                                   O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC
 #ifdef O_NOFOLLOW
                                        | O_NOFOLLOW
 #endif
                                    ,
                                    0600);
     if (descriptor < 0)
-        return false;
+        return std::nullopt;
     const bool written = write_all(descriptor, bytes);
     if (written)
         invoke_fault_hook(written_point);
     const bool fenced = written && fence_descriptor(descriptor);
     if (fenced)
         invoke_fault_hook(fenced_point);
-    const bool closed = ::close(descriptor) == 0;
-    return fenced && closed;
+    if (!fenced) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    return PinnedFile(descriptor);
 #endif
 }
 
