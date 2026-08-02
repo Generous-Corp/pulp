@@ -20,6 +20,14 @@
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_styles.hpp"
 
+#include <pulp/canvas/text_shaper.hpp>
+
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <map>
+#include <iostream>
 #include <algorithm>
 #include <functional>
 #include <filesystem>
@@ -59,6 +67,36 @@ int layout_of_text(const CapturedStyleIndex& index, const std::string& prefix,
     FAIL("no painted node number " << occurrence << " whose text starts with "
                                    << prefix);
     return -1;
+}
+
+
+/// Horizontal scale a node inherits from `transform` on its ancestors.
+///
+/// Chrome reports a text box's bounds in the TRANSFORMED space while
+/// `font-size` stays the untransformed computed value, so an advance shaped at
+/// the computed size is only comparable to the box after the same scale is
+/// applied. A panel that fits itself to a viewport with `transform: scale(.9)`
+/// otherwise reads as every run inside it being 11% too wide.
+double inherited_scale_x(const CapturedStyleIndex& index,
+                         const std::map<int, int>& layout_of_node,
+                         int node_index) {
+    double scale = 1.0;
+    for (int cursor = index.parent_of(node_index); cursor >= 0;
+         cursor = index.parent_of(cursor)) {
+        const auto layout = layout_of_node.find(cursor);
+        if (layout == layout_of_node.end()) continue;
+        const auto styles = index.styles_for_layout(layout->second);
+        const auto it = styles.find("transform");
+        if (it == styles.end() || it->second.empty() || it->second == "none")
+            continue;
+        const auto open = it->second.find('(');
+        if (open == std::string::npos) continue;
+        // matrix(a, b, ...) and matrix3d(a, b, ...) both start with the first
+        // column of the linear part, so `a` is the x scale for any transform
+        // without rotation or skew, which is what a fit-to-viewport wrapper is.
+        scale *= std::atof(it->second.c_str() + open + 1);
+    }
+    return scale;
 }
 
 /// Lower the wrap fixture through the same entry point `pulp import-design`
@@ -420,4 +458,176 @@ TEST_CASE("a single-line run is cached too", "[browser-capture][text-metrics]") 
     CHECK(unwrapped->text_line_boxes[0].length == 108);
     REQUIRE(unwrapped->text_layout_basis.has_value());
     CHECK(unwrapped->text_layout_basis->resolved_face == "Inter-Regular");
+}
+
+// ── Advance census over a real captured design ─────────────────────────────
+
+// Chrome's per-line box width is the only oracle for "is our text the right
+// width", and the question it answers is a distribution, not an example: a
+// systematic overhang across every run is a different defect from a handful of
+// outliers, and they need different fixes. This walks a capture directory,
+// shapes each line's exact substring through the same TextShaper the layout
+// path measures with, and prints the error against Chrome's box.
+//
+// The per-gap convention is reported alongside the shipping per-character one,
+// because one trailing step is the difference between a run that fits and a run
+// that overruns its box.
+//
+// Hidden by default: it needs a capture that is not committed, and selecting
+// it without one FAILS rather than passing quietly.
+//   PULP_TEXT_ADVANCE_CENSUS_CAPTURE=<capture-dir> \
+//     pulp-test-browser-capture-import "[.advance-census]" -s
+TEST_CASE("advance census against Chrome's line boxes", "[.advance-census]") {
+    const char* directory = std::getenv("PULP_TEXT_ADVANCE_CENSUS_CAPTURE");
+    REQUIRE(directory != nullptr);
+    const auto snapshot = fs::path(directory) / "dom-snapshot.json";
+    REQUIRE(fs::is_regular_file(snapshot));
+    auto loaded = CapturedStyleIndex::load(snapshot);
+    REQUIRE(loaded.has_value());
+    const auto& index = *loaded;
+
+    struct Sample {
+        std::string text, family, face;
+        double size = 0, spacing = 0;
+        int weight = 400, glyphs = 0;
+        double chrome = 0, ours = 0, ours_per_gap = 0;
+    };
+    std::vector<Sample> samples;
+
+    // A transformed wrapper is itself laid out, so the painted set carries the
+    // layout index every ancestor scale is read from.
+    std::map<int, int> layout_of_node;
+    for (const auto& node : index.painted_nodes())
+        layout_of_node.emplace(node.node_index, node.layout_index);
+
+    pulp::canvas::TextShaper shaper;
+    for (const auto& node : index.painted_nodes()) {
+        if (node.node_type != 3 || node.text.empty()) continue;
+        const auto boxes = index.text_boxes_for_layout(node.layout_index);
+        if (boxes.empty()) continue;
+        const auto styles = index.styles_for_layout(node.layout_index);
+        const auto value = [&](const char* key) -> std::string {
+            auto it = styles.find(key);
+            return it == styles.end() ? std::string() : it->second;
+        };
+        const double size = std::atof(value("font-size").c_str());
+        if (size <= 0) continue;
+        const std::string family = value("font-family");
+        if (family.empty()) continue;
+        int weight = std::atoi(value("font-weight").c_str());
+        if (weight <= 0) weight = 400;
+        const std::string spacing_text = value("letter-spacing");
+        const double spacing =
+            spacing_text == "normal" ? 0.0 : std::atof(spacing_text.c_str());
+        const double scale =
+            inherited_scale_x(index, layout_of_node, node.node_index);
+        if (scale <= 0.0) continue;
+
+        for (const auto& box : boxes) {
+            if (box.length <= 0 || box.bounds.width <= 0) continue;
+            if (box.start < 0 ||
+                box.start + box.length > static_cast<int>(node.text.size()))
+                continue;
+            // Chrome reports `start`/`length` in UTF-16 code units, so on a
+            // run with non-ASCII text a byte-indexed substring lands mid
+            // sequence. Snap both ends out to codepoint boundaries; a split
+            // sequence is not text and shaping it proves nothing.
+            const auto snap = [&](size_t at) {
+                while (at > 0 && at < node.text.size() &&
+                       (static_cast<unsigned char>(node.text[at]) & 0xC0) == 0x80)
+                    --at;
+                return at;
+            };
+            const size_t begin = snap(static_cast<size_t>(box.start));
+            const size_t end = snap(static_cast<size_t>(box.start + box.length));
+            if (end <= begin) continue;
+            std::string line = node.text.substr(begin, end - begin);
+
+            // Chrome's box excludes a line's trailing collapsed whitespace;
+            // measuring it would report an overhang that is not there.
+            while (!line.empty() &&
+                   std::isspace(static_cast<unsigned char>(line.back())))
+                line.pop_back();
+            if (line.empty()) continue;
+
+            int glyphs = 0;
+            for (unsigned char c : line)
+                if ((c & 0xC0) != 0x80) ++glyphs;
+
+            const double base = shaper
+                                    .prepare(line, family,
+                                             static_cast<float>(size), weight)
+                                    .total_width();
+            samples.push_back(Sample{
+                line, family, index.resolved_face_for_layout(node.layout_index),
+                size, spacing, weight, glyphs, box.bounds.width / scale,
+                base + spacing * glyphs, base + spacing * (glyphs - 1)});
+        }
+    }
+    REQUIRE_FALSE(samples.empty());
+
+    const auto report = [](const char* label, std::vector<double> errors) {
+        if (errors.empty()) return;
+        std::sort(errors.begin(), errors.end());
+        const auto at = [&](double q) {
+            return errors[std::min(errors.size() - 1,
+                                   static_cast<size_t>(q * errors.size()))];
+        };
+        WARN(label << "  n=" << errors.size()
+                   << "  p05=" << at(0.05) << "%  median=" << at(0.50)
+                   << "%  p95=" << at(0.95) << "%  max=" << errors.back() << "%");
+    };
+    const auto errors_of = [&](bool per_gap,
+                               const std::function<bool(const Sample&)>& keep) {
+        std::vector<double> out;
+        for (const auto& s : samples) {
+            if (!keep(s)) continue;
+            const double ours = per_gap ? s.ours_per_gap : s.ours;
+            out.push_back(100.0 * (ours / s.chrome - 1.0));
+        }
+        return out;
+    };
+    const auto all = [](const Sample&) { return true; };
+    const auto spaced = [](const Sample& s) { return s.spacing != 0.0; };
+    const auto plain = [](const Sample& s) { return s.spacing == 0.0; };
+
+    WARN("lines measured: " << samples.size());
+    report("all                      ", errors_of(false, all));
+    report("no letter-spacing        ", errors_of(false, plain));
+    report("letter-spaced            ", errors_of(false, spaced));
+    report("letter-spaced, per-gap   ", errors_of(true, spaced));
+
+    // Per-line detail as TSV, because Catch2 wraps a WARN to the console width
+    // and a wrapped row cannot be parsed. Worst first, so an outlier can be
+    // named rather than inferred from a percentile.
+    std::sort(samples.begin(), samples.end(), [](const auto& a, const auto& b) {
+        return std::abs(a.ours / a.chrome - 1.0) >
+               std::abs(b.ours / b.chrome - 1.0);
+    });
+    if (const char* out = std::getenv("PULP_TEXT_ADVANCE_CENSUS_OUT")) {
+        std::ofstream tsv(out, std::ios::binary);
+        REQUIRE(tsv.good());
+        tsv << "err_pct\terr_pct_per_gap\tchrome\tours\tweight\tsize"
+               "\tspacing\tglyphs\tface\tfamily\ttext\n";
+        for (const auto& s2 : samples) {
+            std::string flat = s2.text;
+            for (auto& c : flat)
+                if (c == '\t' || c == '\n') c = ' ';
+            tsv << 100.0 * (s2.ours / s2.chrome - 1.0) << '\t'
+                << 100.0 * (s2.ours_per_gap / s2.chrome - 1.0) << '\t'
+                << s2.chrome << '\t' << s2.ours << '\t' << s2.weight << '\t'
+                << s2.size << '\t' << s2.spacing << '\t' << s2.glyphs << '\t'
+                << (s2.face.empty() ? "<none>" : s2.face) << '\t' << s2.family
+                << '\t' << flat << '\n';
+        }
+    }
+
+    // A capture with no platform-fonts sidecar cannot say which face Blink
+    // shaped with, and an advance compared against an unknown face measures
+    // nothing about our shaping. Say so rather than reporting the number.
+    size_t with_face = 0;
+    for (const auto& s2 : samples)
+        if (!s2.face.empty()) ++with_face;
+    WARN("lines with a resolved face: " << with_face << " of "
+                                        << samples.size());
 }

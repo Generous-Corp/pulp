@@ -1147,4 +1147,33 @@ TEST_CASE("A bundled family declines a weight it cannot serve",
           != nullptr);
 }
 
+// The paint side of the letter-spacing contract. SkParagraph adds the spacing
+// after every character, so a caller that reserves one step per GAP reserves
+// one step less than gets drawn — the text then overruns the box that was
+// sized for it. Pinned here because `Label::intrinsic_width` has to agree with
+// this number, and nothing else in the tree measures what the painter does.
+TEST_CASE("Painted text adds letter-spacing after every glyph",
+          "[canvas][skia][fonts][text]") {
+    SkBitmap bm;
+    REQUIRE(bm.tryAllocPixels(
+        SkImageInfo::MakeN32Premul(16, 16, SkColorSpace::MakeSRGB())));
+    SkCanvas sk(bm);
+    pulp::canvas::SkiaCanvas canvas(&sk);
+
+    const float spacing = 10.0f;
+    for (const auto& [text, glyphs] :
+         std::vector<std::pair<std::string, int>>{{"A", 1}, {"AB", 2},
+                                                  {"AAAA", 4}}) {
+        INFO("text: " << text);
+        canvas.set_font_full("Inter", 20.0f, 400, 0, 0.0f);
+        const float tight = canvas.measure_text(text);
+        canvas.set_font_full("Inter", 20.0f, 400, 0, spacing);
+        const float spaced = canvas.measure_text(text);
+        // One step per glyph, not per gap. The tolerance covers the paragraph
+        // path's sub-pixel line width; it is far tighter than one whole step.
+        CHECK_THAT(spaced - tight,
+                   Catch::Matchers::WithinAbs(spacing * glyphs, 2.0));
+    }
+}
+
 #endif  // PULP_HAS_SKIA
