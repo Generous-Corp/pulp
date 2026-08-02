@@ -738,6 +738,7 @@ void ForgeModularShell::show_rack(std::vector<RackModule> modules,
                   " on screen in Rack and press SCAN on the MAP module.";
     }
     if (explanation_) {
+        explanation_->set_request(last_request_);
         explanation_->set_connections(connections, modules);
         explanation_->set_depth(static_cast<ExplainDepth>(depth_));
     }
@@ -918,6 +919,11 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
                             c->mode() == forge::ForgeChrome::Mode::Build
                                 ? "Build" : "NOT Build");
     c->narrate(prompt.substr(0, 200));
+    // Kept so the explanation can show what was asked for, above what was
+    // built. The chat rail has it too, but that is a different panel and is
+    // usually scrolled away by the time the rack is on screen.
+    last_request_ = prompt;
+    if (explanation_) explanation_->set_request(last_request_);
     if (input) input->set_text("");
     engine_->submit(prompt, artifact_ == Artifact::patch);
     in_flight_ = true;

@@ -271,6 +271,12 @@ void PatchExplanation::apply_pending_rewrap() {
     if (std::abs(bounds().width - wrapped_at_) >= 1.0f) rebuild();
 }
 
+void PatchExplanation::set_request(std::string request) {
+    if (request == request_) return;
+    request_ = std::move(request);
+    rebuild();
+}
+
 void PatchExplanation::rebuild() {
     while (child_count() > 0) remove_child(child_at(0));
     rows_.clear();
@@ -286,6 +292,35 @@ void PatchExplanation::rebuild() {
 
     // Derived from the pane the explanation is actually in, not a constant.
     const auto columns = columns_for(bounds().width);
+
+    // The request first, in its own quiet box.
+    //
+    // Everything below this is what the patch DOES. What it was asked to do
+    // appeared only in the chat rail, which is a different panel and often
+    // scrolled away by the time the rack is drawn — so the explanation opened
+    // straight into "AUDIO / VCO PLS -> VCF IN" with nothing to compare it
+    // against. Repeating it at the end is not the same: the question a reader
+    // has is "is this what I asked for", and they have it before they read,
+    // not after.
+    if (!request_.empty()) {
+        auto box = std::make_unique<pulp::view::View>();
+        box->flex().direction = FlexDirection::column;
+        box->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        box->flex().padding_left = 10;
+        box->flex().padding_right = 10;
+        box->flex().padding_top = 8;
+        box->flex().padding_bottom = 8;
+        box->flex().margin_bottom = 10;
+        box->set_background_color(forge::design::color::surface_raised);
+
+        for (const auto& line : wrap(request_, columns)) {
+            auto l = std::make_unique<pulp::view::Label>(line);
+            l->set_text_color(forge::design::color::text_muted);
+            l->set_font_size(12);
+            box->add_child(std::move(l));
+        }
+        add_child(std::move(box));
+    }
     const auto wiring_columns = columns_for(bounds().width, kMonoCharWidth);
     const auto why_columns = columns_for(bounds().width, kCharWidth, kWhyIndent);
     wrapped_at_ = bounds().width;

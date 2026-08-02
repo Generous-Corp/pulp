@@ -32,6 +32,10 @@ struct MappedWidget {
     /// Empty for a scan taken before CARTOG classified controls, which is what
     /// every existing map is. Absent means "unknown", never "knob".
     std::string kind;
+    /// For a display, the widget class Rack draws it with — "QuantizerDisplay",
+    /// "Audio2Display". Used only to tell a KEY PLATE from a plain screen; a
+    /// preview should not try to reproduce a vendor's artwork from a name.
+    std::string type;
 };
 
 /// One module's measured layout.
@@ -43,6 +47,13 @@ struct MappedModule {
     std::vector<MappedWidget> params;
     std::vector<MappedWidget> inputs;
     std::vector<MappedWidget> outputs;
+    /// Screens, readouts and touch plates. Measured since scan version 3 and
+    /// read by nobody until the preview began drawing them: a Quantizer came
+    /// out as a bare strip where Rack shows twelve key plates.
+    std::vector<MappedWidget> displays;
+    /// Lamps. A level meter is a column of these, which is why an audio
+    /// interface drawn without them looks switched off.
+    std::vector<MappedWidget> lights;
 };
 
 /// Every module CARTOG has measured, keyed "plugin/model".

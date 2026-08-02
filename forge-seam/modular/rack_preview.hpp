@@ -141,6 +141,10 @@ private:
     /// The knobs of one of OUR modules, cached per model.
     const std::vector<KnobSpec>& module_knobs(const std::string& model) const;
     /// Paint them over the panel, which is where Rack composites its own.
+    /// Screens and lamps from the scan: touch plates, level meters, readouts.
+    void draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                      const RackModule& mod, float scale) const;
+
     void draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
                     const RackModule& mod, float scale) const;
     mutable std::map<std::string, std::vector<KnobSpec>> knob_cache_;

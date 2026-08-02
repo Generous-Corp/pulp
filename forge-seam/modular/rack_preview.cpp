@@ -336,6 +336,84 @@ RackPreview::module_knobs(const std::string& model) const {
     return knob_cache_.emplace(model, std::move(out)).first->second;
 }
 
+/// Screens and lamps: measured by the scan, drawn by nobody until now.
+///
+/// CARTOG has always recorded a module's `displays` (a rectangle plus the
+/// widget's class name) and `lights` (a rectangle), because a panel is more
+/// than its knobs and jacks. The preview drew neither, so a Quantizer came out
+/// as a bare strip where Rack shows a touch plate of twelve key plates, and the
+/// audio interface lost its meter ladder entirely — the two things a person
+/// looks at to know the patch is alive.
+///
+/// Drawn as what they ARE, generically: a recessed screen and a lamp. This does
+/// not reproduce a vendor's artwork and should not try — the point is that the
+/// panel reads as the same instrument, with something where the something is.
+/// The class name is used only to tell a KEY PLATE from a plain screen, because
+/// a keyboard drawn as a blank rectangle loses the one thing that makes it
+/// recognisable.
+void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                               const RackModule& mod, float scale) const {
+    const auto* m = PortMap::shared().find(mod.brand, mod.name);
+    if (!m) return;
+
+    for (const auto& d : m->displays) {
+        if (!(d.w > 0.0f) || !(d.h > 0.0f)) continue;
+        const float w = d.w * scale, h = d.h * scale;
+        if (w < 3.0f || h < 3.0f) continue;         // below this it is a speck
+        const float x = panel.x + d.x * scale - w / 2.0f;
+        const float y = panel.y + d.y * scale - h / 2.0f;
+        // Recessed, like a window cut into the panel.
+        canvas.set_fill_color(from_rgb(0x0E1218, 1.0f));
+        canvas.fill_rounded_rect(x, y, w, h, std::min(3.0f * scale, h * 0.2f));
+        canvas.set_stroke_color(from_rgb(0x2A323D, 1.0f));
+        canvas.set_line_width(std::max(0.5f, 0.8f * scale));
+        canvas.stroke_rounded_rect(x, y, w, h, std::min(3.0f * scale, h * 0.2f));
+
+        // A touch plate is a stack of keys. Rack's quantizer names its widget
+        // QuantizerDisplay and puts twelve QuantizerButtons on it; anything
+        // whose name says keyboard or quantizer gets the same treatment, so
+        // the plate reads as a plate rather than as a blank window.
+        std::string t = d.type;
+        for (auto& ch : t) ch = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(ch)));
+        const bool is_plate = t.find("quantizer") != std::string::npos ||
+                              t.find("keyboard") != std::string::npos ||
+                              t.find("piano") != std::string::npos;
+        if (is_plate && h > 12.0f * scale) {
+            const int keys = 12;
+            const float kh = h / static_cast<float>(keys);
+            for (int i = 0; i < keys; ++i) {
+                // The black keys of an octave, so the plate is legible as one.
+                static const bool sharp[12] = {false, true, false, true, false,
+                                               false, true, false, true, false,
+                                               true, false};
+                const float ky = y + static_cast<float>(i) * kh;
+                canvas.set_fill_color(sharp[11 - i] ? from_rgb(0x161B22, 1.0f)
+                                                    : from_rgb(0xB8C0CC, 1.0f));
+                canvas.fill_rect(x + w * 0.08f, ky + kh * 0.12f,
+                                 w * (sharp[11 - i] ? 0.52f : 0.84f), kh * 0.76f);
+            }
+        }
+    }
+
+    // Lamps. Level meters are a column of these, which is why an audio
+    // interface with none looks switched off.
+    for (const auto& l : m->lights) {
+        if (!(l.w > 0.0f)) continue;
+        const float r = l.w * scale / 2.0f;
+        if (!(r > 0.4f)) continue;
+        const float cx = panel.x + l.x * scale;
+        const float cy = panel.y + l.y * scale;
+        canvas.set_fill_color(from_rgb(0x11161C, 1.0f));
+        canvas.fill_circle(cx, cy, r);
+        // Unlit: the preview shows a patch at rest and has no signal to read,
+        // and a lamp drawn lit would be a claim about level that is not true.
+        canvas.set_stroke_color(from_rgb(0x39424E, 1.0f));
+        canvas.set_line_width(std::max(0.4f, r * 0.25f));
+        canvas.stroke_circle(cx, cy, r * 0.7f);
+    }
+}
+
 void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
                              const RackModule& mod, float scale) const {
     static const std::string kOurs = "ForgeModular";
@@ -541,6 +619,7 @@ void RackPreview::paint(Canvas& canvas) {
             // Positions and sizes come from the module's own manifest, the
             // same file the panel was emitted from, so a knob lands exactly
             // where Rack will draw one rather than where we guess.
+            draw_screens(canvas, panel, *mod_for_panel, L.scale);
             draw_knobs(canvas, panel, *mod_for_panel, L.scale);
             continue;
         }

@@ -383,6 +383,8 @@ private:
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;
     std::string open_patch_;
+    /// The prompt this patch was built from, shown above the explanation.
+    std::string last_request_;
     /// A build this shell started and has not yet seen end.
     ///
     /// Not `busy()`, which is `watching_ && outcome == running` — and a log

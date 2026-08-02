@@ -1582,6 +1582,15 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 why = json.loads(wj.group(1))
             except json.JSONDecodeError:
                 pass                       # prose is optional; the patch is not
+        # Lay the panels out BEFORE judging them.
+        #
+        # Positions are arithmetic, not something the model should be graded
+        # on: it does not know how wide anything is. reflow() ran only after
+        # generate() returned, while lint() runs on every attempt inside it —
+        # so the overlap check rejected attempt after attempt for the one
+        # fault the very next line could fix, burning model calls on
+        # "LFO overlaps SEQ by 2HP". Fix it, then judge what is left.
+        patch = reflow(patch, inv)
         errs = lint(patch, inv)
         if errs:
             # The LINT's reasons, not `report` -- that is the gate's, and the
@@ -1837,7 +1846,9 @@ def main(argv):
                 n += 1
         # Colour by structure before writing, so the file Rack opens and the
         # file the app reads agree about what every cable is.
-        # Panels first, so the file Rack opens has no overlaps in it.
+        # Already laid out inside generate(), before the lint that judges it.
+        # Repeated here because `build` can also be reached with a patch that
+        # did not come through generate(), and reflow is idempotent.
         patch = reflow(patch, inv)
         patch = color_cables_by_role(patch, inv)
         json.dump(patch, open(out, "w"), indent=1)

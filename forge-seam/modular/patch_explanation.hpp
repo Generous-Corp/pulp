@@ -48,6 +48,15 @@ public:
     /// means no role is.
     std::function<void(std::optional<SignalRole>)> on_role_hover;
 
+    /// What was ASKED FOR, shown above the explanation.
+    ///
+    /// A patch explains what it does; on its own it never says what it was
+    /// meant to do. Reading a list of cables without the request beside it
+    /// leaves the one question a reader actually has — "is this what I asked
+    /// for?" — unanswerable from the screen. Forge Instrument prints the
+    /// prompt the same way for the same reason.
+    void set_request(std::string request);
+
     void set_connections(std::vector<Connection> connections,
                          std::vector<RackModule> modules);
     void set_depth(ExplainDepth depth);
@@ -136,6 +145,7 @@ private:
     std::vector<Connection> connections_;
     std::vector<RackModule> modules_;
     std::vector<pulp::view::View*> rows_;
+    std::string request_;
     std::vector<Heading> headings_;
     ExplainDepth depth_ = ExplainDepth::standard;
     float wrapped_at_ = -1.0f;

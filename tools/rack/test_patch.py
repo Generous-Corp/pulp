@@ -576,6 +576,29 @@ def check_buildable_from_parts() -> tuple:
         bad += 1
     else:
         print("  ok     without a quantizer it is still a gap")
+
+    # ORDER, not just presence: reflow must run before the lint that judges.
+    #
+    # Both existed and the sequence was wrong — reflow after generate()
+    # returned, lint inside it on every attempt — so a live run rejected
+    # attempt after attempt for "LFO overlaps SEQ by 2HP", the one fault the
+    # next line would have fixed. Model calls spent on arithmetic.
+    ran += 1
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "patch.py")).read()
+    body = src[src.index("def generate("):]
+    body = body[:body.index("\ndef ")] if "\ndef " in body[10:] else body
+    first_reflow = body.find("reflow(patch")
+    first_lint = body.find("lint(patch")
+    if first_reflow == -1 or first_lint == -1:
+        print("  WRONG  generate() no longer both reflows and lints")
+        bad += 1
+    elif first_reflow > first_lint:
+        print("  WRONG  generate() lints BEFORE it reflows — attempts will be "
+              "rejected for overlaps that reflow fixes")
+        bad += 1
+    else:
+        print("  ok     generate() lays panels out before it judges them")
     return bad, ran
 
 

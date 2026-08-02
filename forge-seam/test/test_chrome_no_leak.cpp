@@ -7078,3 +7078,55 @@ TEST_CASE("a refusal carries the options, not just the bad news",
 
     std::filesystem::remove_all(dir, ec);
 }
+
+TEST_CASE("the explanation opens with what was asked for", "[explain][request]") {
+    // A patch explains what it DOES; on its own it never says what it was
+    // meant to do. The prompt was echoed into the chat rail — a different
+    // panel, usually scrolled away by the time the rack is drawn — so the
+    // explanation opened straight into "AUDIO / VCO PLS -> VCF IN" with
+    // nothing to compare it against, and the one question a reader has ("is
+    // this what I asked for?") could not be answered from the screen.
+    forge_modular::PatchExplanation ex;
+    ex.set_bounds({0, 0, 420, 600});
+
+    std::vector<forge_modular::RackModule> mods;
+    forge_modular::RackModule a;
+    a.id = "1"; a.brand = "ForgeModular"; a.name = "VCO"; a.hp = 8;
+    forge_modular::RackModule b;
+    b.id = "2"; b.brand = "ForgeModular"; b.name = "VCA"; b.hp = 3;
+    mods.push_back(a);
+    mods.push_back(b);
+    std::vector<forge_modular::Connection> cables;
+    forge_modular::Connection c;
+    c.from_module = "1"; c.from_port = "OUT";
+    c.to_module = "2"; c.to_port = "IN";
+    c.role = forge_modular::SignalRole::audio;
+    cables.push_back(c);
+
+    ex.set_connections(cables, mods);
+    const int without = ex.child_count();
+
+    ex.set_request("a melodic arpeggiator quantized to the key of g");
+    const int with = ex.child_count();
+    INFO("children without the request: " << without << ", with: " << with);
+    CHECK(with > without);            // it is actually added
+
+    // And it is FIRST — after the cables it would be a footnote, and the
+    // explanation already repeats the request at the end.
+    auto* first = ex.child_at(0);
+    REQUIRE(first != nullptr);
+    bool found = false;
+    std::function<void(pulp::view::View*)> walk = [&](pulp::view::View* v) {
+        if (!v) return;
+        if (auto* l = dynamic_cast<pulp::view::Label*>(v))
+            if (l->text().find("arpeggiator") != std::string::npos) found = true;
+        for (int i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+    };
+    walk(first);
+    CHECK(found);
+
+    // Clearing it takes the box away again, or a reopened patch would carry
+    // the previous project's request over it.
+    ex.set_request("");
+    CHECK(ex.child_count() == without);
+}

@@ -26,6 +26,7 @@ std::vector<MappedWidget> read_group(const choc::value::ValueView& mod,
         // says "not measured" rather than "zero wide".
         one.w = static_cast<float>(w["w"].getWithDefault<double>(0.0));
         one.h = static_cast<float>(w["h"].getWithDefault<double>(0.0));
+        one.type = w["type"].getWithDefault<std::string>("");
         // Empty when the scan predates control classification, which every
         // existing map does. Absent must read as "unknown", not as "knob".
         one.kind = w["kind"].getWithDefault<std::string>("");
@@ -59,6 +60,8 @@ PortMap PortMap::parse(const std::string& json) {
                 one.height = static_cast<float>(m["size"][1].getWithDefault<double>(0.0));
             }
             one.params = read_group(m, "params");
+            one.displays = read_group(m, "displays");
+            one.lights = read_group(m, "lights");
             one.inputs = read_group(m, "inputs");
             one.outputs = read_group(m, "outputs");
             out.by_key_[plugin + "/" + model] = std::move(one);
