@@ -272,6 +272,14 @@ struct ClipFacts {
     double border_top = 0.0;
     double border_right = 0.0;
     double border_bottom = 0.0;
+
+    /// The element's own `border-radius`, per corner. A clipper's curve belongs
+    /// to what it clips: CSS confines overflow to the rounded padding box, so a
+    /// square-cornered child of a rounded card is cut to the card's curve.
+    double radius_tl = 0.0;
+    double radius_tr = 0.0;
+    double radius_br = 0.0;
+    double radius_bl = 0.0;
 };
 
 bool boxes_overlap(const CapturedBox& a, const CapturedBox& b) {
@@ -286,18 +294,72 @@ struct ClipRect {
     double top = -kUnbounded;
     double right = kUnbounded;
     double bottom = kUnbounded;
+    // The curve of the clipper that contributed each corner. CSS clips overflow
+    // to the ROUNDED padding box, so a rectangle alone cuts a rounded card's
+    // media area square into the corner and the card reads as unrounded.
+    double radius_tl = 0, radius_tr = 0, radius_br = 0, radius_bl = 0;
 
     bool empty() const { return right <= left || bottom <= top; }
+    bool rounded() const {
+        return radius_tl > 0 || radius_tr > 0 || radius_br > 0 || radius_bl > 0;
+    }
 };
 
 ClipRect intersect(const ClipRect& a, const ClipRect& b) {
-    return ClipRect{std::max(a.left, b.left), std::max(a.top, b.top),
-                    std::min(a.right, b.right), std::min(a.bottom, b.bottom)};
+    ClipRect r{std::max(a.left, b.left), std::max(a.top, b.top),
+               std::min(a.right, b.right), std::min(a.bottom, b.bottom)};
+    // A corner keeps a curve only while it is still the corner the rounded
+    // clipper contributed. Where a second, tighter clipper cuts the corner
+    // away, the surviving corner is that clipper's square one — rounding it
+    // anyway would carve a curve out of an edge nothing rounded. When both
+    // inputs still hold the corner, the larger radius wins: it removes more,
+    // and an intersection can only remove.
+    const auto corner = [](bool a_owns, double ra, bool b_owns, double rb) {
+        double out = 0;
+        if (a_owns) out = std::max(out, ra);
+        if (b_owns) out = std::max(out, rb);
+        return out;
+    };
+    const auto same = [](double x, double y) { return std::fabs(x - y) < 0.01; };
+    r.radius_tl = corner(same(a.left, r.left) && same(a.top, r.top), a.radius_tl,
+                         same(b.left, r.left) && same(b.top, r.top), b.radius_tl);
+    r.radius_tr = corner(same(a.right, r.right) && same(a.top, r.top), a.radius_tr,
+                         same(b.right, r.right) && same(b.top, r.top), b.radius_tr);
+    r.radius_br = corner(same(a.right, r.right) && same(a.bottom, r.bottom), a.radius_br,
+                         same(b.right, r.right) && same(b.bottom, r.bottom), b.radius_br);
+    r.radius_bl = corner(same(a.left, r.left) && same(a.bottom, r.bottom), a.radius_bl,
+                         same(b.left, r.left) && same(b.bottom, r.bottom), b.radius_bl);
+    return r;
 }
 
 ClipRect rect_of(const CapturedBox& box) {
     return ClipRect{box.left, box.top, box.left + box.width,
                     box.top + box.height};
+}
+
+/// Whether `box` reaches into any rounded corner of `clip`, and so is actually
+/// cut by the curve. A box that clears every corner square is unaffected by the
+/// rounding, which lets a node fully inside a rounded clip skip carrying one.
+bool intrudes_on_rounded_corner(const ClipRect& clip, const ClipRect& box) {
+    if (!clip.rounded()) return false;
+    // The corner square is the r x r box at the clip's corner; anything
+    // overlapping it may be cut by the arc inside it.
+    const auto overlaps = [&](double r, double x0, double y0, double x1, double y1) {
+        if (r <= 0) return false;
+        const double cx0 = std::min(x0, x1), cx1 = std::max(x0, x1);
+        const double cy0 = std::min(y0, y1), cy1 = std::max(y0, y1);
+        return box.left < cx1 && box.right > cx0 && box.top < cy1 &&
+               box.bottom > cy0;
+    };
+    return overlaps(clip.radius_tl, clip.left, clip.top,
+                    clip.left + clip.radius_tl, clip.top + clip.radius_tl) ||
+           overlaps(clip.radius_tr, clip.right - clip.radius_tr, clip.top,
+                    clip.right, clip.top + clip.radius_tr) ||
+           overlaps(clip.radius_br, clip.right - clip.radius_br,
+                    clip.bottom - clip.radius_br, clip.right, clip.bottom) ||
+           overlaps(clip.radius_bl, clip.left,
+                    clip.bottom - clip.radius_bl,
+                    clip.left + clip.radius_bl, clip.bottom);
 }
 
 /// Whether `outer` holds every pixel of `inner`, allowing for the sub-pixel
@@ -425,6 +487,46 @@ private:
                 facts.border_top = px_value(value("border-top-width"));
                 facts.border_right = px_value(value("border-right-width"));
                 facts.border_bottom = px_value(value("border-bottom-width"));
+                // Chrome serializes the computed radius as a shorthand of one
+                // to four corners; a clip that reads only the first squares off
+                // every card whose corners differ.
+                const auto radius = value("border-radius");
+                std::vector<double> corners;
+                for (std::size_t at = 0; at < radius.size();) {
+                    while (at < radius.size() && radius[at] == ' ') ++at;
+                    const auto end = radius.find(' ', at);
+                    const auto token = radius.substr(
+                        at, end == std::string::npos ? end : end - at);
+                    // An elliptical radius ("12px / 6px") is beyond a single
+                    // scalar per corner; the horizontal axis is nearer the
+                    // truth than dropping the curve.
+                    if (token == "/") break;
+                    if (!token.empty()) corners.push_back(px_value(token));
+                    if (end == std::string::npos) break;
+                    at = end + 1;
+                }
+                switch (corners.size()) {
+                    case 0: break;
+                    case 1:
+                        facts.radius_tl = facts.radius_tr = facts.radius_br =
+                            facts.radius_bl = corners[0];
+                        break;
+                    case 2:
+                        facts.radius_tl = facts.radius_br = corners[0];
+                        facts.radius_tr = facts.radius_bl = corners[1];
+                        break;
+                    case 3:
+                        facts.radius_tl = corners[0];
+                        facts.radius_tr = facts.radius_bl = corners[1];
+                        facts.radius_br = corners[2];
+                        break;
+                    default:
+                        facts.radius_tl = corners[0];
+                        facts.radius_tr = corners[1];
+                        facts.radius_br = corners[2];
+                        facts.radius_bl = corners[3];
+                        break;
+                }
             }
         }
         facts_[node_index] = facts;
@@ -444,6 +546,17 @@ private:
         rect.top += facts.border_top;
         rect.right -= facts.border_right;
         rect.bottom -= facts.border_bottom;
+        // The inner curve is the outer one minus the border it sits behind, per
+        // CSS's inner-radius rule. Taking the outer radius here would round the
+        // clip more sharply than the border it hides inside, leaving a sliver of
+        // the border's own colour uncovered along each corner.
+        const auto inner = [](double r, double a, double b) {
+            return std::max(0.0, r - std::max(a, b));
+        };
+        rect.radius_tl = inner(facts.radius_tl, facts.border_left, facts.border_top);
+        rect.radius_tr = inner(facts.radius_tr, facts.border_right, facts.border_top);
+        rect.radius_br = inner(facts.radius_br, facts.border_right, facts.border_bottom);
+        rect.radius_bl = inner(facts.radius_bl, facts.border_left, facts.border_bottom);
         return rect;
     }
 
@@ -709,7 +822,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         const bool draws_outside_box =
             !slots[i].node.style.box_shadow.empty() ||
             slots[i].node.style.filter.has_value();
-        if (!draws_outside_box && contains(css_clip[i].rect, rect_of(box)))
+        // A rounded clip still cuts a node that sits inside the rectangle but
+        // reaches into a corner — which is exactly the card whose media area
+        // fills the full width and must lose its top two corners to the card.
+        if (!draws_outside_box && contains(css_clip[i].rect, rect_of(box)) &&
+            !intrudes_on_rounded_corner(css_clip[i].rect, rect_of(box)))
             continue;
         pulp::view::IRStyle::ClipRect rect{};
         rect.x = static_cast<float>(css_clip[i].rect.left - box.left);
@@ -721,6 +838,10 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             0.0, css_clip[i].rect.right - css_clip[i].rect.left));
         rect.height = static_cast<float>(std::max(
             0.0, css_clip[i].rect.bottom - css_clip[i].rect.top));
+        rect.radius_tl = static_cast<float>(css_clip[i].rect.radius_tl);
+        rect.radius_tr = static_cast<float>(css_clip[i].rect.radius_tr);
+        rect.radius_br = static_cast<float>(css_clip[i].rect.radius_br);
+        rect.radius_bl = static_cast<float>(css_clip[i].rect.radius_bl);
         slots[i].node.style.clip_rect = rect;
     }
 

@@ -129,7 +129,19 @@ struct IRStyle {
     // A rectangle attached to the node travels with the node, so re-parenting
     // cannot change what it clips. The engine (View::set_ancestor_clip_rect)
     // applies it to the node's OWN ink only — every descendant carries its own.
-    struct ClipRect { float x = 0, y = 0, width = 0, height = 0; };
+    //
+    // The corner radii belong to the clip, not to the node: CSS clips overflow
+    // to the clipper's ROUNDED padding box, so a square-cornered child inside a
+    // rounded card is cut to the card's curve. Without them a rounded card whose
+    // media area is a plain rectangle paints that rectangle square into the
+    // corner, and the card reads as unrounded even though its own border curves.
+    // A radius applies only where the clip's corner is still the clipper's own —
+    // a corner cut by a second, tighter clipper is square, so the resolver drops
+    // the radius there rather than rounding a corner nothing rounded.
+    struct ClipRect {
+        float x = 0, y = 0, width = 0, height = 0;
+        float radius_tl = 0, radius_tr = 0, radius_br = 0, radius_bl = 0;
+    };
     std::optional<ClipRect> clip_rect;
     std::optional<std::string> mask;                   // `mask` shorthand
     std::optional<std::string> mask_image;

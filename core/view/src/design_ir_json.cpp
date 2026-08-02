@@ -425,6 +425,12 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
             };
             crf("x", out.x); crf("y", out.y);
             crf("width", out.width); crf("height", out.height);
+            // Radii are optional and default to zero, so a document written
+            // before the clip carried a curve still parses as a square clip.
+            crf("radiusTopLeft", out.radius_tl);
+            crf("radiusTopRight", out.radius_tr);
+            crf("radiusBottomRight", out.radius_br);
+            crf("radiusBottomLeft", out.radius_bl);
             s.clip_rect = out;
         }
     }
@@ -1887,7 +1893,17 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
         write_key(out, first, "clipRect");
         out << "{\"x\":" << s.clip_rect->x << ",\"y\":" << s.clip_rect->y
             << ",\"width\":" << s.clip_rect->width
-            << ",\"height\":" << s.clip_rect->height << '}';
+            << ",\"height\":" << s.clip_rect->height;
+        // Written only when the clip actually curves, so a square clip
+        // serializes exactly as it did before it could carry a radius.
+        if (s.clip_rect->radius_tl != 0 || s.clip_rect->radius_tr != 0 ||
+            s.clip_rect->radius_br != 0 || s.clip_rect->radius_bl != 0) {
+            out << ",\"radiusTopLeft\":" << s.clip_rect->radius_tl
+                << ",\"radiusTopRight\":" << s.clip_rect->radius_tr
+                << ",\"radiusBottomRight\":" << s.clip_rect->radius_br
+                << ",\"radiusBottomLeft\":" << s.clip_rect->radius_bl;
+        }
+        out << '}';
     }
     write_string_member(out, first, "cursor", s.cursor);
     write_string_member(out, first, "position", s.position);
