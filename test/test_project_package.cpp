@@ -414,7 +414,7 @@ TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
     fs::remove_all(displaced, ignored);
 }
 
-TEST_CASE("Generation publication retains verified blob identities until replacement",
+TEST_CASE("Generation publication revalidates verified blobs before replacement",
           "[project-package][references][race]") {
     TemporaryPackage temporary("reference-pin");
     const std::vector<std::uint8_t> media{'p', 'i', 'n', 'n', 'e', 'd'};
@@ -815,6 +815,27 @@ TEST_CASE("Atomic project-package publisher rejects staged symlinks",
     REQUIRE_FALSE(fs::exists(destination));
 }
 
+TEST_CASE("Atomic directory publication uses bounded descriptor space",
+          "[project-package][atomic-publisher][scale]") {
+    TemporaryPackage temporary("atomic-descriptor-scale");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    for (std::size_t index = 0; index < 320; ++index) {
+        std::ofstream output(publisher->staging_directory() /
+                             ("entry-" + std::to_string(index)));
+        REQUIRE(output);
+        output << index;
+    }
+
+    const auto committed = publisher->commit_directory();
+
+    REQUIRE(committed);
+    REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
+    REQUIRE(read_text(destination / "entry-319") == "319");
+}
+
 TEST_CASE("Atomic project-package file publication rejects a staged symlink",
           "[project-package][atomic-publisher][symlink]") {
     TemporaryPackage temporary("atomic-file-symlink");
@@ -1160,7 +1181,9 @@ TEST_CASE("Project reference validation hashes each canonical blob once per pass
 
         REQUIRE(published);
         REQUIRE(published.value() == AtomicPublishOutcome::PublishedDurably);
-        REQUIRE(g_blob_verifications.load(std::memory_order_relaxed) == 2);
+        // Publishing validates once for admission and once after the serialized
+        // generation is fenced, with one hash per distinct blob in each pass.
+        REQUIRE(g_blob_verifications.load(std::memory_order_relaxed) == 4);
     }
 
     g_blob_verifications.store(0, std::memory_order_relaxed);

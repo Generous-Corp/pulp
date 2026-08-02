@@ -23,7 +23,13 @@ template <typename Size> std::optional<Size> checked_size_limit(std::uint64_t va
 enum class PackageFaultPoint : std::uint8_t;
 enum class NativeReadOutcome : std::uint8_t { Ok, InvalidFile, LimitExceeded, IoError };
 enum class NoReplaceSourceKind : std::uint8_t { RegularFile, Directory };
-enum class NoReplaceOutcome : std::uint8_t { Published, DestinationExists, Unsupported, Failed };
+enum class NoReplaceOutcome : std::uint8_t {
+    Published,
+    PublishedSourceRetained,
+    DestinationExists,
+    Unsupported,
+    Failed
+};
 
 class AnchoredDirectory {
   public:

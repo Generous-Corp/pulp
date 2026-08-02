@@ -128,6 +128,19 @@ HANDLE open_relative_existing(HANDLE parent, const std::filesystem::path& compon
     return handle;
 }
 
+std::optional<std::filesystem::path> final_path(HANDLE handle) noexcept {
+    const auto count = ::GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED);
+    if (count == 0)
+        return std::nullopt;
+    std::wstring storage(count, L'\0');
+    const auto written =
+        ::GetFinalPathNameByHandleW(handle, storage.data(), count, FILE_NAME_NORMALIZED);
+    if (written == 0 || written >= count)
+        return std::nullopt;
+    storage.resize(written);
+    return std::filesystem::path(std::move(storage));
+}
+
 bool write_all(HANDLE handle, std::span<const std::uint8_t> bytes) noexcept {
     std::size_t offset = 0;
     while (offset < bytes.size()) {
@@ -593,25 +606,16 @@ NoReplaceOutcome AnchoredDirectory::publish_no_replace(
         !direct_name(destination_name))
         return NoReplaceOutcome::Failed;
 #if defined(_WIN32)
-    const auto source = open_relative_existing(
-        reinterpret_cast<HANDLE>(native_), source_name,
-        kind == NoReplaceSourceKind::Directory, DELETE | FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
-    if (source == INVALID_HANDLE_VALUE)
+    const auto source_parent_path = final_path(reinterpret_cast<HANDLE>(native_));
+    const auto destination_parent_path =
+        final_path(reinterpret_cast<HANDLE>(destination_parent.native_));
+    if (!source_parent_path || !destination_parent_path)
         return NoReplaceOutcome::Failed;
-    const auto& destination = destination_name.native();
-    const auto name_bytes = destination.size() * sizeof(wchar_t);
-    std::vector<std::uint8_t> storage(sizeof(FILE_RENAME_INFO) + name_bytes);
-    auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
-    rename->ReplaceIfExists = FALSE;
-    rename->RootDirectory = reinterpret_cast<HANDLE>(destination_parent.native_);
-    rename->FileNameLength = static_cast<DWORD>(name_bytes);
-    std::memcpy(rename->FileName, destination.data(), name_bytes);
+    const auto source = *source_parent_path / source_name;
+    const auto destination = *destination_parent_path / destination_name;
     const bool published =
-        ::SetFileInformationByHandle(source, FileRenameInfo, rename,
-                                     static_cast<DWORD>(storage.size())) != 0;
+        ::MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
     const auto error = published ? ERROR_SUCCESS : ::GetLastError();
-    ::CloseHandle(source);
     if (published)
         return NoReplaceOutcome::Published;
     return error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS
@@ -637,8 +641,9 @@ NoReplaceOutcome AnchoredDirectory::publish_no_replace(
     if (::linkat(static_cast<int>(native_), source_name.c_str(),
                  static_cast<int>(destination_parent.native_), destination_name.c_str(), 0) != 0)
         return errno == EEXIST ? NoReplaceOutcome::DestinationExists : NoReplaceOutcome::Failed;
-    (void)::unlinkat(static_cast<int>(native_), source_name.c_str(), 0);
-    return NoReplaceOutcome::Published;
+    return ::unlinkat(static_cast<int>(native_), source_name.c_str(), 0) == 0
+               ? NoReplaceOutcome::Published
+               : NoReplaceOutcome::PublishedSourceRetained;
 #else
     (void)kind;
     return NoReplaceOutcome::Unsupported;
@@ -649,6 +654,8 @@ bool AnchoredDirectory::fence() const noexcept {
     if (native_ == -1)
         return false;
 #if defined(_WIN32)
+    // The anchored Windows publication operation is MOVEFILE_WRITE_THROUGH;
+    // no additional directory-handle flush is available or required here.
     return true;
 #else
     return ::fsync(static_cast<int>(native_)) == 0;
@@ -767,8 +774,8 @@ NoReplaceOutcome publish_no_replace_fallback(const std::filesystem::path& source
     // The destination becomes visible atomically when link() succeeds. Failure
     // to remove the private source is cleanup debt, not a failed publication;
     // reporting failure here would let callers retry after publication.
-    (void)::unlink(source.c_str());
-    return NoReplaceOutcome::Published;
+    return ::unlink(source.c_str()) == 0 ? NoReplaceOutcome::Published
+                                         : NoReplaceOutcome::PublishedSourceRetained;
 #endif
 }
 

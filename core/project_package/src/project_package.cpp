@@ -79,8 +79,8 @@ bool is_real_directory(const fs::path& path) {
     return fs::symlink_status(path, error).type() == fs::file_type::directory && !error;
 }
 
-bool pin_hash_match(const fs::path& path, const timeline::ContentHash& expected,
-                    std::uint64_t maximum, std::vector<detail::PinnedFile>& pinned) {
+bool hash_matches(const fs::path& path, const timeline::ContentHash& expected,
+                  std::uint64_t maximum) {
     if (!expected.valid())
         return false;
     auto file = detail::PinnedFile::open(path, false);
@@ -89,10 +89,7 @@ bool pin_hash_match(const fs::path& path, const timeline::ContentHash& expected,
     if (!file->hash_matches(expected.to_hex(), maximum))
         return false;
     detail::invoke_fault_hook(detail::PackageFaultPoint::BlobReferenceVerified);
-    if (!file->still_named_by(path))
-        return false;
-    pinned.push_back(std::move(*file));
-    return true;
+    return file->still_named_by(path);
 }
 
 std::uint64_t next_serial() noexcept {
@@ -106,11 +103,10 @@ fs::path stage_path(const fs::path& directory) {
 }
 
 bool validate_canonical_blob(const fs::path& root, const timeline::ContentHash& expected,
-                             std::uint64_t maximum, std::set<timeline::ContentHash>& verified,
-                             std::vector<detail::PinnedFile>& pinned) {
+                             std::uint64_t maximum, std::set<timeline::ContentHash>& verified) {
     if (verified.contains(expected))
         return true;
-    if (!pin_hash_match(blob_path(root, {BlobStore::Media, expected}), expected, maximum, pinned))
+    if (!hash_matches(blob_path(root, {BlobStore::Media, expected}), expected, maximum))
         return false;
     verified.insert(expected);
     return true;
@@ -118,39 +114,34 @@ bool validate_canonical_blob(const fs::path& root, const timeline::ContentHash& 
 
 bool validate_locator(const fs::path& root, const timeline::AssetLocator& locator,
                       const timeline::ContentHash& expected, std::uint64_t maximum,
-                      std::set<timeline::ContentHash>& verified,
-                      std::vector<detail::PinnedFile>& pinned) {
+                      std::set<timeline::ContentHash>& verified) {
     if (locator.kind != timeline::AssetLocatorKind::PackageRelative)
         return true;
     if (!timeline::package_relative_path_is_lexically_safe(locator.hint))
         return false;
     const auto canonical = std::string("media/") + expected.to_hex();
-    return locator.hint == canonical &&
-           validate_canonical_blob(root, expected, maximum, verified, pinned);
+    return locator.hint == canonical && validate_canonical_blob(root, expected, maximum, verified);
 }
 
 bool validate_project_references(const fs::path& root, const timeline::Project& project,
-                                 std::uint64_t maximum,
-                                 std::vector<detail::PinnedFile>& pinned) {
+                                 std::uint64_t maximum) {
     std::set<timeline::ContentHash> verified;
     for (const auto& asset : project.assets()) {
         const bool embedded = asset.storage_policy == timeline::AssetStoragePolicy::Embedded;
-        if (embedded &&
-            !validate_canonical_blob(root, asset.content_hash, maximum, verified, pinned))
+        if (embedded && !validate_canonical_blob(root, asset.content_hash, maximum, verified))
             return false;
         for (const auto& locator : asset.locators)
-            if (!validate_locator(root, locator, asset.content_hash, maximum, verified, pinned))
+            if (!validate_locator(root, locator, asset.content_hash, maximum, verified))
                 return false;
         for (const auto& representation : asset.representations) {
             const bool representation_embedded =
                 representation.storage_policy == timeline::AssetStoragePolicy::Embedded;
             if (representation_embedded &&
-                !validate_canonical_blob(root, representation.content_hash, maximum, verified,
-                                         pinned))
+                !validate_canonical_blob(root, representation.content_hash, maximum, verified))
                 return false;
             for (const auto& locator : representation.locators)
                 if (!validate_locator(root, locator, representation.content_hash, maximum,
-                                      verified, pinned))
+                                      verified))
                     return false;
         }
     }
@@ -385,7 +376,15 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
         return failure<BlobReference>(PackageErrorCode::InvalidLayout, impl_->root);
     const auto publication = detail::publish_no_replace(
         temporary, destination, detail::NoReplaceSourceKind::RegularFile);
-    if (publication != detail::NoReplaceOutcome::Published) {
+    if (publication == detail::NoReplaceOutcome::PublishedSourceRetained) {
+        error.clear();
+        if (!fs::remove(temporary, error) || error)
+            return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
+        auto file = detail::PinnedFile::open(destination, true);
+        if (!file || !file->hash_matches(expected.to_hex(), impl_->limits.max_blob_bytes) ||
+            !file->fence() || !file->still_named_by(destination))
+            return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
+    } else if (publication != detail::NoReplaceOutcome::Published) {
         if (impl_->root_anchor.still_named_by(impl_->root))
             fs::remove(temporary, error);
         if (publication != detail::NoReplaceOutcome::DestinationExists)
@@ -410,56 +409,22 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, {});
     if (!impl_->root_anchor.still_named_by(impl_->root))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->root);
-    std::vector<detail::PinnedFile> pinned_references;
     bool validate_references = true;
 #if defined(PULP_PROJECT_PACKAGE_ENABLE_TEST_MUTATIONS)
     validate_references = !detail::skip_reference_validation_for_test();
-    if (validate_references && !validate_project_references(
-                                   impl_->root, project, impl_->limits.max_blob_bytes,
-                                   pinned_references))
+    if (validate_references &&
+        !validate_project_references(impl_->root, project, impl_->limits.max_blob_bytes))
 #else
-    if (!validate_project_references(impl_->root, project, impl_->limits.max_blob_bytes,
-                                     pinned_references))
+    if (!validate_project_references(impl_->root, project, impl_->limits.max_blob_bytes))
 #endif
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidGeneration, impl_->root);
     detail::invoke_fault_hook(detail::PackageFaultPoint::ReferenceSetVerified);
     const auto references_still_named = [&]() {
         if (!validate_references)
             return true;
-        if (!impl_->root_anchor.still_named_by(impl_->root))
-            return false;
-        std::size_t index = 0;
-        std::set<timeline::ContentHash> verified;
-        for (const auto& asset : project.assets()) {
-            const auto check = [&](const timeline::ContentHash& hash) {
-                if (!verified.insert(hash).second)
-                    return true;
-                if (index >= pinned_references.size())
-                    return false;
-                return pinned_references[index++].still_named_by(
-                    blob_path(impl_->root, {BlobStore::Media, hash}));
-            };
-            if (asset.storage_policy == timeline::AssetStoragePolicy::Embedded &&
-                !check(asset.content_hash))
-                return false;
-            for (const auto& locator : asset.locators)
-                if (locator.kind == timeline::AssetLocatorKind::PackageRelative &&
-                    !check(asset.content_hash))
-                    return false;
-            for (const auto& representation : asset.representations) {
-                if (representation.storage_policy == timeline::AssetStoragePolicy::Embedded &&
-                    !check(representation.content_hash))
-                    return false;
-                for (const auto& locator : representation.locators)
-                    if (locator.kind == timeline::AssetLocatorKind::PackageRelative &&
-                        !check(representation.content_hash))
-                        return false;
-            }
-        }
-        return index == pinned_references.size();
+        return impl_->root_anchor.still_named_by(impl_->root) &&
+               validate_project_references(impl_->root, project, impl_->limits.max_blob_bytes);
     };
-    if (!references_still_named())
-        return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidGeneration, impl_->root);
     const auto output_limit =
         detail::checked_size_limit<std::size_t>(impl_->limits.max_project_bytes);
     if (!output_limit)
@@ -490,7 +455,7 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
             runtime::Ok(AtomicPublishOutcome::NotPublished));
     }
     detail::invoke_fault_hook(detail::PackageFaultPoint::GenerationPublished);
-    if (!references_still_named() || !detail::fence_directory(impl_->root))
+    if (!impl_->root_anchor.still_named_by(impl_->root) || !detail::fence_directory(impl_->root))
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     detail::invoke_fault_hook(detail::PackageFaultPoint::GenerationDirectoryFenced);
@@ -532,9 +497,8 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
         return failure<OpenPackageResult>(encoded.error().code, encoded.error().path);
     const std::string_view json(reinterpret_cast<const char*>(encoded->data()), encoded->size());
     auto decoded = timeline::deserialize_project(json, registry);
-    std::vector<detail::PinnedFile> pinned_references;
-    if (!decoded || !validate_project_references(canonical_root, decoded.value(),
-                                                 limits.max_blob_bytes, pinned_references))
+    if (!decoded ||
+        !validate_project_references(canonical_root, decoded.value(), limits.max_blob_bytes))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidGeneration,
                                           canonical_root / kProjectFile);
     return runtime::Result<OpenPackageResult, PackageError>(runtime::Ok(

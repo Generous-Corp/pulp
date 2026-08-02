@@ -464,9 +464,16 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
     if (publication == detail::NoReplaceOutcome::DestinationExists)
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
-    if (publication != detail::NoReplaceOutcome::Published)
+    if (publication != detail::NoReplaceOutcome::Published &&
+        publication != detail::NoReplaceOutcome::PublishedSourceRetained)
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
+    if (publication == detail::NoReplaceOutcome::PublishedSourceRetained) {
+        std::error_code cleanup_error;
+        if (!fs::remove(staged_file, cleanup_error) || cleanup_error)
+            return runtime::Result<AtomicPublishOutcome, PackageError>(
+                runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
+    }
     impl_->staging_root.close();
     if (!pinned->still_named_by(impl_->destination))
         return runtime::Result<AtomicPublishOutcome, PackageError>(
@@ -488,8 +495,6 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
     std::vector<fs::path> directories;
     std::vector<fs::path> files;
-    std::vector<detail::AnchoredDirectory> pinned_directories;
-    std::vector<detail::PinnedFile> pinned_files;
     directories.push_back(impl_->staging);
     std::error_code error;
     for (fs::recursive_directory_iterator iterator(impl_->staging, error), end;
@@ -512,7 +517,6 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         auto pinned = detail::PinnedFile::open(file, true, true);
         if (!pinned || !pinned->fence() || !pinned->still_named_by(file))
             return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, file);
-        pinned_files.push_back(std::move(*pinned));
     }
     std::sort(directories.begin(), directories.end(), [](const auto& lhs, const auto& rhs) {
         return std::distance(lhs.begin(), lhs.end()) > std::distance(rhs.begin(), rhs.end());
@@ -521,18 +525,12 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         auto pinned = detail::AnchoredDirectory::open(directory, true);
         if (!pinned || !detail::fence_directory(directory) || !pinned->still_named_by(directory))
             return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, directory);
-        pinned_directories.push_back(std::move(*pinned));
     }
     if (!impl_->staging_root.still_named_by(impl_->staging))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryTreeFenced);
-    for (std::size_t index = 0; index < files.size(); ++index)
-        if (!pinned_files[index].still_named_by(files[index]))
-            return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, files[index]);
-    for (std::size_t index = 0; index < directories.size(); ++index)
-        if (!pinned_directories[index].still_named_by(directories[index]))
-            return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout,
-                                                 directories[index]);
+    if (!impl_->staging_root.still_named_by(impl_->staging))
+        return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
     detail::invoke_fault_hook(detail::PackageFaultPoint::PublicationSourceVerified);
     const auto publication = impl_->parent_root.publish_no_replace(
         impl_->staging.filename(), impl_->parent_root, impl_->destination.filename(),
