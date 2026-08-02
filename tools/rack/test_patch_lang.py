@@ -36,7 +36,14 @@ def wrong(msg):
 
 
 def signature(doc, inv):
-    """A patch reduced to what Rack actually wires."""
+    """A patch reduced to what Rack actually wires AND sets.
+
+    Values are in here because leaving them out is how the first version of
+    this test reported 138/138 while every knob position was being dropped.
+    The acid patch in the corpus is acid because its resonance is 0.88 and its
+    decay 0.07 — same modules, same cables, completely different sound. A
+    signature that cannot tell those apart is not a signature of a patch.
+    """
     by = {m["id"]: m for m in doc.get("modules", [])}
     cables = []
     for c in doc.get("cables", []):
@@ -45,8 +52,14 @@ def signature(doc, inv):
             continue
         cables.append((s["plugin"], s["model"], c.get("outputId"),
                        t["plugin"], t["model"], c.get("inputId")))
-    mods = sorted((m["plugin"], m["model"]) for m in doc.get("modules", []))
-    return mods, sorted(cables)
+    mods = []
+    for m in doc.get("modules", []):
+        vals = tuple(sorted(
+            (int(p.get("id", -1)), round(float(p.get("value", 0.0)), 6))
+            for p in (m.get("params") or [])
+            if isinstance(p, dict) and "value" in p))
+        mods.append((m["plugin"], m["model"], vals))
+    return sorted(mods), sorted(cables)
 
 
 inv = P.inventory()
@@ -151,6 +164,28 @@ else:
     else:
         wrong(f"{diff} of {same + diff} patches do not round-trip; "
               f"first: {first_bad}")
+
+# Values survive, stated directly. The corpus check above would catch this
+# too, but a failure there says "a patch differs" where this says which
+# property was lost.
+_probe = ("f : ForgeModular/FOURPOLE\n"
+          "f.Cutoff = 0.34\n"
+          "f.Resonance = 0.88\n")
+try:
+    _doc = L.parse(_probe, inv)
+    _vals = {int(p["id"]): p["value"] for p in _doc["modules"][0]["params"]}
+    if _vals.get(0) == 0.34 and _vals.get(1) == 0.88:
+        ok("knob positions parse")
+    else:
+        wrong(f"knob positions did not parse: {_vals}")
+    _again = L.parse(L.render(_doc, inv), inv)
+    _v2 = {int(p["id"]): p["value"] for p in _again["modules"][0]["params"]}
+    if _v2 == _vals:
+        ok("and survive a round trip")
+    else:
+        wrong(f"knob positions changed through the round trip: {_vals} -> {_v2}")
+except L.PatchLangError as e:
+    wrong(f"a patch with knob positions did not parse: {e}")
 
 # The property that makes the language worth having: positions are not
 # expressible, so a hand-written patch cannot have overlapping panels.

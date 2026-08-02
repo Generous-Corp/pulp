@@ -105,6 +105,28 @@ def _ports(inv: dict, plugin: str, model: str) -> tuple:
     return names("inputs"), names("outputs")
 
 
+def _params(inv: dict, plugin: str, model: str) -> list:
+    """Param NAMES for a module, ordered by id. Empty when unmeasured.
+
+    Our own modules carry name/min/max/default in the manifest. A vendor
+    module's params come from the CARTOG scan and may be nameless, in which
+    case the language falls back to the index — a value written against an
+    index still round-trips, it is merely less readable, and dropping the
+    value instead would lose the patch's sound.
+    """
+    entry = (inv.get(plugin, {}).get("modules", {}) or {}).get(model)
+    if not entry:
+        return []
+    out = []
+    for e in (entry.get("params") or []):
+        if isinstance(e, dict):
+            out.append((e.get("id", len(out)), e.get("name") or ""))
+        elif isinstance(e, str):
+            out.append((len(out), e))
+    out.sort(key=lambda t: t[0])
+    return [n for _, n in out]
+
+
 def _port_index(names: list, want: str) -> int:
     """Index of a port by name, case-insensitively. -1 when absent.
 
@@ -184,6 +206,7 @@ def parse(text: str, inv: dict) -> dict:
     names: dict = {}          # local name -> (plugin, model)
     order: list = []          # declaration order, which is left-to-right order
     cables: list = []
+    settings: list = []
     request = ""
 
     for n, raw in enumerate(text.splitlines(), start=1):
@@ -236,6 +259,10 @@ def parse(text: str, inv: dict) -> dict:
             cables.extend(_parse_chain(n, line, names, inv))
             continue
 
+        if "=" in line:
+            settings.append(_parse_setting(n, line, names, inv))
+            continue
+
         raise PatchLangError(
             n, f"cannot read {line.strip()!r}",
             "a line is either  name : Plugin/Module  or  a.OUT >> b.IN")
@@ -243,7 +270,7 @@ def parse(text: str, inv: dict) -> dict:
     if not order:
         raise PatchLangError(1, "no modules declared")
 
-    return _assemble(names, order, cables, inv, request)
+    return _assemble(names, order, cables, settings, inv, request)
 
 
 def _parse_chain(n: int, line: str, names: dict, inv: dict) -> list:
@@ -305,6 +332,46 @@ def _parse_chain(n: int, line: str, names: dict, inv: dict) -> list:
     return out
 
 
+
+
+SETTING = re.compile(
+    r"""^([A-Za-z_][A-Za-z0-9_]*)\.(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9_/\-\#]+))
+        \s*=\s*(-?[0-9.eE+]+)\s*$""", re.VERBOSE)
+
+
+def _parse_setting(n: int, line: str, names: dict, inv: dict) -> tuple:
+    """`name.PARAM = 0.34` — a knob position.
+
+    A patch without its values is a wiring diagram. The acid line in the
+    regression corpus is acid because its resonance is 0.88 and its decay is
+    0.07; a language that carried only the cables would have described the same
+    modules wired the same way, making a completely different sound.
+    """
+    m = SETTING.match(line)
+    if not m:
+        raise PatchLangError(
+            n, f"cannot read the setting {line.strip()!r}",
+            "a setting looks like  name.PARAM = 0.5")
+    local = m.group(1)
+    pname = unquote_port(m.group(2)) if m.group(2) is not None else m.group(3)
+    if local not in names:
+        raise PatchLangError(n, f"'{local}' was never declared")
+    params = _params(inv, *names[local])
+    idx = _port_index(params, pname)
+    if idx < 0 and pname.isdigit():
+        idx = int(pname)          # unnamed vendor params address by index
+    if idx < 0:
+        raise PatchLangError(
+            n, f"'{local}' has no parameter '{pname}'",
+            "its parameters: " + (", ".join(p for p in params if p) or
+                                  "none are named; use an index"))
+    try:
+        value = float(m.group(4))
+    except ValueError:
+        raise PatchLangError(n, f"{m.group(4)!r} is not a number") from None
+    return (local, idx, value)
+
+
 def _endpoint(n: int, txt: str, names: dict) -> tuple:
     m = ENDPOINT.match(txt)
     if not m:
@@ -320,15 +387,18 @@ def _endpoint(n: int, txt: str, names: dict) -> tuple:
     return local, port
 
 
-def _assemble(names: dict, order: list, cables: list, inv: dict,
-              request: str) -> dict:
+def _assemble(names: dict, order: list, cables: list, settings: list,
+              inv: dict, request: str) -> dict:
     """Named nodes and chains into the .vcv shape."""
     ids = {local: i + 1 for i, local in enumerate(order)}
     modules = []
     for local in order:
         plugin, model = names[local]
+        vals = {idx: v for (who, idx, v) in settings if who == local}
         modules.append({"id": ids[local], "plugin": plugin, "model": model,
-                        "pos": [0, 0], "params": []})
+                        "pos": [0, 0],
+                        "params": [{"id": i, "value": vals[i]}
+                                   for i in sorted(vals)]})
     out_cables = []
     for cid, (sn, sp, dn, dp) in enumerate(cables, start=1):
         s_in, s_out = _ports(inv, *names[sn])
@@ -373,7 +443,22 @@ def render(doc: dict, inv: dict) -> str:
     for m in doc.get("modules", []):
         lines.append(f"{local_of[m['id']]:<{width}} : "
                      f"{m.get('plugin')}/{m.get('model')}")
-    lines.append("")
+    # Values, under the declarations they belong to.
+    wrote_any = False
+    for m in doc.get("modules", []):
+        names = _params(inv, m.get("plugin"), m.get("model"))
+        for prm in (m.get("params") or []):
+            if not isinstance(prm, dict) or "value" not in prm:
+                continue
+            i = int(prm.get("id", -1))
+            label = port_label(names, i) if 0 <= i < len(names) and names[i] \
+                else str(i)
+            lines.append(f"{local_of[m['id']]}.{quote_port(label)} = "
+                         f"{prm['value']:g}")
+            wrote_any = True
+    if wrote_any:
+        lines.append("")
+    lines.append("") if not wrote_any else None
 
     by_id = {m["id"]: m for m in doc.get("modules", [])}
     for c in doc.get("cables", []):
