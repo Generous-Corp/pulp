@@ -51,6 +51,28 @@ std::shared_ptr<const Project> modifier_project(std::vector<NoteModifier> modifi
         Project::create(ProjectInput{{1}, "project", 100, {2}, {}, {std::move(sequence)}})));
 }
 
+GrooveTemplate groove_of(GrooveTemplateInput input) {
+    return take(GrooveTemplate::create(std::move(input)));
+}
+
+std::shared_ptr<const Project> groove_project(std::vector<NoteEvent> notes, GrooveTemplate groove,
+                                              TickPosition clip_start = {0},
+                                              TickDuration clip_duration = {400},
+                                              std::vector<NoteModifier> modifiers = {}) {
+    auto content = take(MidiContent::create(std::move(notes), std::move(modifiers), 17));
+    auto clip = take(Clip::create({20}, clip_start, clip_duration, std::move(content)));
+    auto track = take(Track::create({10}, "grooved notes", {std::move(clip)}));
+    SequenceInput sequence_input;
+    sequence_input.id = {2};
+    sequence_input.name = "root";
+    sequence_input.musical_duration = TickDuration{clip_start.value + clip_duration.value};
+    sequence_input.tracks = {std::move(track)};
+    sequence_input.groove = std::move(groove);
+    auto sequence = take(Sequence::create(std::move(sequence_input)));
+    return std::make_shared<const Project>(
+        take(Project::create(ProjectInput{{1}, "groove", 100, {2}, {}, {std::move(sequence)}})));
+}
+
 NoteModifier chance(std::uint64_t note, std::uint16_t probability) {
     NoteModifier modifier;
     modifier.note_id = {note};
@@ -503,6 +525,98 @@ TEST_CASE("A ratchet subdivides a note into retriggers that fill its own span",
         if (event.note_id == ItemId{31})
             ++sibling_events;
     REQUIRE(sibling_events == 2);
+}
+
+TEST_CASE("Sequence groove moves note pairs and scales velocity deterministically",
+          "[playback][groove]") {
+    GrooveTemplateInput input;
+    input.step = TickDuration{100};
+    input.steps = {
+        GrooveStep{TickDuration{0}, 4000},
+        GrooveStep{TickDuration{20}, 1500},
+        GrooveStep{TickDuration{-30}, 500},
+    };
+    ProgramHarness programs;
+    programs.publish(groove_project({{{30}, {0}, {50}, 101, 60, 0},
+                                     {{31}, {100}, {50}, 101, 61, 0},
+                                     {{32}, {200}, {50}, 20'000, 62, 0}},
+                                    groove_of(std::move(input)), {1'000}),
+                     modifier_tempo_map());
+
+    const auto live = programs.store.read();
+    REQUIRE(live);
+    const auto events = live->find_track({10})->arrangement_note_events();
+    REQUIRE(events.size() == 6);
+
+    // One onset displacement moves on and off together, preserving the gate.
+    REQUIRE(events[0].note_id == ItemId{30});
+    REQUIRE(events[0].tick == TickPosition{1'020});
+    REQUIRE(events[0].velocity == 152); // 101 * 1.5, half-up.
+    REQUIRE(events[1].note_id == ItemId{30});
+    REQUIRE(events[1].tick == TickPosition{1'070});
+    REQUIRE(events[1].kind == NoteProgramEventKind::Off);
+    REQUIRE(events[2].note_id == ItemId{31});
+    REQUIRE(events[2].tick == TickPosition{1'070});
+    REQUIRE(events[2].velocity == 51); // 101 * 0.5, half-up.
+    REQUIRE(events[3].note_id == ItemId{31});
+    REQUIRE(events[3].tick == TickPosition{1'120});
+    REQUIRE(events[3].kind == NoteProgramEventKind::Off);
+    REQUIRE(events[4].note_id == ItemId{32});
+    REQUIRE(events[4].tick == TickPosition{1'200});
+    REQUIRE(events[4].velocity == 0xffff); // 4x accent saturates.
+    REQUIRE(events[5].note_id == ItemId{32});
+    REQUIRE(events[5].tick == TickPosition{1'250});
+}
+
+TEST_CASE("Groove intersects displaced notes with the owning clip window",
+          "[playback][groove][clip-window]") {
+    GrooveTemplateInput input;
+    input.step = TickDuration{100};
+    input.steps = {
+        GrooveStep{TickDuration{0}, 1000},
+        GrooveStep{TickDuration{-30}, 1000},
+        GrooveStep{TickDuration{30}, 1000},
+    };
+    ProgramHarness programs;
+    programs.publish(
+        groove_project({{{30}, {0}, {50}, 1'000, 60, 0}, {{31}, {100}, {20}, 1'000, 61, 0}},
+                       groove_of(std::move(input)), {1'000}, {120}),
+        modifier_tempo_map());
+
+    const auto live = programs.store.read();
+    REQUIRE(live);
+    const auto events = live->find_track({10})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].note_id == ItemId{30});
+    REQUIRE(events[0].tick == TickPosition{1'000});
+    REQUIRE(events[1].note_id == ItemId{30});
+    REQUIRE(events[1].tick == TickPosition{1'020});
+}
+
+TEST_CASE("Ratchets inherit one groove displacement and accent",
+          "[playback][groove][note-modifier]") {
+    GrooveTemplateInput input;
+    input.step = TickDuration{100};
+    input.steps = {GrooveStep{TickDuration{20}, 1250}};
+    NoteModifier ratchet = chance(30, note_probability_certain);
+    ratchet.ratchet_count = 2;
+    ProgramHarness programs;
+    programs.publish(groove_project({{{30}, {0}, {100}, 100, 60, 0}}, groove_of(std::move(input)),
+                                    {0}, {200}, {ratchet}),
+                     modifier_tempo_map());
+
+    const auto live = programs.store.read();
+    REQUIRE(live);
+    const auto events = live->find_track({10})->arrangement_note_events();
+    REQUIRE(events.size() == 4);
+    REQUIRE(events[0].tick == TickPosition{20});
+    REQUIRE(events[0].velocity == 125);
+    REQUIRE(events[1].tick == TickPosition{70});
+    REQUIRE(events[1].velocity == 125);
+    REQUIRE(events[2].tick == TickPosition{70});
+    REQUIRE(events[2].velocity == 125);
+    REQUIRE(events[3].tick == TickPosition{120});
+    REQUIRE(events[3].velocity == 125);
 }
 
 TEST_CASE("A ratchet that would collapse below one rendered sample is refused",

@@ -345,17 +345,43 @@ Set
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
 and reference traversal, including charges carried by reused track programs.
 `AudioRendererLimits::max_clips` remains the separate ceiling for compiled audio
-regions. When compiling incrementally, build and retain one snapshot-scoped
-`CompileInvalidationIndex` from the project, root sequence, and
-`CompileContextRegistry`, then pass each transaction dirty set through
-`resolve_dirty_tracks()`. The bundled index combines direct edits, transitive
-sequence dependencies, and nested context readers so every affected root track
-is rebuilt. Resolution compares an O(1) immutable Project structure token plus
-the root identity and registry generation; it fails closed to a full recompile
-when any of them is stale or mismatched. Rebuild the index after a relevant
-structural edit or registry declaration. Context lane contents, ordinary
-note/audio edits, freeze selection, and active-take selection preserve the
-structure token.
+regions. When compiling incrementally, keep one shared
+`CompileContextRegistry` and put it plus the committed transaction `DirtySet`
+in `ProgramCompileRequest::invalidation` by constructing it from that exact
+`CommitResult`. `PlaybackProgramCompiler::submit()`
+builds the snapshot-scoped `CompileInvalidationIndex` and resolves the exact
+`DirtyTrackSet` in the same production path that accepts the compile. The index
+combines direct edits, transitive sequence dependencies, built-in MIDI groove
+reads, and registered/nested context readers. The input must carry the exact
+request snapshot pointer, document revision, and exact predecessor snapshot.
+Sparse reuse occurs only when that predecessor is the currently published
+project; a restored or forked lineage rebuilds the cumulative target in full.
+It copies an immutable registry snapshot, so later control-thread registry
+changes affect the next request; a changed registry generation forces a full
+compile even at the same document revision.
+Because such a refresh can publish the same document revision twice, wait for
+`CompilerStatus::latest_published_epoch >= CompileTicket::submission_epoch`;
+document-revision equality alone is not a terminal signal. The epoch is a
+successful-publication watermark: reaching a ticket means its request published
+or was superseded by a later successful publication. Callers that require the
+exact ticket to be the latest successful publication require epoch equality and
+must also compare the published program identity/revision for their document.
+Epochs are scoped to one compiler instance; destroying its facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+Once `busy` is false, an error with the watermark still below the ticket means
+that ticket did not terminate successfully.
+Callers that need to inspect a prospective delta may still build an index and
+call `resolve_dirty_tracks()` directly, but must not use a separately resolved
+set as a substitute for the request's generation-pinned invalidation input.
+
+Built-in MIDI clips render their owning sequence's `GrooveTemplate`: one timing
+displacement from the authored onset moves note-on and note-off together, and
+the authored-onset accent scales velocity with deterministic half-up rounding
+and saturation. Ratchets inherit that single displacement and accent. A root
+leaf reads root groove; a nested leaf reads child groove exactly once. A
+`SequenceRef` that trims a grooved MIDI leaf currently fails with
+`TrimmedGrooveUnsupported`, because chasing displaced material across the
+retained source-window boundary has no defined contract yet.
 
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree
@@ -403,6 +429,14 @@ lands first, submission rejects the preview as stale; it never reruns the
 transform with a different input. The durable journal therefore contains only
 canonical expected/replacement note arrays, and undo/redo use ordinary inverse
 commands with the identity directory's tombstone rules.
+
+An inverse additionally restates the clip's modifiers, because a modifier keys
+on a note identity and vanishes with the note its edit removed — nothing in the
+edited clip could bring it back. The `expected_modifiers` and
+`replacement_modifiers` fields are optional: authoring code omits them and the
+reducer carries the surviving modifiers across on its own. Expression lanes need
+no such field. They key on a channel-voice address that names no note, so an
+edit to the note set never filters them.
 
 ## Scrubbing the playhead
 

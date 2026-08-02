@@ -6,6 +6,8 @@
 
 #include <pulp/runtime/slot.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include "harness/scoped_rt_process_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -175,13 +177,16 @@ TEST_CASE("Slot survives an N-reader hammer against a hot publisher", "[runtime]
         // only microseconds, so on a saturated host the reader threads may not
         // be scheduled even once before we signal stop — leaving reads==0 and
         // failing the assertion through pure scheduling, not a Slot defect.
-        // Keep publishing (an in-range value) until a reader has provably run;
-        // the OS guarantees a live runnable thread eventually runs, so this
-        // cannot hang while the readers are alive.
-        while (reads.load(std::memory_order_relaxed) == 0) {
-            slot.publish(std::make_unique<Tracked>(kPublishes));
-            std::this_thread::yield();
-        }
+        // Keep publishing (an in-range value) until a reader has provably run.
+        // The deadline covers what "a runnable thread eventually runs" does not:
+        // a Slot that never hands a reader a value would spin here forever, and
+        // that belongs in the REQUIRE below, not in a hung suite.
+        (void)pulp::test::pump_until(
+            [&] { return reads.load(std::memory_order_relaxed) != 0; },
+            [&] {
+                slot.publish(std::make_unique<Tracked>(kPublishes));
+                std::this_thread::yield();
+            });
 
         stop.store(true);
         for (auto& t : readers) t.join();
@@ -389,13 +394,16 @@ TEST_CASE("Handoff survives a producer/consumer hammer with no audio-thread free
         // once before we signal stop — leaving `consumed == 0` and failing the
         // assertion below through a pure harness race, not a Handoff defect.
         // Keep a value pending and drain until the consumer has provably made
-        // progress; the OS scheduler guarantees a runnable thread eventually
-        // runs, so this cannot hang while the consumer is still alive.
-        while (consumed.load(std::memory_order_relaxed) == 0) {
-            h.publish(std::make_unique<Tracked>(1));
-            h.drain_retired();
-            std::this_thread::yield();
-        }
+        // progress. The deadline covers what "a runnable thread eventually runs"
+        // does not: a Handoff that never hands the consumer a value would spin
+        // here forever, and that belongs in the REQUIRE below, not in a hang.
+        (void)pulp::test::pump_until(
+            [&] { return consumed.load(std::memory_order_relaxed) != 0; },
+            [&] {
+                h.publish(std::make_unique<Tracked>(1));
+                h.drain_retired();
+                std::this_thread::yield();
+            });
         stop.store(true);
         consumer.join();
         h.drain_retired();

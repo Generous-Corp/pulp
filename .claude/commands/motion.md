@@ -15,7 +15,7 @@ inspector path is reserved but not wired into normal Pulp launches;
 | Just frames (no instrumentation) | **Visual analysis** | `python3 -m tools.motion.visual.analyze_sequence --frames-dir DIR` |
 | A `.motion.jsonl` fixture | **Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction to record | **Input record/replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture to scrub | **Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` |
+| An in-process fixture already loaded by its test host | **Timeline scrubber** | `Motion.scrubTo` |
 | "Which animation is expensive?" | **Cost attribution** | `Motion.enableCost` + `CostAttributor` |
 | SwiftUI / UIKit / AppKit code path | **Swift facade** (Path G) | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Compose / Android View code path | **Kotlin facade** (Path H) | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
@@ -30,15 +30,15 @@ inspector path is reserved but not wired into normal Pulp launches;
 #     method, prints the trace_id, honors --port + $PULP_INSPECTOR_PORT).
 pulp motion record --view Card --out card-fade.jsonl
 # → trace started — trace_id=1
-pulp motion stop --trace-id 1
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 
 # The transport is length-prefixed; raw line-delimited `nc` is not a client.
 
 # 4. Other handy verbs:
 pulp motion snapshot          # view tracing_enabled / active_traces / cost
 pulp motion list-traces       # enumerate inspector-owned trace IDs
-pulp motion load-fixture FOO.motion.jsonl && pulp motion scrub 30
-pulp motion cost enable       # opt in to per-frame cost samples
+pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 ## Useful env knobs in `pulp-ui-preview`

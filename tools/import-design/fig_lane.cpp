@@ -1,6 +1,7 @@
 #include "fig_lane.hpp"
 
 #include "envelope_merge.hpp"
+#include "node_runtime.hpp"
 
 #include <pulp/platform/child_process.hpp>
 
@@ -55,9 +56,15 @@ struct DecodeResult {
 };
 
 DecodeResult run_decode(const std::vector<std::string>& args, std::string* stdout_capture) {
-    auto node = pulp::platform::find_on_path("node");
-    if (!node) {
-        std::cerr << "Error: 'node' not found on PATH; the .fig lane needs Node >= 22\n";
+    // PATH alone misses Homebrew and every version manager when the process
+    // was launched from Finder rather than a shell, so use the same search the
+    // browser-capture lane does.
+    namespace capture = pulp::import_design::browser_capture;
+    const auto node = capture::resolve_node();
+    if (!node.ok()) {
+        std::cerr << "Error: the .fig lane needs Node.js "
+                  << capture::kMinimumNodeMajor << " or newer.\n"
+                  << capture::node_search_report(node) << "\n";
         return {127, false};
     }
     auto script = resolve_decode_script();
@@ -74,7 +81,7 @@ DecodeResult run_decode(const std::vector<std::string>& args, std::string* stdou
     pulp::platform::ProcessOptions opts;
     opts.timeout_ms = 120000;              // a huge file decodes in a few seconds
     opts.max_output_bytes = kMaxDecodeStdout;
-    auto result = pulp::platform::ChildProcess::run(node->string(), argv, opts);
+    auto result = pulp::platform::ChildProcess::run(node.executable->string(), argv, opts);
     if (result.timed_out) {
         std::cerr << "Error: .fig decode timed out\n";
         return {124, false};

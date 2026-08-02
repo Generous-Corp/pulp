@@ -1,4 +1,5 @@
 #include <pulp/playback/program_compiler.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include "audio_renderer_internal.hpp"
 #include "budgeted_stable_merge.hpp"
@@ -20,6 +21,81 @@
 
 namespace pulp::playback {
 struct PlaybackProgramCompilerCore;
+
+CompileInvalidationInput::CompileInvalidationInput(
+    std::shared_ptr<const CompileContextRegistry> registry,
+    std::shared_ptr<const timeline::Project> snapshot, std::uint64_t document_revision,
+    timeline::DirtySet committed, std::shared_ptr<const timeline::Project> predecessor_snapshot,
+    bool baseline)
+    : committed_(std::move(committed)), snapshot_(std::move(snapshot)),
+      predecessor_snapshot_(std::move(predecessor_snapshot)), document_revision_(document_revision),
+      baseline_(baseline) {
+    if (registry) {
+        registry_generation_ = registry->generation_;
+        captured_registry_revision_ = registry->revision();
+        registry_snapshot_ = std::make_shared<const CompileContextRegistry>(*registry);
+    }
+}
+
+CompileInvalidationInput::CompileInvalidationInput(
+    std::shared_ptr<const CompileContextRegistry> registry, const timeline::CommitResult& committed)
+    : CompileInvalidationInput(std::move(registry), committed.snapshot, committed.revision.value,
+                               committed.dirty, committed.predecessor_snapshot, false) {}
+
+CompileInvalidationInput
+CompileInvalidationInput::baseline(std::shared_ptr<const CompileContextRegistry> registry,
+                                   std::shared_ptr<const timeline::Project> snapshot,
+                                   std::uint64_t document_revision) {
+    return CompileInvalidationInput(std::move(registry), std::move(snapshot), document_revision,
+                                    timeline::DirtySet{}, nullptr, true);
+}
+
+namespace {
+
+std::uint16_t groove_velocity(std::uint16_t authored, std::int32_t per_mille) noexcept {
+    const auto scaled =
+        (static_cast<std::uint64_t>(authored) * static_cast<std::uint64_t>(per_mille) + 500u) /
+        static_cast<std::uint64_t>(timeline::kGrooveUnitScale);
+    return static_cast<std::uint16_t>(
+        std::min<std::uint64_t>(scaled, std::numeric_limits<std::uint16_t>::max()));
+}
+
+bool same_registry_generation(const ProgramCompileRequest& lhs,
+                              const ProgramCompileRequest& rhs) noexcept {
+    if (lhs.invalidation.has_value() != rhs.invalidation.has_value())
+        return false;
+    if (!lhs.invalidation)
+        return true;
+    return lhs.invalidation->captured_registry_generation() ==
+               rhs.invalidation->captured_registry_generation() &&
+           lhs.invalidation->captured_registry_revision() ==
+               rhs.invalidation->captured_registry_revision();
+}
+
+void merge_track_policy_deltas(std::vector<TrackCompilePolicy>& retained,
+                               const std::vector<TrackCompilePolicy>& incoming) {
+    for (const auto& policy : incoming) {
+        const auto found =
+            std::lower_bound(retained.begin(), retained.end(), policy.track_id,
+                             [](const TrackCompilePolicy& value, timeline::ItemId id) {
+                                 return value.track_id < id;
+                             });
+        if (found != retained.end() && found->track_id == policy.track_id)
+            *found = policy;
+        else
+            retained.insert(found, policy);
+    }
+}
+
+} // namespace
+
+struct QueuedCompileRequest {
+    ProgramCompileRequest request;
+    std::uint64_t submission_epoch = 0;
+    std::vector<TrackCompilePolicy> policy_delta;
+    timeline::ItemId policy_project_id;
+    timeline::ItemId policy_sequence_id;
+};
 
 class ProgramCompilerTask final : public CompileTask {
   public:
@@ -51,7 +127,9 @@ class ProgramCompilerTask final : public CompileTask {
     void begin_track_note_modifier_sort();
 
     std::shared_ptr<PlaybackProgramCompilerCore> core_;
-    std::unique_ptr<ProgramCompileRequest> request_;
+    std::unique_ptr<QueuedCompileRequest> queued_;
+    ProgramCompileRequest* request_ = nullptr;
+    std::uint64_t submission_epoch_ = 0;
     const timeline::Sequence* sequence_ = nullptr;
     Stage stage_ = Stage::Capture;
     ProgramGeneration generation_ = 0;
@@ -106,6 +184,8 @@ struct PlaybackProgramCompilerCore
             status.latest_submitted_revision = store.live()->document_revision();
             status.latest_published_revision = store.live()->document_revision();
             status.latest_published_generation = store.live()->generation();
+            published_project = store.live_project();
+            latest_submitted_project = published_project;
         } else if (!bound) {
             status.has_error = true;
             status.last_error = {CompileErrorCode::CompilerAlreadyBound, {}, 0};
@@ -126,11 +206,19 @@ struct PlaybackProgramCompilerCore
         return accepted;
     }
 
-    bool publish_if_latest(std::uint64_t revision, std::shared_ptr<const PlaybackProgram> program) {
+    bool publish_if_latest(std::uint64_t submission_epoch,
+                           std::shared_ptr<const PlaybackProgram> program,
+                           const std::shared_ptr<const timeline::Project>& project,
+                           const std::optional<CompileInvalidationInput>& invalidation) {
         std::lock_guard lock(mutex);
-        if (status.latest_submitted_revision != revision)
+        if (latest_submission_epoch != submission_epoch)
             return false;
-        store.publish(std::move(program));
+        store.publish(std::move(program), project);
+        published_project = project;
+        published_context_registry_generation =
+            invalidation ? invalidation->registry_generation_ : nullptr;
+        published_context_registry_revision =
+            invalidation ? invalidation->captured_registry_revision() : 0;
         return true;
     }
 
@@ -144,11 +232,20 @@ struct PlaybackProgramCompilerCore
             CompileErrorCode::ExecutorUnavailable, {}, status.latest_submitted_revision};
         ++status.rejected_requests;
         status.latest_submitted_revision = status.latest_published_revision;
+        status.latest_submitted_epoch = status.latest_published_epoch;
+        latest_submitted_project = published_project;
+        latest_submitted_context_registry_generation = published_context_registry_generation;
+        latest_submitted_context_registry_revision = published_context_registry_revision;
     }
 
-    std::unique_ptr<ProgramCompileRequest> take_pending() {
+    std::unique_ptr<QueuedCompileRequest> take_pending() {
         std::lock_guard lock(mutex);
         status.active_tracks_completed = 0;
+        if (pending) {
+            active_track_policies = std::move(pending->policy_delta);
+            active_policy_project_id = pending->policy_project_id;
+            active_policy_sequence_id = pending->policy_sequence_id;
+        }
         return std::move(pending);
     }
 
@@ -158,7 +255,7 @@ struct PlaybackProgramCompilerCore
     }
 
     void finish(bool published, std::uint64_t revision, ProgramGeneration generation,
-                CompileError error = {}) {
+                std::uint64_t submission_epoch, CompileError error = {}) {
         bool reschedule = false;
         {
             std::lock_guard lock(mutex);
@@ -166,6 +263,7 @@ struct PlaybackProgramCompilerCore
             if (published) {
                 status.latest_published_revision = revision;
                 status.latest_published_generation = generation;
+                status.latest_published_epoch = submission_epoch;
                 status.has_error = false;
             } else if (error.code != CompileErrorCode::InvalidRequest || error.revision != 0) {
                 status.has_error = true;
@@ -177,6 +275,9 @@ struct PlaybackProgramCompilerCore
             } else {
                 status.busy = false;
             }
+            active_track_policies.clear();
+            active_policy_project_id = {};
+            active_policy_sequence_id = {};
         }
         if (reschedule)
             (void)dispatch();
@@ -186,12 +287,23 @@ struct PlaybackProgramCompilerCore
     CompileExecutor& executor;
     const std::chrono::microseconds coalescing_window;
     std::mutex mutex;
-    std::unique_ptr<ProgramCompileRequest> pending;
+    std::unique_ptr<QueuedCompileRequest> pending;
     CompilerStatus status;
     bool task_scheduled = false;
     bool accepting = true;
     const bool bound;
     OfflineStretchArtifactCache offline_stretch_cache;
+    std::shared_ptr<const detail::ContextRegistryGeneration> published_context_registry_generation;
+    std::uint64_t published_context_registry_revision = 0;
+    std::shared_ptr<const timeline::Project> published_project;
+    std::shared_ptr<const timeline::Project> latest_submitted_project;
+    std::shared_ptr<const detail::ContextRegistryGeneration>
+        latest_submitted_context_registry_generation;
+    std::uint64_t latest_submitted_context_registry_revision = 0;
+    std::uint64_t latest_submission_epoch = 0;
+    std::vector<TrackCompilePolicy> active_track_policies;
+    timeline::ItemId active_policy_project_id;
+    timeline::ItemId active_policy_sequence_id;
 };
 
 void ProgramCompilerTask::begin_track_automation() {
@@ -232,11 +344,13 @@ void ProgramCompilerTask::begin_track_audio_link() {
 
 CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budget) noexcept {
     if (!request_) {
-        request_ = core_->take_pending();
-        if (!request_) {
-            core_->finish(false, 0, 0);
+        queued_ = core_->take_pending();
+        if (!queued_) {
+            core_->finish(false, 0, 0, 0);
             return CompileTaskStatus::Complete;
         }
+        request_ = &queued_->request;
+        submission_epoch_ = queued_->submission_epoch;
         sequence_ = request_->project->find_sequence(request_->sequence_id);
         if (!sequence_)
             return fail({CompileErrorCode::InvalidStructure, request_->sequence_id,
@@ -497,6 +611,34 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail(
                     {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
             const auto* modifier = notes->modifier_for(note.id);
+            const auto* context_sequence =
+                lowered_clip.context_sequence_id.valid()
+                    ? request_->project->find_sequence(lowered_clip.context_sequence_id)
+                    : sequence_;
+            if (!context_sequence)
+                return fail({CompileErrorCode::InvalidStructure, lowered_clip.context_sequence_id,
+                             request_->document_revision});
+            const auto& groove = context_sequence->groove();
+            const auto context_onset =
+                lowered_clip.context_start + timebase::TickDuration{note.start.value};
+            const auto sounding_context_onset = groove.apply_timing(context_onset);
+            const auto displacement = sounding_context_onset - context_onset;
+            const auto authored_start = clip.start() + timebase::TickDuration{note.start.value};
+            const auto authored_end = clip.start() + timebase::TickDuration{note_end.value};
+            const auto shifted_start = authored_start + displacement;
+            const auto shifted_end = authored_end + displacement;
+            const auto sounding_start = std::max(shifted_start, clip.start());
+            const auto sounding_end = std::min(shifted_end, clip.end());
+            // Groove may push a boundary note completely outside its clip.
+            // Such a note has no audible span and contributes no modifier.
+            if (sounding_end <= sounding_start) {
+                ++work;
+                continue;
+            }
+            const auto sounding_duration =
+                timebase::TickDuration{sounding_end.value - sounding_start.value};
+            const auto velocity =
+                groove_velocity(note.velocity, groove.velocity_scale_at(context_onset));
             // Ratcheting is authored, not drawn, so it is a pure function of the
             // content and belongs at compile time. Probability and the pass
             // condition depend on which loop pass is playing, so they stay in
@@ -515,15 +657,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 // The last subdivision lands on the note's own end so a ratchet
                 // never drifts away from the authored duration.
                 const auto span_start =
-                    note.start.value +
-                    detail::ratchet_boundary(note.duration.value, repeat, repeats);
+                    detail::ratchet_boundary(sounding_duration.value, repeat, repeats);
                 const auto span_end =
                     repeat + 1 == repeats
-                        ? note_end.value
-                        : note.start.value +
-                              detail::ratchet_boundary(note.duration.value, repeat + 1, repeats);
-                const auto start_tick = clip.start() + timebase::TickDuration{span_start};
-                const auto end_tick = clip.start() + timebase::TickDuration{span_end};
+                        ? sounding_duration.value
+                        : detail::ratchet_boundary(sounding_duration.value, repeat + 1, repeats);
+                const auto start_tick = sounding_start + timebase::TickDuration{span_start};
+                const auto end_tick = sounding_start + timebase::TickDuration{span_end};
                 const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
                 const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
                 // A subdivision that collapses to nothing at this tempo cannot
@@ -532,10 +672,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     return fail(
                         {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
                 current_note_events_.push_back({start_sample, start_tick, clip.id(), note.id,
-                                                note.velocity, note.pitch, note.channel,
+                                                velocity, note.pitch, note.channel,
                                                 NoteProgramEventKind::On});
-                current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id,
-                                                note.velocity, note.pitch, note.channel,
+                current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id, velocity,
+                                                note.pitch, note.channel,
                                                 NoteProgramEventKind::Off});
             }
             ++work;
@@ -764,16 +904,17 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                 request_->sequence_id, request_->tempo_map, request_->audio_assets,
                                 request_->audio_limits, request_->automation_limits,
                                 request_->project->next_item_id(), std::move(tracks_)));
-        if (!core_->publish_if_latest(request_->document_revision, std::move(program)))
+        if (!core_->publish_if_latest(submission_epoch_, std::move(program), request_->project,
+                                      request_->invalidation))
             return fail({CompileErrorCode::StaleRevision, {}, request_->document_revision});
-        core_->finish(true, request_->document_revision, generation_);
+        core_->finish(true, request_->document_revision, generation_, submission_epoch_);
         return CompileTaskStatus::Complete;
     }
     return CompileTaskStatus::Pending;
 }
 
 CompileTaskStatus ProgramCompilerTask::fail(CompileError error) noexcept {
-    core_->finish(false, error.revision, 0, error);
+    core_->finish(false, error.revision, 0, submission_epoch_, error);
     return CompileTaskStatus::Complete;
 }
 
@@ -806,13 +947,32 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         request.document_revision == 0 || !request.automation_limits.valid() ||
         request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
         request.maximum_note_events_per_track == 0 ||
-        (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
+        (request.invalidation &&
+         (!request.invalidation->registry_snapshot_ ||
+          request.invalidation->snapshot_.get() != request.project.get() ||
+          request.invalidation->document_revision_ != request.document_revision ||
+          (request.invalidation->baseline_ && !request.dirty.all))) ||
+        (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty() &&
+         !request.invalidation))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     request.sample_rate = normalized_rate;
     const auto* sequence = request.project->find_sequence(request.sequence_id);
     if (!sequence)
         return reject(
             {CompileErrorCode::InvalidRequest, request.sequence_id, request.document_revision});
+    if (request.invalidation) {
+        const auto index = CompileInvalidationIndex::build(
+            *request.project, request.sequence_id, *request.invalidation->registry_snapshot_);
+        const auto resolved = resolve_dirty_tracks(*request.project, request.sequence_id,
+                                                   request.invalidation->committed_, index);
+        request.dirty.all = request.dirty.all || resolved.all;
+        // A committed removal legitimately names a track that is absent from
+        // this post-commit snapshot. Linking the new sequence drops its old
+        // program; only surviving resolved tracks need compilation.
+        for (const auto id : resolved.tracks)
+            if (sequence->find_track(id))
+                request.dirty.tracks.push_back(id);
+    }
     std::sort(request.dirty.tracks.begin(), request.dirty.tracks.end());
     request.dirty.tracks.erase(
         std::unique(request.dirty.tracks.begin(), request.dirty.tracks.end()),
@@ -843,6 +1003,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         request.dirty.tracks.end());
 
     bool dispatch = false;
+    std::uint64_t submitted_epoch = 0;
     {
         std::lock_guard lock(core_->mutex);
         if (!core_->accepting)
@@ -851,7 +1012,24 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                     ? CompileError{CompileErrorCode::InvalidRequest, {}, request.document_revision}
                     : CompileError{
                           CompileErrorCode::CompilerAlreadyBound, {}, request.document_revision});
-        if (request.document_revision <= core_->status.latest_submitted_revision) {
+        const auto incoming_registry_generation =
+            request.invalidation ? request.invalidation->registry_generation_ : nullptr;
+        const auto incoming_registry_revision =
+            request.invalidation ? request.invalidation->captured_registry_revision() : 0;
+        const bool registry_refresh =
+            request.invalidation.has_value() &&
+            request.document_revision == core_->status.latest_submitted_revision &&
+            // Pointer identity proves the immutable snapshot is exactly the
+            // submitted/live document, including after compiler replacement.
+            (core_->latest_submitted_project.get() == request.project.get() &&
+             (core_->latest_submitted_context_registry_generation.get() !=
+                  incoming_registry_generation.get() ||
+              core_->latest_submitted_context_registry_revision != incoming_registry_revision ||
+              request.invalidation->baseline_)) &&
+            request.dirty.all;
+        if (request.document_revision < core_->status.latest_submitted_revision ||
+            (request.document_revision == core_->status.latest_submitted_revision &&
+             !registry_refresh)) {
             ++core_->status.rejected_requests;
             const CompileError error{
                 CompileErrorCode::StaleRevision, {}, request.document_revision};
@@ -859,45 +1037,88 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
             core_->status.last_error = error;
             return runtime::Err(error);
         }
+        if (core_->latest_submission_epoch == std::numeric_limits<std::uint64_t>::max())
+            return runtime::Err(
+                CompileError{CompileErrorCode::GenerationExhausted, {}, request.document_revision});
         ++core_->status.submitted_requests;
         core_->status.latest_submitted_revision = request.document_revision;
-        if (core_->pending) {
-            ++core_->status.coalesced_requests;
-            auto dirty = std::move(core_->pending->dirty.tracks);
-            dirty.insert(dirty.end(), request.dirty.tracks.begin(), request.dirty.tracks.end());
-            std::sort(dirty.begin(), dirty.end());
-            dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
-            request.dirty.all = request.dirty.all || core_->pending->dirty.all ||
-                                core_->pending->sequence_id != request.sequence_id ||
-                                core_->pending->project->id() != request.project->id() ||
-                                core_->pending->tempo_map.get() != request.tempo_map.get() ||
-                                core_->pending->sample_rate != request.sample_rate ||
-                                core_->pending->audio_assets.get() != request.audio_assets.get() ||
-                                core_->pending->audio_limits != request.audio_limits;
-            request.dirty.tracks = std::move(dirty);
-
-            const bool same_policy_domain =
-                core_->pending->project->id() == request.project->id() &&
-                core_->pending->sequence_id == request.sequence_id;
-            if (same_policy_domain) {
-                // Policies are sparse deltas. Preserve pending deltas that have
-                // not reached publication; newest delta for a track wins.
-                auto policies = std::move(core_->pending->track_policies);
-                for (const auto& incoming : request.track_policies) {
-                    const auto found =
-                        std::lower_bound(policies.begin(), policies.end(), incoming.track_id,
-                                         [](const TrackCompilePolicy& value, timeline::ItemId id) {
-                                             return value.track_id < id;
-                                         });
-                    if (found != policies.end() && found->track_id == incoming.track_id)
-                        *found = incoming;
-                    else
-                        policies.insert(found, incoming);
-                }
+        core_->latest_submitted_project = request.project;
+        core_->latest_submitted_context_registry_generation = incoming_registry_generation;
+        core_->latest_submitted_context_registry_revision = incoming_registry_revision;
+        submitted_epoch = ++core_->latest_submission_epoch;
+        core_->status.latest_submitted_epoch = submitted_epoch;
+        if (request.invalidation && (core_->published_context_registry_generation.get() !=
+                                         request.invalidation->registry_generation_.get() ||
+                                     core_->published_context_registry_revision !=
+                                         request.invalidation->captured_registry_revision()))
+            request.dirty.all = true;
+        // Sparse reuse is valid only when this commit was reduced from the
+        // exact immutable snapshot currently published. Consecutive revision
+        // numbers and equal IDs do not prove lineage across restored forks.
+        if (request.invalidation && !request.invalidation->baseline_ &&
+            request.invalidation->predecessor_snapshot_.get() != core_->published_project.get())
+            request.dirty.all = true;
+        // A CommitResult describes one delta, not an arbitrary chain of skipped
+        // commits. If its predecessor is not the published revision, exact
+        // incremental reuse is unprovable; the cumulative snapshot is safe only
+        // as a full rebuild. Active/pending successors are also covered below.
+        if (request.invalidation &&
+            request.document_revision > core_->status.latest_published_revision &&
+            (core_->status.latest_published_revision == std::numeric_limits<std::uint64_t>::max() ||
+             request.document_revision != core_->status.latest_published_revision + 1))
+            request.dirty.all = true;
+        // Once a task has taken its request, its partial results can no longer
+        // be merged into a successor. The older task will be barred from
+        // publication by submission epoch, so compile the successor in full.
+        if (core_->task_scheduled && !core_->pending) {
+            request.dirty.all = true;
+            if (core_->active_policy_project_id == request.project->id() &&
+                core_->active_policy_sequence_id == request.sequence_id) {
+                auto policies = core_->active_track_policies;
+                merge_track_policy_deltas(policies, request.track_policies);
                 request.track_policies = std::move(policies);
             }
         }
-        core_->pending = std::make_unique<ProgramCompileRequest>(std::move(request));
+        if (core_->pending) {
+            ++core_->status.coalesced_requests;
+            auto& pending_request = core_->pending->request;
+            auto dirty = std::move(pending_request.dirty.tracks);
+            dirty.insert(dirty.end(), request.dirty.tracks.begin(), request.dirty.tracks.end());
+            std::sort(dirty.begin(), dirty.end());
+            dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
+            request.dirty.all = request.dirty.all || pending_request.dirty.all ||
+                                pending_request.sequence_id != request.sequence_id ||
+                                pending_request.project->id() != request.project->id() ||
+                                pending_request.tempo_map.get() != request.tempo_map.get() ||
+                                pending_request.sample_rate != request.sample_rate ||
+                                pending_request.audio_assets.get() != request.audio_assets.get() ||
+                                pending_request.audio_limits != request.audio_limits ||
+                                !same_registry_generation(pending_request, request);
+            request.dirty.tracks = std::move(dirty);
+
+            const bool same_policy_domain =
+                pending_request.project->id() == request.project->id() &&
+                pending_request.sequence_id == request.sequence_id;
+            if (same_policy_domain) {
+                // Policies are sparse deltas. Preserve pending deltas that have
+                // not reached publication; newest delta for a track wins.
+                auto policies = std::move(pending_request.track_policies);
+                merge_track_policy_deltas(policies, request.track_policies);
+                request.track_policies = std::move(policies);
+            }
+        }
+        request.track_policies.erase(
+            std::remove_if(request.track_policies.begin(), request.track_policies.end(),
+                           [&](const TrackCompilePolicy& policy) {
+                               return sequence->find_track(policy.track_id) == nullptr;
+                           }),
+            request.track_policies.end());
+        auto policy_delta = request.track_policies;
+        const auto policy_project_id = request.project->id();
+        const auto policy_sequence_id = request.sequence_id;
+        core_->pending = std::make_unique<QueuedCompileRequest>(
+            QueuedCompileRequest{std::move(request), submitted_epoch, std::move(policy_delta),
+                                 policy_project_id, policy_sequence_id});
         core_->status.busy = true;
         if (!core_->task_scheduled) {
             core_->task_scheduled = true;
@@ -907,7 +1128,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
     if (dispatch && !core_->dispatch())
         return runtime::Err(
             CompileError{CompileErrorCode::ExecutorUnavailable, {}, submitted_revision});
-    return runtime::Ok(CompileTicket{submitted_revision});
+    return runtime::Ok(CompileTicket{submitted_revision, submitted_epoch});
 }
 
 CompilerStatus PlaybackProgramCompiler::status() const {

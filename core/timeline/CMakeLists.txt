@@ -31,6 +31,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 # Standalone generator for the schema-drift gate: emits the canonical
-# JSON-Schema projection of the built-in registry (see tools/schema_drift_check.py).
+# JSON-Schema projection of the built-in registry (see
+# tools/scripts/schema_drift_check.py).
 add_executable(pulp-timeline-schema-emit tools/schema_emit_main.cpp)
 target_link_libraries(pulp-timeline-schema-emit PRIVATE pulp::timeline)

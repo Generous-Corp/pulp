@@ -1,4 +1,4 @@
-if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
+if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU AND TARGET pulp::inspect)
     # pulp-design-tool requires the GPU host. The design viewport pin +
     # aspect-locked uniform scale used to fit runtime-imported JSX into a
     # window are implemented only in MacGpuWindowHost (window_host_mac.mm,

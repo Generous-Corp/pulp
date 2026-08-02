@@ -14,7 +14,7 @@
 //!
 //! | `pulp trace <verb>`                    | Inspector method       |
 //! |----------------------------------------|------------------------|
-//! | `start [--categories …] [--out FILE]…` | `Trace.startSession`   |
+//! | `start [--categories …] [--ring-mb N]` | `Trace.startSession`   |
 //! | `stop`                                 | `Trace.stopSession`    |
 //! | `query "<SQL>" [--format …]`           | `Trace.query`          |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
@@ -42,36 +42,31 @@
 //! lives in the inspect adapter. The shell-out is what the MCP wrapper
 //! does too.
 //!
-//! # Reachability gate (off-by-default ergonomics)
+//! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! Every verb runs a quick `TcpStream::connect` against
-//! `127.0.0.1:<port>` first (default 9147, override via
-//! `PULP_INSPECTOR_PORT`). If nothing is listening we print a clear
-//! "no inspector running — start with `PULP_TRACE_SERVER=1
-//! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
-//! This catches the most common user mistake (forgetting to launch the
-//! host with tracing enabled) without making the user wait for the C++
-//! binary's own discovery + connect cycle to fail.
+//! `--session ID --instance ID --publication ID` selects one exact
+//! publication. An explicit
+//! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
+//! C++ client performs authenticated ephemeral discovery and the real protocol
+//! connection is the only connection opened. If no session is available it
+//! prints a clear explanation that live capture requires an explicitly owned
+//! source-checkout host which constructs `InspectorServer`, wires
+//! `DomainHandler`, and publishes authenticated discovery. Normal Pulp hosts do
+//! not start this endpoint, and `PULP_TRACE_SERVER` is not implemented.
 
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
-use crate::cmd::trace_open::{run_open, OpenArgs};
-use crate::cmd::trace_query::run_offline_query;
+use crate::cmd::trace_open::OpenArgs;
 use crate::error::{CliError, Result};
 
-/// Default inspector port — matches `inspect/src/inspector_server.cpp`
-/// `kDefaultPort` (and `motion::DEFAULT_INSPECTOR_PORT`). The C++ side
-/// also honours `PULP_INSPECTOR_PORT`; we honor the same env var here
-/// so a non-default host stays reachable.
-pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;
+pub use crate::cmd::trace_dispatch::dispatch;
+pub use crate::cmd::trace_doctor::{
+    resolve_trace_processor, TraceProcessorSource, TraceProcessorStatus,
+};
 
-/// Env var that overrides [`DEFAULT_INSPECTOR_PORT`]. Same name the
-/// C++ inspector server reads on startup.
-pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
+/// Optional explicit discovery filter understood by the wrapper.
+pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
 
 /// Output format for `pulp trace query`. JSON is the default because
 /// it is the easiest for agents to parse; humans reach for `table`.
@@ -153,9 +148,15 @@ pub struct GlobalFlags {
     /// `--json` — emit the raw inspector JSON instead of the
     /// pretty-printed default.
     pub json: bool,
-    /// Optional explicit port. Falls back to
-    /// `$PULP_INSPECTOR_PORT`, then [`DEFAULT_INSPECTOR_PORT`].
+    /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
+    /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
+    /// Exact session identity forwarded as `pulp inspect --session`.
+    pub session_id: Option<String>,
+    /// Exact instance identity forwarded as `pulp inspect --instance`.
+    pub instance_id: Option<String>,
+    /// Non-reusable publication generation forwarded as `--publication`.
+    pub publication_id: Option<String>,
 }
 
 /// `pulp trace start` flag set.
@@ -164,11 +165,8 @@ pub struct StartArgs {
     /// `--categories dsp,render,…` — the span categories to record.
     /// Empty means "let the inspector pick its default taxonomy".
     pub categories: Vec<String>,
-    /// `--out FILE.pftrace` — explicit output path for the flushed
-    /// trace. Empty means the inspector chooses a temp path.
-    pub out: Option<PathBuf>,
     /// `--ring-mb N` — in-process ring size in mebibytes. `None` means
-    /// the inspector's default (80MB).
+    /// the inspector's default (80MB); accepted values are 1 through 512.
     pub ring_mb: Option<u32>,
 }
 
@@ -211,16 +209,51 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             globals.json = true;
         } else if a == "--port" {
             i += 1;
-            let v = args.get(i).ok_or_else(|| {
-                CliError::BadUsage("--port requires a value".to_owned())
-            })?;
-            globals.port = Some(v.parse::<u16>().map_err(|_| {
-                CliError::BadUsage(format!("--port: invalid u16 value `{v}`"))
-            })?);
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage("--port requires a value".to_owned()))?;
+            let port = v
+                .parse::<u16>()
+                .map_err(|_| CliError::BadUsage(format!("--port: invalid u16 value `{v}`")))?;
+            if port == 0 {
+                return Err(CliError::BadUsage(
+                    "--port must be between 1 and 65535".to_owned(),
+                ));
+            }
+            globals.port = Some(port);
+        } else if a == "--session" || a == "--instance" || a == "--publication" {
+            i += 1;
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage(format!("{a} requires a value")))?;
+            if !crate::cmd::inspector::valid_session_identity(v) {
+                return Err(CliError::BadUsage(format!(
+                    "{a} must contain only ASCII letters, digits, `-`, or `_`"
+                )));
+            }
+            if a == "--session" {
+                globals.session_id = Some(v.clone());
+            } else if a == "--instance" {
+                globals.instance_id = Some(v.clone());
+            } else {
+                globals.publication_id = Some(v.clone());
+            }
         } else {
             rest.push(a.clone());
         }
         i += 1;
+    }
+    if globals.session_id.is_some() != globals.instance_id.is_some() {
+        return Err(CliError::BadUsage(
+            "--session and --instance must be supplied together".to_owned(),
+        ));
+    }
+    if globals.publication_id.is_some()
+        && (globals.session_id.is_none() || globals.instance_id.is_none())
+    {
+        return Err(CliError::BadUsage(
+            "--publication requires --session and --instance".to_owned(),
+        ));
     }
 
     let Some(verb) = rest.first() else {
@@ -230,19 +263,28 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     match verb.as_str() {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "start" => parse_start(&rest[1..]).map(|s| (s, globals)),
-        "stop" => Ok((Sub::Stop, globals)),
+        "stop" => no_args("stop", &rest[1..]).map(|()| (Sub::Stop, globals)),
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => Ok((Sub::Snapshot, globals)),
+        "snapshot" => no_args("snapshot", &rest[1..]).map(|()| (Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
-        "doctor" => Ok((Sub::Doctor, globals)),
-        "fetch" => Ok((Sub::Fetch, globals)),
+        "doctor" => no_args("doctor", &rest[1..]).map(|()| (Sub::Doctor, globals)),
+        "fetch" => no_args("fetch", &rest[1..]).map(|()| (Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
-            Ok((preset_sub(verb), globals))
+            no_args(verb, &rest[1..]).map(|()| (preset_sub(verb), globals))
         }
         _ => Err(CliError::UnknownSubcommand),
     }
+}
+
+fn no_args(verb: &str, args: &[String]) -> Result<()> {
+    if let Some(argument) = args.first() {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace {verb}: unexpected argument `{argument}`"
+        )));
+    }
+    Ok(())
 }
 
 /// Build a [`Sub::Query`] for a named preset verb.
@@ -263,9 +305,7 @@ fn parse_start(args: &[String]) -> Result<Sub> {
             "--categories" | "--category" => {
                 i += 1;
                 let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage(
-                        "--categories requires a value".to_owned(),
-                    )
+                    CliError::BadUsage("--categories requires a value".to_owned())
                 })?;
                 s.categories = v
                     .split(',')
@@ -275,22 +315,26 @@ fn parse_start(args: &[String]) -> Result<Sub> {
                     .collect();
             }
             "--out" => {
-                i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--out requires a path".to_owned())
-                })?;
-                s.out = Some(PathBuf::from(v));
+                return Err(CliError::BadUsage(
+                    "pulp trace start --out is unavailable: authenticated \
+                     inspector clients cannot choose a host filesystem path"
+                        .to_owned(),
+                ));
             }
             "--ring-mb" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--ring-mb requires a value".to_owned())
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--ring-mb requires a value".to_owned()))?;
+                let ring_mb = v.parse::<u32>().map_err(|_| {
+                    CliError::BadUsage(format!("--ring-mb: invalid u32 value `{v}`"))
                 })?;
-                s.ring_mb = Some(v.parse::<u32>().map_err(|_| {
-                    CliError::BadUsage(format!(
-                        "--ring-mb: invalid u32 value `{v}`"
-                    ))
-                })?);
+                if !(1..=512).contains(&ring_mb) {
+                    return Err(CliError::BadUsage(
+                        "--ring-mb must be between 1 and 512".to_owned(),
+                    ));
+                }
+                s.ring_mb = Some(ring_mb);
             }
             other => {
                 return Err(CliError::BadUsage(format!(
@@ -310,28 +354,26 @@ fn parse_query(args: &[String]) -> Result<Sub> {
         match args[i].as_str() {
             "--preset" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--preset requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--preset requires a value".to_owned()))?;
                 q.preset = Some(v.clone());
             }
             "--format" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--format requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--format requires a value".to_owned()))?;
                 q.format = QueryFormat::parse(v).ok_or_else(|| {
-                    CliError::BadUsage(format!(
-                        "--format: expected json|table|csv, got `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--format: expected json|table|csv, got `{v}`"))
                 })?;
                 q.format_set = true;
             }
             "--trace" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--trace requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--trace requires a value".to_owned()))?;
                 q.trace = Some(PathBuf::from(v));
             }
             other if other.starts_with("--") => {
@@ -343,8 +385,7 @@ fn parse_query(args: &[String]) -> Result<Sub> {
                 // First bare positional is the SQL string.
                 if q.sql.is_some() {
                     return Err(CliError::BadUsage(
-                        "pulp trace query: only one SQL string is allowed"
-                            .to_owned(),
+                        "pulp trace query: only one SQL string is allowed".to_owned(),
                     ));
                 }
                 q.sql = Some(args[i].clone());
@@ -354,14 +395,12 @@ fn parse_query(args: &[String]) -> Result<Sub> {
     }
     if q.sql.is_some() && q.preset.is_some() {
         return Err(CliError::BadUsage(
-            "pulp trace query: pass a SQL string OR --preset, not both"
-                .to_owned(),
+            "pulp trace query: pass a SQL string OR --preset, not both".to_owned(),
         ));
     }
     if q.sql.is_none() && q.preset.is_none() {
         return Err(CliError::BadUsage(
-            "pulp trace query: missing SQL string (or --preset <name>)"
-                .to_owned(),
+            "pulp trace query: missing SQL string (or --preset <name>)".to_owned(),
         ));
     }
     Ok(Sub::Query(q))
@@ -369,9 +408,7 @@ fn parse_query(args: &[String]) -> Result<Sub> {
 
 fn parse_explain(args: &[String]) -> Result<Sub> {
     let question = args.first().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp trace explain: missing \"<question>\"".to_owned(),
-        )
+        CliError::BadUsage("pulp trace explain: missing \"<question>\"".to_owned())
     })?;
     Ok(Sub::Explain {
         question: question.clone(),
@@ -389,14 +426,10 @@ fn parse_open(args: &[String]) -> Result<Sub> {
             "--keep-alive-seconds" => {
                 i += 1;
                 let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage(
-                        "--keep-alive-seconds requires a value".to_owned(),
-                    )
+                    CliError::BadUsage("--keep-alive-seconds requires a value".to_owned())
                 })?;
                 keep_alive_secs = v.parse::<u64>().map_err(|_| {
-                    CliError::BadUsage(format!(
-                        "--keep-alive-seconds: invalid u64 value `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--keep-alive-seconds: invalid u64 value `{v}`"))
                 })?;
             }
             other if other.starts_with("--") => {
@@ -407,8 +440,7 @@ fn parse_open(args: &[String]) -> Result<Sub> {
             _ => {
                 if file.is_some() {
                     return Err(CliError::BadUsage(
-                        "pulp trace open: only one .pftrace file is allowed"
-                            .to_owned(),
+                        "pulp trace open: only one .pftrace file is allowed".to_owned(),
                     ));
                 }
                 file = Some(PathBuf::from(&args[i]));
@@ -416,11 +448,8 @@ fn parse_open(args: &[String]) -> Result<Sub> {
         }
         i += 1;
     }
-    let file = file.ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp trace open: missing <file.pftrace>".to_owned(),
-        )
-    })?;
+    let file = file
+        .ok_or_else(|| CliError::BadUsage("pulp trace open: missing <file.pftrace>".to_owned()))?;
     Ok(Sub::Open(OpenArgs {
         file,
         no_browser,
@@ -435,9 +464,7 @@ fn parse_open(args: &[String]) -> Result<Sub> {
 pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
     match sub {
         Sub::Help => None,
-        Sub::Start(s) => {
-            Some(("Trace.startSession", build_start_params(s)))
-        }
+        Sub::Start(s) => Some(("Trace.startSession", build_start_params(s))),
         Sub::Stop => Some(("Trace.stopSession", "{}".to_owned())),
         Sub::Query(q) => Some(("Trace.query", build_query_params(q))),
         Sub::Snapshot => Some(("Trace.snapshot", "{}".to_owned())),
@@ -469,15 +496,6 @@ fn build_start_params(s: &StartArgs) -> String {
             buf.push('"');
         }
         buf.push(']');
-        first = false;
-    }
-    if let Some(ref out) = s.out {
-        if !first {
-            buf.push(',');
-        }
-        buf.push_str("\"out_path\":\"");
-        buf.push_str(&escape_json(&out.to_string_lossy()));
-        buf.push('"');
         first = false;
     }
     if let Some(ring_mb) = s.ring_mb {
@@ -517,533 +535,67 @@ fn build_query_params(q: &QueryArgs) -> String {
 /// verbatim. The inspector's `choc::json::parse` rejects anything that
 /// isn't valid JSON afterwards, which gives a clearer error than a
 /// partial escape would.
-fn escape_json(s: &str) -> String {
+pub(crate) fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Trait so tests can swap out the inspector "talker" without spawning
-/// a real `pulp-cpp` subprocess. Production code uses the
-/// [`SystemInspector`] impl below.
-pub trait InspectorTalker {
-    /// Send `method` + `params_json` to the inspector and return the
-    /// raw response body (the inspector's JSON result).
-    ///
-    /// # Errors
-    ///
-    /// Implementations return [`CliError::Other`] with a human message
-    /// on transport failures (binary not on PATH, port not listening,
-    /// command exited non-zero).
-    fn call(&self, port: u16, method: &str, params_json: &str)
-        -> Result<String>;
-}
+pub use crate::cmd::inspector::InspectorTalker;
 
-/// Production talker — checks reachability via `TcpStream::connect`
-/// against `127.0.0.1:<port>` first, then shells out to `pulp-cpp
+/// Production talker — shells out to `pulp-cpp
 /// inspect --command METHOD --params JSON`. Captures stdout and
 /// returns it verbatim.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemInspector;
 
 impl InspectorTalker for SystemInspector {
-    fn call(
+    fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String> {
+        crate::cmd::inspector::call("trace", port, method, params_json)
+    }
+
+    fn call_selected(
         &self,
         port: u16,
+        session_id: &str,
+        instance_id: &str,
+        publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // Reachability probe — fail fast with a clear message before
-        // the C++ binary's slower discovery+connect cycle would.
-        if !inspector_reachable(port) {
-            return Err(CliError::Other(no_inspector_hint(port)));
-        }
-        let bin = resolve_inspect_binary().ok_or_else(|| {
-            CliError::Other(
-                "pulp trace: could not find `pulp-cpp` or `pulp` binary \
-                 on PATH (needed to talk to the inspector). Install / \
-                 build the CLI first."
-                    .to_owned(),
-            )
-        })?;
-        let output = Command::new(&bin)
-            .arg("inspect")
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--command")
-            .arg(method)
-            .arg("--params")
-            .arg(params_json)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "pulp trace: failed to spawn {}: {}",
-                    bin.display(),
-                    e
-                ))
-            })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(CliError::Other(format!(
-                "pulp trace: `{} inspect --command {}` exited with {:?}: {}",
-                bin.display(),
-                method,
-                output.status.code(),
-                stderr.trim(),
-            )));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        let selection = crate::cmd::inspector::SessionSelection {
+            session_id: session_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+            publication_id: publication_id.to_owned(),
+        };
+        crate::cmd::inspector::call_selected("trace", port, Some(&selection), method, params_json)
     }
 }
 
-/// Resolve the inspect-capable binary. Preference order:
-///
-/// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
-/// 2. A local in-tree dev build.
-/// 3. `pulp` on `$PATH`, relying on its fallthrough to `pulp-cpp`.
-fn resolve_inspect_binary() -> Option<PathBuf> {
-    if let Some(p) = crate::proc::which("pulp-cpp") {
-        return Some(p);
-    }
-    for candidate in [
-        "build/tools/cli/pulp-cpp",
-        "build/tools/cli/pulp",
-        "build/pulp",
-    ] {
-        let p = PathBuf::from(candidate);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    crate::proc::which("pulp")
-}
-
-/// Probe whether something is listening on `127.0.0.1:<port>`. Short
-/// timeout (250ms) so the wait is invisible to the user when the
-/// inspector is alive on the local box.
-#[must_use]
-pub fn inspector_reachable(port: u16) -> bool {
-    let addr = format!("127.0.0.1:{port}");
-    let parsed = match addr.parse() {
-        Ok(p) => p,
-        Err(_) => return false,
+/// The clear "no inspector" hint string surfaced after an authenticated
+/// inspector request fails and in `pulp trace` help text.
+pub(crate) fn no_inspector_hint(port: u16) -> String {
+    let target = if port == 0 {
+        "authenticated discovery".to_owned()
+    } else {
+        format!("port {port}")
     };
-    TcpStream::connect_timeout(&parsed, Duration::from_millis(250)).is_ok()
-}
-
-/// The clear "no inspector" hint string — surfaced both on
-/// reachability failure and in `pulp trace` help text.
-fn no_inspector_hint(port: u16) -> String {
     format!(
-        "pulp trace: no inspector listening on port {port}.\n\
-         Start the host with the tracing server enabled, e.g.:\n  \
-         PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview\n\
+        "pulp trace: no inspector available through {target}.\n\
+         Live capture requires an explicitly owned source-checkout host that\n\
+         constructs InspectorServer, wires DomainHandler, and publishes\n\
+         authenticated discovery. Normal Pulp hosts do not start this endpoint;\n\
+         PULP_TRACE_SERVER is not implemented.\n\
          (override the port with --port N or $PULP_INSPECTOR_PORT)."
     )
 }
 
-/// Resolve the effective port from CLI flags + env.
-#[must_use]
-pub fn resolve_port(flags: &GlobalFlags) -> u16 {
-    if let Some(p) = flags.port {
-        return p;
-    }
-    if let Ok(v) = std::env::var(INSPECTOR_PORT_ENV) {
-        if let Ok(p) = v.parse::<u16>() {
-            return p;
-        }
-    }
-    DEFAULT_INSPECTOR_PORT
+/// Resolve the explicit port filter from CLI flags + env. Zero delegates
+/// selection to authenticated discovery. A configured but invalid environment
+/// filter is an error rather than permission to select a different session.
+pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
+    crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
-/// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure glue
-/// — pulls the inspector call, optionally prints the inspector JSON or
-/// the pretty-printed form, and returns.
-///
-/// # Errors
-///
-/// Surfaces any [`CliError`] the talker emits, plus [`CliError::Io`]
-/// on writer failure.
-pub fn dispatch<T: InspectorTalker>(
-    sub: &Sub,
-    flags: &GlobalFlags,
-    talker: &T,
-    out: &mut impl Write,
-) -> Result<()> {
-    let port = resolve_port(flags);
-    if matches!(sub, Sub::Help) {
-        return print_help(out).map_err(io_err);
-    }
-    if matches!(sub, Sub::Doctor) {
-        return run_doctor(port, flags.json, talker, out);
-    }
-    if let Sub::Open(args) = sub {
-        return run_open(args, flags.json, out);
-    }
-    if matches!(sub, Sub::Fetch) {
-        return crate::cmd::trace_fetch::run_fetch(flags.json, out);
-    }
-    // `query --trace FILE` runs offline against a flushed `.pftrace` via
-    // trace_processor; without `--trace` it falls through to the live
-    // inspector `Trace.query` path below.
-    if let Sub::Query(q) = sub {
-        if q.trace.is_some() {
-            return run_offline_query(
-                q,
-                &resolve_trace_processor(),
-                flags.json,
-                out,
-            );
-        }
-    }
-    let Some((method, params)) = to_inspector_call(sub) else {
-        // The `Help` arm above already returned. This stays here so
-        // adding a new `Sub` variant without a matching
-        // `to_inspector_call` arm fails loudly instead of no-oping.
-        return Err(CliError::Other(format!(
-            "pulp trace: no inspector mapping for {sub:?}"
-        )));
-    };
-    let response = talker.call(port, method, &params)?;
-
-    if flags.json {
-        writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
-    } else {
-        write_pretty(out, sub, &response).map_err(io_err)?;
-    }
-    Ok(())
-}
-
-/// Pretty-printer per verb. Falls back to the raw JSON when the
-/// response doesn't look like the expected shape — the inspector is
-/// the source of truth, we don't try to second-guess it.
-fn write_pretty(
-    out: &mut impl Write,
-    sub: &Sub,
-    response: &str,
-) -> std::io::Result<()> {
-    let trimmed = response.trim();
-    match sub {
-        Sub::Start(_) => {
-            if let Some(path) = extract_str(trimmed, "out_path") {
-                writeln!(out, "tracing started — writing to {path}")?;
-                writeln!(out, "  stop with: pulp trace stop")?;
-            } else {
-                writeln!(out, "tracing started")?;
-                writeln!(out, "  raw: {trimmed}")?;
-            }
-        }
-        Sub::Stop => {
-            // The headline of `stop` is the `.pftrace` path — pull it
-            // out so the user can hand it to ui.perfetto.dev.
-            if let Some(path) = extract_str(trimmed, "out_path") {
-                writeln!(out, "{path}")?;
-            } else {
-                writeln!(out, "{trimmed}")?;
-            }
-        }
-        Sub::Query(_) => {
-            // Query results are data — print the inspector body as-is
-            // (JSON by default, or the pre-formatted table/csv the
-            // inspector rendered).
-            writeln!(out, "{trimmed}")?;
-        }
-        Sub::Snapshot => {
-            writeln!(out, "Trace subsystem snapshot")?;
-            writeln!(out, "  raw: {trimmed}")?;
-        }
-        Sub::Explain { .. } => {
-            // The narrated answer lives in `explanation`; surface it
-            // as prose, not JSON, since that is the L1 product.
-            if let Some(text) = extract_str(trimmed, "explanation") {
-                writeln!(out, "{text}")?;
-            } else {
-                writeln!(out, "{trimmed}")?;
-            }
-        }
-        Sub::Help => {
-            writeln!(out, "{trimmed}")?;
-        }
-        // Doctor and Open are handled in dispatch() and never reach
-        // write_pretty; these arms keep the match exhaustive.
-        Sub::Doctor | Sub::Open(_) | Sub::Fetch => {
-            writeln!(out, "{trimmed}")?;
-        }
-    }
-    Ok(())
-}
-
-/// Tiny grep for `"<key>":"<value>"` in a flat JSON object — used by
-/// `write_pretty` to pull the `.pftrace` path / narrated explanation.
-/// We don't pull serde_json in here because the response shapes are
-/// stable and a substring match is plenty for a pretty-print. Handles
-/// the `\"` / `\\` escapes the inspector emits.
-fn extract_str(json: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\":");
-    let idx = json.find(&needle)?;
-    let tail = &json[idx + needle.len()..];
-    let tail = tail.trim_start();
-    let mut chars = tail.char_indices();
-    // Expect an opening quote.
-    if chars.next().map(|(_, c)| c) != Some('"') {
-        return None;
-    }
-    let mut result = String::new();
-    let mut escaped = false;
-    for (_, c) in chars {
-        if escaped {
-            result.push(c);
-            escaped = false;
-        } else if c == '\\' {
-            escaped = true;
-        } else if c == '"' {
-            return Some(result);
-        } else {
-            result.push(c);
-        }
-    }
-    None
-}
-
-/// Extract a boolean field `"<key>":true|false` from a flat JSON object.
-/// Companion to [`extract_str`] with the same rationale (stable inspector
-/// response shapes make a substring match plenty).
-fn extract_bool(json: &str, key: &str) -> Option<bool> {
-    let needle = format!("\"{key}\":");
-    let idx = json.find(&needle)?;
-    let tail = json[idx + needle.len()..].trim_start();
-    if tail.starts_with("true") {
-        Some(true)
-    } else if tail.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Env var overriding the `trace_processor` binary path.
-const TRACE_PROCESSOR_ENV: &str = "PULP_TRACE_PROCESSOR";
-
-/// Which tier resolved a `trace_processor` binary (or that none did).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TraceProcessorSource {
-    /// `$PULP_TRACE_PROCESSOR` pointed at an existing file.
-    Env,
-    /// The pinned, Pulp-fetched `trace_processor_shell` in the Pulp home.
-    Pinned,
-    /// Found on `$PATH`.
-    Path,
-    /// Not found anywhere.
-    None,
-}
-
-/// Result of probing for a usable `trace_processor` / `trace_processor_shell`.
-#[derive(Debug, Clone)]
-pub struct TraceProcessorStatus {
-    /// Resolved path, or `None` when unavailable.
-    pub path: Option<PathBuf>,
-    /// Which tier resolved it.
-    pub source: TraceProcessorSource,
-}
-
-impl TraceProcessorStatus {
-    /// Whether a usable binary was found.
-    #[must_use]
-    pub fn available(&self) -> bool {
-        self.path.is_some()
-    }
-
-    fn source_str(&self) -> &'static str {
-        match self.source {
-            TraceProcessorSource::Env => "env",
-            TraceProcessorSource::Pinned => "pinned",
-            TraceProcessorSource::Path => "path",
-            TraceProcessorSource::None => "none",
-        }
-    }
-}
-
-/// Probe for a usable `trace_processor` binary. Resolution order:
-/// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → the pinned,
-/// Pulp-fetched `trace_processor_shell` in the Pulp home (populated by
-/// `pulp trace fetch`) → a `trace_processor_shell` / `trace_processor` on
-/// `$PATH`. The pinned tier makes offline query zero-install without a
-/// surprise download: `query` uses it only once fetched.
-#[must_use]
-pub fn resolve_trace_processor() -> TraceProcessorStatus {
-    if let Ok(v) = std::env::var(TRACE_PROCESSOR_ENV) {
-        let p = PathBuf::from(&v);
-        if p.is_file() {
-            return TraceProcessorStatus {
-                path: Some(p),
-                source: TraceProcessorSource::Env,
-            };
-        }
-    }
-    if let Some(p) = crate::cmd::trace_fetch::pinned_binary_if_present() {
-        return TraceProcessorStatus {
-            path: Some(p),
-            source: TraceProcessorSource::Pinned,
-        };
-    }
-    for name in ["trace_processor_shell", "trace_processor"] {
-        if let Some(p) = crate::proc::which(name) {
-            return TraceProcessorStatus {
-                path: Some(p),
-                source: TraceProcessorSource::Path,
-            };
-        }
-    }
-    TraceProcessorStatus {
-        path: None,
-        source: TraceProcessorSource::None,
-    }
-}
-
-/// Run `pulp trace doctor`: aggregate client-side readiness probes
-/// (inspector reachability, `trace_processor` availability) with the
-/// inspector's own `Trace.snapshot` facts, then print a report.
-///
-/// # Errors
-///
-/// Only writer failures ([`CliError::Io`]). An unreachable inspector or a
-/// missing `trace_processor` is reported *in* the doctor output, not as an
-/// error — surfacing that is the whole point of a doctor.
-pub fn run_doctor<T: InspectorTalker>(
-    port: u16,
-    json: bool,
-    talker: &T,
-    out: &mut impl Write,
-) -> Result<()> {
-    let reachable = inspector_reachable(port);
-    // Only ask the inspector for its snapshot when we know it is up;
-    // otherwise the talker's own reachability probe would just re-fail.
-    let snapshot = if reachable {
-        talker.call(port, "Trace.snapshot", "{}").ok()
-    } else {
-        None
-    };
-    let tp = resolve_trace_processor();
-    let report =
-        build_doctor_report(port, reachable, snapshot.as_deref(), &tp, json);
-    write!(out, "{report}").map_err(io_err)
-}
-
-fn json_bool_opt(v: Option<bool>) -> &'static str {
-    match v {
-        Some(true) => "true",
-        Some(false) => "false",
-        None => "null",
-    }
-}
-
-fn json_str_opt(v: Option<&str>) -> String {
-    match v {
-        Some(s) => format!("\"{}\"", escape_json(s)),
-        None => "null".to_owned(),
-    }
-}
-
-/// Build the doctor report (human text or `--json`). Pure: every probe
-/// already ran in [`run_doctor`], so this is fully unit-testable.
-///
-/// `compiled_in` / `active` / `last_trace_path` come from the inspector's
-/// `Trace.snapshot`; they are `None` (JSON `null` / "unknown") when the
-/// inspector is unreachable. `ready_to_capture` needs a reachable inspector
-/// with tracing compiled in; `ready_to_query` needs a `trace_processor`
-/// plus a captured trace to run over.
-#[must_use]
-pub fn build_doctor_report(
-    port: u16,
-    reachable: bool,
-    snapshot_json: Option<&str>,
-    tp: &TraceProcessorStatus,
-    json: bool,
-) -> String {
-    let compiled_in = snapshot_json.and_then(|s| extract_bool(s, "compiled_in"));
-    let active = snapshot_json.and_then(|s| extract_bool(s, "active"));
-    let last_trace_path =
-        snapshot_json.and_then(|s| extract_str(s, "last_trace_path"));
-
-    let ready_to_capture = reachable && compiled_in.unwrap_or(false);
-    let ready_to_query = tp.available() && last_trace_path.is_some();
-
-    if json {
-        let tp_path = tp.path.as_deref().and_then(std::path::Path::to_str);
-        return format!(
-            "{{\"port\":{port},\
-             \"inspector_reachable\":{reachable},\
-             \"compiled_in\":{},\
-             \"active\":{},\
-             \"last_trace_path\":{},\
-             \"trace_processor_available\":{},\
-             \"trace_processor_path\":{},\
-             \"trace_processor_source\":\"{}\",\
-             \"ready_to_capture\":{ready_to_capture},\
-             \"ready_to_query\":{ready_to_query}}}\n",
-            json_bool_opt(compiled_in),
-            json_bool_opt(active),
-            json_str_opt(last_trace_path.as_deref()),
-            tp.available(),
-            json_str_opt(tp_path),
-            tp.source_str(),
-        );
-    }
-
-    let mut b = String::with_capacity(512);
-    b.push_str("pulp trace doctor\n");
-    b.push_str(&format!(
-        "  inspector (port {port}) ... {}\n",
-        if reachable { "reachable" } else { "UNREACHABLE" }
-    ));
-    b.push_str(&format!(
-        "  tracing compiled in ..... {}\n",
-        match compiled_in {
-            Some(true) => "yes",
-            Some(false) => "NO (rebuild with -DPULP_TRACING=ON)",
-            None => "unknown (inspector unreachable)",
-        }
-    ));
-    if let Some(a) = active {
-        b.push_str(&format!(
-            "  session active .......... {}\n",
-            if a { "yes" } else { "no" }
-        ));
-    }
-    b.push_str(&format!(
-        "  last trace .............. {}\n",
-        last_trace_path.as_deref().unwrap_or("none captured yet")
-    ));
-    b.push_str(&format!(
-        "  trace_processor ......... {}\n",
-        match tp.source {
-            TraceProcessorSource::Env => "found (via $PULP_TRACE_PROCESSOR)",
-            TraceProcessorSource::Pinned => "found (pinned, fetched by Pulp)",
-            TraceProcessorSource::Path => "found (on $PATH)",
-            TraceProcessorSource::None =>
-                "MISSING (run `pulp trace fetch` for the pinned build, \
-                 set $PULP_TRACE_PROCESSOR, or install trace_processor_shell)",
-        }
-    ));
-    b.push('\n');
-    b.push_str(&format!(
-        "  ready to capture a trace . {}\n",
-        if ready_to_capture { "yes" } else { "no" }
-    ));
-    b.push_str(&format!(
-        "  ready to query offline ... {}\n",
-        if ready_to_query { "yes" } else { "no" }
-    ));
-    if !reachable {
-        b.push('\n');
-        b.push_str(&no_inspector_hint(port));
-        b.push('\n');
-    }
-    b
-}
-
-fn print_help(out: &mut impl Write) -> std::io::Result<()> {
+pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "pulp trace — wrappers around the inspector Trace.* protocol\n"
@@ -1052,7 +604,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Lifecycle verbs:")?;
     writeln!(
         out,
-        "  start [--categories dsp,render,…] [--out FILE.pftrace] [--ring-mb N]"
+        "  start [--categories dsp,render,…] [--ring-mb 1..512]"
     )?;
     writeln!(
         out,
@@ -1067,21 +619,24 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Query verbs:")?;
     writeln!(
         out,
-        "  query \"<sql>\" [--format json|table|csv]   Run SQL (Trace.query; JSON default)"
-    )?;
-    writeln!(
-        out,
         "  query \"<sql>\" --trace FILE.pftrace        Run SQL offline via trace_processor"
     )?;
     writeln!(
         out,
-        "  query --preset <name>         Run a named trace-stdlib preset"
+        "  query \"<sql>\" [--format json|table|csv]   Reserved live command; currently unavailable"
+    )?;
+    writeln!(
+        out,
+        "  query --preset <name>         Reserved live command; currently unavailable"
     )?;
     writeln!(
         out,
         "  slowest-frames                Frames over the vsync budget, worst first"
     )?;
-    writeln!(out, "  xruns                         Audio xrun / deadline-miss events")?;
+    writeln!(
+        out,
+        "  xruns                         Audio xrun / deadline-miss events"
+    )?;
     writeln!(
         out,
         "  dsp-hotspots                  Per-node DSP cost, most expensive first"
@@ -1094,7 +649,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Investigation:")?;
     writeln!(
         out,
-        "  explain \"<question>\"          One-shot narrated root cause (Trace.explain)"
+        "  explain \"<question>\"          Reserved live command; currently unavailable"
     )?;
     writeln!(out)?;
     writeln!(out, "Readiness:")?;
@@ -1118,675 +673,42 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(out)?;
     writeln!(out, "Global flags:")?;
-    writeln!(out, "  --json                        Print the raw inspector JSON response")?;
     writeln!(
         out,
-        "  --port N                      Override the inspector port (default 9147 / $PULP_INSPECTOR_PORT)\n"
+        "  --json                        Print the raw inspector JSON response"
     )?;
     writeln!(
         out,
-        "Example: PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &"
+        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)"
     )?;
-    writeln!(out, "         pulp trace start --categories dsp,render")?;
-    writeln!(out, "         pulp trace stop        # → /tmp/pulp-<ts>.pftrace")?;
     writeln!(
         out,
-        "         pulp trace explain \"why is my plugin slow to open?\""
+        "  --session ID --instance ID --publication ID\n\
+                                        Select one exact authenticated publication\n"
+    )?;
+    writeln!(
+        out,
+        "Live capture requires a custom host owning InspectorServer + DomainHandler."
+    )?;
+    writeln!(out, "After that host publishes discovery:")?;
+    writeln!(out, "  pulp trace start --categories dsp,render")?;
+    writeln!(
+        out,
+        "  pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION"
+    )?;
+    writeln!(
+        out,
+        "  pulp trace explain \"why is my plugin slow to open?\" --session SESSION \
+         --instance INSTANCE --publication PUBLICATION"
     )?;
     Ok(())
 }
 
 #[inline]
-fn io_err(e: std::io::Error) -> CliError {
+pub(crate) fn io_err(e: std::io::Error) -> CliError {
     CliError::io(Path::new("<stdout>"), e)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn s(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|x| (*x).to_owned()).collect()
-    }
-
-    #[test]
-    fn parse_empty_yields_help() {
-        let (sub, _g) = parse(&[]).unwrap();
-        assert!(matches!(sub, Sub::Help));
-    }
-
-    #[test]
-    fn parse_help_aliases() {
-        for a in &["help", "--help", "-h"] {
-            let (sub, _) = parse(&s(&[a])).unwrap();
-            assert!(matches!(sub, Sub::Help), "{a}");
-        }
-    }
-
-    #[test]
-    fn parse_global_json_in_any_position() {
-        let (_sub, g) = parse(&s(&["--json", "snapshot"])).unwrap();
-        assert!(g.json);
-        let (_sub, g) = parse(&s(&["snapshot", "--json"])).unwrap();
-        assert!(g.json);
-    }
-
-    #[test]
-    fn parse_port_override() {
-        let (_sub, g) = parse(&s(&["--port", "9200", "snapshot"])).unwrap();
-        assert_eq!(g.port, Some(9200));
-    }
-
-    #[test]
-    fn parse_port_rejects_garbage() {
-        let err = parse(&s(&["--port", "nope", "snapshot"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_unknown_verb_is_unknown() {
-        let err = parse(&s(&["blarg"])).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand));
-    }
-
-    #[test]
-    fn parse_start_collects_categories_out_and_ring() {
-        let (sub, _) = parse(&s(&[
-            "start",
-            "--categories",
-            "dsp, render ,gpu",
-            "--out",
-            "/tmp/x.pftrace",
-            "--ring-mb",
-            "128",
-        ]))
-        .unwrap();
-        let Sub::Start(a) = sub else {
-            panic!("expected start")
-        };
-        assert_eq!(a.categories, vec!["dsp", "render", "gpu"]);
-        assert_eq!(a.out.as_deref(), Some(Path::new("/tmp/x.pftrace")));
-        assert_eq!(a.ring_mb, Some(128));
-    }
-
-    #[test]
-    fn parse_start_defaults_are_empty() {
-        let (sub, _) = parse(&s(&["start"])).unwrap();
-        let Sub::Start(a) = sub else { panic!() };
-        assert!(a.categories.is_empty());
-        assert!(a.out.is_none());
-        assert!(a.ring_mb.is_none());
-    }
-
-    #[test]
-    fn parse_start_rejects_bad_ring_mb() {
-        let err = parse(&s(&["start", "--ring-mb", "big"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_takes_sql_positional() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT name FROM slice"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.sql.as_deref(), Some("SELECT name FROM slice"));
-        assert!(q.preset.is_none());
-        assert_eq!(q.format, QueryFormat::Json);
-    }
-
-    #[test]
-    fn parse_query_format_flag() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT 1", "--format", "table"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.format, QueryFormat::Table);
-        assert!(q.format_set);
-    }
-
-    #[test]
-    fn parse_query_default_format_is_not_marked_set() {
-        let (sub, _) = parse(&s(&["query", "SELECT 1"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert!(!q.format_set);
-        assert!(q.trace.is_none());
-    }
-
-    #[test]
-    fn parse_query_trace_flag_sets_offline_path() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT 1", "--trace", "/t/run.pftrace"]))
-                .unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.trace.as_deref(), Some(std::path::Path::new("/t/run.pftrace")));
-        assert_eq!(q.sql.as_deref(), Some("SELECT 1"));
-    }
-
-    #[test]
-    fn parse_query_trace_requires_a_value() {
-        let err = parse(&s(&["query", "SELECT 1", "--trace"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_rejects_bad_format() {
-        let err =
-            parse(&s(&["query", "SELECT 1", "--format", "yaml"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_preset_flag() {
-        let (sub, _) = parse(&s(&["query", "--preset", "xruns"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.preset.as_deref(), Some("xruns"));
-        assert!(q.sql.is_none());
-    }
-
-    #[test]
-    fn parse_query_rejects_sql_and_preset_together() {
-        let err =
-            parse(&s(&["query", "SELECT 1", "--preset", "xruns"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_rejects_missing_sql_and_preset() {
-        let err = parse(&s(&["query"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_preset_verbs_map_to_query() {
-        for name in
-            &["slowest-frames", "xruns", "dsp-hotspots", "layout-vs-paint"]
-        {
-            let (sub, _) = parse(&s(&[name])).unwrap();
-            let Sub::Query(q) = sub else {
-                panic!("{name} should be a query")
-            };
-            assert_eq!(q.preset.as_deref(), Some(*name));
-        }
-    }
-
-    #[test]
-    fn parse_explain_requires_a_question() {
-        let err = parse(&s(&["explain"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-        let (sub, _) = parse(&s(&["explain", "why slow?"])).unwrap();
-        assert!(matches!(sub, Sub::Explain { .. }));
-    }
-
-    #[test]
-    fn to_inspector_call_methods_match_protocol() {
-        assert_eq!(
-            to_inspector_call(&Sub::Start(StartArgs::default())).unwrap().0,
-            "Trace.startSession"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Stop).unwrap().0,
-            "Trace.stopSession"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Query(QueryArgs {
-                sql: Some("SELECT 1".to_owned()),
-                preset: None,
-                format: QueryFormat::Json,
-                ..QueryArgs::default()
-            }))
-            .unwrap()
-            .0,
-            "Trace.query"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Snapshot).unwrap().0,
-            "Trace.snapshot"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Explain {
-                question: "why?".to_owned()
-            })
-            .unwrap()
-            .0,
-            "Trace.explain"
-        );
-        assert!(to_inspector_call(&Sub::Help).is_none());
-    }
-
-    #[test]
-    fn build_start_params_includes_only_set_fields() {
-        // Empty → empty object (inspector picks its defaults).
-        let p = build_start_params(&StartArgs::default());
-        assert_eq!(p, "{}");
-        // All fields set.
-        let p = build_start_params(&StartArgs {
-            categories: vec!["dsp".to_owned(), "render".to_owned()],
-            out: Some(PathBuf::from("/tmp/x.pftrace")),
-            ring_mb: Some(64),
-        });
-        assert!(p.contains("\"categories\":[\"dsp\",\"render\"]"));
-        assert!(p.contains("\"out_path\":\"/tmp/x.pftrace\""));
-        assert!(p.contains("\"ring_mb\":64"));
-    }
-
-    #[test]
-    fn build_query_params_carries_sql_and_format() {
-        let p = build_query_params(&QueryArgs {
-            sql: Some("SELECT name FROM slice".to_owned()),
-            preset: None,
-            format: QueryFormat::Csv,
-            ..QueryArgs::default()
-        });
-        assert!(p.contains("\"sql\":\"SELECT name FROM slice\""));
-        assert!(p.contains("\"format\":\"csv\""));
-        assert!(!p.contains("preset"));
-    }
-
-    #[test]
-    fn build_query_params_carries_preset() {
-        let p = build_query_params(&QueryArgs {
-            sql: None,
-            preset: Some("slowest-frames".to_owned()),
-            format: QueryFormat::Json,
-            ..QueryArgs::default()
-        });
-        assert!(p.contains("\"preset\":\"slowest-frames\""));
-        assert!(p.contains("\"format\":\"json\""));
-        assert!(!p.contains("\"sql\""));
-    }
-
-    #[test]
-    fn explain_params_escape_the_question() {
-        let (_m, p) = to_inspector_call(&Sub::Explain {
-            question: "why is \"x\" slow?".to_owned(),
-        })
-        .unwrap();
-        assert!(p.contains("\\\""), "expected escaped quote in {p}");
-    }
-
-    #[test]
-    fn resolve_port_prefers_explicit() {
-        let g = GlobalFlags {
-            json: false,
-            port: Some(1234),
-        };
-        assert_eq!(resolve_port(&g), 1234);
-    }
-
-    #[test]
-    fn extract_str_reads_flat_string_field() {
-        let body = "{\"out_path\":\"/tmp/pulp-1.pftrace\",\"n\":3}";
-        assert_eq!(
-            extract_str(body, "out_path").as_deref(),
-            Some("/tmp/pulp-1.pftrace")
-        );
-        assert_eq!(extract_str(body, "missing"), None);
-    }
-
-    #[test]
-    fn extract_str_handles_escaped_quotes() {
-        let body = "{\"explanation\":\"the \\\"lead\\\" voice dominates\"}";
-        assert_eq!(
-            extract_str(body, "explanation").as_deref(),
-            Some("the \"lead\" voice dominates")
-        );
-    }
-
-    #[test]
-    fn escape_json_handles_quotes_and_backslashes() {
-        assert_eq!(escape_json("a\"b"), "a\\\"b");
-        assert_eq!(escape_json("a\\b"), "a\\\\b");
-    }
-
-    /// Test-only talker that records calls and returns canned
-    /// responses. Lets us exercise `dispatch` without a real
-    /// `pulp-cpp` binary or a live inspector.
-    struct RecordingTalker {
-        responses: std::cell::RefCell<Vec<String>>,
-        calls: std::cell::RefCell<Vec<(u16, String, String)>>,
-    }
-
-    impl RecordingTalker {
-        fn new(responses: Vec<&str>) -> Self {
-            Self {
-                responses: std::cell::RefCell::new(
-                    responses.into_iter().map(str::to_owned).collect(),
-                ),
-                calls: std::cell::RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl InspectorTalker for RecordingTalker {
-        fn call(
-            &self,
-            port: u16,
-            method: &str,
-            params: &str,
-        ) -> Result<String> {
-            self.calls.borrow_mut().push((
-                port,
-                method.to_owned(),
-                params.to_owned(),
-            ));
-            let mut r = self.responses.borrow_mut();
-            if r.is_empty() {
-                Ok("{}".to_owned())
-            } else {
-                Ok(r.remove(0))
-            }
-        }
-    }
-
-    #[test]
-    fn dispatch_start_passes_method_and_params() {
-        let t = RecordingTalker::new(vec![
-            "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Start(StartArgs {
-            categories: vec!["dsp".to_owned()],
-            out: None,
-            ring_mb: None,
-        });
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let calls = t.calls.borrow();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1, "Trace.startSession");
-        assert!(calls[0].2.contains("\"categories\":[\"dsp\"]"));
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("/tmp/pulp-9.pftrace"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_stop_prints_pftrace_path() {
-        let t = RecordingTalker::new(vec![
-            "{\"out_path\":\"/tmp/pulp-42.pftrace\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Stop, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        assert_eq!(t.calls.borrow()[0].1, "Trace.stopSession");
-        let out = String::from_utf8(buf).unwrap();
-        assert_eq!(out.trim(), "/tmp/pulp-42.pftrace");
-    }
-
-    #[test]
-    fn dispatch_query_preset_verb_routes_to_trace_query() {
-        let t = RecordingTalker::new(vec!["[]"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let (sub, flags) = parse(&s(&["slowest-frames"])).unwrap();
-        dispatch(&sub, &flags, &t, &mut buf).unwrap();
-        let calls = t.calls.borrow();
-        assert_eq!(calls[0].1, "Trace.query");
-        assert!(calls[0].2.contains("\"preset\":\"slowest-frames\""));
-    }
-
-    #[test]
-    fn dispatch_json_flag_prints_raw_response() {
-        let t = RecordingTalker::new(vec!["[{\"name\":\"process\"}]"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags {
-            json: true,
-            port: None,
-        };
-        let sub = Sub::Query(QueryArgs {
-            sql: Some("SELECT name FROM slice".to_owned()),
-            preset: None,
-            format: QueryFormat::Json,
-            ..QueryArgs::default()
-        });
-        dispatch(&sub, &flags, &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("[{\"name\":\"process\"}]"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_explain_prints_narrated_prose() {
-        let t = RecordingTalker::new(vec![
-            "{\"explanation\":\"Root cause: font-atlas build.\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Explain {
-            question: "why slow to open?".to_owned(),
-        };
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        assert_eq!(t.calls.borrow()[0].1, "Trace.explain");
-        let out = String::from_utf8(buf).unwrap();
-        assert_eq!(out.trim(), "Root cause: font-atlas build.");
-    }
-
-    #[test]
-    fn dispatch_help_prints_usage_without_calling_inspector() {
-        let t = RecordingTalker::new(vec![]);
-        let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Help, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("pulp trace — wrappers"));
-        assert!(t.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn no_inspector_hint_mentions_port_and_trace_server_knob() {
-        let s = no_inspector_hint(9200);
-        assert!(s.contains("port 9200"), "{s}");
-        assert!(s.contains("PULP_TRACE_SERVER=1"));
-    }
-
-    #[test]
-    fn inspector_reachable_returns_quickly_for_unused_port() {
-        let _ = inspector_reachable(1);
-    }
-
-    #[test]
-    fn parse_doctor_verb() {
-        let (sub, _) = parse(&s(&["doctor"])).unwrap();
-        assert!(matches!(sub, Sub::Doctor));
-    }
-
-    #[test]
-    fn doctor_has_no_single_inspector_call() {
-        assert!(to_inspector_call(&Sub::Doctor).is_none());
-    }
-
-    #[test]
-    fn parse_fetch_verb() {
-        let (sub, _) = parse(&s(&["fetch"])).unwrap();
-        assert!(matches!(sub, Sub::Fetch));
-    }
-
-    #[test]
-    fn fetch_has_no_single_inspector_call() {
-        assert!(to_inspector_call(&Sub::Fetch).is_none());
-    }
-
-    #[test]
-    fn extract_bool_reads_true_false_and_missing() {
-        let body = "{\"compiled_in\":true,\"active\":false}";
-        assert_eq!(extract_bool(body, "compiled_in"), Some(true));
-        assert_eq!(extract_bool(body, "active"), Some(false));
-        assert_eq!(extract_bool(body, "missing"), None);
-    }
-
-    fn tp(source: TraceProcessorSource, path: Option<&str>) -> TraceProcessorStatus {
-        TraceProcessorStatus {
-            path: path.map(PathBuf::from),
-            source,
-        }
-    }
-
-    #[test]
-    fn doctor_report_all_green_is_ready() {
-        let snap = "{\"compiled_in\":true,\"active\":false,\
-                    \"last_trace_path\":\"/tmp/x.pftrace\"}";
-        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human = build_doctor_report(9147, true, Some(snap), &status, false);
-        assert!(human.contains("inspector (port 9147) ... reachable"), "{human}");
-        assert!(human.contains("tracing compiled in ..... yes"), "{human}");
-        assert!(human.contains("last trace .............. /tmp/x.pftrace"), "{human}");
-        assert!(human.contains("ready to capture a trace . yes"), "{human}");
-        assert!(human.contains("ready to query offline ... yes"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_unreachable_marks_unknowns_and_prints_hint() {
-        let status = tp(TraceProcessorSource::None, None);
-        let human = build_doctor_report(9200, false, None, &status, false);
-        assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
-        assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
-        assert!(human.contains("ready to capture a trace . no"), "{human}");
-        // The "how do I start the server" hint is surfaced.
-        assert!(human.contains("PULP_TRACE_SERVER=1"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_not_compiled_in_blocks_capture() {
-        let snap = "{\"compiled_in\":false,\"active\":false}";
-        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human = build_doctor_report(9147, true, Some(snap), &status, false);
-        assert!(human.contains("tracing compiled in ..... NO"), "{human}");
-        assert!(human.contains("ready to capture a trace . no"), "{human}");
-        // No trace yet, so offline query is not ready even with the binary.
-        assert!(human.contains("ready to query offline ... no"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_json_shape() {
-        let snap = "{\"compiled_in\":true,\"active\":true,\
-                    \"last_trace_path\":\"/tmp/y.pftrace\"}";
-        let status = tp(TraceProcessorSource::Env, Some("/opt/tp"));
-        let json = build_doctor_report(9147, true, Some(snap), &status, true);
-        // Parses as one flat JSON object with the readiness contract.
-        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
-        assert_eq!(v["port"], 9147);
-        assert_eq!(v["inspector_reachable"], true);
-        assert_eq!(v["compiled_in"], true);
-        assert_eq!(v["active"], true);
-        assert_eq!(v["last_trace_path"], "/tmp/y.pftrace");
-        assert_eq!(v["trace_processor_available"], true);
-        assert_eq!(v["trace_processor_path"], "/opt/tp");
-        assert_eq!(v["trace_processor_source"], "env");
-        assert_eq!(v["ready_to_capture"], true);
-        assert_eq!(v["ready_to_query"], true);
-    }
-
-    #[test]
-    fn doctor_report_json_nulls_when_unreachable() {
-        let status = tp(TraceProcessorSource::None, None);
-        let json = build_doctor_report(9147, false, None, &status, true);
-        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
-        assert!(v["compiled_in"].is_null());
-        assert!(v["last_trace_path"].is_null());
-        assert!(v["trace_processor_path"].is_null());
-        assert_eq!(v["trace_processor_source"], "none");
-        assert_eq!(v["ready_to_query"], false);
-    }
-
-    #[test]
-    fn resolve_trace_processor_honors_env_override() {
-        // Serialize with the pinned-tier test: both drive resolution off the
-        // process-global PULP_* env vars.
-        let _g = crate::cmd::trace_fetch::ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut f = std::env::temp_dir();
-        f.push("pulp-doctor-test-tp");
-        std::fs::write(&f, b"#!/bin/sh\n").unwrap();
-        std::env::set_var("PULP_TRACE_PROCESSOR", &f);
-        let status = resolve_trace_processor();
-        std::env::remove_var("PULP_TRACE_PROCESSOR");
-        let _ = std::fs::remove_file(&f);
-        assert_eq!(status.source, TraceProcessorSource::Env);
-        assert_eq!(status.path.as_deref(), Some(f.as_path()));
-    }
-
-    #[test]
-    fn resolve_prefers_pinned_over_path_when_env_unset() {
-        let Some(key) = crate::cmd::trace_fetch::host_platform_key() else {
-            return;
-        };
-        let pin = crate::cmd::trace_fetch::pin_for(key).unwrap();
-        let _g = crate::cmd::trace_fetch::ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let prev_tp = std::env::var_os("PULP_TRACE_PROCESSOR");
-        let prev_home = std::env::var_os("PULP_HOME");
-        std::env::remove_var("PULP_TRACE_PROCESSOR");
-        let home = std::env::temp_dir()
-            .join(format!("pulp-resolve-pin-{}", std::process::id()));
-        let cached =
-            crate::cmd::trace_fetch::pinned_cache_path_under(&home, pin);
-        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
-        std::fs::write(&cached, b"pinned tp").unwrap();
-        std::env::set_var("PULP_HOME", &home);
-        let status = resolve_trace_processor();
-        match prev_tp {
-            Some(v) => std::env::set_var("PULP_TRACE_PROCESSOR", v),
-            None => std::env::remove_var("PULP_TRACE_PROCESSOR"),
-        }
-        match prev_home {
-            Some(v) => std::env::set_var("PULP_HOME", v),
-            None => std::env::remove_var("PULP_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&home);
-        assert_eq!(status.source, TraceProcessorSource::Pinned);
-        assert_eq!(status.path.as_deref(), Some(cached.as_path()));
-    }
-
-    #[test]
-    fn dispatch_doctor_reports_unreachable_without_a_call_mapping() {
-        // Port 1 is never a live inspector, so this is deterministic:
-        // run_doctor prints the report; no Trace.* call mapping is needed.
-        let t = RecordingTalker::new(vec![]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags { json: false, port: Some(1) };
-        dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("pulp trace doctor"), "{out}");
-        assert!(out.contains("UNREACHABLE"), "{out}");
-    }
-
-    #[test]
-    fn parse_open_verb_defaults() {
-        let (sub, _) = parse(&s(&["open", "/tmp/x.pftrace"])).unwrap();
-        let Sub::Open(a) = sub else { panic!("expected open") };
-        assert_eq!(a.file, Path::new("/tmp/x.pftrace"));
-        assert!(!a.no_browser);
-        assert_eq!(a.keep_alive_secs, OpenArgs::DEFAULT_KEEP_ALIVE_SECS);
-    }
-
-    #[test]
-    fn parse_open_collects_flags() {
-        let (sub, _) = parse(&s(&[
-            "open",
-            "/tmp/y.pftrace",
-            "--no-browser",
-            "--keep-alive-seconds",
-            "3",
-        ]))
-        .unwrap();
-        let Sub::Open(a) = sub else { panic!("expected open") };
-        assert!(a.no_browser);
-        assert_eq!(a.keep_alive_secs, 3);
-    }
-
-    #[test]
-    fn parse_open_requires_a_file() {
-        let err = parse(&s(&["open", "--no-browser"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_open_rejects_a_second_file() {
-        let err = parse(&s(&["open", "a.pftrace", "b.pftrace"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn open_has_no_single_inspector_call() {
-        let sub = Sub::Open(OpenArgs {
-            file: PathBuf::from("/tmp/x.pftrace"),
-            no_browser: true,
-            keep_alive_secs: 0,
-        });
-        assert!(to_inspector_call(&sub).is_none());
-    }
-}
+#[path = "trace_parse_tests.rs"]
+mod tests;

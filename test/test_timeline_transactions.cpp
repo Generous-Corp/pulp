@@ -58,12 +58,15 @@ TEST_CASE("Document session rejects stale writers and caches exact retries") {
     auto first = session_transaction(first_writer.value(), {},
                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
     const auto retry = first;
+    const auto predecessor = session->snapshot();
     auto committed = session->submit(first_writer.value(), first);
     REQUIRE(committed);
     REQUIRE(committed->revision.value == 1);
+    REQUIRE(committed->predecessor_snapshot.get() == predecessor.get());
     auto retried = session->submit(first_writer.value(), retry);
     REQUIRE(retried);
     REQUIRE(retried->revision.value == 1);
+    REQUIRE(retried->predecessor_snapshot.get() == predecessor.get());
     REQUIRE(session->journal().entries().size() == 1);
 
     auto collision = retry;

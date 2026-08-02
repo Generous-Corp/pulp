@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/playback/audio_renderer.hpp>
+#include <pulp/playback/compile_context_registry.hpp>
 #include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/dirty_track_resolver.hpp>
 #include <pulp/playback/offline_stretch_artifact.hpp>
@@ -10,7 +11,13 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <utility>
 #include <vector>
+
+namespace pulp::timeline {
+struct CommitResult;
+}
 
 namespace pulp::playback {
 
@@ -18,6 +25,48 @@ struct TrackCompilePolicy {
     timeline::ItemId track_id;
     ProviderSelectorProgram provider;
     RendererStatePolicy state_policy = RendererStatePolicy::CarryByItemId;
+};
+
+/// One committed document delta lowered through the compile-context registry.
+///
+/// This is the production path from sequence-owned context edits to exact
+/// track recompilation. Construction binds the dirty set to an exact snapshot
+/// pointer and document revision and copies an immutable registry generation.
+/// The compiler rejects a request whose project or revision does not match.
+struct CompileInvalidationInput {
+    CompileInvalidationInput(std::shared_ptr<const CompileContextRegistry> registry,
+                             const timeline::CommitResult& committed);
+
+    /// Pin registry state without claiming a document delta. Use only with
+    /// request.dirty.all for an initial full compile, a registry-only refresh,
+    /// or full adoption of an already-live document revision.
+    static CompileInvalidationInput baseline(std::shared_ptr<const CompileContextRegistry> registry,
+                                             std::shared_ptr<const timeline::Project> snapshot,
+                                             std::uint64_t document_revision);
+
+    std::uint64_t captured_registry_revision() const noexcept {
+        return captured_registry_revision_;
+    }
+    const void* captured_registry_generation() const noexcept {
+        return registry_generation_.get();
+    }
+
+  private:
+    CompileInvalidationInput(std::shared_ptr<const CompileContextRegistry> registry,
+                             std::shared_ptr<const timeline::Project> snapshot,
+                             std::uint64_t document_revision, timeline::DirtySet committed,
+                             std::shared_ptr<const timeline::Project> predecessor_snapshot,
+                             bool baseline);
+    friend class PlaybackProgramCompiler;
+    friend struct PlaybackProgramCompilerCore;
+    timeline::DirtySet committed_;
+    std::shared_ptr<const timeline::Project> snapshot_;
+    std::shared_ptr<const timeline::Project> predecessor_snapshot_;
+    std::uint64_t document_revision_ = 0;
+    std::shared_ptr<const detail::ContextRegistryGeneration> registry_generation_;
+    std::shared_ptr<const CompileContextRegistry> registry_snapshot_;
+    std::uint64_t captured_registry_revision_ = 0;
+    bool baseline_ = false;
 };
 
 struct ProgramCompileRequest {
@@ -38,6 +87,9 @@ struct ProgramCompileRequest {
     std::uint64_t max_expanded_note_events = 1'000'000u;
     std::uint64_t max_expanded_clips = 1'000'000u;
     std::size_t maximum_note_events_per_track = default_maximum_note_events_per_track;
+    // Appended to preserve positional aggregate initialization of the original
+    // request fields. Snapshot and revision must match this request.
+    std::optional<CompileInvalidationInput> invalidation;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -67,6 +119,11 @@ enum class CompileErrorCode : std::uint8_t {
     // values, whereas trimming still has no defined inherited value even once
     // that renderer exists.
     MidiExpressionLaneUnsupported,
+    // A nested SequenceRef trims a MIDI leaf whose owner has an authored groove
+    // that does not state canonical no-feel. The flatten-first path cannot
+    // decide whether displaced events outside the retained source window should
+    // chase, clip, or disappear, so it refuses rather than leaking events.
+    TrimmedGrooveUnsupported,
 };
 
 struct CompileError {
@@ -79,6 +136,7 @@ struct CompileError {
 
 struct CompileTicket {
     std::uint64_t revision = 0;
+    std::uint64_t submission_epoch = 0;
 };
 
 struct CompilerStatus {
@@ -92,6 +150,11 @@ struct CompilerStatus {
     std::uint64_t active_tracks_completed = 0;
     bool has_error = false;
     CompileError last_error;
+    // Compiler-instance-scoped terminal watermark. `>= ticket.epoch` means the
+    // ticket published or was superseded; equality means that exact ticket was
+    // the instance's latest successful publication.
+    std::uint64_t latest_submitted_epoch = 0;
+    std::uint64_t latest_published_epoch = 0;
 };
 
 struct PlaybackProgramCompilerCore;
@@ -100,7 +163,9 @@ class PlaybackProgramCompiler {
   public:
     /// The store and executor must outlive every task they accept. Destroying
     /// this facade stops new submissions; accepted tasks retain shared compiler
-    /// state and may finish without dereferencing the facade.
+    /// state and may finish without dereferencing the facade. Tickets and status
+    /// epochs are scoped to this compiler instance; destroying the facade
+    /// forfeits observation of any retained task's completion.
     /// Exactly one control thread submits requests; task execution may occur on
     /// any executor thread.
     PlaybackProgramCompiler(

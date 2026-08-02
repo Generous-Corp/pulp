@@ -27,6 +27,18 @@ ContentHash hash(char digit) {
     return *ContentHash::from_hex(std::string(64, digit));
 }
 
+// The lone sequence envelope inside a whole-project snapshot, as raw bytes, so
+// a test can hand exactly one envelope to registry.migrate.
+std::string sequence_envelope(const std::string& snapshot) {
+    const auto parsed = take(parse_json(snapshot));
+    const auto* data = parsed->root().find("data");
+    REQUIRE(data != nullptr);
+    const auto* sequences = data->find("sequences");
+    REQUIRE(sequences != nullptr);
+    REQUIRE(sequences->array.size() == 1);
+    return std::string(parsed->raw(sequences->array[0]));
+}
+
 Project project_with(ClipContent content = EmptyContent{}) {
     auto clip = take(Clip::create({4}, {0}, {100}, std::move(content)));
     auto track = take(Track::create({3}, "track", {clip}));

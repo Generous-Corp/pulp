@@ -162,6 +162,17 @@ pulp run --audio-inspector --screenshot ui.png
 # → ui.png and ui.audio-inspector.png
 ```
 
+A screenshot-only run opens no audio device, so that capture proves the panel
+loaded and laid out — its meters read zero because nothing is rendering. Add a
+readout (`--audio-probe-json`, `--audio-scope-json`, `--audio-capture-wav`,
+`--audio-capture-rolling`) or `PULP_SCREENSHOT_KEEP_AUDIO=1` when the captured
+panel must show live values:
+
+```bash
+# Headless: capture the panel showing real signal
+PULP_SCREENSHOT_KEEP_AUDIO=1 pulp run --audio-inspector --screenshot ui.png
+```
+
 ## Dev-on / ship-off gating
 
 The probe and Inspector are gated behind the `PULP_ENABLE_AUDIO_PROBES` CMake

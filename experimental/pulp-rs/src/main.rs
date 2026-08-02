@@ -154,10 +154,11 @@ enum Command {
 
     /// Agent-facing wrappers around the inspector `Motion.*`
     /// protocol — record / stop / snapshot / list-traces /
-    /// load-fixture / scrub / play / pause / cost. Pairs with the
+    /// scrub / play / pause / cost. Pairs with the
     /// `/motion` slash command and the `pulp_motion_*` MCP tools.
-    /// Off by default — requires a running inspector
-    /// (PULP_MOTION_SERVER=1).
+    /// Normal launches publish no endpoint; live use requires an
+    /// explicitly owned custom host that wires `InspectorServer`,
+    /// `DomainHandler`, and authenticated discovery.
     #[command(name = "motion")]
     Motion(PkgTailArgs),
 
@@ -165,8 +166,9 @@ enum Command {
     /// protocol — start / stop / query / snapshot / explain plus the
     /// L0 preset verbs (slowest-frames / xruns / dsp-hotspots /
     /// layout-vs-paint). Pairs with the `/trace` slash command and the
-    /// `pulp_trace_*` MCP tools. Off by default — requires a running
-    /// inspector with tracing enabled (PULP_TRACE_SERVER=1).
+    /// `pulp_trace_*` MCP tools. Normal launches publish no endpoint;
+    /// live use requires an explicitly owned custom host that wires
+    /// `InspectorServer`, `DomainHandler`, and authenticated discovery.
     #[command(name = "trace")]
     Trace(PkgTailArgs),
 
@@ -749,7 +751,7 @@ fn real_main() -> Result<(), ExitCode> {
                     eprintln!("pulp motion: unknown subcommand");
                     eprintln!(
                         "  supported: record, stop, snapshot, list-traces, \
-                         load-fixture, scrub, play, pause, cost"
+                         scrub, play, pause, cost"
                     );
                     ExitCode::from(2)
                 }

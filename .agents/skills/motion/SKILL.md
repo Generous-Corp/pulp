@@ -42,7 +42,7 @@ provenance work identically across surfaces.
 | A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
 | A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction that drives the suspect motion | **D — Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture + an inspector client (design review / CI triage) | **E — Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` over the inspector wire |
+| A fixture available to C++ host/test code (design review / CI triage) | **E — Timeline scrubber** | Direct `MotionScrubber` fixture load, then authenticated `Motion.scrubTo` |
 | "Which animation is expensive and why?" | **F — Cost attribution** | `Motion.enableCost` + `CostAttributor` + `make_render_cost_probe` |
 | SwiftUI / UIKit / AppKit / iOS / macOS / AUv3 host code path | **G — Swift native** | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Jetpack Compose or Android `View` code path | **H — Android native** | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
@@ -50,8 +50,11 @@ provenance work identically across surfaces.
 
 ## Path A — Runtime trace
 
-The runtime path attaches a trace at runtime over the inspector wire, no
-source instrumentation, no cleanup phase to forget.
+The runtime path attaches a trace over an authenticated inspector session.
+Normal Pulp launches do not create that endpoint: use a source-checkout,
+explicitly wired custom fixture that owns an `InspectorServer`, motion domain
+handler, and authenticated discovery publication. Trace teardown is still
+explicit.
 
 ### 1. Confirm the complaint as a measurable property
 
@@ -62,12 +65,12 @@ Translate "looks off" into a metric and a target. Example mappings:
 - "two cards drift" → two `frame` traces, deltas correlate
 - "scroll jumps on restore" → child-of-ScrollView geometry, presentation source
 
-### 2. Start the host with the motion server enabled
+### 2. Start an explicitly wired custom fixture
 
-```bash
-PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview
-# Motion inspector listening on port 9147
-```
+No environment flag turns a normal app or `pulp-ui-preview` launch into an
+inspector host. The custom fixture must construct and retain the inspector
+server, attach the Motion domain handler, and publish its owner-private
+session record and credential for authenticated discovery.
 
 ### 3. Attach a trace
 
@@ -82,37 +85,28 @@ pulp motion record --view Card --fps 30 --out card-fade.jsonl
 # → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
 #   in the app or test when you need an on-disk JSONL artifact.
 # → trace started — trace_id=1
-# →   stop with: pulp motion stop --trace-id 1
+# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
-Every verb honours `--port N` and `$PULP_INSPECTOR_PORT`, exits 1
-with a clear "start the host with `PULP_MOTION_SERVER=1 …`" hint
-when nothing is listening, and supports `--json` for raw inspector
-output. Full list: `record / stop / snapshot / list-traces /
-load-fixture / scrub / play / pause / cost {enable|disable}`.
+`record` resolves authenticated discovery to one exact publication before it
+mutates, then prints that selector in the stop command. `stop` requires the
+exact `--session ID --instance ID --publication ID` selector so a replacement
+process that reuses the other IDs cannot inherit the operation. `scrub`,
+`play`, `pause`, and cost toggles also mutate process-owned state and require
+an exact publication. Read-only `snapshot` and `list-traces` accept
+auto-discovery or exact selection; `--port` remains a discovery filter, and
+`--json` includes the resolved selector for `record`. The command exits 1 with
+custom-fixture guidance when no eligible session exists. Full list: `record /
+stop / snapshot / list-traces / scrub / play / pause / cost
+{enable|disable}`. Fixture loading is deliberately absent
+because a remote client cannot grant the server authority to read an arbitrary
+host filesystem path.
 
-**3b. Raw inspector wire** (TCP port 9147, length-prefix-framed JSON):
+Do not connect to the raw TCP framing yourself. The client performs mutual
+nonce/HMAC authentication with the owner-private per-session credential before
+it sends a request.
 
-```jsonc
-{ "id": 1, "method": "Motion.startTrace",
-  "params": {
-    "view_name": "Card",
-    "fps": 30,
-    "metrics": [{
-      "kind": "geometry",
-      "name": "frame",
-      "node_id": "card",
-      "properties": ["minX","minY","width","height"],
-      "space": "window",
-      "source": "presentation"
-    }]
-  }
-}
-```
-
-Response: `{ "trace_id": 1 }`.
-
-**3c. `pulp_motion_*` MCP wrapper tools** — same payload shape as
+**3b. `pulp_motion_*` MCP wrapper tools** — same payload shape as
 the wire path, called as a `tools/call` JSON-RPC request when an
 agent is driving an MCP server (see
 `docs/guides/motion-observability.md` Tooling section).
@@ -128,7 +122,7 @@ animation. The motion server emits events as the values change.
 ### 5. Stop the trace
 
 ```bash
-pulp motion stop --trace-id 1
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 # → trace stopped (removed=true)
 ```
 
@@ -329,7 +323,8 @@ primitives — matches the originally-recorded one within
 false-fail.
 ## Path E — Timeline scrubber (inspector replay)
 
-`pulp::inspect::MotionScrubber` loads a `.motion.jsonl` fixture and
+`pulp::inspect::MotionScrubber` loads a `.motion.jsonl` fixture in trusted
+host/test code and
 re-emits the prefix of events with `frame <= playhead` to caller
 sinks and (when attached to an `InspectorServer`) to inspector clients
 over the wire. The scrubber is passive — no clock is pumped, no
@@ -340,7 +335,7 @@ Protocol surface (routed by `DomainHandler::handle_motion`):
 
 | Method               | Params              | Response                                                |
 |----------------------|---------------------|---------------------------------------------------------|
-| `Motion.loadFixture` | `{ path }`          | `{ ok, event_count, max_frame, header: {version,policy,duration_scale} }` |
+| `Motion.loadFixture` | `{ path }`          | Unavailable: remote sessions cannot authorize host filesystem reads |
 | `Motion.scrubTo`     | `{ frame }`         | `{ playhead_frame, emitted_count }` + broadcast events  |
 | `Motion.play`        | `{}`                | `{ playing:true, emitted_count, playhead_frame }`       |
 | `Motion.pause`       | `{}`                | `{ playing:false, playhead_frame }`                     |
@@ -350,14 +345,11 @@ Broadcast events reuse `MotionInspector`'s `Motion.start / .sample /
 distinguish replayed bursts from live coordinator events on the same
 wire.
 
-CLI shortcut (no inspector REPL needed):
-
-```bash
-pulp motion load-fixture captures/card-open.motion.jsonl
-pulp motion scrub 120
-pulp motion play
-pulp motion pause
-```
+After trusted host/test code loads the fixture, an authenticated client with
+the granted trace-control capability may call `pulp motion scrub 120
+--session SESSION --instance INSTANCE --publication PUBLICATION`, `play` with
+the same selector,
+or `pause`. `pulp motion load-fixture` is intentionally unavailable.
 
 Direct C++ usage:
 
@@ -374,7 +366,7 @@ scrub.play();          // jump to max frame, emit everything
 Gotchas:
 
 - `load_fixture` is passive. Sinks see no events until `scrub_to` /
-  `play` is called. Don't pre-clear UI overlays on `loadFixture` and
+  `play` is called. Don't pre-clear UI overlays during the trusted load and
   expect a refill — wait for the first `scrub_to`.
 - Backwards scrubs re-emit from frame 0. If your sink accumulates,
   clear it before each scrub or compare counts modulo the prefix size.
@@ -428,9 +420,9 @@ also reports `cost_enabled` and `cost_samples_emitted`.
 CLI shortcut:
 
 ```bash
-pulp motion cost enable
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
 # ... drive the suspect animation ...
-pulp motion cost disable
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot --json | jq '.cost_samples_emitted'
 ```
 
@@ -748,8 +740,11 @@ Apply these on every motion debugging run:
 | Variable | Effect |
 |---|---|
 | `PULP_MOTION_LOG=1` | Install the default log sink + enable tracing |
-| `PULP_MOTION_SERVER=1` | Start the Motion inspector server on port 9147 |
 | `PULP_MOTION_FIREHOSE=1` | Broadcast every `publish_*` call to all sinks |
+
+There is no environment variable that starts an inspector server. Runtime
+inspection requires an explicitly wired custom fixture and authenticated
+discovery.
 
 ## Files this skill covers
 
