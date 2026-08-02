@@ -274,6 +274,16 @@ Triggered only when a PR touches files in the release-path scope:
 `CMakeLists.txt`, `release-cli.yml`. Most PRs (view / docs / examples /
 plugin) skip this gate entirely so iteration speed is unaffected.
 
+The macOS leg has its own `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON`
+selector, falling back to the legacy shared `PULP_RELEASE_MACOS_RUNS_ON_JSON`
+only while a fleet migrates. Production uses mutually exclusive Tart CI class
+labels: tagged `Release CLI` / `Sign and Release` jobs request
+`pulp-release-tagged`, while this PR-time gate requests
+`pulp-release-pr-gate`. One release supervisor serves both classes but mints a
+JIT runner for only the highest class with demand, so an older PR gate cannot
+claim capacity while a tagged release is waiting. GitHub retains FIFO within
+each class.
+
 If `release-cli.yml`'s job structure ever drifts from this gate, the
 gate is lying. Mirror any structural change to release-cli.yml here
 (or refactor both into a shared composite action). The "Mirror
