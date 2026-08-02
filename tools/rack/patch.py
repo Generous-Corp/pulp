@@ -1471,6 +1471,49 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
             from_parts[tag] = parts
     missing -= set(from_parts)
 
+    # An IDIOM outranks a keyword.
+    #
+    # TAG_WORDS maps a word to a required device. The idiom library states,
+    # per patch KIND, the roles a patch of that kind actually needs — and it
+    # is the thing the generator is graded against afterwards. When a prompt
+    # resolves to an idiom whose own requirements this machine can meet, that
+    # idiom is a more specific and more authoritative statement about
+    # buildability than a word match, so a tag it does not require is not a
+    # gap.
+    #
+    # Measured: "a granular texture that stretches a drone" resolves to
+    # `granular-cloud`, which needs an amplifier, a clock and an envelope —
+    # all installed. preflight demanded a Granular-tagged MODULE, so a free
+    # plugin was downloaded to satisfy it, and the generator then built a
+    # patch that did not use it. The two disagreed and the idiom was right.
+    if missing:
+        try:
+            import idiom_check as _ic                       # noqa: PLC0415
+            import patch_vocabulary as _pv                  # noqa: PLC0415
+            _idioms = _ic.load_idioms()
+            _slug = _ic.resolve(prompt, _idioms)
+            if _slug:
+                _idiom = _idioms[_slug]
+                # `check` returns the reasons a patch would FAIL the idiom. An
+                # empty inventory-level check means the parts are here.
+                _needed = _pv.needed_modules(_idiom)
+                _roles = _ic.load_roles()
+                _have_role = {}
+                for _role in _needed:
+                    _have_role[_role] = any(
+                        _ic._module_matches(_role, _e, _roles)
+                        for _p in inv.values()
+                        for _e in (_p.get("modules") or {}).values())
+                if all(_have_role.values()):
+                    idiom_covers = set()
+                    for _t in missing:
+                        idiom_covers.add(_t)
+                    missing -= idiom_covers
+                    from_parts.update(
+                        {t: sorted(_needed) for t in idiom_covers})
+        except Exception:                                   # noqa: BLE001
+            pass          # an unreadable idiom library must not block a build
+
     # A missing FINISH is a note, not a refusal.
     omitted = {t for t in missing if t in GARNISH}
     missing -= omitted
