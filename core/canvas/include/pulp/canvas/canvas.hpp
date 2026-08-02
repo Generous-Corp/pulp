@@ -1391,6 +1391,27 @@ public:
         save();
     }
 
+    /// CSS `backdrop-filter` with its full function list — `saturate(0.2)`,
+    /// `brightness(2)`, `invert(1)`, a `grayscale(1) brightness(1.6)` pair.
+    /// Same layer contract as `save_backdrop_filter`: the layer's initial
+    /// contents are the parent surface run through the composed filter, and it
+    /// must be paired with restore().
+    ///
+    /// The default keeps exactly the behaviour every backend already had —
+    /// blur entries summed, everything else dropped — so a backend that has
+    /// not implemented the chain renders an unfiltered (or merely blurred)
+    /// backdrop rather than an unbalanced canvas stack. Query
+    /// `CanvasCapability::backdrop_filter_chain` to find out which you got.
+    virtual void save_backdrop_filter_chain(float x, float y, float w, float h,
+                                            const FilterChainEntry* chain,
+                                            int count) {
+        float blur = 0.0f;
+        for (int i = 0; i < count; ++i)
+            if (chain[i].kind == FilterChainEntry::Kind::blur)
+                blur += chain[i].amount;
+        save_backdrop_filter(x, y, w, h, blur);
+    }
+
     // ── Box shadow ──────────────────────────────────────────────────
     /// Draw a CSS-style box shadow around (or inside, when inset) a
     /// rounded rectangle anchored at (x, y, w, h). When `inset` is false

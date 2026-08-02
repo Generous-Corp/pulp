@@ -608,17 +608,30 @@
     },
     "css/backdropFilter": {
       "status": "supported",
-      "mapsTo": "parses blur(Npx) \u2192 setBackdropFilter(id, blur_px)",
+      "mapsTo": "css_filter_chain \u2192 View::set_backdrop_filter_chain \u2192 Canvas::save_backdrop_filter_chain (blur alone also sets View::set_backdrop_blur)",
       "supportedValues": [
-        "blur(<px>)",
         "none",
-        "other filter functions (parsed; only blur applies at paint time per arch-blur-only-backdrop)"
+        "blur(<px>)",
+        "brightness(<number|%>)",
+        "contrast(<number|%>)",
+        "grayscale(<number|%>)",
+        "hue-rotate(<deg>)",
+        "invert(<number|%>)",
+        "opacity(<number|%>)",
+        "saturate(<number|%>)",
+        "sepia(<number|%>)",
+        "any space-separated list of the above, applied in source order"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "drop-shadow(...)",
+        "url(#filter)",
+        "any function above, through the JS/web-compat bridge, which still routes blur only"
+      ],
       "tests": [
-        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]",
+        "test/test_browser_capture_backdrop_filter.cpp [backdrop-filter]"
       ],
-      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot. Wave 4 css extensive \u2014 non-blur filter functions are arch-blur-only-backdrop (the bridge slot View::backdrop_filter_blur_ is scalar; the multi-function chain that the foreground filter chain uses is queued behind SkImageFilters compose-list parity). Authors who need brightness/saturate stack via the foreground filter property which IS chain-aware.",
+      "notes": "The colour functions apply at paint time on the Skia backend: the list is composed into one SkImageFilter and installed as the layer's backdrop, cropped to the element's own rect. Two limits remain, and they are different in kind. (1) `drop-shadow()` in a backdrop list is dropped by the parser \u2014 its colour argument needs the full colour parser, and a shadow in the wrong colour is worse than an absent one; `url(#filter)` needs an SVG filter graph. (2) The JS/web-compat bridge slot is still the scalar `setBackdropFilter(id, blur_px)`, so a design that reaches paint through the shim rather than through the native import lane still gets blur only. A backend that does not advertise CanvasCapability::backdrop_filter_chain keeps the blur and drops the colour half, and says so once through the capability-fallback warning.",
       "issue": "1434"
     },
     "css/backfaceVisibility": {

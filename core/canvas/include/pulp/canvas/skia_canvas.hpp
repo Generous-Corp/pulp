@@ -239,6 +239,7 @@ public:
             case CanvasCapability::filter_chain:
             case CanvasCapability::mask_layer:
             case CanvasCapability::backdrop_filter:
+            case CanvasCapability::backdrop_filter_chain:
             case CanvasCapability::bloom_layer:
             case CanvasCapability::sksl_draw:
             case CanvasCapability::sksl_post_effect:
@@ -375,6 +376,9 @@ public:
                                Color tint) override;
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
+    void save_backdrop_filter_chain(float x, float y, float w, float h,
+                                    const FilterChainEntry* chain,
+                                    int count) override;
 
     // Box shadow uses SkImageFilters::DropShadowOnly for outset shadows; inset
     // shadows clip to the box and stroke with a blurred mask.

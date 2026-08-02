@@ -1286,8 +1286,47 @@ void apply_visual_style(View& view, const IRStyle& style,
             view.set_filter_blur(*radius);
     }
     if (style.backdrop_filter) {
+        // The blur radius is set whatever else the list holds: repaint damage
+        // reads the scalar to size the region a change reaches, and a frosted
+        // node that also saturates still spreads by its blur.
         if (const auto radius = css_blur_radius(*style.backdrop_filter))
             view.set_backdrop_blur(*radius);
+        // Anything beyond a blur — `saturate()`, `brightness()`, `invert()` —
+        // needs the whole list, and is carried separately so a blur-only value
+        // still takes the scalar path it always took. Reading only the blur out
+        // of such a list renders a desaturating backdrop at full saturation,
+        // which reads as a colour bug rather than as a missing filter.
+        auto chain = css_filter_chain(*style.backdrop_filter);
+        const bool blur_only =
+            std::all_of(chain.begin(), chain.end(), [](const auto& entry) {
+                return entry.kind ==
+                       canvas::Canvas::FilterChainEntry::Kind::blur;
+            });
+        if (!chain.empty() && !blur_only) {
+            std::vector<View::FilterOp> ops;
+            ops.reserve(chain.size());
+            for (const auto& entry : chain) {
+                View::FilterOp op;
+                using CanvK = canvas::Canvas::FilterChainEntry::Kind;
+                using ViewK = View::FilterOp::Kind;
+                switch (entry.kind) {
+                    case CanvK::blur:        op.kind = ViewK::blur;        break;
+                    case CanvK::brightness:  op.kind = ViewK::brightness;  break;
+                    case CanvK::contrast:    op.kind = ViewK::contrast;    break;
+                    case CanvK::grayscale:   op.kind = ViewK::grayscale;   break;
+                    case CanvK::hue_rotate:  op.kind = ViewK::hue_rotate;  break;
+                    case CanvK::invert:      op.kind = ViewK::invert;      break;
+                    case CanvK::opacity:     op.kind = ViewK::opacity;     break;
+                    case CanvK::saturate:    op.kind = ViewK::saturate;    break;
+                    case CanvK::sepia:       op.kind = ViewK::sepia;       break;
+                    case CanvK::drop_shadow: op.kind = ViewK::drop_shadow; break;
+                }
+                op.amount = entry.amount;
+                op.angle_deg = entry.angle_deg;
+                ops.push_back(op);
+            }
+            view.set_backdrop_filter_chain(std::move(ops));
+        }
     }
     if (style.mix_blend_mode) {
         if (const auto mode = css_blend_mode(*style.mix_blend_mode))

@@ -5543,3 +5543,27 @@ text node. So:
   run's index is appended (`…/::before[0]/#text[k]`), and DOM parentage points at
   the pseudo's HOST, not the pseudo — the run has to be parented to its own box
   slot explicitly or it lands as that box's sibling.
+
+## A backdrop-filter colour matrix floods the whole panel without a crop
+
+`SkImageFilters::ColorFilter` reports UNBOUNDED output, so `saveLayer` treats its
+bounds argument as a hint and grows the layer to the device clip. Installed as
+`SaveLayerRec::fBackdrop`, the filtered result then composites over everything
+already painted and **the entire panel floods with one colour** — which looks
+like a broken renderer, not like a filter with the wrong extent. Wrap the whole
+composed chain in `SkImageFilters::Crop(bounds, …)`; cropping only the blur entry
+(which is what the blur-only path did, because a blur was the only unbounded
+thing it could produce) is not enough.
+
+The same trap is already documented one function away for `crt` in
+`save_layer_with_shader_effect`. Two independent instances make it the rule for
+this file: **any filter installed as a backdrop gets cropped to the element rect.**
+
+## Growing `View::ViewStyleExtras` needs a full build, not a target build
+
+`ViewStyleExtras` sits behind `style_extras_`, so adding a field changes the
+layout of a type many libraries include. Building only the feature target links
+stale objects against the new layout and the symptom is not a crash — it is a
+**render that comes back a uniform near-white**, with the tool reporting success.
+`cmake --build build -j<N>` over everything, then re-render, before believing any
+pixel measurement of such a change.

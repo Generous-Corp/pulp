@@ -1509,6 +1509,22 @@ public:
     void set_backdrop_blur(float radius) { style_extras().backdrop_blur = radius; }
     float backdrop_blur() const { return style_extras_ ? style_extras_->backdrop_blur : 0.0f; }
 
+    /// CSS backdrop-filter with its full function list — `saturate()`,
+    /// `brightness()`, `invert()`, and compositions of them. Takes precedence
+    /// over `set_backdrop_blur` when non-empty; a blur-only value can be
+    /// expressed either way and means the same thing.
+    ///
+    /// Callers that pass a list containing a blur SHOULD also call
+    /// `set_backdrop_blur` with that radius: the repaint-damage pass reads the
+    /// scalar to decide how far beyond the view's bounds a change reaches.
+    void set_backdrop_filter_chain(std::vector<FilterOp> chain) {
+        style_extras().backdrop_filter_chain = std::move(chain);
+    }
+    const std::vector<FilterOp>& backdrop_filter_chain() const {
+        static const std::vector<FilterOp> kEmpty;
+        return style_extras_ ? style_extras_->backdrop_filter_chain : kEmpty;
+    }
+
     /// CSS `clip-path: path("...")`. Stores an SVG-path-d string; paint_all()
     /// installs it as a canvas clip via
     /// `Canvas::clip_path_svg` before painting children. Empty string
@@ -2207,6 +2223,8 @@ private:
     struct ViewStyleExtras {
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
+        /// The whole `backdrop-filter` list when it is more than a blur.
+        std::vector<FilterOp> backdrop_filter_chain;
         // Import-resolved clip on this view's OWN ink; see
         // set_ancestor_clip_rect for why it does not descend.
         std::optional<Rect> ancestor_clip;
