@@ -262,8 +262,17 @@ constexpr Digest kHelloWorldMono12 {
 #else
 constexpr Digest kHelloInter14 {
     /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/244,
-    /*darkness_sum=*/31403,
+    // Regenerated 2026-08-02 when the bundled faces reached the SkParagraph
+    // path. 244/31403 was NOT bundled Inter: the paragraph collection only
+    // learned the bundled faces on platforms with no font DB of their own, so
+    // macOS resolved "Inter" through CoreText to a substitute. Verified against
+    // Chrome rendering this exact string at this exact size from this repo's
+    // own Inter-Regular.ttf — ink width 32.00px vs Chrome's 32.50px (-1.5%),
+    // where the old render was 31.00px (-4.6%), and the letterforms now match.
+    // The Linux digest below never moved: FreeType always used the bundled
+    // face, and macOS's opaque count converging on it is the corroboration.
+    /*opaque_pixels=*/210,
+    /*darkness_sum=*/30518,
 };
 
 constexpr Digest kHelloWorldMono12 {
