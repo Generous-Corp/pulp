@@ -217,6 +217,38 @@ Facts worth knowing before touching any of it:
 - **The rows are addressed by layout node; the semantic report is addressed by
   `backend_node_id`.** The join is three hops: backend id → node index
   (`nodes.backendNodeId`) → layout index (`layout.nodeIndex`) → style row.
+- **The list is sized for drawing a whole panel, not for describing a control.**
+  A property the capture does not collect is one no consumer can ever draw — the
+  box arrives with that appearance defaulted, which renders as a plausible wrong
+  picture rather than an error. Collecting one costs a string per node;
+  re-capturing a corpus to add one later costs every design. So when in doubt,
+  collect it. Two properties earn specific mention: without `background-size`
+  the standard CSS grid idiom (a hard-stop gradient, tiled) lowers to a single
+  1 px line instead of eight columns, and reading only `border-top-style` makes
+  a dashed *left* border vanish — hence all four `border-*-style` are collected.
+- **A node can own more than one layout entry.** A box that also lays out an
+  inline text box contributes two entries with the same `nodeIndex`; a
+  `::before` with generated content is the everyday case. Take the **first**
+  entry — the node's own box — so the choice is defined rather than
+  last-write-wins.
+- **Element index N in the page is not element index N in the snapshot.** The
+  page walk is `document.querySelectorAll('*')`; the snapshot also emits
+  pseudo-element boxes (`::before` / `::after`) and shadow-tree content as
+  `nodeType === 1`. Counting those re-points every control after the first
+  `::before` at the node *before* its own — which still resolves and still looks
+  like data. `snapshotElementNodes()` in `semantics.mjs` is the one place that
+  correspondence is computed; every per-candidate snapshot value
+  (`backend_node_id`, `paint_order`) goes through it, and a candidate whose tag
+  disagrees with the node it landed on raises `capture-node-alignment-mismatch`
+  rather than shipping a neighbour's data.
+- **Paint order is consumed, never re-derived.** `includePaintOrder: true` makes
+  Chromium answer "what paints on top of what" directly, and each candidate
+  carries that integer as `paint_order`. Do not sort by `z-index` instead:
+  opacity, transforms, filters and `will-change` all create stacking contexts,
+  so a `z-index` sort agrees on simple pages and diverges silently on exactly
+  the layered panels this exists for. A laid-out document that arrives without
+  `paintOrders` raises `capture-paint-order-missing` — a tree of nulls would
+  read as "this page has no layering".
 - **A control's own node usually carries only its label's styling.** The
   gradient, radius, and shadow stack that make it look like a knob sit on an
   inner face element. Resolve through the candidate's `paint_bounds` — match it
