@@ -18,6 +18,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <aclapi.h>
 #include <windows.h>
 #include <winternl.h>
 #else
@@ -153,6 +154,53 @@ bool write_all(HANDLE handle, std::span<const std::uint8_t> bytes) noexcept {
     }
     return true;
 }
+
+bool adopt_inherited_permissions(HANDLE child, HANDLE parent, bool directory) noexcept {
+    PSECURITY_DESCRIPTOR parent_descriptor = nullptr;
+    const auto read_error = GetSecurityInfo(
+        parent, SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        nullptr, nullptr, nullptr, nullptr, &parent_descriptor);
+    if (read_error != ERROR_SUCCESS || parent_descriptor == nullptr) {
+        if (parent_descriptor != nullptr)
+            LocalFree(parent_descriptor);
+        return false;
+    }
+    HANDLE token = nullptr;
+    bool token_opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token) != 0;
+    if (!token_opened && GetLastError() == ERROR_NO_TOKEN)
+        token_opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0;
+    GENERIC_MAPPING file_mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
+                                 FILE_ALL_ACCESS};
+    PSECURITY_DESCRIPTOR child_descriptor = nullptr;
+    const bool descriptor_created =
+        token_opened &&
+        CreatePrivateObjectSecurityEx(parent_descriptor, nullptr, &child_descriptor, nullptr,
+                                      directory, SEF_DACL_AUTO_INHERIT, token,
+                                      &file_mapping) != 0;
+    if (token != nullptr)
+        CloseHandle(token);
+    LocalFree(parent_descriptor);
+    if (!descriptor_created || child_descriptor == nullptr) {
+        if (child_descriptor != nullptr)
+            DestroyPrivateObjectSecurity(&child_descriptor);
+        return false;
+    }
+    BOOL dacl_present = FALSE;
+    BOOL dacl_defaulted = FALSE;
+    PACL dacl = nullptr;
+    const bool dacl_read =
+        GetSecurityDescriptorDacl(child_descriptor, &dacl_present, &dacl, &dacl_defaulted) != 0 &&
+        dacl_present && dacl != nullptr;
+    const auto write_error =
+        dacl_read
+            ? SetSecurityInfo(child, SE_FILE_OBJECT,
+                              DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+                              nullptr, nullptr, dacl, nullptr)
+            : ERROR_INVALID_SECURITY_DESCR;
+    DestroyPrivateObjectSecurity(&child_descriptor);
+    return write_error == ERROR_SUCCESS;
+}
 #else
 bool write_all(int descriptor, std::span<const std::uint8_t> bytes) noexcept {
     std::size_t offset = 0;
@@ -210,9 +258,12 @@ PinnedFile& PinnedFile::operator=(PinnedFile&& other) noexcept {
 }
 
 std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
-                                           bool fence_capable, bool allow_rename) noexcept {
+                                           bool fence_capable, bool allow_rename,
+                                           bool permissions_mutable) noexcept {
 #if defined(_WIN32)
-    const auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    if (permissions_mutable)
+        access |= WRITE_DAC;
     const auto sharing = FILE_SHARE_READ | (allow_rename ? FILE_SHARE_DELETE : 0);
     const auto handle = ::CreateFileW(
         path.c_str(), access, sharing, nullptr, OPEN_EXISTING,
@@ -229,6 +280,7 @@ std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
     return PinnedFile(reinterpret_cast<std::intptr_t>(handle));
 #else
     (void)allow_rename;
+    (void)permissions_mutable;
     const auto descriptor = ::open(path.c_str(), (fence_capable ? O_RDWR : O_RDONLY) | O_CLOEXEC
 #ifdef O_NOFOLLOW
                                                      | O_NOFOLLOW
@@ -364,6 +416,17 @@ bool PinnedFile::fence() const noexcept {
 #endif
 }
 
+bool PinnedFile::adopt_inherited_permissions_from(const AnchoredDirectory& parent) const noexcept {
+#if defined(_WIN32)
+    return native_ != -1 && parent.native_ != -1 &&
+           adopt_inherited_permissions(reinterpret_cast<HANDLE>(native_),
+                                       reinterpret_cast<HANDLE>(parent.native_), false);
+#else
+    (void)parent;
+    return native_ != -1;
+#endif
+}
+
 bool PinnedFile::still_named_by(const std::filesystem::path& path) const noexcept {
     if (native_ == -1)
         return false;
@@ -415,7 +478,7 @@ AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) no
     const auto handle = ::CreateFileW(
         path.c_str(),
         FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
-            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
         sharing, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
@@ -446,23 +509,26 @@ AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) no
 
 std::optional<AnchoredDirectory>
 AnchoredDirectory::open_directory(const std::filesystem::path& relative,
-                                  bool allow_rename) const noexcept {
+                                  bool allow_rename, bool permissions_mutable) const noexcept {
     if (native_ == -1 || relative.empty() || relative.is_absolute() ||
         !relative.parent_path().empty() || relative == "." || relative == "..")
         return std::nullopt;
 #if defined(_WIN32)
     const auto sharing =
         FILE_SHARE_READ | FILE_SHARE_WRITE | (allow_rename ? FILE_SHARE_DELETE : 0);
+    auto access = FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
+                  FILE_READ_ATTRIBUTES | READ_CONTROL;
+    if (permissions_mutable)
+        access |= WRITE_DAC;
     const auto handle = open_relative_existing(
         reinterpret_cast<HANDLE>(native_), relative, true,
-        FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
-            FILE_READ_ATTRIBUTES,
-        sharing);
+        access, sharing);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
     return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
 #else
     (void)allow_rename;
+    (void)permissions_mutable;
     const auto descriptor = ::openat(static_cast<int>(native_), relative.c_str(),
                                      O_RDONLY | O_CLOEXEC
 #ifdef O_DIRECTORY
@@ -659,6 +725,18 @@ bool AnchoredDirectory::fence() const noexcept {
     return true;
 #else
     return ::fsync(static_cast<int>(native_)) == 0;
+#endif
+}
+
+bool AnchoredDirectory::adopt_inherited_permissions_from(
+    const AnchoredDirectory& parent) const noexcept {
+#if defined(_WIN32)
+    return native_ != -1 && parent.native_ != -1 &&
+           adopt_inherited_permissions(reinterpret_cast<HANDLE>(native_),
+                                       reinterpret_cast<HANDLE>(parent.native_), true);
+#else
+    (void)parent;
+    return native_ != -1;
 #endif
 }
 

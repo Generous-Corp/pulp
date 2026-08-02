@@ -43,7 +43,8 @@ class AnchoredDirectory {
     static std::optional<AnchoredDirectory> open(const std::filesystem::path& path,
                                                  bool allow_rename = false) noexcept;
     std::optional<AnchoredDirectory>
-    open_directory(const std::filesystem::path& relative, bool allow_rename = false) const noexcept;
+    open_directory(const std::filesystem::path& relative, bool allow_rename = false,
+                   bool permissions_mutable = false) const noexcept;
     /// Returns true only while `path` still names this pinned directory.
     bool still_named_by(const std::filesystem::path& path) const noexcept;
     bool write_exclusive_and_fence(const std::filesystem::path& relative,
@@ -55,9 +56,11 @@ class AnchoredDirectory {
                                         const std::filesystem::path& destination_name,
                                         NoReplaceSourceKind kind) const noexcept;
     bool fence() const noexcept;
+    bool adopt_inherited_permissions_from(const AnchoredDirectory& parent) const noexcept;
     void close() noexcept;
 
   private:
+    friend class PinnedFile;
     explicit AnchoredDirectory(std::intptr_t native) noexcept : native_(native) {}
     std::intptr_t native_ = -1;
 };
@@ -74,9 +77,11 @@ class PinnedFile {
 
     static std::optional<PinnedFile> open(const std::filesystem::path& path,
                                           bool fence_capable,
-                                          bool allow_rename = false) noexcept;
+                                          bool allow_rename = false,
+                                          bool permissions_mutable = false) noexcept;
     bool hash_matches(std::string_view expected_hex, std::uint64_t maximum_bytes) const noexcept;
     bool fence() const noexcept;
+    bool adopt_inherited_permissions_from(const AnchoredDirectory& parent) const noexcept;
     /// Returns true only while `path` still names this single-linked regular file.
     bool still_named_by(const std::filesystem::path& path) const noexcept;
     void close() noexcept;

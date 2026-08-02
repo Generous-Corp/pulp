@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -27,13 +28,19 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <aclapi.h>
 #include <process.h>
+#include <sddl.h>
 #include <windows.h>
 #else
 #include <csignal>
 #if defined(__APPLE__)
 #include <membership.h>
 #include <sys/acl.h>
+#elif defined(__linux__)
+#include <linux/posix_acl.h>
+#include <linux/posix_acl_xattr.h>
+#include <sys/xattr.h>
 #endif
 #include <sys/stat.h>
 #include <unistd.h>
@@ -218,6 +225,64 @@ std::string read_text(const fs::path& path) {
     REQUIRE(input);
     return {std::istreambuf_iterator<char>(input), {}};
 }
+
+#if defined(_WIN32)
+std::wstring dacl_sddl(const fs::path& path) {
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    REQUIRE(GetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
+                                  DACL_SECURITY_INFORMATION, nullptr, nullptr, nullptr, nullptr,
+                                  &descriptor) == ERROR_SUCCESS);
+    LPWSTR text = nullptr;
+    REQUIRE(ConvertSecurityDescriptorToStringSecurityDescriptorW(
+        descriptor, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &text, nullptr));
+    std::wstring result = text != nullptr ? text : L"";
+    if (text != nullptr)
+        LocalFree(text);
+    if (descriptor != nullptr)
+        LocalFree(descriptor);
+    return result;
+}
+
+bool dacl_is_protected(const fs::path& path) {
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    REQUIRE(GetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
+                                  DACL_SECURITY_INFORMATION, nullptr, nullptr, nullptr, nullptr,
+                                  &descriptor) == ERROR_SUCCESS);
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    REQUIRE(GetSecurityDescriptorControl(descriptor, &control, &revision));
+    if (descriptor != nullptr)
+        LocalFree(descriptor);
+    return (control & SE_DACL_PROTECTED) != 0;
+}
+#elif defined(__APPLE__)
+std::string extended_acl_text(const fs::path& path) {
+    acl_t acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
+    if (acl == nullptr)
+        return {};
+    ssize_t length = 0;
+    char* text = ::acl_to_text(acl, &length);
+    std::string result;
+    if (text != nullptr && length > 0)
+        result.assign(text, static_cast<std::size_t>(length));
+    if (text != nullptr)
+        ::acl_free(text);
+    ::acl_free(acl);
+    return result;
+}
+#elif defined(__linux__)
+std::vector<std::uint8_t> xattr_bytes(const fs::path& path, const char* name) {
+    errno = 0;
+    const auto size = ::getxattr(path.c_str(), name, nullptr, 0);
+    if (size < 0) {
+        REQUIRE((errno == ENODATA || errno == ENOTSUP));
+        return {};
+    }
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    REQUIRE(::getxattr(path.c_str(), name, bytes.data(), bytes.size()) == size);
+    return bytes;
+}
+#endif
 
 void publish_baseline(const fs::path& root, const pulp::timeline::ContentHash& hash,
                       std::span<const std::uint8_t> bytes, const pulp::timeline::Project& project) {
@@ -801,6 +866,123 @@ TEST_CASE("Atomic project-package publication preserves ordinary umask permissio
 }
 #endif
 
+#if defined(_WIN32)
+TEST_CASE("Atomic publication matches direct-child Windows DACL inheritance",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-windows-acl-inheritance");
+    fs::create_directories(temporary.path);
+    const auto control_directory = temporary.path / "control-directory";
+    fs::create_directory(control_directory);
+    fs::create_directory(control_directory / "nested");
+    std::ofstream(control_directory / "nested" / "value.txt") << "control";
+    const auto control_file = temporary.path / "control-file";
+    std::ofstream(control_file) << "control";
+
+    const auto published_directory = temporary.path / "published-directory";
+    auto directory_publisher = AtomicPublisher::create(published_directory);
+    REQUIRE(directory_publisher);
+    REQUIRE(dacl_is_protected(directory_publisher->staging_directory()));
+    REQUIRE(dacl_sddl(directory_publisher->staging_directory()) !=
+            dacl_sddl(control_directory));
+    REQUIRE(directory_publisher->write("nested/value.txt", "published"));
+    REQUIRE(directory_publisher->commit_directory());
+
+    const auto published_file = temporary.path / "published-file";
+    auto file_publisher = AtomicPublisher::create_file(published_file);
+    REQUIRE(file_publisher);
+    REQUIRE(dacl_is_protected(file_publisher->staging_file()));
+    std::ofstream(file_publisher->staging_file()) << "published";
+    REQUIRE(file_publisher->commit_file(file_publisher->staging_file()));
+
+    REQUIRE(dacl_sddl(published_directory) == dacl_sddl(control_directory));
+    REQUIRE(dacl_sddl(published_directory / "nested") ==
+            dacl_sddl(control_directory / "nested"));
+    REQUIRE(dacl_sddl(published_directory / "nested" / "value.txt") ==
+            dacl_sddl(control_directory / "nested" / "value.txt"));
+    REQUIRE(dacl_sddl(published_file) == dacl_sddl(control_file));
+}
+#endif
+
+#if defined(__linux__)
+TEST_CASE("Atomic publication matches direct-child Linux ACL and setgid inheritance",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-linux-acl-inheritance");
+    fs::create_directories(temporary.path);
+    REQUIRE(::chmod(temporary.path.c_str(), 02750) == 0);
+
+    struct DefaultAcl {
+        posix_acl_xattr_header header;
+        posix_acl_xattr_entry entries[5];
+    } acl{};
+    acl.header.a_version = POSIX_ACL_XATTR_VERSION;
+    const auto undefined_id = ~std::uint32_t{0};
+    acl.entries[0] = {ACL_USER_OBJ, ACL_READ | ACL_WRITE | ACL_EXECUTE, undefined_id};
+    acl.entries[1] = {ACL_USER, ACL_READ, 1};
+    acl.entries[2] = {ACL_GROUP_OBJ, ACL_READ | ACL_EXECUTE, undefined_id};
+    acl.entries[3] = {ACL_MASK, ACL_READ | ACL_EXECUTE, undefined_id};
+    acl.entries[4] = {ACL_OTHER, 0, undefined_id};
+    constexpr const char* default_acl = "system.posix_acl_default";
+    constexpr const char* access_acl = "system.posix_acl_access";
+    errno = 0;
+    const auto acl_set =
+        ::setxattr(temporary.path.c_str(), default_acl, &acl, sizeof(acl), 0);
+    if (acl_set != 0 && errno == ENOTSUP)
+        SKIP("POSIX ACL xattrs are unavailable");
+    REQUIRE(acl_set == 0);
+
+    const auto control_directory = temporary.path / "control-directory";
+    fs::create_directory(control_directory);
+    fs::create_directory(control_directory / "nested");
+    std::ofstream(control_directory / "nested" / "value.txt") << "control";
+    const auto control_file = temporary.path / "control-file";
+    std::ofstream(control_file) << "control";
+
+    const auto published_directory = temporary.path / "published-directory";
+    auto directory_publisher = AtomicPublisher::create(published_directory);
+    REQUIRE(directory_publisher);
+    REQUIRE(directory_publisher->write("nested/value.txt", "published"));
+    REQUIRE(directory_publisher->commit_directory());
+
+    const auto published_file = temporary.path / "published-file";
+    auto file_publisher = AtomicPublisher::create_file(published_file);
+    REQUIRE(file_publisher);
+    std::ofstream(file_publisher->staging_file()) << "published";
+    REQUIRE(file_publisher->commit_file(file_publisher->staging_file()));
+
+    struct stat control_directory_status{};
+    struct stat published_directory_status{};
+    struct stat control_file_status{};
+    struct stat published_file_status{};
+    struct stat control_nested_status{};
+    struct stat published_nested_status{};
+    REQUIRE(::stat(control_directory.c_str(), &control_directory_status) == 0);
+    REQUIRE(::stat(published_directory.c_str(), &published_directory_status) == 0);
+    REQUIRE(::stat(control_file.c_str(), &control_file_status) == 0);
+    REQUIRE(::stat(published_file.c_str(), &published_file_status) == 0);
+    REQUIRE(::stat((control_directory / "nested").c_str(), &control_nested_status) == 0);
+    REQUIRE(::stat((published_directory / "nested").c_str(), &published_nested_status) == 0);
+    REQUIRE(published_directory_status.st_gid == control_directory_status.st_gid);
+    REQUIRE((published_directory_status.st_mode & 07777) ==
+            (control_directory_status.st_mode & 07777));
+    REQUIRE(published_file_status.st_gid == control_file_status.st_gid);
+    REQUIRE((published_file_status.st_mode & 0777) == (control_file_status.st_mode & 0777));
+    REQUIRE(published_nested_status.st_gid == control_nested_status.st_gid);
+    REQUIRE((published_nested_status.st_mode & 07777) ==
+            (control_nested_status.st_mode & 07777));
+    REQUIRE(xattr_bytes(published_directory, access_acl) ==
+            xattr_bytes(control_directory, access_acl));
+    REQUIRE(xattr_bytes(published_directory, default_acl) ==
+            xattr_bytes(control_directory, default_acl));
+    REQUIRE(xattr_bytes(published_directory / "nested", access_acl) ==
+            xattr_bytes(control_directory / "nested", access_acl));
+    REQUIRE(xattr_bytes(published_directory / "nested", default_acl) ==
+            xattr_bytes(control_directory / "nested", default_acl));
+    REQUIRE(xattr_bytes(published_directory / "nested" / "value.txt", access_acl) ==
+            xattr_bytes(control_directory / "nested" / "value.txt", access_acl));
+    REQUIRE(xattr_bytes(published_file, access_acl) == xattr_bytes(control_file, access_acl));
+}
+#endif
+
 #if defined(__APPLE__)
 TEST_CASE("Atomic project-package publisher rejects namespace-writing parent ACLs",
           "[project-package][atomic-publisher][permissions]") {
@@ -825,6 +1007,60 @@ TEST_CASE("Atomic project-package publisher rejects namespace-writing parent ACL
 
     REQUIRE_FALSE(publisher);
     REQUIRE(publisher.error().code == PackageErrorCode::InvalidPath);
+}
+
+TEST_CASE("Atomic publication matches direct-child macOS ACL inheritance",
+          "[project-package][atomic-publisher][permissions]") {
+    TemporaryPackage temporary("atomic-parent-acl-inheritance");
+    fs::create_directories(temporary.path);
+    acl_t acl = ::acl_init(1);
+    REQUIRE(acl != nullptr);
+    acl_entry_t entry = nullptr;
+    REQUIRE(::acl_create_entry(&acl, &entry) == 0);
+    REQUIRE(::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0);
+    uuid_t user{};
+    REQUIRE(::mbr_uid_to_uuid(1, user) == 0);
+    REQUIRE(::acl_set_qualifier(entry, user) == 0);
+    acl_permset_t permissions = nullptr;
+    REQUIRE(::acl_get_permset(entry, &permissions) == 0);
+    REQUIRE(::acl_add_perm(permissions, ACL_READ_DATA) == 0);
+    REQUIRE(::acl_set_permset(entry, permissions) == 0);
+    acl_flagset_t flags = nullptr;
+    REQUIRE(::acl_get_flagset_np(entry, &flags) == 0);
+    REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_FILE_INHERIT) == 0);
+    REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0);
+    REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_LIMIT_INHERIT) == 0);
+    REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_ONLY_INHERIT) == 0);
+    REQUIRE(::acl_set_flagset_np(entry, flags) == 0);
+    REQUIRE(::acl_set_file(temporary.path.c_str(), ACL_TYPE_EXTENDED, acl) == 0);
+    ::acl_free(acl);
+
+    const auto control_directory = temporary.path / "control-directory";
+    fs::create_directory(control_directory);
+    std::ofstream(control_directory / "nested.txt") << "control";
+    const auto control_file = temporary.path / "control-file";
+    std::ofstream(control_file) << "control";
+
+    const auto published_directory = temporary.path / "published-directory";
+    auto directory_publisher = AtomicPublisher::create(published_directory);
+    REQUIRE(directory_publisher);
+    REQUIRE(directory_publisher->write("nested.txt", "published"));
+    const auto directory_outcome = directory_publisher->commit_directory();
+    REQUIRE(directory_outcome);
+    REQUIRE(directory_outcome.value() == AtomicPublishOutcome::PublishedDurably);
+
+    const auto published_file = temporary.path / "published-file";
+    auto file_publisher = AtomicPublisher::create_file(published_file);
+    REQUIRE(file_publisher);
+    std::ofstream(file_publisher->staging_file()) << "published";
+    const auto file_outcome = file_publisher->commit_file(file_publisher->staging_file());
+    REQUIRE(file_outcome);
+    REQUIRE(file_outcome.value() == AtomicPublishOutcome::PublishedDurably);
+
+    REQUIRE(extended_acl_text(published_directory) == extended_acl_text(control_directory));
+    REQUIRE(extended_acl_text(published_directory / "nested.txt") ==
+            extended_acl_text(control_directory / "nested.txt"));
+    REQUIRE(extended_acl_text(published_file) == extended_acl_text(control_file));
 }
 #endif
 
@@ -873,12 +1109,14 @@ TEST_CASE("Atomic project-package file publication rejects a staged symlink",
           "[project-package][atomic-publisher][symlink]") {
     TemporaryPackage temporary("atomic-file-symlink");
     fs::create_directories(temporary.path);
-    auto publisher = AtomicPublisher::create(temporary.path / "published");
+    auto publisher = AtomicPublisher::create_file(temporary.path / "published");
     REQUIRE(publisher);
     const auto external = temporary.path / "external.txt";
     std::ofstream(external) << "external";
-    const auto staged = publisher->staging_directory() / "redirect";
+    const auto staged = publisher->staging_file();
     std::error_code error;
+    fs::remove(staged, error);
+    REQUIRE_FALSE(error);
     fs::create_symlink(external, staged, error);
     if (error)
         SKIP("symlink creation is unavailable: " << error.message());
@@ -936,12 +1174,12 @@ TEST_CASE("Atomic file publication revalidates its pinned source after callbacks
     TemporaryPackage temporary("atomic-file-rebind");
     fs::create_directories(temporary.path);
     const auto destination = temporary.path / "published";
-    auto publisher = AtomicPublisher::create(destination);
+    auto publisher = AtomicPublisher::create_file(destination);
     REQUIRE(publisher);
-    REQUIRE(publisher->write("source", "original"));
-    const auto source = publisher->staging_directory() / "source";
+    const auto source = publisher->staging_file();
+    std::ofstream(source) << "original";
     g_rebind_source = source;
-    g_rebind_displaced = publisher->staging_directory() / "displaced";
+    g_rebind_displaced = source.parent_path() / "displaced";
     g_rebind_replacement_file = source;
     g_rebind_point = pulp::project_package::detail::PackageFaultPoint::StagedFileFenced;
     pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(

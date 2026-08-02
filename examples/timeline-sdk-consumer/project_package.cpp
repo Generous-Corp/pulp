@@ -23,5 +23,12 @@ int main() {
         return 3;
 
     auto empty_path = AtomicPublisher::create({});
-    return !empty_path && empty_path.error().code == PackageErrorCode::InvalidPath ? 0 : 4;
+    auto empty_file_path = AtomicPublisher::create_file({});
+    const auto staging_file = &AtomicPublisher::staging_file;
+    (void)staging_file;
+    return !empty_path && empty_path.error().code == PackageErrorCode::InvalidPath &&
+                   !empty_file_path &&
+                   empty_file_path.error().code == PackageErrorCode::InvalidPath
+               ? 0
+               : 4;
 }

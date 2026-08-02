@@ -62,6 +62,82 @@ fs::path path_from_utf8(std::string_view value) {
 
 enum class PrivateDirectoryCreate : std::uint8_t { Created, AlreadyExists, Failed };
 
+bool configure_guard_inheritance(const fs::path& guard, const fs::path& parent) noexcept {
+#if defined(_WIN32)
+    (void)guard;
+    (void)parent;
+    return true;
+#elif defined(__APPLE__)
+    acl_t parent_acl = ::acl_get_file(parent.c_str(), ACL_TYPE_EXTENDED);
+    if (parent_acl == nullptr)
+        return errno == ENOENT || errno == EOPNOTSUPP;
+    acl_t proxy_acl = ::acl_init(1);
+    if (proxy_acl == nullptr) {
+        ::acl_free(parent_acl);
+        return false;
+    }
+    bool valid = true;
+    acl_entry_t source = nullptr;
+    errno = 0;
+    int entry_result = ::acl_get_entry(parent_acl, ACL_FIRST_ENTRY, &source);
+    while (valid && entry_result == 0) {
+        acl_flagset_t source_flags = nullptr;
+        const bool flags_read = ::acl_get_flagset_np(source, &source_flags) == 0;
+        const bool inheritable =
+            flags_read &&
+            (::acl_get_flag_np(source_flags, ACL_ENTRY_FILE_INHERIT) == 1 ||
+             ::acl_get_flag_np(source_flags, ACL_ENTRY_DIRECTORY_INHERIT) == 1);
+        if (inheritable) {
+            const bool file_inherit =
+                ::acl_get_flag_np(source_flags, ACL_ENTRY_FILE_INHERIT) == 1;
+            const bool directory_inherit =
+                ::acl_get_flag_np(source_flags, ACL_ENTRY_DIRECTORY_INHERIT) == 1;
+            const bool limit_inherit =
+                ::acl_get_flag_np(source_flags, ACL_ENTRY_LIMIT_INHERIT) == 1;
+            acl_entry_t destination = nullptr;
+            valid = ::acl_create_entry(&proxy_acl, &destination) == 0 &&
+                    ::acl_copy_entry(destination, source) == 0;
+            acl_flagset_t destination_flags = nullptr;
+            valid = valid && ::acl_get_flagset_np(destination, &destination_flags) == 0;
+            if (valid && file_inherit)
+                valid = ::acl_add_flag_np(destination_flags, ACL_ENTRY_FILE_INHERIT) == 0;
+            if (valid && directory_inherit)
+                valid = ::acl_add_flag_np(destination_flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0;
+            if (valid && limit_inherit)
+                valid = ::acl_add_flag_np(destination_flags, ACL_ENTRY_LIMIT_INHERIT) == 0;
+            valid = valid &&
+                    ::acl_add_flag_np(destination_flags, ACL_ENTRY_ONLY_INHERIT) == 0 &&
+                    ::acl_delete_flag_np(destination_flags, ACL_ENTRY_INHERITED) == 0 &&
+                    ::acl_set_flagset_np(destination, destination_flags) == 0;
+        }
+        if (valid) {
+            errno = 0;
+            entry_result = ::acl_get_entry(parent_acl, ACL_NEXT_ENTRY, &source);
+        }
+    }
+    valid = valid && entry_result == -1 && errno == EINVAL &&
+            (::acl_set_file(guard.c_str(), ACL_TYPE_EXTENDED, proxy_acl) == 0 ||
+             errno == EOPNOTSUPP);
+    ::acl_free(proxy_acl);
+    ::acl_free(parent_acl);
+    return valid;
+#elif defined(__linux__)
+    constexpr const char* name = "system.posix_acl_default";
+    errno = 0;
+    const auto size = ::getxattr(parent.c_str(), name, nullptr, 0);
+    if (size < 0)
+        return errno == ENODATA || errno == ENOTSUP;
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    if (size != 0 && ::getxattr(parent.c_str(), name, bytes.data(), bytes.size()) != size)
+        return false;
+    return ::setxattr(guard.c_str(), name, bytes.data(), bytes.size(), 0) == 0;
+#else
+    (void)guard;
+    (void)parent;
+    return true;
+#endif
+}
+
 bool parent_allows_private_staging(const fs::path& parent) noexcept {
 #if defined(_WIN32)
     const auto directory = CreateFileW(
@@ -222,7 +298,7 @@ bool parent_allows_private_staging(const fs::path& parent) noexcept {
 bool private_directory_security_matches(HANDLE directory) noexcept {
     PSECURITY_DESCRIPTOR expected_descriptor = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)", SDDL_REVISION_1,
+            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1,
             &expected_descriptor, nullptr))
         return false;
 
@@ -279,7 +355,7 @@ PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
 #if defined(_WIN32)
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)", SDDL_REVISION_1, &descriptor,
+            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor,
             nullptr))
         return PrivateDirectoryCreate::Failed;
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
@@ -313,7 +389,13 @@ PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
         fs::remove(path, ignored);
         return PrivateDirectoryCreate::Failed;
     }
-    bool private_security = ::fchmod(directory, 0700) == 0;
+    struct stat inherited_status{};
+    const bool inherited_status_read = ::fstat(directory, &inherited_status) == 0;
+    const auto private_mode = static_cast<mode_t>(
+        0700 | (inherited_status_read ? inherited_status.st_mode & S_ISGID : 0));
+    bool private_security = inherited_status_read;
+    if (private_security && (inherited_status.st_mode & 0777) != 0700)
+        private_security = ::fchmod(directory, private_mode) == 0;
 #if defined(__APPLE__)
     acl_t empty = ::acl_init(0);
     errno = 0;
@@ -344,45 +426,41 @@ PrivateDirectoryCreate create_private_directory(const fs::path& path) noexcept {
 bool create_publication_payload(const fs::path& path,
                                 const fs::path& destination_parent) noexcept {
 #if defined(_WIN32)
-    PSECURITY_DESCRIPTOR parent_descriptor = nullptr;
-    const auto read_error = GetNamedSecurityInfoW(
-        const_cast<PWSTR>(destination_parent.c_str()), SE_FILE_OBJECT,
-        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-        nullptr, nullptr, nullptr, nullptr, &parent_descriptor);
-    if (read_error != ERROR_SUCCESS || parent_descriptor == nullptr) {
-        if (parent_descriptor != nullptr)
-            LocalFree(parent_descriptor);
+    (void)destination_parent;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)", SDDL_REVISION_1,
+            &descriptor, nullptr))
         return false;
-    }
-
-    HANDLE token = nullptr;
-    bool token_opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token) != 0;
-    if (!token_opened && GetLastError() == ERROR_NO_TOKEN)
-        token_opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0;
-
-    GENERIC_MAPPING file_mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
-                                 FILE_ALL_ACCESS};
-    PSECURITY_DESCRIPTOR child_descriptor = nullptr;
-    const bool descriptor_created =
-        token_opened &&
-        CreatePrivateObjectSecurityEx(parent_descriptor, nullptr, &child_descriptor, nullptr, TRUE,
-                                      SEF_DACL_AUTO_INHERIT, token, &file_mapping) != 0;
-    if (token != nullptr)
-        CloseHandle(token);
-    LocalFree(parent_descriptor);
-    if (!descriptor_created || child_descriptor == nullptr) {
-        if (child_descriptor != nullptr)
-            DestroyPrivateObjectSecurity(&child_descriptor);
-        return false;
-    }
-
-    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), child_descriptor, FALSE};
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
     const bool created = CreateDirectoryW(path.c_str(), &attributes) != 0;
-    DestroyPrivateObjectSecurity(&child_descriptor);
+    LocalFree(descriptor);
     return created;
 #else
     (void)destination_parent;
     return ::mkdir(path.c_str(), 0777) == 0;
+#endif
+}
+
+bool create_publication_file(const fs::path& path) noexcept {
+#if defined(_WIN32)
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr))
+        return false;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
+    const auto file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+                                  &attributes, CREATE_NEW,
+                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    LocalFree(descriptor);
+    return file != INVALID_HANDLE_VALUE && CloseHandle(file) != 0;
+#else
+    int flags = O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    const int file = ::open(path.c_str(), flags, 0666);
+    return file >= 0 && ::close(file) == 0;
 #endif
 }
 
@@ -395,6 +473,7 @@ struct AtomicPublisher::Impl {
     detail::AnchoredDirectory parent_root;
     detail::AnchoredDirectory guard_root;
     detail::AnchoredDirectory staging_root;
+    bool file = false;
     bool committed = false;
 };
 
@@ -413,6 +492,16 @@ AtomicPublisher& AtomicPublisher::operator=(AtomicPublisher&& other) noexcept {
 
 runtime::Result<AtomicPublisher, PackageError>
 AtomicPublisher::create(const fs::path& destination) noexcept {
+    return create_impl(destination, false);
+}
+
+runtime::Result<AtomicPublisher, PackageError>
+AtomicPublisher::create_file(const fs::path& destination) noexcept {
+    return create_impl(destination, true);
+}
+
+runtime::Result<AtomicPublisher, PackageError>
+AtomicPublisher::create_impl(const fs::path& destination, bool file) noexcept {
     if (destination.empty())
         return failure<AtomicPublisher>(PackageErrorCode::InvalidPath, destination);
     std::error_code error;
@@ -442,14 +531,23 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
         const auto created = create_private_directory(staging);
         if (created == PrivateDirectoryCreate::Created) {
             auto guard_root = parent_root->open_directory(staging.filename());
-            const auto payload = staging / "payload";
+            const auto payload = staging / (file ? "file-payload" : "payload");
             if (!guard_root || !guard_root->still_named_by(staging) ||
-                !create_publication_payload(payload, parent)) {
+                !configure_guard_inheritance(staging, parent) ||
+                (file ? !create_publication_file(payload)
+                      : !create_publication_payload(payload, parent))) {
+                if (guard_root)
+                    guard_root->close();
                 fs::remove_all(staging, error);
                 return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
             }
-            auto staging_root = guard_root->open_directory(payload.filename(), true);
-            if (!staging_root || !staging_root->still_named_by(payload)) {
+            std::optional<detail::AnchoredDirectory> staging_root;
+            if (!file)
+                staging_root = guard_root->open_directory(payload.filename(), true, true);
+            if (!file && (!staging_root || !staging_root->still_named_by(payload))) {
+                if (staging_root)
+                    staging_root->close();
+                guard_root->close();
                 fs::remove_all(staging, error);
                 return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
             }
@@ -459,7 +557,9 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
             impl->staging = payload;
             impl->parent_root = std::move(*parent_root);
             impl->guard_root = std::move(*guard_root);
-            impl->staging_root = std::move(*staging_root);
+            if (staging_root)
+                impl->staging_root = std::move(*staging_root);
+            impl->file = file;
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
         }
@@ -472,13 +572,18 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
 
 const fs::path& AtomicPublisher::staging_directory() const noexcept {
     static const fs::path empty;
-    return impl_ ? impl_->staging : empty;
+    return impl_ && !impl_->file ? impl_->staging : empty;
+}
+
+const fs::path& AtomicPublisher::staging_file() const noexcept {
+    static const fs::path empty;
+    return impl_ && impl_->file ? impl_->staging : empty;
 }
 
 runtime::Result<bool, PackageError>
 AtomicPublisher::write(std::string_view relative_utf8,
                        std::span<const std::uint8_t> bytes) noexcept {
-    if (!impl_ || impl_->committed ||
+    if (!impl_ || impl_->file || impl_->committed ||
         !timeline::package_relative_path_is_portable(relative_utf8))
         return failure<bool>(PackageErrorCode::InvalidPath, impl_ ? impl_->staging : fs::path{});
     const fs::path relative = path_from_utf8(relative_utf8);
@@ -502,19 +607,18 @@ runtime::Result<bool, PackageError> AtomicPublisher::write(std::string_view rela
 
 runtime::Result<AtomicPublishOutcome, PackageError>
 AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
-    if (!impl_ || impl_->committed || staged_file.parent_path() != impl_->staging ||
+    if (!impl_ || !impl_->file || impl_->committed || staged_file != impl_->staging ||
         !detail::regular_file_no_links(staged_file))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidPath, staged_file);
-    auto pinned = detail::PinnedFile::open(staged_file, true, true);
+    auto pinned = detail::PinnedFile::open(staged_file, true, true, true);
     if (!pinned || !pinned->fence() || !pinned->still_named_by(staged_file) ||
-        !impl_->staging_root.still_named_by(impl_->staging))
+        !impl_->guard_root.still_named_by(impl_->guard))
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::StagedFileFenced);
-    if (!pinned->still_named_by(staged_file) ||
-        !impl_->staging_root.still_named_by(impl_->staging))
+    if (!pinned->still_named_by(staged_file) || !impl_->guard_root.still_named_by(impl_->guard))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, staged_file);
     detail::invoke_fault_hook(detail::PackageFaultPoint::PublicationSourceVerified);
-    const auto publication = impl_->staging_root.publish_no_replace(
+    const auto publication = impl_->guard_root.publish_no_replace(
         staged_file.filename(), impl_->parent_root, impl_->destination.filename(),
         detail::NoReplaceSourceKind::RegularFile);
     if (publication == detail::NoReplaceOutcome::DestinationExists)
@@ -530,15 +634,13 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
             return runtime::Result<AtomicPublishOutcome, PackageError>(
                 runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     }
-    impl_->staging_root.close();
-    if (!pinned->still_named_by(impl_->destination))
-        return runtime::Result<AtomicPublishOutcome, PackageError>(
-            runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
+    const bool permissions_adopted = pinned->adopt_inherited_permissions_from(impl_->parent_root);
+    const bool destination_stable = pinned->still_named_by(impl_->destination);
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     std::error_code ignored;
     impl_->guard_root.close();
-    fs::remove_all(impl_->guard, ignored);
-    if (!impl_->parent_root.fence())
+    fs::remove(impl_->guard, ignored);
+    if (!destination_stable || !permissions_adopted || !impl_->parent_root.fence())
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     return runtime::Result<AtomicPublishOutcome, PackageError>(
@@ -546,7 +648,7 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
 }
 
 runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_directory() noexcept {
-    if (!impl_ || impl_->committed)
+    if (!impl_ || impl_->file || impl_->committed)
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, {});
     if (!impl_->staging_root.still_named_by(impl_->staging))
         return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, impl_->staging);
@@ -598,15 +700,15 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
     if (publication != detail::NoReplaceOutcome::Published)
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, impl_->destination);
     impl_->committed = true;
-    if (!impl_->staging_root.still_named_by(impl_->destination))
-        return runtime::Result<AtomicPublishOutcome, PackageError>(
-            runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
+    const bool permissions_adopted =
+        impl_->staging_root.adopt_inherited_permissions_from(impl_->parent_root);
+    const bool destination_stable = impl_->staging_root.still_named_by(impl_->destination);
     impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     std::error_code ignored;
     impl_->guard_root.close();
     fs::remove(impl_->guard, ignored);
-    if (!impl_->parent_root.fence())
+    if (!destination_stable || !permissions_adopted || !impl_->parent_root.fence())
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
     return runtime::Result<AtomicPublishOutcome, PackageError>(
@@ -617,15 +719,19 @@ void AtomicPublisher::cancel() noexcept {
     if (!impl_ || impl_->committed || impl_->staging.empty())
         return;
     std::error_code ignored;
-    if (impl_->staging_root.still_named_by(impl_->staging) &&
-        impl_->guard_root.still_named_by(impl_->guard)) {
-        impl_->staging_root.close();
+    const bool source_stable =
+        impl_->file ? detail::regular_file_no_links(impl_->staging)
+                    : impl_->staging_root.still_named_by(impl_->staging);
+    if (source_stable && impl_->guard_root.still_named_by(impl_->guard)) {
+        if (!impl_->file)
+            impl_->staging_root.close();
         impl_->guard_root.close();
         fs::remove_all(impl_->guard, ignored);
     } else {
         // Leaking an unreachable private stage is safer than recursively deleting
         // an unrelated object that has rebound to the old staging pathname.
-        impl_->staging_root.close();
+        if (!impl_->file)
+            impl_->staging_root.close();
         impl_->guard_root.close();
     }
     impl_->staging.clear();

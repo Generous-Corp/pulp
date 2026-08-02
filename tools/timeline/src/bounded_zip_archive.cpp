@@ -467,12 +467,12 @@ write_dawproject_archive_no_replace(const pulp::interchange::ExportArtifacts& ar
     if (!artifacts_reserve || !io || !control)
         return runtime::Err(DawProjectArchiveError{
             DawProjectArchiveErrorCode::Export, "DAWproject export exceeds the working-set limit"});
-    auto publisher = project_package::AtomicPublisher::create(destination);
+    auto publisher = project_package::AtomicPublisher::create_file(destination);
     if (!publisher)
         return runtime::Err(
             DawProjectArchiveError{DawProjectArchiveErrorCode::Publish,
                                    "output file must not exist and its parent must exist"});
-    const auto staging = publisher->staging_directory() / "archive.dawproject";
+    const auto staging = publisher->staging_file();
     mz_zip_archive zip{};
     install_allocator(zip, ledger);
     auto* file = open_zip_file(staging, true);

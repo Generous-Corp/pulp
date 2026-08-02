@@ -1043,9 +1043,12 @@ scene-to-track arbitration.
 ## project_package
 
 Crash-consistent publication for stable project-package roots and generic
-files or directories. `AtomicPublisher` creates a private sibling staging
-directory, accepts only safe package-relative paths, and publishes a previously
-absent destination without replacing it. `PackageWriter` instead maintains one
+files or directories. `AtomicPublisher::create()` creates a private sibling
+directory stage, accepts only safe package-relative paths through `write()`,
+and publishes it with `commit_directory()`. File publication instead uses
+`create_file()`, which returns one pre-created `staging_file()` that an external
+producer may truncate and fill before `commit_file()`. Both modes publish a
+previously absent destination without replacing it. `PackageWriter` instead maintains one
 stable package root: `stage_blob()` hash-verifies and fences content-addressed
 blobs before publishing them no-replace, while `publish()` validates every
 package-relative asset reference before atomically replacing the root's
@@ -1057,8 +1060,13 @@ follow-on recovery layer.
 Writer exclusion is cooperative. All package writers must honor the package
 lock, and callers must not concurrently rename or replace package or private
 staging entries out of band from another process running as the same account.
-An external producer using `staging_directory()` must finish and release the
-stage before commit or cancellation begins.
+Any external producer using `staging_directory()` or `staging_file()` must
+finish and release the stage before commit or cancellation begins. On Windows,
+staged objects retain a
+private DACL until the rename succeeds; the still-open published handle then
+adopts the destination parent's inheritance. A crash in that narrow interval
+can leave the published object owner-private, never exposed with staging-only
+permissions.
 The implementation pins and revalidates identities to reject detected
 rebinding, but POSIX does not provide a portable operation that renames an
 already-open directory by identity.

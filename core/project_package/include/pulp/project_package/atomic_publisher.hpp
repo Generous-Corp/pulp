@@ -38,7 +38,7 @@ enum class AtomicPublishOutcome : std::uint8_t {
     NotPublished,
     /// The destination and its parent namespace were durably fenced.
     PublishedDurably,
-    /// The destination is visible, but its final namespace fence failed.
+    /// The destination is visible, but final permission adoption or namespace fencing failed.
     PublishedDurabilityUncertain,
 };
 
@@ -52,6 +52,9 @@ class AtomicPublisher {
     /// Creates a private staging sibling for a destination that must not exist.
     static runtime::Result<AtomicPublisher, PackageError>
     create(const std::filesystem::path& destination) noexcept;
+    /// Creates a private, pre-permissioned file slot for one external writer.
+    static runtime::Result<AtomicPublisher, PackageError>
+    create_file(const std::filesystem::path& destination) noexcept;
 
     ~AtomicPublisher();
     AtomicPublisher(AtomicPublisher&&) noexcept;
@@ -59,17 +62,19 @@ class AtomicPublisher {
     AtomicPublisher(const AtomicPublisher&) = delete;
     AtomicPublisher& operator=(const AtomicPublisher&) = delete;
 
-    /// Returns the private directory into which an external writer may stage one file.
-    /// The external writer must be stopped before `commit_file()`, `commit_directory()`,
-    /// or `cancel()` begins.
+    /// Returns the private root for a directory publication. External writers must stop
+    /// before `commit_directory()` or `cancel()` begins.
     const std::filesystem::path& staging_directory() const noexcept;
+    /// Returns the pre-created private file slot for a file publication. The external writer
+    /// may truncate and fill this file, but must stop before `commit_file()` or `cancel()` begins.
+    const std::filesystem::path& staging_file() const noexcept;
     /// Writes and durably fences one lexically safe relative file.
     runtime::Result<bool, PackageError> write(std::string_view relative_utf8,
                                               std::span<const std::uint8_t> bytes) noexcept;
     /// Writes and durably fences one UTF-8 text file.
     runtime::Result<bool, PackageError> write(std::string_view relative_utf8,
                                               std::string_view text) noexcept;
-    /// Publishes one direct child of `staging_directory()` at the destination.
+    /// Publishes the pre-created `staging_file()` at the destination.
     /// The destination must not exist. A post-publication namespace-fence
     /// failure returns `PublishedDurabilityUncertain`, never `NotPublished`.
     runtime::Result<AtomicPublishOutcome, PackageError>
@@ -83,6 +88,8 @@ class AtomicPublisher {
 
   private:
     struct Impl;
+    static runtime::Result<AtomicPublisher, PackageError>
+    create_impl(const std::filesystem::path& destination, bool file) noexcept;
     explicit AtomicPublisher(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
 };
