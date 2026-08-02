@@ -202,6 +202,17 @@ public:
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
+    /// The CSS numeric weight this Label will actually be painted at — its own
+    /// when it was given one, otherwise the nearest ancestor's.
+    ///
+    /// Not the same as `font_weight()`, and the difference is not cosmetic: an
+    /// imported design sets the weight on the *view* via
+    /// `set_inheritable_font_weight`, leaving `font_weight()` at its 400
+    /// default. Anything that measures this text has to ask the same question
+    /// the painter does, or a bold run is measured as regular on exactly the
+    /// panels where weight came from the cascade.
+    int effective_font_weight() const;
+
     /// Baseline offset from the top of the Label's measured box, used by Yoga's
     /// `YGNodeSetBaselineFunc` to honor `align-items: baseline` on
     /// flex containers. Returns
@@ -348,21 +359,28 @@ private:
     // Cache of the soft-wrap shaped layout so paint() reuses it instead of
     // re-running the expensive TextShaper prepare()+layout each frame. Keyed on
     // every input the shaper reads; a key mismatch recomputes, so no stale hit
-    // is possible. Weight/style/letter-spacing are intentionally absent — they
-    // affect rasterization, not line breaking.
+    // is possible.
+    //
+    // Weight IS one of those inputs. A Bold face is a different set of glyph
+    // advances, not a Regular one drawn heavier, so the same string at the same
+    // size in the same family breaks at a different word depending on it —
+    // which is why a key without it serves a Regular layout to a Bold label.
+    // Letter-spacing is still absent: it is applied after breaking, by the
+    // caller.
     struct ShapedLayoutKey {
         std::string display_text;  // text_ after text-transform
         std::string family;        // resolved family ("Inter" fallback)
         float font_size = 0.0f;
+        int font_weight = 400;     // CSS numeric weight; selects the face
         float width = 0.0f;        // bounds().width — changes every resize
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
-                   font_size == o.font_size && width == o.width &&
-                   line_height == o.line_height && break_mode == o.break_mode &&
-                   font_gen == o.font_gen;
+                   font_size == o.font_size && font_weight == o.font_weight &&
+                   width == o.width && line_height == o.line_height &&
+                   break_mode == o.break_mode && font_gen == o.font_gen;
         }
     };
     ShapedLayoutKey shaped_cache_key_;

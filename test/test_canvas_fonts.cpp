@@ -46,6 +46,7 @@ using namespace pulp::canvas;
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_run_planner.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFont.h"
@@ -866,6 +867,104 @@ TEST_CASE("The default font cascade resolves to a face that can draw",
         SkFont font(resolved.typeface, opts.size);
         REQUIRE(font.measureText("Mix", 3, SkTextEncoding::kUTF8, nullptr) > 0.0f);
     }
+}
+
+// ── Weight is a measurement input, not a rasterization detail ───────────────
+//
+// `TextShaper` measured every run through `SkFontStyle::Normal()` while the
+// painter resolved the run's real weight, and its segment cache was keyed on
+// (family, size) alone — so a Bold label and its Regular twin shared one set of
+// advances, whichever ran first. The visible symptom is a paragraph that breaks
+// a word or two late and overflows its box: a wrapping bug in appearance, a
+// measurement bug in fact.
+//
+// The expected numbers come from `test/fixtures/browser-capture-text-wrap`,
+// where Chrome laid out this exact string at this exact size in both weights,
+// from THIS repository's copy of the font. They are Chrome's measurements of
+// its own render — not a second computation from the same font metrics this
+// code uses, which would agree with it whether or not either is right.
+
+namespace {
+
+// Chrome's line-box widths for "Handgloves 123" at 20px, Funnel Display
+// instanced at wght 400 and wght 700. See the fixture's README.
+constexpr float kChromeRegularWidth = 150.8125f;
+constexpr float kChromeBoldWidth = 154.203125f;
+
+}  // namespace
+
+TEST_CASE("shaped width follows the requested weight",
+          "[canvas][skia][fonts][variable-weight][text-metrics]") {
+    const std::string family = "PulpWeightTest-Funnel";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             family));
+
+    pulp::canvas::TextShaper shaper;
+    const auto regular = shaper.prepare("Handgloves 123", family, 20.0f, 400);
+    const auto bold = shaper.prepare("Handgloves 123", family, 20.0f, 700);
+
+    // The defect: identical advances for two different weights. Under the bug
+    // this difference is exactly zero, because both requests resolved the same
+    // face AND shared one cache bucket.
+    INFO("regular " << regular.total_width() << "  bold " << bold.total_width());
+    CHECK(bold.total_width() > regular.total_width());
+
+    // Agreement with the browser, bounded RELATIVELY at 1%.
+    //
+    // Pulp measures this string ~0.65% wider than Chrome's line box at both
+    // weights (151.80 vs 150.81, 155.20 vs 154.20). The residual is systematic,
+    // sub-pixel per glyph, present at both weights, and NOT explained by
+    // segmentation (the summed segments equal a single whole-string advance to
+    // four decimals) nor by ink-vs-advance (Skia's ink extent is wider than its
+    // advance here, while Chrome is narrower than both). It is an open question
+    // about what a `textBoxes` width measures, not a face mismatch.
+    //
+    // 1% is chosen because it separates the two answers this case must tell
+    // apart: shaping the right face at the wrong weight, or the wrong face
+    // entirely, costs 2% and ~10% respectively on this corpus — both an order
+    // of magnitude outside a residual of this size. A tighter absolute bound
+    // would encode the unexplained offset as if it were understood.
+    CHECK_THAT(regular.total_width(),
+               Catch::Matchers::WithinRel(kChromeRegularWidth, 0.01f));
+    CHECK_THAT(bold.total_width(),
+               Catch::Matchers::WithinRel(kChromeBoldWidth, 0.01f));
+    // The weight cost itself, which is what this fix is for, agrees with
+    // Chrome's to a hundredth of a pixel — so it is asserted far more tightly
+    // than the absolute widths it is a difference of.
+    CHECK_THAT(bold.total_width() - regular.total_width(),
+               Catch::Matchers::WithinAbs(
+                   kChromeBoldWidth - kChromeRegularWidth, 0.05));
+
+    CHECK(regular.font_weight() == 400);
+    CHECK(bold.font_weight() == 700);
+}
+
+TEST_CASE("the segment cache does not serve one weight's widths to another",
+          "[canvas][skia][fonts][variable-weight][text-metrics]") {
+    const std::string family = "PulpWeightCacheTest-Funnel";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             family));
+
+    // Measure bold FIRST, then regular. With a (family, size) key the second
+    // call is a cache hit on the first's widths, so the order is what makes the
+    // stale bucket observable — measuring regular first would hide it behind
+    // the correct answer.
+    pulp::canvas::TextShaper shaper;
+    const float bold_first = shaper.prepare("Handgloves 123", family, 20.0f, 700)
+                                 .total_width();
+    const float regular_second =
+        shaper.prepare("Handgloves 123", family, 20.0f, 400).total_width();
+    CHECK(regular_second < bold_first);
+
+    // And the reverse order agrees with itself, so neither answer depends on
+    // which weight happened to be measured first.
+    pulp::canvas::TextShaper fresh;
+    const float regular_first =
+        fresh.prepare("Handgloves 123", family, 20.0f, 400).total_width();
+    const float bold_second =
+        fresh.prepare("Handgloves 123", family, 20.0f, 700).total_width();
+    CHECK_THAT(regular_first, Catch::Matchers::WithinAbs(regular_second, 0.001));
+    CHECK_THAT(bold_second, Catch::Matchers::WithinAbs(bold_first, 0.001));
 }
 
 #endif  // PULP_HAS_SKIA

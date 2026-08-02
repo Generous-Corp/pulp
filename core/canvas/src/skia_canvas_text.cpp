@@ -406,7 +406,9 @@ void SkiaCanvas::fill_text_anchored(const std::string& text,
     }
 
     auto& shaper = global_text_shaper();
-    auto prepared = shaper.prepare(text, font_family_, font_size_);
+    // The weight the painter below will use, so the baseline this anchoring
+    // derives comes from the same face that draws the glyphs.
+    auto prepared = shaper.prepare(text, font_family_, font_size_, font_weight_);
     float ascent  = prepared.ascent();    // distance above baseline
     float descent = prepared.descent();   // distance below baseline
     if (ascent <= 0.0f)  ascent  = font_size_ * 0.85f;  // fallback
