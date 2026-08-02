@@ -38,7 +38,7 @@ SchemaRegistry registry_with_replaced_track_migration() {
     for (const auto& original : source.types()) {
         auto copy = original;
         if (copy.type_name == "pulp.timeline.track") {
-            REQUIRE(copy.upgrades.size() == 6);
+            REQUIRE(copy.upgrades.size() == 7);
             copy.upgrades[0].migrate = rewrite_track_identity;
         }
         REQUIRE(builder.register_type(std::move(copy)).has_value());
@@ -59,7 +59,7 @@ void require_invalid_identity(const std::string& snapshot) {
 TEST_CASE("Timeline device chains round trip in authored order") {
     const auto registry = builtins();
     const auto encoded = take(serialize_project(project_with_devices(), registry));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":7") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":8") !=
             std::string::npos);
     REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.device_placement\"") !=
             std::string::npos);
@@ -145,7 +145,7 @@ TEST_CASE("Timeline permanent fixtures cover Track versions one and two") {
     const auto old_project = take(deserialize_project(fixture("v1/track.json"), registry));
     REQUIRE(old_project.sequences()[0].tracks()[0].device_chain().empty());
     const auto upgraded = take(serialize_project(old_project, registry));
-    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":7") !=
+    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":8") !=
             std::string::npos);
 
     const auto current = take(deserialize_project(fixture("v2/device-chain.json"), registry));
@@ -191,8 +191,13 @@ TEST_CASE("Timeline device chain envelopes reject mislabeled structural versions
         REQUIRE(decoded.error().code == expected);
     };
 
+    // Deliberately far past any version the registry will plausibly reach. This
+    // assertion previously named the next version up, which stopped testing
+    // anything the moment the schema grew into it: the decoder accepted the
+    // "mislabeled" envelope and failed later for an unrelated reason, so the
+    // case still failed but no longer for the reason it was written for.
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
-                        "pulp.timeline.track\",\"version\":8"),
+                        "pulp.timeline.track\",\"version\":9999"),
            PersistenceErrorCode::UnsupportedSchemaVersion);
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
                         "pulp.timeline.track\",\"version\":1"),

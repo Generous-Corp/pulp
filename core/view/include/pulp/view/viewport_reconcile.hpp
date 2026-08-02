@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
 
 namespace pulp::view {
 
@@ -117,6 +118,31 @@ inline void walk_and_clamp(pulp::view::View& view,
                        viewport_width, viewport_height,
                        depth + 1, child_label);
     }
+}
+
+/// Whether a caller has opted out of reconciliation, given the raw value
+/// of `PULP_SHOT_NO_RECONCILE` (`nullptr` when the variable is unset).
+///
+/// Reconciliation stays ON by default: it exists so runtime-imported
+/// React trees with hardcoded oversize containers still land inside the
+/// captured frame, and every screenshot path relies on that.
+///
+/// The opt-out exists for the one shape where clamping is wrong rather
+/// than helpful: a design imported as a faithful capture is a backdrop
+/// with `position:absolute` and a literal width (1280px in a 920px root)
+/// carrying bound controls positioned against it. That matches the
+/// clamp's predicate exactly, so the artwork is rescaled out from under
+/// the controls — which does not fail, it just scores a different image
+/// than the one on disk. Anything comparing a rendered panel against a
+/// reference render must set this, or it measures the clamp.
+///
+/// Unset, empty, `0` and `false` all mean "reconcile" so that a variable
+/// left exported as `0` does not silently disable it.
+inline bool reconcile_disabled_by_env(const char* raw) {
+    if (!raw) return false;
+    const std::string_view value{raw};
+    if (value.empty()) return false;
+    return value != "0" && value != "false";
 }
 
 inline void reconcile_oversize_absolute_subtree(pulp::view::View& root,

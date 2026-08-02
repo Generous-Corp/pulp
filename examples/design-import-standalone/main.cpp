@@ -180,7 +180,8 @@ int main(int argc, char** argv) {
 
     std::vector<pulp::view::ImportDiagnostic> diagnostics;
     auto root = pulp::view::build_native_view_tree(
-        ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+        ir, ir.asset_manifest,
+        {.diagnostics_out = &diagnostics, .asset_base_directory = extract_dir});
     if (!root) {
         std::cerr << "materialize failed\n";
         return 1;

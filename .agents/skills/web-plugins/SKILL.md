@@ -527,6 +527,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   makes an unbounded ratchet fan-out especially dangerous. This engine support
   does not by itself add a JavaScript authoring surface.
 
+- Sequence groove rendering and compile-context invalidation are equally
+  portable. Built-in MIDI subscribes to `CompileContextKind::Groove`; its owner
+  sequence timing displacement and velocity accent are compiled before the
+  bounded ratchet expansion. WAM and WebCLAP therefore inherit the same note
+  program without browser-only math. Keep `CommitResult` predecessor provenance,
+  registry snapshots, and MIDI compile-structure tokens in the shared timeline /
+  playback lane so sparse reuse cannot publish stale browser programs. This also
+  does not create a JavaScript authoring surface by itself.
+
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
   alternative count (and an overload set with no generic fallback) precisely so
@@ -656,6 +665,14 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+
+`web-plugins.yml` also carries a second, unrelated job:
+`Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
+emscripten and runs the timeline conformance corpus through it. It shares the
+file only for the emsdk pin — it needs no Skia, no Chrome, no wasi-sdk, no npm,
+so keep it a separate job rather than a step in the lane above, or a one-minute
+check starts waiting on a fifteen-minute one. It is not a browser lane; if you
+are here for WAM/WebCLAP behavior, it is not the job you want.
 
 ### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
 

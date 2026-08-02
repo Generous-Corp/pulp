@@ -7,9 +7,23 @@ import {
   freezeAndMeasureDocumentExtent,
   freezeDynamicTime,
   installDynamicWorkTracker,
+  resumeDynamicTime,
   validateCaptureDimensions,
   waitForStable,
 } from "./settle.mjs";
+
+test("pixels are read with virtual time running again", async () => {
+  const calls = [];
+  await resumeDynamicTime({
+    async call(method, params) {
+      calls.push({ method, params });
+    },
+  });
+  assert.deepEqual(calls, [{
+    method: "Emulation.setVirtualTimePolicy",
+    params: { policy: "advance" },
+  }]);
+});
 
 test("page settle observes a readiness window after an early plateau", async () => {
   let samples = 0;

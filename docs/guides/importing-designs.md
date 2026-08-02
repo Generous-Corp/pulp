@@ -122,6 +122,14 @@ without invoking the initial `__pulpCaptureReady` contract again.
 Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
 JavaScript, and C++ artifacts do not embed or require them.
 
+Node.js does not have to be on `PATH`. An app launched from Finder or Explorer
+inherits a minimal `PATH` that excludes every common Node.js install location,
+so Pulp searches `PATH` first and then the standard locations directly:
+`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and the mise, nvm, fnm, and
+asdf version-manager roots under your home directory, taking the first
+installation that is version 22 or newer. When no installation qualifies, the
+error names the Node.js versions it found or the locations it searched.
+
 Portable image paths are resolved by the runtime that opens the artifact.
 `ScriptedUiSession` anchors JavaScript assets to the generated script directory,
 and native DesignIR callers pass the document directory through

@@ -55,7 +55,7 @@ bool same_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept 
 
 bool same_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
     return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
-           lhs.duration == rhs.duration && lhs.color == rhs.color;
+           lhs.duration == rhs.duration && lhs.color == rhs.color && lhs.role == rhs.role;
 }
 
 } // namespace
@@ -64,7 +64,8 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
         lhs.next_item_id() != rhs.next_item_id() ||
         lhs.root_sequence_id() != rhs.root_sequence_id() || lhs.tempo_map() != rhs.tempo_map() ||
-        lhs.meter_map() != rhs.meter_map() || lhs.session_start() != rhs.session_start() ||
+        lhs.meter_map() != rhs.meter_map() ||
+        lhs.session_start() != rhs.session_start() || lhs.tuning() != rhs.tuning() ||
         lhs.assets().size() != rhs.assets().size() ||
         lhs.sequences().size() != rhs.sequences().size())
         return false;
@@ -110,6 +111,7 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
                 left_track.active_take_lane_id() != right_track.active_take_lane_id() ||
                 left_track.freeze() != right_track.freeze() ||
                 left_track.mixer() != right_track.mixer() ||
+                left_track.tuning() != right_track.tuning() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
                             right_track.device_chain().begin()) ||
                 !std::equal(left_track.take_lanes().begin(), left_track.take_lanes().end(),
