@@ -18,6 +18,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
+ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
 
 
 def _workflow_text() -> str:
@@ -60,8 +61,22 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertRegex(self.text, r"(?m)^\s{4}branches:\s*\[main\]\s*$")
 
         path_patterns = re.findall(r"(?m)^\s{6}-\s+'([^']+)'\s*$", self.text)
+        self.assertGreaterEqual(path_patterns.count(".github/actionlint.yaml"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/workflows/**"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/actions/**"), 2)
+
+    def test_actionlint_knows_the_authority_runner_label(self) -> None:
+        self.assertTrue(
+            ACTIONLINT_CONFIG.exists(),
+            f"missing actionlint config: {ACTIONLINT_CONFIG}",
+        )
+        config = ACTIONLINT_CONFIG.read_text(encoding="utf-8")
+        self.assertRegex(config, r"(?m)^self-hosted-runner:\s*$")
+        self.assertRegex(config, r"(?m)^\s{2}labels:\s*$")
+        self.assertRegex(
+            config,
+            r"(?m)^\s{4}-\s+pulp-queue-authority-studio\s*$",
+        )
 
     def test_workflow_has_minimal_permissions_and_concurrency(self) -> None:
         self.assertRegex(

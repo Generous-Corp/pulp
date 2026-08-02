@@ -19,6 +19,7 @@ name: Workflow lint
 on:
   pull_request:
     paths:
+      - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
@@ -52,6 +53,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
