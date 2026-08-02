@@ -1196,6 +1196,30 @@ separate target exists for consumers that want manifest handling alone.
 **Depends on:** `pulp::runtime`
 
 
+## timeline_agent_view
+
+Bounded, versioned read projections for agents and other context-limited
+consumers. `AgentView` pins an immutable `timeline::DocumentView`; every read
+requires the caller's expected revision and refuses mismatches. The outline is
+project/sequence/track/clip sized. Rows carry Merkle content commitments, while
+each `omitted` count and SHA-256 covers only the directly omitted authored rows,
+so omission counts form a non-overlapping partition of the structural census.
+
+Region pages select clip starts in a half-open window and order them by
+`(start, id)`. A cursor is accepted only when its version, revision, sequence,
+anchor, exact window bounds, and key identify a member of that same window.
+`DirtySet` projection additionally requires an adjacent before/after revision
+range ending at the pinned view. That range rejects stale and multi-commit
+projections, but it cannot authenticate `DirtySet` origin because the public set
+type carries no session-issued provenance token; callers must pair it with the
+`CommitResult` that produced it. Removed identities map to their tombstoned
+nearest outline owner.
+
+**Link:** `pulp::timeline-agent-view` · **Include prefix:**
+`<pulp/timeline_agent_view/...>`
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## timeline_editor
 
 Interfaces for building a timeline editor over the document model, plus the edit

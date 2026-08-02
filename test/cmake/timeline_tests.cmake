@@ -573,3 +573,6 @@ endif()
 
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.
 include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
+
+# Keep focused Timeline submodule registrations beneath this owner hub.
+include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
