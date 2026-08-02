@@ -35,13 +35,15 @@ bool is_blank(const std::string& text) {
     });
 }
 
-/// A `background-image` that names an asset rather than painting a gradient.
-/// `apply_computed_styles` has already made that split, so read the field it
-/// decided rather than re-parsing the declaration and risking a different
-/// answer from the one the node actually carries.
+/// A fill that needs a decoded raster rather than a paintable gradient.
+///
+/// `apply_computed_styles` has already split gradients out, so ANY surviving
+/// `background_image` needs an asset — testing for `url(` specifically would
+/// classify `image-set(...)` and `-webkit-image-set(...)` as `native` and then
+/// draw nothing, which is the one answer the census must never give.
 bool references_asset(const pulp::view::IRStyle& style) {
     return style.background_image.has_value() &&
-           style.background_image->find("url(") != std::string::npos;
+           !style.background_image->empty();
 }
 
 /// A readable, stable name. Reviewers and structural assertions both need to
