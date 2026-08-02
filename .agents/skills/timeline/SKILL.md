@@ -986,6 +986,14 @@ Consequences worth knowing before you touch this:
   vocabulary. `SequencerUiHostT`'s parameter exists so the playback seam and the
   intent vocabulary can evolve apart; the alias is what keeps that parameter bound
   to something real instead of only ever meeting a test stand-in.
+- Piano-roll gestures use the sibling `NoteEditIntent` and
+  `NoteEditIntentHost`. Insert carries only `replacement`, erase carries only
+  `expected`, and move/resize/velocity carry both with one identity;
+  `ValidatedNoteEditIntent::create` rejects malformed or ambiguous shapes, and
+  `NoteEditIntentHost` accepts only that wrapper so invalid raw values cannot
+  cross the host seam. There is intentionally no note lowerer until the granular
+  note commands land — do not route these through the O(clip)
+  `ReplaceNoteContent` command as an interim implementation.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit
@@ -1746,6 +1754,44 @@ when the lab is absent the handler still returns a well-formed typed envelope
 carrying its install hint. Assert the typed envelope and the absence of an
 argument refusal — that is what proves the loop reached the compare stage — and
 leave the measurement to the tool's own suite.
+
+## `std::int64_t` is a different type on Linux and Darwin — never let CTAD see a bare `LL`
+
+`std::int64_t` is **`long` on LP64 Linux** and **`long long` on Darwin**. A bare `0LL` literal is
+`long long` on *both*. So a sibling written with `LL` alongside a `std::int64_t` expression **unifies
+on macOS and diverges on Linux** — and `std::array` class-template argument deduction requires every
+element to have the *same* type, so it fails on exactly one platform:
+
+```cpp
+// BROKEN on Linux, compiles on macOS. kTicksPerQuarter is std::int64_t.
+const std::array windows{
+    std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4},  // pair<long,long> on Linux
+    std::pair{0LL,                  3 * kTicksPerQuarter / 4},  // pair<long long,long>  <-- diverges
+};
+```
+
+GCC reports `no matching function for call to 'array(std::pair<long int, long int>…)'` plus a
+`no type named 'type' in 'struct std::enable_if<false, …>'` — which reads like a container problem
+and is a *type-identity* problem.
+
+**Fix by spelling the element type, not by correcting the literal.** Correcting `0LL` leaves CTAD
+deducing, so the next sibling reintroduces it:
+
+```cpp
+using TrimWindow = std::pair<std::int64_t, std::int64_t>;
+const std::array<TrimWindow, 3> windows{ TrimWindow{…}, TrimWindow{0, …}, TrimWindow{…} };
+```
+
+**Why this class is dangerous here specifically:** the required gate is **macOS**, and there is *no
+macOS signal at all* — the code compiles cleanly on the platform that gates the merge. Only the
+advisory Linux lane can see it.
+
+**Reproduce it without a Linux toolchain** — a standalone TU with `using i64 = long;` in place of
+`std::int64_t` gives the identical deduction error on Apple clang, so the diagnosis is
+positive-controlled locally even though the confirming build is CI's.
+
+Applies to any deduced aggregate over timebase quantities — ticks, frames, sample counts — since
+those are `std::int64_t` throughout.
 
 ## Foreign-format import (interop)
 
