@@ -2,7 +2,7 @@
   "schema_version": 1,
   "event_id": "20260802-backdrop-filter-chain",
   "kind": "change",
-  "created_at": "2026-08-02T18:05:00Z",
+  "created_at": "2026-08-02T17:20:00Z",
   "slices": [
     "canvas-kernel"
   ],
