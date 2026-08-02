@@ -108,6 +108,74 @@ canvas::Color parse_css_color(const std::string& str) {
         c.a = std::clamp(vals[3], 0.0f, 1.0f);
         return c;
     }
+
+    if (str.compare(0, 6, "oklab(") == 0 || str.compare(0, 6, "oklch(") == 0) {
+        // Chrome serializes every modern colour function as oklab()/oklch(),
+        // so a design authored in ANY wide-gamut syntax arrives here. Falling
+        // through to the opaque-white default painted a dark panel white while
+        // looking like a deliberate colour, and a gradient stop that lands on
+        // white is indistinguishable downstream from one the design asked for.
+        const bool polar = str[3] == 'c';
+        auto inner = str.substr(6);
+        inner = inner.substr(0, inner.find(')'));
+        // `L a b / alpha`, with `,` accepted for the legacy comma form.
+        for (auto& ch : inner)
+            if (ch == ',') ch = ' ';
+        float vals[3] = {0.0f, 0.0f, 0.0f};
+        float alpha = 1.0f;
+        int n = 0;
+        bool after_slash = false;
+        std::istringstream ss(inner);
+        std::string tok;
+        // a/b and chroma are given either as numbers or as a percentage of the
+        // reference range: +/-0.4 for a/b, 0..0.4 for chroma. Lightness is a
+        // percentage of 1.0. Hue is an angle.
+        const float pct_base[3] = {1.0f, 0.4f, polar ? 0.4f : 0.4f};
+        while (ss >> tok) {
+            if (tok == "/") { after_slash = true; continue; }
+            if (tok == "none") tok = "0";
+            float scale = 1.0f;
+            if (!tok.empty() && tok.back() == '%') {
+                tok.pop_back();
+                scale = after_slash ? 0.01f
+                                    : pct_base[n < 3 ? n : 2] * 0.01f;
+            } else if (tok.size() > 3 &&
+                       tok.compare(tok.size() - 3, 3, "deg") == 0) {
+                tok.erase(tok.size() - 3);
+            }
+            float v = 0.0f;
+            try { v = std::stof(tok) * scale; } catch (...) { v = 0.0f; }
+            if (after_slash) { alpha = v; break; }
+            if (n < 3) vals[n++] = v;
+        }
+        float L = vals[0], a = vals[1], b = vals[2];
+        if (polar) {
+            const float hr = b * 3.14159265f / 180.0f;
+            const float chroma = a;
+            a = chroma * std::cos(hr);
+            b = chroma * std::sin(hr);
+        }
+        // Oklab -> LMS' -> LMS -> linear sRGB (Ottosson's matrices).
+        const float lp = L + 0.3963377774f * a + 0.2158037573f * b;
+        const float mp = L - 0.1055613458f * a - 0.0638541728f * b;
+        const float sp = L - 0.0894841775f * a - 1.2914855480f * b;
+        const float l = lp * lp * lp, m = mp * mp * mp, s = sp * sp * sp;
+        const float lin[3] = {
+            4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
+            -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
+            -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s};
+        const auto encode = [](float v) {
+            v = std::clamp(v, 0.0f, 1.0f);
+            v = v <= 0.0031308f ? 12.92f * v
+                                : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+        c.r = encode(lin[0]);
+        c.g = encode(lin[1]);
+        c.b = encode(lin[2]);
+        c.a = std::clamp(alpha, 0.0f, 1.0f);
+        return c;
+    }
     return c;
 }
 
@@ -413,15 +481,70 @@ bool parse_one_gradient(const std::string& gradient,
         return std::sqrt(dx * dx + dy * dy);
     };
 
-    // Simple parser for "linear-gradient(to right, color1, color2, ...)"
+    // linear-gradient([<angle> | to <side-or-corner>,] stop, stop, ...)
     if (gradient.substr(0, 16) == "linear-gradient(") {
         auto inner = gradient.substr(16, gradient.size() - 17);
         float x0 = 0, y0 = 0, x1 = 0, y1 = 1;  // default: to bottom
         size_t color_start = 0;
-        if (inner.substr(0, 8) == "to right") { x0=0; y0=0; x1=1; y1=0; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 9) == "to bottom") { x0=0; y0=0; x1=0; y1=1; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 7) == "to left") { x0=1; y0=0; x1=0; y1=0; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 6) == "to top") { x0=0; y0=1; x1=0; y1=0; color_start = inner.find(',') + 1; }
+        const size_t prefix_end = top_level_comma(inner);
+        std::string seg = prefix_end == std::string::npos
+                              ? std::string()
+                              : inner.substr(0, prefix_end);
+        while (!seg.empty() && seg.back() == ' ') seg.pop_back();
+        while (!seg.empty() && seg.front() == ' ') seg.erase(0, 1);
+
+        // CSS angles run clockwise from "to top". An angle used to fall through
+        // to the stop list, where the colour parser read `150deg` as a colour it
+        // did not know and returned opaque WHITE -- so an angled gradient gained
+        // a spurious white first stop AND silently reverted to "to bottom".
+        std::optional<float> radians;
+        const bool is_angle = !seg.empty() &&
+                              (std::isdigit(static_cast<unsigned char>(seg[0])) ||
+                               seg[0] == '-' || seg[0] == '+' || seg[0] == '.');
+        if (is_angle) {
+            radians = parse_angle(seg);
+        } else if (seg.rfind("to ", 0) == 0) {
+            const bool to_top = seg.find("top") != std::string::npos;
+            const bool to_bottom = seg.find("bottom") != std::string::npos;
+            const bool to_left = seg.find("left") != std::string::npos;
+            const bool to_right = seg.find("right") != std::string::npos;
+            const bool corner = (to_top || to_bottom) && (to_left || to_right);
+            if (corner) {
+                // A corner gradient's line is perpendicular to the OTHER
+                // diagonal, so its end colour lands exactly on the named
+                // corner. That makes the angle depend on the box's aspect
+                // ratio, which is why it cannot be one of the four fixed
+                // vectors -- `to bottom right` used to match the `to bottom`
+                // prefix test and paint straight down.
+                const float w = box_known ? box.width : 1.0f;
+                const float h = box_known ? box.height : 1.0f;
+                const float corner_angle = std::atan2(w, h);
+                const float pi = 3.14159265f;
+                if (to_top && to_right)         radians = corner_angle;
+                else if (to_bottom && to_right) radians = pi - corner_angle;
+                else if (to_bottom && to_left)  radians = pi + corner_angle;
+                else                            radians = -corner_angle;
+            } else if (to_right)  { x0=0; y0=0; x1=1; y1=0; color_start = prefix_end + 1; }
+            else if (to_bottom)   { x0=0; y0=0; x1=0; y1=1; color_start = prefix_end + 1; }
+            else if (to_left)     { x0=1; y0=0; x1=0; y1=0; color_start = prefix_end + 1; }
+            else if (to_top)      { x0=0; y0=1; x1=0; y1=0; color_start = prefix_end + 1; }
+        }
+        if (radians) {
+            // The line runs through the centre; its length is the projection of
+            // the box onto it, so the first and last stops sit on the corners.
+            // Endpoints are stored per-axis as box fractions, which is how the
+            // painter maps them back.
+            const float w = box_known ? box.width : 1.0f;
+            const float h = box_known ? box.height : 1.0f;
+            const float dx = std::sin(*radians);
+            const float dy = -std::cos(*radians);
+            const float length = std::fabs(w * dx) + std::fabs(h * dy);
+            x0 = (w * 0.5f - dx * length * 0.5f) / w;
+            y0 = (h * 0.5f - dy * length * 0.5f) / h;
+            x1 = (w * 0.5f + dx * length * 0.5f) / w;
+            y1 = (h * 0.5f + dy * length * 0.5f) / h;
+            color_start = prefix_end + 1;
+        }
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;

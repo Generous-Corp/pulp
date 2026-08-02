@@ -226,7 +226,7 @@ target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::format)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
-set(_pulp_inspector_symbol_tool "")
+unset(_pulp_inspector_symbol_tool)
 set(_pulp_inspector_symbol_mode "NM")
 if(MSVC)
     get_filename_component(_pulp_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
