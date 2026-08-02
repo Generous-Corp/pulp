@@ -5505,3 +5505,66 @@ fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome an
 Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
+
+## Area weighting cannot see the defects people notice
+
+`score_native_panel.py` reports an area-weighted failing fraction, and the
+defects that make a panel look wrong are small. Measured, not argued: a gradient
+fix moved delay **0.1697 → 0.0919 (−46%)** with no visible change, while a
+person looking at the same renders found five defects the score ranked as noise
+— a button's triangle icon entirely absent, a square icon 2px off-centre in its
+ring, every knob's pointer line gone, every selected state's accent fill turned
+grey, a teal underline dropped from the active tab while boxes were invented
+around the tabs next to it, and a paragraph running past its card. A missing
+knob pointer is a few hundred px on a 16M px panel. **Never read a falling area
+score as a fidelity improvement, and never read a low one as a good panel.**
+
+`tools/import-validation/check_panel_presence.py` asks the questions area
+weighting cannot, over the same capture and render:
+
+```bash
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --json-out presence.json
+# no-regression use: fail only on findings that are NEW
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --baseline presence.json
+```
+
+Five checks — ink present per node, ink absent per node, colour present, text
+contained, text runs — each a yes/no question whose answer does not shrink as
+the panel grows. On the four current designs it names every one of those six
+defects, at the node.
+
+Things that cost time here, all of them found by measuring:
+
+- **Run it against the reference as its own render first.** That control must
+  report zero on every design. It is the only thing that separates "this check
+  found a defect" from "this check fires on everything", and it caught two
+  contamination bugs during development.
+- **Ink is measured against each side's OWN modal colour**, which makes the ink
+  checks deliberately blind to colour. A filled chip going grey changes no marks
+  at all — both sides are a flat rectangle with a label on it — so the per-node
+  colour check is what catches selected states going dead, not the ink checks.
+- **A per-node colour check and a panel-wide one catch different things.** The
+  teal underline vanished panel-wide on forge (ratio 0.004); delay's accent
+  survived on sliders while every toggle lost it, so only the per-node question
+  sees that one.
+- **Containment must be asked against a container with room to spare**, never
+  against the run's own box or the reference's own extent. A text node's box is
+  a tight fit around Chrome's glyphs, so a substituted face makes every run on
+  the panel "overflow" — 154 findings on delay, one root cause, no signal. Asked
+  against the nearest ancestor with slack it drops to the runs that genuinely
+  stopped fitting.
+- **Restrict text measurements to pixels the run or its ancestors own.** A tab
+  strip 2px lower in our render read as a caption 80px below it overflowing its
+  card, because the measuring window caught the tab's own text in the same
+  colour.
+- **A blank render is flagged first, panel-wide, before any per-node verdict.**
+  SPECTR renders zero marks and every per-node check fires; saying that once
+  ("the panel is substantially blank") beats saying it 56 times.
+- **What it still cannot see**: a mark present but the wrong shape or a couple
+  of px out of place; a missing glyph inside a gradient tile, where the
+  gradient's own variation counts as ink (forge's logo mark is missed for
+  exactly this reason); and text clipped inside a box whose ink still ends short
+  of the clip edge. Nodes it cannot measure are counted under `unmeasurable` and
+  are never folded into the passing count.

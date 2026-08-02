@@ -137,6 +137,30 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: score-native-panel
+    path: tools/import-validation/score_native_panel.py
+    category: visual-compare
+    use_when: Score a natively rendered panel against the Chromium capture that is its oracle, per node.
+    invocation: python3 tools/import-validation/score_native_panel.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--tau 0.05]
+    inputs: A browser-capture directory (browser.png + dom-snapshot.json + capture.json) and the rendered composite at the same size.
+    outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, and failing area grouped by drawing feature.
+    caveat: Area-weighted. It cannot see a small feature disappear — a missing knob pointer or an absent icon is a few hundred px on a panel of millions, and a change with no visible effect moved it 46%. Pair it with check-panel-presence, which asks the questions area weighting cannot.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: check-panel-presence
+    path: tools/import-validation/check_panel_presence.py
+    category: visual-compare
+    use_when: Catch a feature that vanished, a mark that was invented, an accent that went grey, or text that stopped fitting — the defects an area score ranks as noise.
+    invocation: python3 tools/import-validation/check_panel_presence.py --capture <capture-dir> --render <native.png> [--crop L,T,W,H] [--baseline <previous.json>]
+    inputs: The same browser-capture directory and rendered composite the area score takes, plus an optional previous run's JSON as the no-regression baseline.
+    outputs: Per-node findings under five presence checks (ink present, ink absent, colour present, text contained, text runs), a panel-wide blank-render guard, and the set of findings new since the baseline.
+    caveat: Presence, not fidelity — a mark that is present but the wrong shape, weight or position by less than a couple of px passes, and a missing mark inside a gradient can hide in the gradient's own variation. Nodes it cannot measure are reported under `unmeasurable`, never counted as passing. It complements score-native-panel; neither replaces the other.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: importer-differential-lab
     path: tools/import-validation/importer_differential_lab.py
     category: visual-compare
