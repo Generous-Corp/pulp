@@ -48,6 +48,10 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
         profile && config.inspector_profile.empty()) {
         config.inspector_profile = *profile;
     }
+    if (config.inspector_profile.empty() &&
+        standalone_env_truthy("PULP_INSPECTOR")) {
+        config.inspector_profile = "local";
+    }
     if (auto capabilities = runtime::get_env("PULP_INSPECT_CAPABILITIES");
         capabilities && config.inspector_capabilities.empty()) {
         std::string_view remaining = *capabilities;

@@ -25,6 +25,7 @@
 
 #include <sstream>
 #include <iomanip>
+#include <limits>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -777,7 +778,15 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
     if (req.method == methods::kStateSetParameter) {
         try {
             auto params = choc::json::parse(req.params_json);
-            auto pid = static_cast<uint32_t>(params["id"].getInt64());
+            const auto& id_json = params["id"];
+            if (!id_json.isInt())
+                throw std::runtime_error("State.setParameter id is not an integer");
+            const auto raw_pid = id_json.getInt64();
+            if (raw_pid < 0 ||
+                static_cast<std::uint64_t>(raw_pid) >
+                    std::numeric_limits<std::uint32_t>::max())
+                throw std::runtime_error("State.setParameter id is out of range");
+            const auto pid = static_cast<std::uint32_t>(raw_pid);
             const auto& value_json = params["value"];
             if (!value_json.isInt() && !value_json.isFloat())
                 throw std::runtime_error("State.setParameter value is not numeric");

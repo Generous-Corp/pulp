@@ -68,7 +68,9 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
-    // Development Inspector activation. Empty/"off" starts no endpoint.
+    // Development Inspector activation. Empty/"off" is inert, "local" owns
+    // only the in-window overlay, and agent profiles start an authenticated
+    // endpoint.
     // Capability ids are only used with the "custom" profile. Kept as plain
     // strings so public standalone headers remain independent of inspector SDK
     // types when inspector support is compiled out.

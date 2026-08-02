@@ -1298,8 +1298,10 @@ TEST_CASE("Standalone environment preserves explicit config over env defaults",
 
 TEST_CASE("Standalone environment imports Development Inspector activation",
           "[standalone][inspect]") {
+    ScopedEnv legacy_activation("PULP_INSPECTOR");
     ScopedEnv profile("PULP_INSPECT_PROFILE");
     ScopedEnv capabilities("PULP_INSPECT_CAPABILITIES");
+    legacy_activation.unset();
     profile.set("custom");
     capabilities.set("session.describe,state.read,state.write");
 
@@ -1314,6 +1316,16 @@ TEST_CASE("Standalone environment imports Development Inspector activation",
     config = standalone_config_from_environment(explicit_config);
     REQUIRE(config.inspector_profile == "observe");
     REQUIRE(config.inspector_capabilities == std::vector<std::string>{"ui.read"});
+
+    profile.unset();
+    capabilities.unset();
+    legacy_activation.set("1");
+    config = standalone_config_from_environment(StandaloneConfig{});
+    REQUIRE(config.inspector_profile == "local");
+
+    explicit_config.inspector_profile = "off";
+    config = standalone_config_from_environment(explicit_config);
+    REQUIRE(config.inspector_profile == "off");
 }
 
 TEST_CASE("Standalone frame delay env accepts only positive plain integers",

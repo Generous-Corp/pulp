@@ -521,14 +521,20 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
                                    view::View& root, view::WindowHost& window,
                                    std::string profile,
                                    std::vector<std::string> custom_capabilities) {
+    const bool local_only = profile == "local";
     const auto parsed_profile = parse_profile(profile);
-    if (!parsed_profile)
+    if (!local_only && !parsed_profile)
         return nullptr;
-    if (*parsed_profile == inspect::InspectorProfile::Off)
+    if (!local_only && *parsed_profile == inspect::InspectorProfile::Off)
         return nullptr;
 
     auto overlay = std::make_shared<inspect::InspectorOverlay>(root);
     inspect::install_inspector_hooks(*overlay);
+    if (local_only) {
+        overlay->set_active(true);
+        return std::unique_ptr<StandaloneInspectorRuntime>(
+            new StandaloneInspectorRuntime(std::move(overlay), nullptr, {}, root, window));
+    }
     // This composition root is stack-owned by StandaloneApp::run() and is
     // stopped after run_event_loop() returns. A page-owned/non-blocking loop
     // would otherwise return before the first idle pump, falsely report a

@@ -303,6 +303,38 @@ TEST_CASE("Standalone inspector off mode creates no runtime, hook, endpoint, or 
     REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
 }
 
+TEST_CASE("Standalone local inspector owns only the in-window overlay",
+          "[standalone][inspect][local]") {
+    const auto runtime_dir = std::filesystem::temp_directory_path()
+        / "pulp-standalone-inspector-local-test";
+    std::error_code error;
+    std::filesystem::remove_all(runtime_dir, error);
+    ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
+    runtime_env.set(runtime_dir.string());
+
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+    window.blocking_event_loop = false;
+    window.exit_drain_supported = false;
+    window.deferred_close_supported = false;
+
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "local", {});
+    REQUIRE(runtime != nullptr);
+    REQUIRE_FALSE(runtime->lifecycle_state().rpc_accepting);
+    REQUIRE_FALSE(runtime->lifecycle_state().dispatch_accepting);
+    REQUIRE_FALSE(runtime->lifecycle_state().borrowed_sources_attached);
+    runtime->pump();
+    REQUIRE_FALSE(root.interaction().overlay_queue.empty());
+    REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
+    runtime->stop();
+    REQUIRE(runtime->try_finish_retirement());
+}
+
 TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",
           "[standalone][inspect][capabilities][negative]") {
     StandaloneApp app(null_processor_factory);
