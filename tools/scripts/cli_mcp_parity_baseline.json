@@ -91,7 +91,6 @@
     "pulp_motion_disable_cost": "Sub-tool of `pulp motion` \u2014 inspector Motion.disableCost RPC, no top-level CLI peer",
     "pulp_motion_enable_cost": "Sub-tool of `pulp motion` \u2014 inspector Motion.enableCost RPC, no top-level CLI peer",
     "pulp_motion_list_traces": "Sub-tool of `pulp motion` \u2014 inspector Motion.listTraces RPC, no top-level CLI peer",
-    "pulp_motion_load_fixture": "Sub-tool of `pulp motion` \u2014 inspector Motion.loadFixture RPC, no top-level CLI peer",
     "pulp_motion_pause": "Sub-tool of `pulp motion` \u2014 inspector Motion.pause RPC, no top-level CLI peer",
     "pulp_motion_play": "Sub-tool of `pulp motion` \u2014 inspector Motion.play RPC, no top-level CLI peer",
     "pulp_motion_scrub_to": "Sub-tool of `pulp motion` \u2014 inspector Motion.scrubTo RPC, no top-level CLI peer",

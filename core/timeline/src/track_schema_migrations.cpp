@@ -51,6 +51,7 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
     const auto* active = mutable_member(data, "active_take_lane_id");
     const auto* freeze = mutable_member(data, "freeze");
     const auto* mixer = mutable_member(data, "mixer");
+    const auto* tuning = mutable_member(data, "tuning");
     return id && id->kind == JsonValue::Kind::String && name &&
            name->kind == JsonValue::Kind::String && clips &&
            clips->kind == JsonValue::Kind::Array &&
@@ -72,7 +73,10 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
                 : !freeze) &&
            (track_schema_policy.supports_mixer(version)
                 ? !mixer || mixer->kind == JsonValue::Kind::Object
-                : !mixer);
+                : !mixer) &&
+           (track_schema_policy.supports_tuning(version)
+                ? !tuning || tuning->kind == JsonValue::Kind::Object
+                : !tuning);
 }
 
 bool has_track_mixer_automation(JsonValue& data) noexcept {
@@ -462,6 +466,51 @@ migrate_track_v7_to_v6(std::string_view source, BoundedJsonSink& output, const v
         version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{version->begin, version->end, "6"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v7_to_v8(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // A v7 track states no tuning, and an absent tuning is exactly how v8
+    // spells "follow the project", so the upgrade is the version stamp alone.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.mixer_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.mixer_introduced_version) ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "8"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v8_to_v7(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // An override decides what this instrument plays in. A v7 reader dropping
+    // it would silently return the track to the project tuning, which is a
+    // different tune, so a track that states one refuses to downgrade.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.tuning_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.tuning_introduced_version) ||
+        mutable_member(*data, "tuning") || version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "7"}};
     if (!valid_raw_edits(source, edits))
         return migration_fail<SchemaWriteSuccess>();
     apply_raw_edits(source, edits, output);

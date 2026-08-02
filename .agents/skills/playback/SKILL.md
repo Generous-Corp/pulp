@@ -963,13 +963,28 @@ editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
 
+**"Every Pulp plugin links `playback`" is true of a desktop configure only.**
+The chain runs through `pulp-host`, and `core/host` is behind `NOT IOS` — iOS
+disallows dlopen of third-party plugins, so hosting is not built there and the
+`pulp-view-core -> pulp::host` edge is dropped too. One guard therefore removes
+`host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
+plugin's only route to all three. Anything asserting `playback` is present in a
+plugin binary must say which configure it means; entries a guard can remove
+must be appended to `PULP_LINK_FLOOR_DEBT_<target>` under that same condition
+rather than declared unconditionally, which reads their absence as rot. See the
+`timeline` skill for the full rule.
+
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor
 rung — while the binary links neither, and still pass. If what you need to show
 is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
 `REQUIRE` list, which fails naming any module that is absent from the measured
 closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
-by it; it does not link `timeline_editor` at all.
+by it; it does not link `timeline_editor` at all. The positive inbound proof is
+`TimelinePluginProof_CLAP`: it requires `format timeline timeline_editor` under
+the `sequencer-plugin-editor` tier while recording the packaging-driven
+`playback` reach as per-target debt. Its native ruler/playhead view demonstrates
+the host seam without claiming a piano roll.
 
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
@@ -1036,3 +1051,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

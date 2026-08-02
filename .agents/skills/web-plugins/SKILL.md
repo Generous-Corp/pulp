@@ -680,6 +680,14 @@ The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
 
+`web-plugins.yml` also carries a second, unrelated job:
+`Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
+emscripten and runs the timeline conformance corpus through it. It shares the
+file only for the emsdk pin — it needs no Skia, no Chrome, no wasi-sdk, no npm,
+so keep it a separate job rather than a step in the lane above, or a one-minute
+check starts waiting on a fifteen-minute one. It is not a browser lane; if you
+are here for WAM/WebCLAP behavior, it is not the job you want.
+
 ### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
 
 Not `Foo`. `cmake --build … --target Foo` is a hard **"No rule to make target"**,

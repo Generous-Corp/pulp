@@ -188,8 +188,13 @@ uint64_t next_layer_id() {
 /// for a multi-gigabyte surface.
 constexpr int kMaxLayerDimension = 8192;
 
+// The fill type goes to SkPathBuilder's CONSTRUCTOR, not to `setFillType()` —
+// the inline header setter writes a field offset the compiled `libskia.a` does
+// not read back, so an even-odd path built that way renders as a solid nonzero
+// one with no error. See the note on SkiaCanvas::fill_path in skia_canvas.cpp.
 SkPath to_sk_path(const Path& path, FillRule rule) {
-    SkPathBuilder b;
+    SkPathBuilder b(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
+                                              : SkPathFillType::kWinding);
     for (Path::Element el : path) {
         switch (el.verb) {
             case Path::Verb::move:
@@ -212,8 +217,6 @@ SkPath to_sk_path(const Path& path, FillRule rule) {
                 break;
         }
     }
-    b.setFillType(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
-                                            : SkPathFillType::kWinding);
     return b.detach();
 }
 

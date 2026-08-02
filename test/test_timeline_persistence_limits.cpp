@@ -5,7 +5,7 @@ TEST_CASE("Timeline project summary scans metadata and counts without resolving 
     auto snapshot = take(serialize_project(mixed_project(), registry)).json;
 
     const auto summary = take(peek_project_summary(snapshot, registry));
-    REQUIRE(summary.schema_version == 2);
+    REQUIRE(summary.schema_version == 3);
     REQUIRE(summary.project_id == ItemId{1});
     REQUIRE(summary.name == "mixed");
     REQUIRE(summary.next_item_id == 12);

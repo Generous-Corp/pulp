@@ -19,6 +19,8 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -85,8 +87,10 @@ TEST_CASE("SignalGraph compile_() is race-free against a live process() "
     // first, the loop body never runs, `compiles` stays zero, and there was never
     // anything to race against. Waiting here — rather than after the render loop —
     // makes the overlap real instead of merely making the count non-zero.
-    while (compiles.load(std::memory_order_relaxed) == 0)
-        std::this_thread::yield();
+    // The deadline is what keeps this wait honest: an unbounded spin would trade
+    // the flake for a hang, and a compiler that genuinely never advances must
+    // reach the CHECK below rather than park the suite here forever.
+    (void)pulp::test::wait_for_progress(compiles);
 
     // Audio thread: keep rendering the live snapshot the whole time.
     std::uint64_t blocks = 0;

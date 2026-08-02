@@ -1169,6 +1169,30 @@ separate target exists for consumers that want manifest handling alone.
 **Depends on:** `pulp::runtime`
 
 
+## timeline_agent_view
+
+Bounded, versioned read projections for agents and other context-limited
+consumers. `AgentView` pins an immutable `timeline::DocumentView`; every read
+requires the caller's expected revision and refuses mismatches. The outline is
+project/sequence/track/clip sized. Rows carry Merkle content commitments, while
+each `omitted` count and SHA-256 covers only the directly omitted authored rows,
+so omission counts form a non-overlapping partition of the structural census.
+
+Region pages select clip starts in a half-open window and order them by
+`(start, id)`. A cursor is accepted only when its version, revision, sequence,
+anchor, exact window bounds, and key identify a member of that same window.
+`DirtySet` projection additionally requires an adjacent before/after revision
+range ending at the pinned view. That range rejects stale and multi-commit
+projections, but it cannot authenticate `DirtySet` origin because the public set
+type carries no session-issued provenance token; callers must pair it with the
+`CommitResult` that produced it. Removed identities map to their tombstoned
+nearest outline owner.
+
+**Link:** `pulp::timeline-agent-view` · **Include prefix:**
+`<pulp/timeline_agent_view/...>`
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## timeline_editor
 
 Interfaces for building a timeline editor over the document model, plus the edit
@@ -1240,6 +1264,15 @@ floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
 
+Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
+only a replacement note, erase carries only the expected note, and move, resize,
+and velocity edits carry both snapshots with the same note identity.
+`ValidatedNoteEditIntent::create` checks that shape and the note domain, and
+`NoteEditIntentHost` accepts only the validated wrapper. Note intents deliberately
+have no transaction lowerer yet: granular
+note commands own that later boundary, so this editor API does not disguise an
+O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no
 mocking framework. It is also a legitimate deployment: an editor embedded in a
@@ -1248,6 +1281,31 @@ auditions, and stays fully usable.
 
 **Depends on:** `pulp::timeline`, `pulp::timebase`
 
+
+## timeline_view
+
+Views that draw the document and turn a gesture into an edit intent — the first
+consumer of the editor rung rather than another declaration of it.
+
+The rung exists so a view can be built, tested and reasoned about without an
+engine. Its floor row admits `timeline_editor`, `timeline`, `timebase`, `view`,
+`canvas`, `platform` and `runtime`, and **deliberately omits `playback`**: that
+omission is the contract, not an oversight. A view's only coupling toward audio
+stays the `SequencerUiHost` interface, so an arranger drawn over somebody else's
+engine acquires no transport. Wanting to widen the row to reach `playback` means
+wanting a host that implements the seam. It also omits `project_package`, which
+keeps storage a sibling rung rather than a base: an editor is proven against a
+`serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row.
+
+A view takes **resolved values** — an origin tick, a `px_per_tick`, a resolved
+`tolerance_px`, or a `TickProjection`/`PitchProjection` that is already a pair of
+scalars with a name. What it does not take is **viewport policy**: an object
+owning DPI, zoom or scroll state that the view must keep in sync. That line is
+what lets a viewport slice and a view slice proceed concurrently without racing,
+and it keeps a view testable headlessly with plain numbers.
+
+**Link:** `pulp::timeline-view` · **Include prefix:** `<pulp/timeline_view/...>`
 
 ## playback
 

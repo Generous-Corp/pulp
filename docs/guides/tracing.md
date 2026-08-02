@@ -19,30 +19,30 @@ before you touch it.
 
 ---
 
-## The tiered experience (L0 / L1 / L2)
+## Available analysis surface
 
-You do not need to know SQL, or even have an agent, to get an answer. There are
-three tiers, and they all work identically under Claude Code, Codex, or any
-MCP-speaking agent — because the whole experience is shipped `SKILL.md` skills
-plus a CLI/MCP surface, not a vendor API.
+Capture and offline SQL are available today. The live `Trace.query` and
+`Trace.explain` protocol names are reserved, but deliberately return
+`capability_unavailable` until an analysis backend exists. Named L0 presets
+therefore remain planned rather than silently returning placeholder data.
 
 | Tier | Who | Entry point | What you get |
 |---|---|---|---|
-| **L0** | Novice, **no agent** | `pulp trace slowest-frames`, `pulp trace xruns`, `pulp trace dsp-hotspots`, `pulp trace layout-vs-paint`, `pulp trace query --preset <name>` | A deterministic canned query over Pulp's categories → a plain table. Zero SQL, zero agent. |
-| **L1** | Novice, **one-shot** | `pulp trace explain "<question>"` · MCP `pulp_trace_explain` · `/trace "<question>"` | **The headline.** An agent loads the `trace-analysis` skill, runs the full investigation autonomously, and returns a plain-English **root cause + chain of evidence + a concrete fix** — never raw SQL. |
-| **L2** | Expert, **iterative** | `pulp trace query "<sql>"` with the `trace-analysis` + `trace-sql` skills loaded | The full hypothesis→query→drill-down loop for hard, multi-bottleneck cases. |
+| **L0** | Novice, **no agent** | Planned named presets | Not available yet. |
+| **L1** | Novice, **one-shot** | Give an agent a `.pftrace` and load `trace-analysis` | A plain-English root cause, evidence chain, and fix built from real offline queries. |
+| **L2** | Expert, **iterative** | `pulp trace query "<sql>" --trace FILE.pftrace` with the `trace-analysis` + `trace-sql` skills loaded | The hypothesis→query→drill-down loop over the flushed trace. |
 
-The L0 preset names map **1:1** onto the trace-stdlib SQL views shipped with the
+The planned L0 preset names map **1:1** onto the trace-stdlib SQL views shipped with the
 `trace-sql` skill (`slowest-frames → pulp_slowest_frames`, `xruns →
 pulp_xruns`, `dsp-hotspots → pulp_dsp_node_cost`, `layout-vs-paint →
-pulp_layout_vs_paint`) — one definition, three surfaces.
+pulp_layout_vs_paint`). They are not exposed as successful commands yet.
 
 ### The L1 "explain" flow, spelled out
 
 ```
 1. Capture   → pulp trace start --categories dsp   (or accept a given --trace FILE.pftrace)
              → reproduce → pulp trace stop  → /tmp/pulp-<ts>.pftrace
-2. Ask       → pulp trace explain "why is my plugin using so much CPU?"
+2. Ask       → give the .pftrace and question to an agent using trace-analysis
 3. Agent     → loads the trace-analysis skill and runs its protocol autonomously:
                forms a hypothesis, queries via the trace-sql stdlib, checks
                wall-time vs CPU-time, follows blockers across threads, verifies
@@ -232,8 +232,8 @@ promise.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the plugin editor (or launch the standalone app) ...
-pulp trace stop                                        # → /tmp/pulp-<ts>.pftrace
-pulp trace explain "why is my plugin slow to open?"
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+# Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 
 One-shot, main-thread startup laid out on a timeline: Dawn/Graphite device
@@ -259,13 +259,12 @@ A representative L1 answer:
 ### Use case 2 — "Find the slowest frames / why does the UI stutter when I move a knob?"
 
 ```bash
-pulp trace slowest-frames                              # L0 preset: frames over budget, worst first
-# then, to explain a hitch during an interaction:
 pulp trace start --categories render,layout,canvas,text,js,gpu
 pulp motion record --view Knob --out knob.jsonl        # motion trace_id joins in
 # ... sweep the knob ...
-pulp trace stop
-pulp trace query --preset layout-vs-paint              # or: explain "why did those frames blow the budget?"
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+# Run the trace-sql frame/layout queries against the printed file:
+pulp trace query "<SQL from trace-sql>" --trace /tmp/pulp-trace.pftrace
 ```
 
 The fat slices are `TextShaper::prepare` firing every frame — the knob's value
@@ -282,8 +281,8 @@ one-row-per-stage cost split.
 # reproduces exactly.
 pulp trace start --categories dsp,dsp.node
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
-pulp trace stop
-pulp trace explain "why is my plugin using so much CPU?"
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
+# Give the printed .pftrace to an agent using the trace-analysis skill.
 ```
 
 `AudioProcessLoadMeasurer` reports a calm ~40% average, but the flamegraph shows

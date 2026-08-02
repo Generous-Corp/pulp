@@ -32,6 +32,8 @@
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -472,6 +474,12 @@ TEST_CASE("Baked param injection: repeated concurrent injection stays clean",
         run_block(*fx.result.processor,
                   b == 0 ? impulse(kFrames) : std::vector<float>(kFrames, 0.0f));
     }
+    // `injected > 0` is a precondition of everything below, and the block budget
+    // does not establish it: nothing orders the control thread's first injection
+    // before this loop ends, so a loaded host can spend the whole budget before
+    // that thread is ever scheduled. Wait for the injection to land; the deadline
+    // keeps a mailbox that genuinely never accepts one a failed REQUIRE, not a hang.
+    (void)pulp::test::wait_for_progress(injected);
     stop.store(true, std::memory_order_relaxed);
     control.join();
 

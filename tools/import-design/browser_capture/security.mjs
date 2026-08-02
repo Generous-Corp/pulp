@@ -467,8 +467,13 @@ export function sanitizeSnapshot(value, privatePrefix) {
       /file:\/\/\/[^\s"'<>]+/giu, "file:///<local-path>");
     sanitized = sanitized.replace(
       /(["'])(\/[^"'\r\n]+)\1/gu, "$1<local-path>$1");
+    // Requires at least one character after the slash: a lone "/" delimited by
+    // whitespace names no file, but it IS how CSS separates a colour's alpha
+    // (`oklab(L a b / .34)`) and a box-shadow layer's colour. Matching zero
+    // trailing characters rewrote that separator to "<local-path>" and made
+    // every translucent computed colour unparseable downstream.
     sanitized = sanitized.replace(
-      /(?<![\w:/.-])\/(?!\/)[^\s"'<>;,)]*/gu, "<local-path>");
+      /(?<![\w:/.-])\/(?!\/)[^\s"'<>;,)]+/gu, "<local-path>");
     sanitized = sanitized.replace(
       /\b[A-Za-z]:\\[^\s"'<>]*/gu, "<local-path>");
     captureUrls.forEach((url, index) => {

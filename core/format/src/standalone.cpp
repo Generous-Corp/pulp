@@ -28,13 +28,11 @@
 #include <TargetConditionals.h>
 #endif
 
-// The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
-// compile flag (root CMake option, default ON for dev/examples builds;
-// release/standalone-ship builds set it OFF) so a shipped standalone app does
-// not expose the developer inspector to end users. It additionally requires
-// PULP_HAS_INSPECT (GPU + desktop, the link gate) and a non-Android platform.
-// PULP_STANDALONE_INSPECTOR folds all three into one condition used by every
-// inspector block below.
+// The root component gate defines PULP_ENABLE_INSPECTOR for this standalone
+// authoring target and links the visual overlay here, never through
+// pulp-format. PULP_HAS_INSPECT records that the desktop GPU overlay target
+// actually exists. PULP_STANDALONE_INSPECTOR folds those conditions with the
+// platform guard for every inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
 #endif
@@ -489,8 +487,32 @@ bool StandaloneApp::start() {
     }
     constrain_audio_config(config_);
 
+    // A screenshot-only launch paints a few frames, writes a PNG and exits, so
+    // its render callback could only ever push silence at whoever is sitting at
+    // the machine. Skip the audio backend outright: no audio system, no device,
+    // no hardware MIDI (nothing drains it without the render callback). That is
+    // what lets a Standalone build be captured and verified with nobody at the
+    // desk. A capture that also asks for a live readout — probe/scope JSON, a
+    // capture WAV — is produced BY that callback, so it keeps audio, as does an
+    // explicit `screenshot_keeps_audio` / PULP_SCREENSHOT_KEEP_AUDIO=1 opt-in.
+    audio_skipped_for_capture_ = detail::standalone_capture_skips_audio(config_);
+    if (audio_skipped_for_capture_) {
+        runtime::log_info(
+            "Standalone: screenshot capture — no audio device created, opened, "
+            "or started (set PULP_SCREENSHOT_KEEP_AUDIO=1 to keep audio live)");
+        prepare_render_state();
+        running_.store(true);
+        return true;
+    }
+
     // Set up audio
-    audio_system_ = audio::create_audio_system();
+    audio_system_ = audio_system_factory_
+        ? audio_system_factory_()
+        : audio::create_audio_system();
+    if (!audio_system_) {
+        runtime::log_error("Standalone: failed to create audio system");
+        return false;
+    }
     audio_device_ = audio_system_->create_device(config_.audio_device_id);
     if (!audio_device_) {
         runtime::log_error("Standalone: failed to create audio device");
