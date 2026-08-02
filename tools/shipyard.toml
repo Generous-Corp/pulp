@@ -56,11 +56,12 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.80.2 (current pin) — the `version` field moved through v0.70.0 and v0.78.0
-#   to v0.80.2, but this rationale block was left labelled v0.68.0, so the file
-#   documented a pin it no longer installed. Relabelled 2026-07-31. v0.80.2 also
-#   carries `shipyard metrics`, which the docs and the ci skill still told readers
-#   to fetch a newer Shipyard by hand to get.
+# v0.81.0 (current pin) — fleet status now observes the complete repository
+#   runner inventory, expected-but-not-yet-registered metal hosts, Tart disk
+#   admission headroom, ccache size drift, and accidental hosted Linux routing.
+#   It also fixes stale-release detection when a bounded comparison cannot
+#   recover the oldest releasable commit timestamp. v0.80.2 introduced
+#   `shipyard metrics`; all earlier recovery guarantees below remain carried.
 #
 # v0.68.0 (earlier pin) — durable-queue dead-worker recovery (Shipyard #351): a killed
 #   `shipyard ship`/`pr` worker left its job stuck `running` in the queue,
@@ -73,7 +74,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.80.2"
+version = "v0.81.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
