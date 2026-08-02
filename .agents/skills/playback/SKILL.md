@@ -898,6 +898,10 @@ longer exists, so a reason cannot outlive its code.
 declared set, so reaching for a format, host, or view type fails the gate even
 when the build would have linked.
 
+`project_package` has its own floor above Timeline: it may reach timeline,
+timebase, platform, and runtime, but it must not reach playback. Package
+publication or recovery must not widen playback's row.
+
 **The link axis is transitive, and playback is the module that shows why.** The
 check follows what a linked library itself links, to a fixed point, so a row
 cannot stay green by depending on a module that breaches it. `core/playback`

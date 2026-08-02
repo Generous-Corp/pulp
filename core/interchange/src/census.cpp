@@ -57,6 +57,14 @@ void record_clip(ConceptCensus& out, const timeline::Project& project,
                 // nothing was lost.
                 if (!notes.modifiers().empty() || notes.modifier_seed() != 0)
                     out.record(Concept::ClipNoteModifier, id, limits);
+                // A lane's points are authored independently of every note, so
+                // a format carrying the notes and not the lanes writes a file
+                // that opens successfully with the controller movement gone.
+                // The lane's own identity is the owner, matching how automation
+                // and take lanes are recorded, so the count is lanes rather
+                // than the clips holding them.
+                for (const timeline::MidiExpressionLane& lane : notes.lanes())
+                    out.record(Concept::ClipMidiExpressionLane, lane.id, limits);
             },
             [&](const timeline::RegisteredContent&) {
                 out.record(Concept::ContentRegistered, id, limits);

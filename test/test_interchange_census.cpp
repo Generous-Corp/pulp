@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -273,6 +274,61 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     const Project seeded = take_value(
         Project::create(ProjectInput{{1}, "seeded", 100, {2}, {}, {seeded_sequence}}));
     REQUIRE(census(seeded).count(Concept::ClipNoteModifier) == 1);
+}
+
+TEST_CASE("a census records a clip's controller streams so an export cannot drop them silently",
+          "[interchange]") {
+    // A lane's points are authored independently of every note, so a format
+    // that carries the notes and not the lanes writes a file that opens
+    // successfully with the controller movement gone. Before this row existed
+    // the walker counted the lanes and the vocabulary had no way to name them,
+    // so such a document exported reporting no loss at all.
+    MidiExpressionLane mod_wheel;
+    mod_wheel.id = {30};
+    mod_wheel.address = {0, 0, 0x0B, 0, 1};
+    mod_wheel.points = {{{40}, TickPosition{0}, 0u}, {{41}, TickPosition{24}, 0x8000'0000u}};
+
+    MidiExpressionLane brightness;
+    brightness.id = {31};
+    brightness.address = {0, 1, 0x0B, 0, 74};
+    brightness.points = {{{42}, TickPosition{48}, 0xFFFF'FFFFu}};
+
+    auto content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 0,
+                                                  {brightness, mod_wheel}));
+    auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
+    auto track = take_value(Track::create({6}, "musical", {clip}));
+    auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
+    const Project project = take_value(
+        Project::create(ProjectInput{{1}, "expressive", 100, {2}, {}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNote) == 1);
+    REQUIRE(counted.count(Concept::ClipMidiExpressionLane) == 2);
+    REQUIRE(concept_detectable_in_model(Concept::ClipMidiExpressionLane));
+
+    // The owners are the LANE identities, not the clip's. A per-clip recording
+    // would also make the count 1 rather than 2, so asserting the values is
+    // what separates "recorded per lane" from "recorded per clip" -- a count
+    // alone passes for a document holding exactly one lane in one clip.
+    // `MidiContent::create` returns lanes in (address, id) order, so the
+    // channel-0 lane precedes the channel-1 lane whatever order they arrived in.
+    const std::span<const ItemId> owners = counted.owners(Concept::ClipMidiExpressionLane);
+    REQUIRE(owners.size() == 2);
+    REQUIRE(owners[0] == ItemId{30});
+    REQUIRE(owners[1] == ItemId{31});
+
+    // The same notes with no lane record only the note concept, so the new row
+    // cannot be a constant that fires on every note clip.
+    auto plain_content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
+    auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
+    auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
+                                                      {plain_track}));
+    const Project plain = take_value(
+        Project::create(ProjectInput{{1}, "plain", 100, {2}, {}, {plain_sequence}}));
+    const ConceptCensus plain_census = census(plain);
+    REQUIRE(plain_census.count(Concept::ClipNote) == 1);
+    REQUIRE_FALSE(plain_census.contains(Concept::ClipMidiExpressionLane));
 }
 
 TEST_CASE("a census records track mixer state and the lanes that automate it",

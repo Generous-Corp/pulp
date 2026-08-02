@@ -54,6 +54,7 @@
     "pulp-osc",
     "pulp-platform",
     "pulp-playback",
+    "pulp-project-package",
     "pulp-render",
     "pulp-runtime",
     "pulp-sample-bank-manifest",
