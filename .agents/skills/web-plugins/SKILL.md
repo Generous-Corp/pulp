@@ -442,6 +442,22 @@ per-ABI entry point for it.** Go through the plugin's own state:
   no-exceptions proof together. Hand-editing any of the four consumer lists for a
   timeline unit is not just unnecessary, it is wrong.
 
+- **This skill owns the engines' web-ABI source closure, not the engines.**
+  `skill_path_map.json` maps `web-plugins` to
+  `core/timeline/PulpTimelineSources.cmake`,
+  `core/playback/PulpPlaybackSources.cmake`, `PulpWam.cmake` (which carries the
+  literal `core/timebase/src` list) and `PulpWclap.cmake` — the surfaces that
+  decide what the browser lanes compile. It does **not** claim
+  `core/timebase/**`, `core/timeline/**`, or `core/playback/**` wholesale.
+  Adding or splitting an engine TU still lands on this skill, because it edits
+  one of those lists; editing an existing engine TU does not, because nothing
+  here goes stale. Whole-subsystem claims made the gate fire on every engine
+  edit, which trains reflexive `Skill-Update: skip` trailers — and that reflex
+  is how a genuinely missed skill update gets waved through. `web-timeline-
+  source-closure` (a ctest, not this gate) is what proves the closure itself.
+  `tools/scripts/test_skill_sync.py::RealSkillPathMapOwnershipTests` asserts
+  the boundary from both sides, so widening it back fails a test.
+
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,
   `transaction_marker_internal.cpp` — belong in the shared timeline source

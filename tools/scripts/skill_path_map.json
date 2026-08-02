@@ -620,16 +620,18 @@
         "tools/cmake/PulpWam.cmake",
         "tools/cmake/PulpWclap.cmake",
         "tools/cmake/PulpPortableWav.cmake",
-        "core/timebase/**",
-        "core/timeline/**",
-        "core/playback/**",
+        "core/timeline/PulpTimelineSources.cmake",
+        "core/playback/PulpPlaybackSources.cmake",
         "core/audio/include/pulp/audio/wav_decoder.hpp",
         "core/audio/src/wav_decoder.cpp",
         "external/dr_libs/dr_wav.h",
         "tools/scripts/*web_timeline_source_closure_check.py",
         ".github/workflows/web-plugins.yml",
         "tools/cmake/PulpWebUi.cmake"
-      ]
+      ],
+      "_doc": {
+        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list — so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer — the habit that lets a genuinely missed skill update through."
+      }
     },
     "webview-ui": {
       "paths": [
