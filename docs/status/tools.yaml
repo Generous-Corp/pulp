@@ -125,6 +125,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: verify-rendered-panel
+    path: tools/import-validation/verify_rendered_panel.py
+    category: visual-compare
+    use_when: Prove the emitted ui.js artifact renders like the importer output it claims to ship.
+    invocation: python3 tools/import-validation/verify_rendered_panel.py --artifact <ui.js> --reference <render.png> --tokens <tokens.json> --width <px> --height <px> [--scale 2]
+    inputs: Emitted UI artifact, importer reference render, design tokens, and the intended canvas dimensions.
+    outputs: Fail-closed similarity, foreign-colour, image-source, renderer-capability, and size verdicts with distinct exit codes.
+    caveat: Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: importer-differential-lab
     path: tools/import-validation/importer_differential_lab.py
     category: visual-compare
