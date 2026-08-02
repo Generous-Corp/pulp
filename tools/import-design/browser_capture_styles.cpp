@@ -243,10 +243,12 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
     const auto backend_ids = member(nodes, "backendNodeId");
     const auto parents = member(nodes, "parentIndex");
     if (!backend_ids.isArray()) return std::nullopt;
+    index.node_to_backend_.assign(backend_ids.size(), -1);
     for (uint32_t i = 0; i < backend_ids.size(); ++i) {
         const int backend = json_int(backend_ids[static_cast<int>(i)], -1);
-        if (backend >= 0) index.backend_to_node_[backend] =
-            static_cast<int>(i);
+        if (backend < 0) continue;
+        index.backend_to_node_[backend] = static_cast<int>(i);
+        index.node_to_backend_[i] = backend;
     }
     if (parents.isArray()) {
         index.parent_index_.reserve(parents.size());
@@ -255,16 +257,54 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
                 json_int(parents[static_cast<int>(i)], -1));
     }
 
+    // Node identity. Whole-tree lowering needs to know WHAT each painted node
+    // is — an element or a text run, and which tag — because that decides
+    // whether it can be drawn natively at all.
+    const auto node_types = member(nodes, "nodeType");
+    const auto node_names = member(nodes, "nodeName");
+    const auto node_attributes = member(nodes, "attributes");
+    const auto node_count = backend_ids.size();
+    index.node_type_.assign(node_count, 0);
+    index.node_name_.assign(node_count, -1);
+    index.node_attributes_.resize(node_count);
+    for (uint32_t i = 0; i < node_count; ++i) {
+        const auto at = static_cast<int>(i);
+        if (node_types.isArray() && i < node_types.size())
+            index.node_type_[i] = json_int(node_types[at], 0);
+        if (node_names.isArray() && i < node_names.size())
+            index.node_name_[i] = json_int(node_names[at], -1);
+        if (!node_attributes.isArray() || i >= node_attributes.size())
+            continue;
+        const auto entry = node_attributes[at];
+        if (!entry.isArray()) continue;
+        auto& pairs = index.node_attributes_[i];
+        pairs.reserve(entry.size());
+        for (uint32_t j = 0; j < entry.size(); ++j)
+            pairs.push_back(json_int(entry[static_cast<int>(j)], -1));
+    }
+
     const auto node_index = member(layout, "nodeIndex");
     const auto styles = member(layout, "styles");
     const auto bounds = member(layout, "bounds");
+    const auto texts = member(layout, "text");
+    const auto paint_orders = member(layout, "paintOrders");
     if (!node_index.isArray() || !styles.isArray()) return std::nullopt;
 
     index.layout_to_node_.assign(node_index.size(), -1);
+    index.layout_text_.assign(node_index.size(), -1);
+    // Absent rather than zero when the capture did not request paint order:
+    // zero is a legitimate order, so defaulting to it would silently reorder
+    // the whole panel into document order while looking like real data.
+    index.layout_paint_order_.assign(node_index.size(), -1);
     for (uint32_t i = 0; i < node_index.size(); ++i) {
-        const int node = json_int(node_index[static_cast<int>(i)], -1);
+        const auto at = static_cast<int>(i);
+        const int node = json_int(node_index[at], -1);
+        if (texts.isArray() && i < texts.size())
+            index.layout_text_[i] = json_int(texts[at], -1);
+        if (paint_orders.isArray() && i < paint_orders.size())
+            index.layout_paint_order_[i] = json_int(paint_orders[at], -1);
         if (node < 0) continue;
-        index.node_to_layout_[node] = static_cast<int>(i);
+        index.node_to_layout_[node] = at;
         index.layout_to_node_[i] = node;
     }
 
@@ -330,6 +370,97 @@ std::optional<CapturedBox> CapturedStyleIndex::bounds_for(
     return layout_bounds_[static_cast<size_t>(*layout)];
 }
 
+std::string CapturedStyleIndex::string_at(int index) const {
+    if (index < 0 || index >= static_cast<int>(strings_.size())) return {};
+    return strings_[static_cast<size_t>(index)];
+}
+
+int CapturedStyleIndex::parent_of(int node_index) const {
+    if (node_index < 0 ||
+        node_index >= static_cast<int>(parent_index_.size())) {
+        return -1;
+    }
+    return parent_index_[static_cast<size_t>(node_index)];
+}
+
+std::string CapturedStyleIndex::attribute(int node_index,
+                                          std::string_view name) const {
+    if (node_index < 0 ||
+        node_index >= static_cast<int>(node_attributes_.size())) {
+        return {};
+    }
+    const auto& pairs = node_attributes_[static_cast<size_t>(node_index)];
+    // Flattened name/value string indices, so step two at a time and stop
+    // before a trailing name with no value.
+    for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
+        if (string_at(pairs[i]) == name) return string_at(pairs[i + 1]);
+    }
+    return {};
+}
+
+std::string CapturedStyleIndex::tag_name(int node_index) const {
+    if (node_index < 0 || node_index >= static_cast<int>(node_name_.size()))
+        return {};
+    auto name = string_at(node_name_[static_cast<size_t>(node_index)]);
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return name;
+}
+
+std::map<std::string, std::string> CapturedStyleIndex::styles_for_layout(
+    int layout_index) const {
+    std::map<std::string, std::string> computed;
+    if (layout_index < 0 ||
+        layout_index >= static_cast<int>(style_rows_.size())) {
+        return computed;
+    }
+    const auto& row = style_rows_[static_cast<size_t>(layout_index)];
+    for (size_t i = 0; i < row.size() && i < property_names_.size(); ++i) {
+        const auto value = string_at(row[i]);
+        if (value.empty()) continue;
+        computed[property_names_[i]] = value;
+    }
+    return computed;
+}
+
+std::vector<CapturedPaintNode> CapturedStyleIndex::painted_nodes() const {
+    std::vector<CapturedPaintNode> painted;
+    painted.reserve(layout_to_node_.size());
+    for (size_t layout = 0; layout < layout_to_node_.size(); ++layout) {
+        const int node = layout_to_node_[layout];
+        if (node < 0) continue;
+        CapturedPaintNode entry;
+        entry.layout_index = static_cast<int>(layout);
+        entry.node_index = node;
+        entry.paint_order = layout < layout_paint_order_.size()
+                                ? layout_paint_order_[layout]
+                                : -1;
+        if (node < static_cast<int>(node_type_.size()))
+            entry.node_type = node_type_[static_cast<size_t>(node)];
+        entry.tag_name = tag_name(node);
+        if (layout < layout_text_.size())
+            entry.text = string_at(layout_text_[layout]);
+        if (layout < layout_bounds_.size())
+            entry.bounds = layout_bounds_[layout];
+        entry.backend_node_id =
+            node < static_cast<int>(node_to_backend_.size())
+                ? node_to_backend_[static_cast<size_t>(node)]
+                : -1;
+        painted.push_back(std::move(entry));
+    }
+    // Chrome's paint order, ties broken by document order. The layout array is
+    // already in document order, so a STABLE sort is what preserves it — and it
+    // matters, because a paint order groups every node painted in one phase and
+    // ties are the common case, not the exception.
+    std::stable_sort(painted.begin(), painted.end(),
+                     [](const CapturedPaintNode& a,
+                        const CapturedPaintNode& b) {
+                         return a.paint_order < b.paint_order;
+                     });
+    return painted;
+}
+
 std::map<std::string, std::string> CapturedStyleIndex::styles_for(
     int backend_node_id, const std::optional<CapturedBox>& paint_box) const {
     std::map<std::string, std::string> computed;
@@ -374,7 +505,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
 
 void apply_computed_styles(const std::map<std::string, std::string>& computed,
                            const std::optional<CapturedBox>& box,
-                           pulp::view::IRStyle& style) {
+                           pulp::view::IRStyle& style,
+                           ComputedStyleScope scope) {
     const auto lookup = [&computed](const char* name) -> std::string {
         const auto it = computed.find(name);
         return it == computed.end() ? std::string{} : it->second;
@@ -394,6 +526,29 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
         if (const auto length = parse_length(value, reference)) field = *length;
     };
 
+    const auto color = lookup("color");
+    if (!is_absent(color)) style.color = color;
+
+    // Typography. Inherited, so it is the half a text run legitimately owns.
+    set_string("font-family", style.font_family);
+    set_length("font-size", style.font_size, reference_height);
+    const auto weight = lookup("font-weight");
+    if (!is_absent(weight)) {
+        if (const auto parsed = parse_number(weight))
+            style.font_weight = static_cast<int>(*parsed);
+    }
+    set_string("font-style", style.font_style);
+    const auto align = lookup("text-align");
+    if (!is_absent(align) && align != "start") style.text_align = align;
+    set_length("letter-spacing", style.letter_spacing, reference_width);
+    set_length("line-height", style.line_height, reference_height);
+    set_string("text-transform", style.text_transform);
+    const auto decoration = lookup("text-decoration-line");
+    if (!is_absent(decoration)) style.text_decoration = decoration;
+    set_string("white-space", style.white_space);
+
+    if (scope == ComputedStyleScope::text_only) return;
+
     // Fills. `background-image` carries both gradients and asset references;
     // they land on different IR fields because only one of them is paintable
     // without resolving an asset.
@@ -406,10 +561,13 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
             style.background_gradient = background_image;
         else
             style.background_image = background_image;
+        // Tiling is part of the fill, not a decoration: the standard CSS grid
+        // idiom is one gradient with a hard stop repeated at a fixed size, so a
+        // fill recorded without its size and repeat paints a single 1px line
+        // where the design has a grid.
+        set_string("background-size", style.background_size);
+        set_string("background-repeat", style.background_repeat);
     }
-
-    const auto color = lookup("color");
-    if (!is_absent(color)) style.color = color;
 
     const auto opacity = lookup("opacity");
     if (!opacity.empty()) {
@@ -501,23 +659,6 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     set_string("clip-path", style.clip_path);
     set_string("mask-image", style.mask_image);
 
-    // Typography.
-    set_string("font-family", style.font_family);
-    set_length("font-size", style.font_size, reference_height);
-    const auto weight = lookup("font-weight");
-    if (!is_absent(weight)) {
-        if (const auto parsed = parse_number(weight))
-            style.font_weight = static_cast<int>(*parsed);
-    }
-    set_string("font-style", style.font_style);
-    const auto align = lookup("text-align");
-    if (!is_absent(align) && align != "start") style.text_align = align;
-    set_length("letter-spacing", style.letter_spacing, reference_width);
-    set_length("line-height", style.line_height, reference_height);
-    set_string("text-transform", style.text_transform);
-    const auto decoration = lookup("text-decoration-line");
-    if (!is_absent(decoration)) style.text_decoration = decoration;
-    set_string("white-space", style.white_space);
     set_string("cursor", style.cursor);
 
     const auto overflow = lookup("overflow");
