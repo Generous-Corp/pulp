@@ -5645,3 +5645,34 @@ controls and lowers them separately.
   defect was between them. Two plausible mechanisms had been proposed (a border
   shorthand painting at zero width; accent colours failing to parse) and both
   were wrong; a five-minute bisect beat both guesses.
+
+## A bordered parent shifts every descendant, and it is a double-count
+
+An absolutely positioned child is placed against its parent's **padding box** —
+that is the containing block — so a layout engine adds the parent's border width
+to every child offset. Chrome's captured boxes already include it once, because
+they are measured from the page origin, so an offset taken from the parent's
+BORDER box gets it counted twice. Every descendant of a bordered node lands one
+border-width down and to the right of where the browser put it.
+
+On a real panel that reads as **a card's fill sliding out from under its own
+frame**: a rounded outline with a band of the card's own background showing
+between it and the content. It is a geometry bug, not a paint bug, so no amount
+of looking at the border code finds it — `lower_painted_tree` must subtract the
+parent's resolved border widths when it computes a child's parent-relative
+offset, mirroring `apply_border_widths`'s per-edge-wins-over-uniform rule.
+
+**A one-pixel misalignment is invisible in a score and obvious to a person.**
+Fixing it moved `delay` 0.0838 → 0.0665 and `forge` 0.1407 → 0.1346, but what
+made it findable was cropping a card corner at 6x and reading the pixel runs
+either side of the border: Chrome plate/border/border/fill with no gap, ours
+plate/border/border/**background/background**/fill.
+
+**Still open: a child is not clipped to its ancestor's `border-radius`.** The
+per-node clip that whole-tree lowering carries is `IRStyle::ClipRect` — a plain
+rectangle — so a card's rounded corner cuts nothing and the fill's square corner
+covers it. Closing it means radii on `ClipRect`, the `CssClipChain` tracking
+which ancestor contributed each edge AND its corner radii, a rounded variant of
+`View::set_ancestor_clip_rect`, the paint-time clip, and the JSON round-trip.
+That is a slice, not a patch — do not half-land it, because a clip model that is
+rounded on some paths and rectangular on others is worse than an honest square.

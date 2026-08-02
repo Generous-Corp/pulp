@@ -444,6 +444,56 @@ TEST_CASE("native lowering places nodes at Chrome's solved boxes verbatim",
     }
 }
 
+// A layout engine places an absolutely positioned child against its parent's
+// PADDING box, so the parent's border width is added to every child offset.
+// Chrome's boxes already include it once — they are measured from the page
+// origin — so an offset taken from the parent's BORDER box gets it counted
+// twice, and every descendant of a bordered node lands one border-width down
+// and to the right of where the browser put it. On a real panel that is a
+// card's fill sliding out from under its own frame.
+TEST_CASE("a bordered parent does not shift its children",
+          "[browser-capture][native-lowering]") {
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV(3px border), 4 DIV(child).
+    // The child's page box is (30,30); the parent's is (20,20), so the offset
+    // between them is 10. A layout engine then adds the parent's 3px border
+    // when it places the child against the padding box, so the value emitted
+    // has to be 7 for the sum to land back on Chrome's 30.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            // Index 34 is "3px"; 11 is "none", which records no width at all.
+            .styles = "[[11,14,11,11,11,11],[11,14,11,11,11,11],"
+                      "[11,14,11,11,11,11],[11,14,34,34,34,34],"
+                      "[11,14,11,11,11,11]]",
+            .bounds = "[[0,0,200,200],[0,0,200,200],[0,0,200,200],"
+                      "[20,20,100,100],[30,30,40,40]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names =
+                R"(["background-image","display","border-top-width",)"
+                R"("border-right-width","border-bottom-width",)"
+                R"("border-left-width"])",
+        },
+        "bordered-parent-offset");
+    const auto* parent = find_node(lowered.root, [](const IRNode& n) {
+        return n.style.border_top_width.value_or(0.0f) > 0.0f;
+    });
+    REQUIRE(parent != nullptr);
+    REQUIRE(parent->children.size() == 1);
+    const IRNode& child = parent->children.front();
+    CHECK_THAT(child.style.left.value_or(-1.0f),
+               Catch::Matchers::WithinAbs(7.0, 1e-4));
+    CHECK_THAT(child.style.top.value_or(-1.0f),
+               Catch::Matchers::WithinAbs(7.0, 1e-4));
+    // And the parent itself is untouched — the compensation belongs to the
+    // child's offset, not to the box the border is drawn on.
+    CHECK_THAT(parent->style.width.value_or(0.0f),
+               Catch::Matchers::WithinAbs(100.0, 1e-4));
+}
+
 TEST_CASE("parent-relative offsets compose to Chrome's absolute boxes",
           "[browser-capture][native-lowering]") {
     // Storing a child's box relative to its parent is what makes "move a

@@ -844,8 +844,31 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         }
 
         const auto children = entry.children;
-        const double child_left = entry.box.left;
-        const double child_top = entry.box.top;
+        // Children are placed against the parent's PADDING box, not its border
+        // box, because that is where a layout engine puts an absolutely
+        // positioned child — the containing block is the padding box, so the
+        // parent's border width is added to every child offset.
+        //
+        // Chrome's boxes are already final and already measured from the page
+        // origin, so an offset taken from the parent's border box has that
+        // border width in it once. Letting Yoga add it again counts it twice,
+        // and every descendant of a bordered node lands one border-width down
+        // and to the right of where the browser put it — visible as a card's
+        // fill sliding out from under its own frame.
+        const auto edge_border = [](const std::optional<float>& side,
+                                    const std::optional<float>& uniform) {
+            // Mirrors `apply_border_widths`: an explicitly set edge wins even
+            // at 0, otherwise the uniform shorthand applies.
+            if (side) return static_cast<double>(std::max(0.0f, *side));
+            if (uniform) return static_cast<double>(std::max(0.0f, *uniform));
+            return 0.0;
+        };
+        const double child_left =
+            entry.box.left + edge_border(entry.node.style.border_left_width,
+                                         entry.node.style.border_width);
+        const double child_top =
+            entry.box.top + edge_border(entry.node.style.border_top_width,
+                                        entry.node.style.border_width);
         const ClipRect child_clip =
             intersect(ancestor_clip,
                       overflow_clip_of(entry.node, entry.box.left,
