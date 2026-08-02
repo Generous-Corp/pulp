@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <string>
@@ -27,9 +28,11 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <stdio.h>
+#include <sys/acl.h>
 #elif defined(__linux__)
 #include <linux/fs.h>
 #include <sys/syscall.h>
+#include <sys/xattr.h>
 #endif
 #endif
 
@@ -94,8 +97,8 @@ HANDLE open_relative(HANDLE parent, const std::filesystem::path& component,
     return handle;
 }
 
-HANDLE open_relative_existing(HANDLE parent, const std::filesystem::path& component,
-                              bool directory, ACCESS_MASK access, ULONG share) noexcept {
+HANDLE open_relative_existing(HANDLE parent, const std::filesystem::path& component, bool directory,
+                              ACCESS_MASK access, ULONG share) noexcept {
     const auto& name = component.native();
     if (name.empty() || name == L"." || name == L".." ||
         name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
@@ -176,8 +179,7 @@ bool adopt_inherited_permissions(HANDLE child, HANDLE parent, bool directory) no
     const bool descriptor_created =
         token_opened &&
         CreatePrivateObjectSecurityEx(parent_descriptor, nullptr, &child_descriptor, nullptr,
-                                      directory, SEF_DACL_AUTO_INHERIT, token,
-                                      &file_mapping) != 0;
+                                      directory, SEF_DACL_AUTO_INHERIT, token, &file_mapping) != 0;
     if (token != nullptr)
         CloseHandle(token);
     LocalFree(parent_descriptor);
@@ -224,6 +226,107 @@ bool fence_descriptor(int descriptor) noexcept {
 #endif
     return ::fsync(descriptor) == 0;
 }
+
+int open_unlinked_permission_probe(int parent) noexcept {
+    static std::atomic<std::uint64_t> serial{0};
+    for (std::size_t attempt = 0; attempt < 32; ++attempt) {
+        std::array<char, 96> name{};
+        const auto value = serial.fetch_add(1, std::memory_order_relaxed);
+        const auto length = std::snprintf(
+            name.data(), name.size(), ".pulp-stage-permission-probe-%llu-%llu",
+            static_cast<unsigned long long>(::getpid()), static_cast<unsigned long long>(value));
+        if (length <= 0 || static_cast<std::size_t>(length) >= name.size())
+            return -1;
+        const auto descriptor = ::openat(parent, name.data(),
+                                         O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                             | O_NOFOLLOW
+#endif
+                                         ,
+                                         0666);
+        if (descriptor < 0) {
+            if (errno == EEXIST)
+                continue;
+            return -1;
+        }
+        if (::unlinkat(parent, name.data(), 0) == 0)
+            return descriptor;
+        const auto saved_error = errno;
+        ::close(descriptor);
+        ::unlinkat(parent, name.data(), 0);
+        errno = saved_error;
+        return -1;
+    }
+    errno = EEXIST;
+    return -1;
+}
+
+bool adopt_direct_child_permissions(int child, int parent) noexcept {
+    const auto probe = open_unlinked_permission_probe(parent);
+    if (probe < 0)
+        return false;
+    struct stat probe_status{};
+    struct stat child_status{};
+    bool valid = ::fstat(probe, &probe_status) == 0 && ::fstat(child, &child_status) == 0;
+
+#if defined(__APPLE__)
+    errno = 0;
+    acl_t probe_acl = valid ? ::acl_get_fd_np(probe, ACL_TYPE_EXTENDED) : nullptr;
+    const bool acl_read = probe_acl != nullptr || errno == ENOENT;
+#elif defined(__linux__)
+    constexpr const char* access_acl = "system.posix_acl_access";
+    errno = 0;
+    const auto acl_size = valid ? ::fgetxattr(probe, access_acl, nullptr, 0) : -1;
+    const bool acl_supported = acl_size >= 0 || errno != ENOTSUP;
+    const bool acl_read = acl_size >= 0 || errno == ENODATA || errno == ENOTSUP;
+    std::vector<std::uint8_t> probe_acl;
+    if (acl_size > 0) {
+        probe_acl.resize(static_cast<std::size_t>(acl_size));
+        valid = ::fgetxattr(probe, access_acl, probe_acl.data(), probe_acl.size()) == acl_size;
+    }
+#else
+    constexpr bool acl_read = true;
+#endif
+    const bool probe_closed = ::close(probe) == 0;
+    valid = valid && acl_read && probe_closed;
+    if (!valid) {
+#if defined(__APPLE__)
+        if (probe_acl != nullptr)
+            ::acl_free(probe_acl);
+#endif
+        return false;
+    }
+    if (child_status.st_uid != probe_status.st_uid)
+        valid = false;
+    if (valid && child_status.st_gid != probe_status.st_gid &&
+        ::fchown(child, static_cast<uid_t>(-1), probe_status.st_gid) != 0)
+        valid = false;
+    if (valid && ::fchmod(child, probe_status.st_mode & 07777) != 0)
+        valid = false;
+
+#if defined(__APPLE__)
+    if (valid && probe_acl != nullptr)
+        valid = ::acl_set_fd_np(child, probe_acl, ACL_TYPE_EXTENDED) == 0;
+    if (valid && probe_acl == nullptr) {
+        acl_t empty = ::acl_init(0);
+        errno = 0;
+        valid = empty != nullptr &&
+                (::acl_set_fd_np(child, empty, ACL_TYPE_EXTENDED) == 0 || errno == ENOENT);
+        if (empty != nullptr)
+            ::acl_free(empty);
+    }
+    if (probe_acl != nullptr)
+        ::acl_free(probe_acl);
+#elif defined(__linux__)
+    if (valid && acl_size >= 0)
+        valid = ::fsetxattr(child, access_acl, probe_acl.data(), probe_acl.size(), 0) == 0;
+    if (valid && acl_size < 0 && acl_supported) {
+        errno = 0;
+        valid = ::fremovexattr(child, access_acl) == 0 || errno == ENODATA;
+    }
+#endif
+    return valid;
+}
 #endif
 
 } // namespace
@@ -257,17 +360,16 @@ PinnedFile& PinnedFile::operator=(PinnedFile&& other) noexcept {
     return *this;
 }
 
-std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path,
-                                           bool fence_capable, bool allow_rename,
-                                           bool permissions_mutable) noexcept {
+std::optional<PinnedFile> PinnedFile::open(const std::filesystem::path& path, bool fence_capable,
+                                           bool allow_rename, bool permissions_mutable) noexcept {
 #if defined(_WIN32)
     auto access = fence_capable ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
     if (permissions_mutable)
         access |= WRITE_DAC;
     const auto sharing = FILE_SHARE_READ | (allow_rename ? FILE_SHARE_DELETE : 0);
-    const auto handle = ::CreateFileW(
-        path.c_str(), access, sharing, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    const auto handle =
+        ::CreateFileW(path.c_str(), access, sharing, nullptr, OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
     BY_HANDLE_FILE_INFORMATION info{};
@@ -362,25 +464,24 @@ bool PinnedFile::hash_matches(std::string_view expected_hex,
     std::uint8_t trailing = 0;
     DWORD trailing_count = 0;
     BY_HANDLE_FILE_INFORMATION after{};
-    const bool stable = ::ReadFile(handle, &trailing, 1, &trailing_count, nullptr) != 0 &&
-                        trailing_count == 0 &&
-                        ::GetFileInformationByHandle(handle, &after) != 0 &&
-                        before.nFileSizeHigh == after.nFileSizeHigh &&
-                        before.nFileSizeLow == after.nFileSizeLow &&
-                        before.ftLastWriteTime.dwHighDateTime == after.ftLastWriteTime.dwHighDateTime &&
-                        before.ftLastWriteTime.dwLowDateTime == after.ftLastWriteTime.dwLowDateTime &&
-                        before.nNumberOfLinks == after.nNumberOfLinks;
+    const bool stable =
+        ::ReadFile(handle, &trailing, 1, &trailing_count, nullptr) != 0 && trailing_count == 0 &&
+        ::GetFileInformationByHandle(handle, &after) != 0 &&
+        before.nFileSizeHigh == after.nFileSizeHigh && before.nFileSizeLow == after.nFileSizeLow &&
+        before.ftLastWriteTime.dwHighDateTime == after.ftLastWriteTime.dwHighDateTime &&
+        before.ftLastWriteTime.dwLowDateTime == after.ftLastWriteTime.dwLowDateTime &&
+        before.nNumberOfLinks == after.nNumberOfLinks;
 #else
     std::uint8_t trailing = 0;
     const auto trailing_count = ::read(descriptor, &trailing, 1);
     struct stat after{};
     const bool stat_after = ::fstat(descriptor, &after) == 0;
 #if defined(__APPLE__)
-    const bool timestamps_match =
-        stat_after && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec &&
-        before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec &&
-        before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec &&
-        before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec;
+    const bool timestamps_match = stat_after &&
+                                  before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec &&
+                                  before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec &&
+                                  before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec &&
+                                  before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec;
 #else
     const bool timestamps_match = stat_after && before.st_mtim.tv_sec == after.st_mtim.tv_sec &&
                                   before.st_mtim.tv_nsec == after.st_mtim.tv_nsec &&
@@ -422,8 +523,9 @@ bool PinnedFile::adopt_inherited_permissions_from(const AnchoredDirectory& paren
            adopt_inherited_permissions(reinterpret_cast<HANDLE>(native_),
                                        reinterpret_cast<HANDLE>(parent.native_), false);
 #else
-    (void)parent;
-    return native_ != -1;
+    return native_ != -1 && parent.native_ != -1 &&
+           adopt_direct_child_permissions(static_cast<int>(native_),
+                                          static_cast<int>(parent.native_));
 #endif
 }
 
@@ -470,17 +572,17 @@ void PinnedFile::close() noexcept {
     native_ = -1;
 }
 
-std::optional<AnchoredDirectory>
-AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) noexcept {
+std::optional<AnchoredDirectory> AnchoredDirectory::open(const std::filesystem::path& path,
+                                                         bool allow_rename) noexcept {
 #if defined(_WIN32)
     const auto sharing =
         FILE_SHARE_READ | FILE_SHARE_WRITE | (allow_rename ? FILE_SHARE_DELETE : 0);
-    const auto handle = ::CreateFileW(
-        path.c_str(),
-        FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
-            FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
-        sharing, nullptr, OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    const auto handle =
+        ::CreateFileW(path.c_str(),
+                      FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
+                          FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
+                      sharing, nullptr, OPEN_EXISTING,
+                      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
     BY_HANDLE_FILE_INFORMATION info{};
@@ -508,8 +610,8 @@ AnchoredDirectory::open(const std::filesystem::path& path, bool allow_rename) no
 }
 
 std::optional<AnchoredDirectory>
-AnchoredDirectory::open_directory(const std::filesystem::path& relative,
-                                  bool allow_rename, bool permissions_mutable) const noexcept {
+AnchoredDirectory::open_directory(const std::filesystem::path& relative, bool allow_rename,
+                                  bool permissions_mutable) const noexcept {
     if (native_ == -1 || relative.empty() || relative.is_absolute() ||
         !relative.parent_path().empty() || relative == "." || relative == "..")
         return std::nullopt;
@@ -520,9 +622,8 @@ AnchoredDirectory::open_directory(const std::filesystem::path& relative,
                   FILE_READ_ATTRIBUTES | READ_CONTROL;
     if (permissions_mutable)
         access |= WRITE_DAC;
-    const auto handle = open_relative_existing(
-        reinterpret_cast<HANDLE>(native_), relative, true,
-        access, sharing);
+    const auto handle =
+        open_relative_existing(reinterpret_cast<HANDLE>(native_), relative, true, access, sharing);
     if (handle == INVALID_HANDLE_VALUE)
         return std::nullopt;
     return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
@@ -550,8 +651,7 @@ bool AnchoredDirectory::still_named_by(const std::filesystem::path& path) const 
 #if defined(_WIN32)
     const auto named = ::CreateFileW(
         path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (named == INVALID_HANDLE_VALUE)
         return false;
     BY_HANDLE_FILE_INFORMATION pinned_info{};
@@ -571,7 +671,8 @@ bool AnchoredDirectory::still_named_by(const std::filesystem::path& path) const 
     struct stat named_status{};
     return ::fstat(static_cast<int>(native_), &pinned_status) == 0 &&
            ::lstat(path.c_str(), &named_status) == 0 && S_ISDIR(named_status.st_mode) &&
-           pinned_status.st_dev == named_status.st_dev && pinned_status.st_ino == named_status.st_ino;
+           pinned_status.st_dev == named_status.st_dev &&
+           pinned_status.st_ino == named_status.st_ino;
 #endif
 }
 
@@ -791,12 +892,9 @@ bool write_exclusive_and_fence(const std::filesystem::path& path,
 
 bool fence_file(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
-    const auto handle =
-        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                      OPEN_EXISTING,
-                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH |
-                          FILE_FLAG_OPEN_REPARSE_POINT,
-                      nullptr);
+    const auto handle = ::CreateFileW(
+        path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return false;
     const bool fenced = ::FlushFileBuffers(handle) != 0;
@@ -904,10 +1002,9 @@ bool replace_path(const std::filesystem::path& source,
 
 bool regular_file_no_links(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
-    const auto handle = ::CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
-                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                      nullptr, OPEN_EXISTING,
-                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    const auto handle = ::CreateFileW(
+        path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
         return false;
     BY_HANDLE_FILE_INFORMATION info{};

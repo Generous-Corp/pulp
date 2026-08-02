@@ -1062,11 +1062,11 @@ lock, and callers must not concurrently rename or replace package or private
 staging entries out of band from another process running as the same account.
 Any external producer using `staging_directory()` or `staging_file()` must
 finish and release the stage before commit or cancellation begins. On Windows,
-staged objects retain a
-private DACL until the rename succeeds; the still-open published handle then
-adopts the destination parent's inheritance. A crash in that narrow interval
-can leave the published object owner-private, never exposed with staging-only
-permissions.
+staged objects retain a private DACL until the rename succeeds; the still-open
+published handle then adopts the destination parent's inheritance. A crash
+before or during that adoption can leave the published object or some
+descendants owner-private instead of broadly inherited; callers must treat
+final permissions as incomplete.
 The implementation pins and revalidates identities to reject detected
 rebinding, but POSIX does not provide a portable operation that renames an
 already-open directory by identity.
@@ -1122,8 +1122,8 @@ if (!opened)
 ```
 
 `PublishedDurabilityUncertain` means the new `project.json` may already be
-visible even though the final directory fence failed; callers must not report
-that outcome as a definite rollback.
+visible even though final permission adoption or the directory fence did not
+complete; callers must not report that outcome as a definite rollback.
 
 Source builds may set `PULP_ENABLE_PROJECT_PACKAGE=OFF` to omit this component
 and the dependent Timeline authoring tools. The resulting installed SDK does

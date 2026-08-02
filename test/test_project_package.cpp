@@ -11,11 +11,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -67,6 +69,22 @@ pulp::project_package::detail::PackageFaultPoint g_rebind_point =
     pulp::project_package::detail::PackageFaultPoint::DirectoryPublished;
 std::atomic<std::uint64_t> g_blob_verifications{0};
 
+#if defined(_WIN32)
+constexpr wchar_t kPrivatePublicationDirectoryDacl[] =
+    L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)";
+constexpr wchar_t kPrivatePublicationFileDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)";
+fs::path g_published_permission_observation_path;
+bool g_published_permission_observation_is_directory = false;
+bool g_published_permission_observed = false;
+bool g_published_permission_was_private = false;
+#else
+fs::path g_private_stage_directory;
+pulp::project_package::detail::PackageFaultPoint g_private_stage_point =
+    pulp::project_package::detail::PackageFaultPoint::StagedFileWritten;
+bool g_private_stage_observed = false;
+bool g_private_stage_was_private = false;
+#endif
+
 void swap_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified &&
         point != pulp::project_package::detail::PackageFaultPoint::BlobReferenceVerified)
@@ -80,6 +98,25 @@ void count_blob_verification(pulp::project_package::detail::PackageFaultPoint po
     if (point == pulp::project_package::detail::PackageFaultPoint::BlobReferenceVerified)
         g_blob_verifications.fetch_add(1, std::memory_order_relaxed);
 }
+
+#if !defined(_WIN32)
+void observe_private_package_stage(
+    pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != g_private_stage_point)
+        return;
+    std::error_code error;
+    for (fs::directory_iterator iterator(g_private_stage_directory, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (!iterator->path().filename().string().starts_with(".pulp-stage-"))
+            continue;
+        struct stat status{};
+        g_private_stage_observed = true;
+        g_private_stage_was_private =
+            ::stat(iterator->path().c_str(), &status) == 0 && (status.st_mode & 0777) == 0600;
+        return;
+    }
+}
+#endif
 
 void append_during_blob_hash(pulp::project_package::detail::PackageFaultPoint point) noexcept {
     if (point != pulp::project_package::detail::PackageFaultPoint::BlobHashSnapshot)
@@ -227,6 +264,111 @@ std::string read_text(const fs::path& path) {
 }
 
 #if defined(_WIN32)
+bool dacl_matches_sddl(const fs::path& path, const wchar_t* expected_sddl) noexcept {
+    PSECURITY_DESCRIPTOR expected_descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(expected_sddl, SDDL_REVISION_1,
+                                                              &expected_descriptor, nullptr))
+        return false;
+    BOOL expected_present = FALSE;
+    BOOL expected_defaulted = FALSE;
+    PACL expected_dacl = nullptr;
+    SECURITY_DESCRIPTOR_CONTROL expected_control = 0;
+    DWORD expected_revision = 0;
+    const bool expected_read =
+        GetSecurityDescriptorDacl(expected_descriptor, &expected_present, &expected_dacl,
+                                  &expected_defaulted) != 0 &&
+        GetSecurityDescriptorControl(expected_descriptor, &expected_control, &expected_revision) !=
+            0;
+
+    PACL actual_dacl = nullptr;
+    PSECURITY_DESCRIPTOR actual_descriptor = nullptr;
+    const auto security_error = GetNamedSecurityInfoW(
+        const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+        nullptr, &actual_dacl, nullptr, &actual_descriptor);
+    SECURITY_DESCRIPTOR_CONTROL actual_control = 0;
+    DWORD actual_revision = 0;
+    const bool actual_control_read =
+        actual_descriptor != nullptr &&
+        GetSecurityDescriptorControl(actual_descriptor, &actual_control, &actual_revision) != 0;
+    const bool matches = expected_read && expected_present && expected_dacl != nullptr &&
+                         security_error == ERROR_SUCCESS && actual_control_read &&
+                         actual_dacl != nullptr && (expected_control & SE_DACL_PROTECTED) != 0 &&
+                         (actual_control & SE_DACL_PROTECTED) != 0 &&
+                         actual_dacl->AclSize == expected_dacl->AclSize &&
+                         std::memcmp(actual_dacl, expected_dacl, expected_dacl->AclSize) == 0;
+    if (actual_descriptor != nullptr)
+        LocalFree(actual_descriptor);
+    LocalFree(expected_descriptor);
+    return matches;
+}
+
+bool add_read_ace(const fs::path& path, PSID sid, DWORD inheritance) noexcept {
+    PACL current_dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const auto read_error = GetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
+                                                  DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                                                  &current_dacl, nullptr, &descriptor);
+    if (read_error != ERROR_SUCCESS || current_dacl == nullptr) {
+        if (descriptor != nullptr)
+            LocalFree(descriptor);
+        return false;
+    }
+
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = FILE_GENERIC_READ;
+    access.grfAccessMode = GRANT_ACCESS;
+    access.grfInheritance = inheritance;
+    BuildTrusteeWithSidW(&access.Trustee, sid);
+    PACL updated_dacl = nullptr;
+    const auto update_error = SetEntriesInAclW(1, &access, current_dacl, &updated_dacl);
+    const auto write_error = update_error == ERROR_SUCCESS
+                                 ? SetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()),
+                                                         SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                                         nullptr, nullptr, updated_dacl, nullptr)
+                                 : update_error;
+    if (updated_dacl != nullptr)
+        LocalFree(updated_dacl);
+    LocalFree(descriptor);
+    return update_error == ERROR_SUCCESS && write_error == ERROR_SUCCESS;
+}
+
+bool dacl_has_allowed_sid(const fs::path& path, PSID expected_sid) noexcept {
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const auto security_error = GetNamedSecurityInfoW(
+        const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+        nullptr, &dacl, nullptr, &descriptor);
+    bool found = false;
+    if (security_error == ERROR_SUCCESS && dacl != nullptr) {
+        for (DWORD index = 0; index < dacl->AceCount && !found; ++index) {
+            void* raw = nullptr;
+            if (GetAce(dacl, index, &raw) == 0)
+                break;
+            const auto* header = static_cast<const ACE_HEADER*>(raw);
+            if (header->AceType != ACCESS_ALLOWED_ACE_TYPE)
+                continue;
+            const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+            const auto sid = const_cast<DWORD*>(&ace->SidStart);
+            found = IsValidSid(sid) != 0 && EqualSid(sid, expected_sid) != 0;
+        }
+    }
+    if (descriptor != nullptr)
+        LocalFree(descriptor);
+    return found;
+}
+
+void observe_private_published_permissions(
+    pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::
+                     DestinationPublishedBeforePermissionAdoption)
+        return;
+    g_published_permission_observed = true;
+    g_published_permission_was_private = dacl_matches_sddl(
+        g_published_permission_observation_path, g_published_permission_observation_is_directory
+                                                     ? kPrivatePublicationDirectoryDacl
+                                                     : kPrivatePublicationFileDacl);
+}
+
 std::wstring dacl_sddl(const fs::path& path) {
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     REQUIRE(GetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
@@ -241,19 +383,6 @@ std::wstring dacl_sddl(const fs::path& path) {
     if (descriptor != nullptr)
         LocalFree(descriptor);
     return result;
-}
-
-bool dacl_is_protected(const fs::path& path) {
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
-    REQUIRE(GetNamedSecurityInfoW(const_cast<PWSTR>(path.c_str()), SE_FILE_OBJECT,
-                                  DACL_SECURITY_INFORMATION, nullptr, nullptr, nullptr, nullptr,
-                                  &descriptor) == ERROR_SUCCESS);
-    SECURITY_DESCRIPTOR_CONTROL control = 0;
-    DWORD revision = 0;
-    REQUIRE(GetSecurityDescriptorControl(descriptor, &control, &revision));
-    if (descriptor != nullptr)
-        LocalFree(descriptor);
-    return (control & SE_DACL_PROTECTED) != 0;
 }
 #elif defined(__APPLE__)
 std::string extended_acl_text(const fs::path& path) {
@@ -464,8 +593,8 @@ TEST_CASE("Package writer rejects a root pathname rebound away from its lock",
     TemporaryPackage temporary("writer-root-rebind");
     auto writer = PackageWriter::create(temporary.path, registry());
     REQUIRE(writer);
-    const auto displaced = temporary.path.parent_path() /
-                           (temporary.path.filename().string() + "-displaced");
+    const auto displaced =
+        temporary.path.parent_path() / (temporary.path.filename().string() + "-displaced");
     fs::rename(temporary.path, displaced);
     fs::create_directories(temporary.path / "media");
     const std::vector<std::uint8_t> bytes{'p', 'i', 'n'};
@@ -859,44 +988,102 @@ TEST_CASE("Atomic project-package publication preserves ordinary umask permissio
     REQUIRE((fs::status(destination / "nested", error).permissions() & fs::perms::all) ==
             (fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec));
     REQUIRE_FALSE(error);
-    REQUIRE((fs::status(destination / "nested" / "value.txt", error).permissions() &
-             fs::perms::all) ==
-            (fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read));
+    REQUIRE(
+        (fs::status(destination / "nested" / "value.txt", error).permissions() & fs::perms::all) ==
+        (fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read));
     REQUIRE_FALSE(error);
 }
 #endif
 
 #if defined(_WIN32)
-TEST_CASE("Atomic publication matches direct-child Windows DACL inheritance",
+TEST_CASE("Atomic publication matches Windows DACL inheritance for trees and files",
           "[project-package][atomic-publisher][permissions]") {
     TemporaryPackage temporary("atomic-windows-acl-inheritance");
     fs::create_directories(temporary.path);
+    std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> marker_storage{};
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    const auto recursive_marker_sid = reinterpret_cast<PSID>(marker_storage.data());
+    REQUIRE(InitializeSid(recursive_marker_sid, &authority, 2));
+    *GetSidSubAuthority(recursive_marker_sid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
+    *GetSidSubAuthority(recursive_marker_sid, 1) = 0x00f0f0f0u;
+    REQUIRE(add_read_ace(temporary.path, recursive_marker_sid,
+                         CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE));
+
+    std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> direct_marker_storage{};
+    const auto direct_marker_sid = reinterpret_cast<PSID>(direct_marker_storage.data());
+    REQUIRE(InitializeSid(direct_marker_sid, &authority, 2));
+    *GetSidSubAuthority(direct_marker_sid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
+    *GetSidSubAuthority(direct_marker_sid, 1) = 0x00f0f0f1u;
+    REQUIRE(add_read_ace(temporary.path, direct_marker_sid,
+                         CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE |
+                             NO_PROPAGATE_INHERIT_ACE));
+
     const auto control_directory = temporary.path / "control-directory";
     fs::create_directory(control_directory);
     fs::create_directory(control_directory / "nested");
     std::ofstream(control_directory / "nested" / "value.txt") << "control";
     const auto control_file = temporary.path / "control-file";
     std::ofstream(control_file) << "control";
+    REQUIRE(dacl_has_allowed_sid(control_directory, recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(control_directory / "nested", recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(control_directory / "nested" / "value.txt", recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(control_file, recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(control_directory, direct_marker_sid));
+    REQUIRE_FALSE(dacl_has_allowed_sid(control_directory / "nested", direct_marker_sid));
+    REQUIRE_FALSE(
+        dacl_has_allowed_sid(control_directory / "nested" / "value.txt", direct_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(control_file, direct_marker_sid));
 
     const auto published_directory = temporary.path / "published-directory";
     auto directory_publisher = AtomicPublisher::create(published_directory);
     REQUIRE(directory_publisher);
-    REQUIRE(dacl_is_protected(directory_publisher->staging_directory()));
-    REQUIRE(dacl_sddl(directory_publisher->staging_directory()) !=
-            dacl_sddl(control_directory));
+    REQUIRE(dacl_matches_sddl(directory_publisher->staging_directory(),
+                              kPrivatePublicationDirectoryDacl));
+    REQUIRE(dacl_sddl(directory_publisher->staging_directory()) != dacl_sddl(control_directory));
     REQUIRE(directory_publisher->write("nested/value.txt", "published"));
-    REQUIRE(directory_publisher->commit_directory());
+    g_published_permission_observation_path = published_directory;
+    g_published_permission_observation_is_directory = true;
+    g_published_permission_observed = false;
+    g_published_permission_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_published_permissions);
+    const auto directory_committed = directory_publisher->commit_directory();
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(directory_committed);
+    REQUIRE(directory_committed.value() == AtomicPublishOutcome::PublishedDurably);
+    REQUIRE(g_published_permission_observed);
+    REQUIRE(g_published_permission_was_private);
 
     const auto published_file = temporary.path / "published-file";
     auto file_publisher = AtomicPublisher::create_file(published_file);
     REQUIRE(file_publisher);
-    REQUIRE(dacl_is_protected(file_publisher->staging_file()));
+    REQUIRE(dacl_matches_sddl(file_publisher->staging_file(), kPrivatePublicationFileDacl));
     std::ofstream(file_publisher->staging_file()) << "published";
-    REQUIRE(file_publisher->commit_file(file_publisher->staging_file()));
+    g_published_permission_observation_path = published_file;
+    g_published_permission_observation_is_directory = false;
+    g_published_permission_observed = false;
+    g_published_permission_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_published_permissions);
+    const auto file_committed = file_publisher->commit_file(file_publisher->staging_file());
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(file_committed);
+    REQUIRE(file_committed.value() == AtomicPublishOutcome::PublishedDurably);
+    REQUIRE(g_published_permission_observed);
+    REQUIRE(g_published_permission_was_private);
 
+    REQUIRE(dacl_has_allowed_sid(published_directory, recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(published_directory / "nested", recursive_marker_sid));
+    REQUIRE(
+        dacl_has_allowed_sid(published_directory / "nested" / "value.txt", recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(published_file, recursive_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(published_directory, direct_marker_sid));
+    REQUIRE_FALSE(dacl_has_allowed_sid(published_directory / "nested", direct_marker_sid));
+    REQUIRE_FALSE(
+        dacl_has_allowed_sid(published_directory / "nested" / "value.txt", direct_marker_sid));
+    REQUIRE(dacl_has_allowed_sid(published_file, direct_marker_sid));
     REQUIRE(dacl_sddl(published_directory) == dacl_sddl(control_directory));
-    REQUIRE(dacl_sddl(published_directory / "nested") ==
-            dacl_sddl(control_directory / "nested"));
+    REQUIRE(dacl_sddl(published_directory / "nested") == dacl_sddl(control_directory / "nested"));
     REQUIRE(dacl_sddl(published_directory / "nested" / "value.txt") ==
             dacl_sddl(control_directory / "nested" / "value.txt"));
     REQUIRE(dacl_sddl(published_file) == dacl_sddl(control_file));
@@ -924,8 +1111,7 @@ TEST_CASE("Atomic publication matches direct-child Linux ACL and setgid inherita
     constexpr const char* default_acl = "system.posix_acl_default";
     constexpr const char* access_acl = "system.posix_acl_access";
     errno = 0;
-    const auto acl_set =
-        ::setxattr(temporary.path.c_str(), default_acl, &acl, sizeof(acl), 0);
+    const auto acl_set = ::setxattr(temporary.path.c_str(), default_acl, &acl, sizeof(acl), 0);
     if (acl_set != 0 && errno == ENOTSUP)
         SKIP("POSIX ACL xattrs are unavailable");
     REQUIRE(acl_set == 0);
@@ -967,8 +1153,7 @@ TEST_CASE("Atomic publication matches direct-child Linux ACL and setgid inherita
     REQUIRE(published_file_status.st_gid == control_file_status.st_gid);
     REQUIRE((published_file_status.st_mode & 0777) == (control_file_status.st_mode & 0777));
     REQUIRE(published_nested_status.st_gid == control_nested_status.st_gid);
-    REQUIRE((published_nested_status.st_mode & 07777) ==
-            (control_nested_status.st_mode & 07777));
+    REQUIRE((published_nested_status.st_mode & 07777) == (control_nested_status.st_mode & 07777));
     REQUIRE(xattr_bytes(published_directory, access_acl) ==
             xattr_bytes(control_directory, access_acl));
     REQUIRE(xattr_bytes(published_directory, default_acl) ==
@@ -980,6 +1165,92 @@ TEST_CASE("Atomic publication matches direct-child Linux ACL and setgid inherita
     REQUIRE(xattr_bytes(published_directory / "nested" / "value.txt", access_acl) ==
             xattr_bytes(control_directory / "nested" / "value.txt", access_acl));
     REQUIRE(xattr_bytes(published_file, access_acl) == xattr_bytes(control_file, access_acl));
+}
+
+TEST_CASE("Package writer files match direct-child Linux ACL and setgid inheritance",
+          "[project-package][package-writer][permissions]") {
+    TemporaryPackage temporary("writer-linux-acl-inheritance");
+    fs::create_directories(temporary.path);
+    REQUIRE(::chmod(temporary.path.c_str(), 02750) == 0);
+
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
+    const auto first_hash = hash_bytes(first_media);
+    REQUIRE(writer->stage_blob(BlobStore::Media, first_hash, first_media));
+    REQUIRE(writer->publish(make_project("first", "first", first_hash)));
+    REQUIRE(::chmod((temporary.path / "project.json").c_str(), 0600) == 0);
+
+    struct DefaultAcl {
+        posix_acl_xattr_header header;
+        posix_acl_xattr_entry entries[5];
+    } acl{};
+    acl.header.a_version = POSIX_ACL_XATTR_VERSION;
+    const auto undefined_id = ~std::uint32_t{0};
+    acl.entries[0] = {ACL_USER_OBJ, ACL_READ | ACL_WRITE, undefined_id};
+    acl.entries[1] = {ACL_USER, ACL_READ, 1};
+    acl.entries[2] = {ACL_GROUP_OBJ, ACL_READ, undefined_id};
+    acl.entries[3] = {ACL_MASK, ACL_READ, undefined_id};
+    acl.entries[4] = {ACL_OTHER, 0, undefined_id};
+    constexpr const char* default_acl = "system.posix_acl_default";
+    constexpr const char* access_acl = "system.posix_acl_access";
+    const auto set_default_acl = [&](const fs::path& directory) {
+        errno = 0;
+        const auto result = ::setxattr(directory.c_str(), default_acl, &acl, sizeof(acl), 0);
+        if (result != 0 && errno == ENOTSUP)
+            SKIP("POSIX ACL xattrs are unavailable");
+        REQUIRE(result == 0);
+    };
+    set_default_acl(temporary.path);
+    set_default_acl(temporary.path / "media");
+
+    const auto control_project = temporary.path / "control-project.json";
+    const auto control_blob = temporary.path / "media" / "control-blob";
+    std::ofstream(control_project) << "control";
+    std::ofstream(control_blob) << "control";
+
+    const std::vector<std::uint8_t> second_media{'s', 'e', 'c', 'o', 'n', 'd'};
+    const auto second_hash = hash_bytes(second_media);
+    g_private_stage_directory = temporary.path / "media";
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::StagedFileWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto staged = writer->stage_blob(BlobStore::Media, second_hash, second_media);
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(staged);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    g_private_stage_directory = temporary.path;
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::GenerationWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto published = writer->publish(make_project("second", "second", second_hash));
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(published);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    const auto published_project = temporary.path / "project.json";
+    const auto published_blob = temporary.path / "media" / second_hash.to_hex();
+    struct stat control_project_status{};
+    struct stat published_project_status{};
+    struct stat control_blob_status{};
+    struct stat published_blob_status{};
+    REQUIRE(::stat(control_project.c_str(), &control_project_status) == 0);
+    REQUIRE(::stat(published_project.c_str(), &published_project_status) == 0);
+    REQUIRE(::stat(control_blob.c_str(), &control_blob_status) == 0);
+    REQUIRE(::stat(published_blob.c_str(), &published_blob_status) == 0);
+    REQUIRE(published_project_status.st_gid == control_project_status.st_gid);
+    REQUIRE((published_project_status.st_mode & 0777) == (control_project_status.st_mode & 0777));
+    REQUIRE(published_blob_status.st_gid == control_blob_status.st_gid);
+    REQUIRE((published_blob_status.st_mode & 0777) == (control_blob_status.st_mode & 0777));
+    REQUIRE(xattr_bytes(published_project, access_acl) == xattr_bytes(control_project, access_acl));
+    REQUIRE(xattr_bytes(published_blob, access_acl) == xattr_bytes(control_blob, access_acl));
 }
 #endif
 
@@ -1062,6 +1333,92 @@ TEST_CASE("Atomic publication matches direct-child macOS ACL inheritance",
             extended_acl_text(control_directory / "nested.txt"));
     REQUIRE(extended_acl_text(published_file) == extended_acl_text(control_file));
 }
+
+TEST_CASE("Package writer files match direct-child macOS ACL inheritance",
+          "[project-package][package-writer][permissions]") {
+    TemporaryPackage temporary("writer-macos-acl-inheritance");
+    fs::create_directories(temporary.path);
+
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    const std::vector<std::uint8_t> first_media{'f', 'i', 'r', 's', 't'};
+    const auto first_hash = hash_bytes(first_media);
+    REQUIRE(writer->stage_blob(BlobStore::Media, first_hash, first_media));
+    REQUIRE(writer->publish(make_project("first", "first", first_hash)));
+    REQUIRE(::chmod((temporary.path / "project.json").c_str(), 0600) == 0);
+
+    const auto set_inheritable_acl = [](const fs::path& directory) {
+        acl_t acl = ::acl_init(1);
+        REQUIRE(acl != nullptr);
+        acl_entry_t entry = nullptr;
+        REQUIRE(::acl_create_entry(&acl, &entry) == 0);
+        REQUIRE(::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0);
+        uuid_t user{};
+        REQUIRE(::mbr_uid_to_uuid(1, user) == 0);
+        REQUIRE(::acl_set_qualifier(entry, user) == 0);
+        acl_permset_t permissions = nullptr;
+        REQUIRE(::acl_get_permset(entry, &permissions) == 0);
+        REQUIRE(::acl_add_perm(permissions, ACL_READ_DATA) == 0);
+        REQUIRE(::acl_set_permset(entry, permissions) == 0);
+        acl_flagset_t flags = nullptr;
+        REQUIRE(::acl_get_flagset_np(entry, &flags) == 0);
+        REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_FILE_INHERIT) == 0);
+        REQUIRE(::acl_add_flag_np(flags, ACL_ENTRY_ONLY_INHERIT) == 0);
+        REQUIRE(::acl_set_flagset_np(entry, flags) == 0);
+        REQUIRE(::acl_set_file(directory.c_str(), ACL_TYPE_EXTENDED, acl) == 0);
+        ::acl_free(acl);
+    };
+    set_inheritable_acl(temporary.path);
+    set_inheritable_acl(temporary.path / "media");
+
+    const auto control_project = temporary.path / "control-project.json";
+    const auto control_blob = temporary.path / "media" / "control-blob";
+    std::ofstream(control_project) << "control";
+    std::ofstream(control_blob) << "control";
+
+    const std::vector<std::uint8_t> second_media{'s', 'e', 'c', 'o', 'n', 'd'};
+    const auto second_hash = hash_bytes(second_media);
+    g_private_stage_directory = temporary.path / "media";
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::StagedFileWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto staged = writer->stage_blob(BlobStore::Media, second_hash, second_media);
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(staged);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    g_private_stage_directory = temporary.path;
+    g_private_stage_point = pulp::project_package::detail::PackageFaultPoint::GenerationWritten;
+    g_private_stage_observed = false;
+    g_private_stage_was_private = false;
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(
+        observe_private_package_stage);
+    const auto published = writer->publish(make_project("second", "second", second_hash));
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    REQUIRE(published);
+    REQUIRE(g_private_stage_observed);
+    REQUIRE(g_private_stage_was_private);
+
+    const auto published_project = temporary.path / "project.json";
+    const auto published_blob = temporary.path / "media" / second_hash.to_hex();
+    struct stat control_project_status{};
+    struct stat published_project_status{};
+    struct stat control_blob_status{};
+    struct stat published_blob_status{};
+    REQUIRE(::stat(control_project.c_str(), &control_project_status) == 0);
+    REQUIRE(::stat(published_project.c_str(), &published_project_status) == 0);
+    REQUIRE(::stat(control_blob.c_str(), &control_blob_status) == 0);
+    REQUIRE(::stat(published_blob.c_str(), &published_blob_status) == 0);
+    REQUIRE(published_project_status.st_gid == control_project_status.st_gid);
+    REQUIRE((published_project_status.st_mode & 0777) == (control_project_status.st_mode & 0777));
+    REQUIRE(published_blob_status.st_gid == control_blob_status.st_gid);
+    REQUIRE((published_blob_status.st_mode & 0777) == (control_blob_status.st_mode & 0777));
+    REQUIRE(extended_acl_text(published_project) == extended_acl_text(control_project));
+    REQUIRE(extended_acl_text(published_blob) == extended_acl_text(control_blob));
+}
 #endif
 
 TEST_CASE("Atomic project-package publisher rejects staged symlinks",
@@ -1092,8 +1449,7 @@ TEST_CASE("Atomic directory publication uses bounded descriptor space",
     auto publisher = AtomicPublisher::create(destination);
     REQUIRE(publisher);
     for (std::size_t index = 0; index < 320; ++index) {
-        std::ofstream output(publisher->staging_directory() /
-                             ("entry-" + std::to_string(index)));
+        std::ofstream output(publisher->staging_directory() / ("entry-" + std::to_string(index)));
         REQUIRE(output);
         output << index;
     }
@@ -1291,8 +1647,7 @@ TEST_CASE("No-replace fallback publishes regular files without replacement",
     std::ofstream(source) << "payload";
 
     const auto result = pulp::project_package::detail::publish_no_replace_fallback(
-        source, destination,
-        pulp::project_package::detail::NoReplaceSourceKind::RegularFile);
+        source, destination, pulp::project_package::detail::NoReplaceSourceKind::RegularFile);
 
     REQUIRE(result == pulp::project_package::detail::NoReplaceOutcome::Published);
     REQUIRE_FALSE(fs::exists(source));
@@ -1308,8 +1663,7 @@ TEST_CASE("No-replace fallback never applies the regular-file link path to direc
     fs::create_directory(source);
 
     const auto result = pulp::project_package::detail::publish_no_replace_fallback(
-        source, destination,
-        pulp::project_package::detail::NoReplaceSourceKind::Directory);
+        source, destination, pulp::project_package::detail::NoReplaceSourceKind::Directory);
 
     REQUIRE(result == pulp::project_package::detail::NoReplaceOutcome::Unsupported);
     REQUIRE(fs::is_directory(source));

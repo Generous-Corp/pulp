@@ -511,7 +511,7 @@ write_dawproject_archive_no_replace(const pulp::interchange::ExportArtifacts& ar
     if (publication.value() == project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
         return runtime::Err(
             DawProjectArchiveError{DawProjectArchiveErrorCode::Publish,
-                                   "output file publication durability is uncertain"});
+                                   "output file publication finalization is uncertain"});
     return runtime::Ok(peak);
 }
 

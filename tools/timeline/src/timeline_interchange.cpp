@@ -248,7 +248,7 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
     if (publication.value() ==
         pulp::project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
         return export_error_result(format_text, plan, "publish",
-                                   "output directory publication durability is uncertain",
+                                   "output directory publication finalization is uncertain",
                                    filesystem_path_to_utf8(output_directory));
     return {0, export_result_json(format_text, output_directory, plan)};
 }
@@ -346,7 +346,7 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                                filesystem_path_to_utf8(output_directory));
     if (publication.value() ==
         pulp::project_package::AtomicPublishOutcome::PublishedDurabilityUncertain)
-        return detail::failure("publish", "output directory publication durability is uncertain",
+        return detail::failure("publish", "output directory publication finalization is uncertain",
                                filesystem_path_to_utf8(output_directory));
     return {0, output_json(format_text, output_directory, fidelity)};
 }

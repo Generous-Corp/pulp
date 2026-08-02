@@ -32,13 +32,14 @@ struct PackageError {
     std::filesystem::path path;
 };
 
-/// Visibility and durability state after a namespace-publication attempt.
+/// Visibility and finalization state after a namespace-publication attempt.
 enum class AtomicPublishOutcome : std::uint8_t {
     /// The destination name was not published.
     NotPublished,
-    /// The destination and its parent namespace were durably fenced.
+    /// The destination has final permissions and its parent namespace was durably fenced.
     PublishedDurably,
-    /// The destination is visible, but final permission adoption or namespace fencing failed.
+    /// The destination is visible, but final permission adoption or namespace fencing did not
+    /// complete.
     PublishedDurabilityUncertain,
 };
 
@@ -75,13 +76,14 @@ class AtomicPublisher {
     runtime::Result<bool, PackageError> write(std::string_view relative_utf8,
                                               std::string_view text) noexcept;
     /// Publishes the pre-created `staging_file()` at the destination.
-    /// The destination must not exist. A post-publication namespace-fence
+    /// The destination must not exist. A post-publication finalization
     /// failure returns `PublishedDurabilityUncertain`, never `NotPublished`.
     runtime::Result<AtomicPublishOutcome, PackageError>
     commit_file(const std::filesystem::path& staged_file) noexcept;
     /// Publishes the complete staged tree without replacing an existing path.
     /// All file bytes and nested directory entries are durable before the
-    /// destination name becomes visible.
+    /// destination name becomes visible. A post-publication finalization
+    /// failure returns `PublishedDurabilityUncertain`, never `NotPublished`.
     runtime::Result<AtomicPublishOutcome, PackageError> commit_directory() noexcept;
     /// Removes unpublished staging on a best-effort basis.
     void cancel() noexcept;

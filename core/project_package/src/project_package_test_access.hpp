@@ -16,6 +16,7 @@ enum class PackageFaultPoint : std::uint8_t {
     GenerationPublished,
     GenerationDirectoryFenced,
     DirectoryTreeFenced,
+    DestinationPublishedBeforePermissionAdoption,
     DirectoryPublished,
     BlobHashSnapshot,
     ReferenceSetVerified,

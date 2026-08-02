@@ -372,10 +372,18 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
                                            detail::PackageFaultPoint::StagedFileWritten,
                                            detail::PackageFaultPoint::StagedFileFenced))
         return failure<BlobReference>(PackageErrorCode::IoError, temporary);
+#if !defined(_WIN32)
+    auto destination_parent = impl_->root_anchor.open_directory(path_from_utf8(store_name(store)));
+    auto staged_file = detail::PinnedFile::open(temporary, true, true, true);
+    if (!destination_parent || !staged_file || !staged_file->still_named_by(temporary)) {
+        fs::remove(temporary, error);
+        return failure<BlobReference>(PackageErrorCode::IoError, temporary);
+    }
+#endif
     if (!impl_->root_anchor.still_named_by(impl_->root))
         return failure<BlobReference>(PackageErrorCode::InvalidLayout, impl_->root);
-    const auto publication = detail::publish_no_replace(
-        temporary, destination, detail::NoReplaceSourceKind::RegularFile);
+    const auto publication = detail::publish_no_replace(temporary, destination,
+                                                        detail::NoReplaceSourceKind::RegularFile);
     if (publication == detail::NoReplaceOutcome::PublishedSourceRetained) {
         error.clear();
         if (!fs::remove(temporary, error) || error)
@@ -395,6 +403,13 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
         if (!file->fence() || !file->still_named_by(destination))
             return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
     }
+#if !defined(_WIN32)
+    if ((publication == detail::NoReplaceOutcome::Published ||
+         publication == detail::NoReplaceOutcome::PublishedSourceRetained) &&
+        (!staged_file->adopt_inherited_permissions_from(*destination_parent) ||
+         !staged_file->fence() || !staged_file->still_named_by(destination)))
+        return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
+#endif
     detail::invoke_fault_hook(detail::PackageFaultPoint::BlobPublished);
     if (!impl_->root_anchor.still_named_by(impl_->root) ||
         !detail::fence_directory(destination.parent_path()))
@@ -443,6 +458,14 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
                                            detail::PackageFaultPoint::GenerationWritten,
                                            detail::PackageFaultPoint::GenerationFenced))
         return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, temporary);
+#if !defined(_WIN32)
+    auto staged_file = detail::PinnedFile::open(temporary, true, true, true);
+    if (!staged_file || !staged_file->still_named_by(temporary)) {
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+        return failure<AtomicPublishOutcome>(PackageErrorCode::IoError, temporary);
+    }
+#endif
     if (!references_still_named()) {
         std::error_code ignored;
         fs::remove(temporary, ignored);
@@ -455,6 +478,12 @@ PackageWriter::publish(const timeline::Project& project) noexcept {
             runtime::Ok(AtomicPublishOutcome::NotPublished));
     }
     detail::invoke_fault_hook(detail::PackageFaultPoint::GenerationPublished);
+#if !defined(_WIN32)
+    if (!staged_file->adopt_inherited_permissions_from(impl_->root_anchor) ||
+        !staged_file->fence() || !staged_file->still_named_by(destination))
+        return runtime::Result<AtomicPublishOutcome, PackageError>(
+            runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
+#endif
     if (!impl_->root_anchor.still_named_by(impl_->root) || !detail::fence_directory(impl_->root))
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::PublishedDurabilityUncertain));
@@ -501,9 +530,8 @@ open_package(const fs::path& root, const timeline::SchemaRegistry& registry,
         !validate_project_references(canonical_root, decoded.value(), limits.max_blob_bytes))
         return failure<OpenPackageResult>(PackageErrorCode::InvalidGeneration,
                                           canonical_root / kProjectFile);
-    return runtime::Result<OpenPackageResult, PackageError>(runtime::Ok(
-        OpenPackageResult{std::move(decoded).value(), canonical_root / "journal", cache,
-                          cache_recreated}));
+    return runtime::Result<OpenPackageResult, PackageError>(runtime::Ok(OpenPackageResult{
+        std::move(decoded).value(), canonical_root / "journal", cache, cache_recreated}));
 }
 
 runtime::Result<std::vector<std::uint8_t>, PackageError>
