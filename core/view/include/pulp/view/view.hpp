@@ -1535,6 +1535,21 @@ public:
         return style_extras_ ? style_extras_->ancestor_clip : kNone;
     }
 
+    /// Corner radii for the ancestor clip, clockwise from top-left.
+    ///
+    /// CSS clips overflow to the clipper's ROUNDED padding box, so a child with
+    /// square corners inside a rounded card is cut to the card's curve. Clipping
+    /// to the bare rectangle instead paints that child square into the corner
+    /// and the card reads as unrounded even though its own border curves.
+    /// Zero on every corner is the common case and clips to the plain rectangle.
+    void set_ancestor_clip_radii(float tl, float tr, float br, float bl) {
+        style_extras().ancestor_clip_radii = {tl, tr, br, bl};
+    }
+    const std::array<float, 4>& ancestor_clip_radii() const {
+        static const std::array<float, 4> kNone{0.0f, 0.0f, 0.0f, 0.0f};
+        return style_extras_ ? style_extras_->ancestor_clip_radii : kNone;
+    }
+
     void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
     const std::string& clip_path() const {
         static const std::string kEmpty;
@@ -2267,6 +2282,9 @@ private:
         // Import-resolved clip on this view's OWN ink; see
         // set_ancestor_clip_rect for why it does not descend.
         std::optional<Rect> ancestor_clip;
+        // Corner radii of that clip, clockwise from top-left; see
+        // set_ancestor_clip_radii.
+        std::array<float, 4> ancestor_clip_radii{0.0f, 0.0f, 0.0f, 0.0f};
         std::string clip_path;
         std::string mask_image;
         std::string mask;

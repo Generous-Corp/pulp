@@ -1360,6 +1360,9 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_ancestor_clip_rect(Rect{style.clip_rect->x, style.clip_rect->y,
                                          style.clip_rect->width,
                                          style.clip_rect->height});
+        view.set_ancestor_clip_radii(
+            style.clip_rect->radius_tl, style.clip_rect->radius_tr,
+            style.clip_rect->radius_br, style.clip_rect->radius_bl);
     }
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) {

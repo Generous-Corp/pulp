@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-clip-carries-corner-radii",
+  "kind": "change",
+  "created_at": "2026-08-02T20:40:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "An imported node's resolved clip was a bare rectangle, so a rounded card clipping its overflow cut its children square through the corner: the card's own border curved while the media area inside it painted a right angle, which reads as a border-radius bug on an element whose radius is correct. CSS confines overflow to the clipper's ROUNDED padding box, so the curve belongs to the clip, not to the clipped node. IRStyle::ClipRect gains four radii, View::set_ancestor_clip_radii applies them as an SVG path clip, and the browser-capture resolver keeps a corner's radius only while that corner is still the rounded clipper's own — a corner cut away by a second, tighter clipper is square, and rounding it would carve a curve out of an edge nothing rounded. The inner radius is the outer one less the border it sits behind, per CSS's inner-radius rule. A node fully inside the clip rectangle can still be cut by the curve, so the no-op-clip early-out now tests corner intrusion as well as containment. Pulp-only: the defect was introduced here by flattening the overflow chain into per-node clip rectangles, and the fix belongs to that same lowering, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-browser-capture-import"
+  ],
+  "disposition": "pulp-only"
+}
