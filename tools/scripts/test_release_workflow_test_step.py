@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -715,6 +716,24 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             'cp tools/scripts/release_product_matrix.json',
             run_block,
         )
+
+    def test_release_content_helper_shell_is_syntactically_valid(self) -> None:
+        """Catch heredoc indentation that only fails on tagged Linux jobs."""
+        workflow = yaml.safe_load(self.text)
+        step = next(
+            step
+            for step in workflow["jobs"]["build-cli"]["steps"]
+            if step.get("name")
+            == "Ensure release-content verifier helpers exist"
+        )
+        result = subprocess.run(
+            ["bash", "-n"],
+            input=step["run"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_manual_dispatch_compatibility_helpers_do_not_dirty_tracked_source(
         self,
