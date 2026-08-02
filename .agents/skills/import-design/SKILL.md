@@ -23,6 +23,7 @@ exists:
 | Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
 | Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
 | Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
+| **"It matches the reference and still looks wrong" → is the PALETTE itself bad?** | `python3 tools/import-validation/check_palette_health.py --pack DIR --theme dark\|light` (also `--tokens`/`--artifact`) |
 | Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
@@ -34,6 +35,16 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Pixel comparison cannot see a bad palette.** Every visual gate above scores
+agreement with the source, so a colour defect the source ALREADY had — an accent
+that swallows its own ramp, a caption tier under its contrast bar — reproduces
+faithfully and passes. `check_palette_health.py` judges the token values
+themselves instead: accent-ramp structure, named-hue survival, and each text
+tier against the QUIETEST surface it can land on, not just the app background.
+Reach for it on any "looks off / illegible / wrong colour" report that a
+pixel diff calls clean. Its bars are declared-value upper bounds — anything
+composited under the type only takes real contrast lower.
 
 **Check geometry BEFORE you look at pixels.** A `.fig` carries Figma's
 already-SOLVED rect for every node — auto-layout children included — so where
