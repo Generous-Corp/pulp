@@ -6,6 +6,7 @@
 #include <pulp/timeline/asset_path.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -63,8 +64,108 @@ enum class PrivateDirectoryCreate : std::uint8_t { Created, AlreadyExists, Faile
 
 bool parent_allows_private_staging(const fs::path& parent) noexcept {
 #if defined(_WIN32)
-    (void)parent;
-    return true;
+    const auto directory = CreateFileW(
+        parent.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (directory == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool real_directory = GetFileInformationByHandle(directory, &info) != 0 &&
+                                (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+                                (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+
+    PSID owner = nullptr;
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const auto security_error = GetSecurityInfo(directory, SE_FILE_OBJECT,
+                                                OWNER_SECURITY_INFORMATION |
+                                                    DACL_SECURITY_INFORMATION,
+                                                &owner, nullptr, &dacl, nullptr, &descriptor);
+    CloseHandle(directory);
+    if (!real_directory || security_error != ERROR_SUCCESS || owner == nullptr || dacl == nullptr) {
+        if (descriptor != nullptr)
+            LocalFree(descriptor);
+        return false;
+    }
+
+    HANDLE token = nullptr;
+    DWORD token_bytes = 0;
+    bool token_opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token) != 0;
+    if (!token_opened && GetLastError() == ERROR_NO_TOKEN)
+        token_opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != 0;
+    if (token_opened)
+        GetTokenInformation(token, TokenUser, nullptr, 0, &token_bytes);
+    std::vector<std::uint8_t> token_storage(token_bytes);
+    const bool token_read = token_opened && token_bytes != 0 &&
+                            GetTokenInformation(token, TokenUser, token_storage.data(),
+                                                token_bytes, &token_bytes) != 0;
+    if (token != nullptr)
+        CloseHandle(token);
+    const auto* token_user =
+        token_read ? reinterpret_cast<const TOKEN_USER*>(token_storage.data()) : nullptr;
+
+    std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> system_storage{};
+    std::array<std::uint8_t, SECURITY_MAX_SID_SIZE> administrators_storage{};
+    DWORD system_bytes = static_cast<DWORD>(system_storage.size());
+    DWORD administrators_bytes = static_cast<DWORD>(administrators_storage.size());
+    const bool trusted_sids =
+        CreateWellKnownSid(WinLocalSystemSid, nullptr, system_storage.data(), &system_bytes) != 0 &&
+        CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, administrators_storage.data(),
+                           &administrators_bytes) != 0;
+    bool safe = token_user != nullptr && trusted_sids && EqualSid(owner, token_user->User.Sid) != 0;
+    constexpr ACCESS_MASK dangerous = FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
+                                      DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL;
+    for (DWORD index = 0; safe && index < dacl->AceCount; ++index) {
+        void* raw = nullptr;
+        if (GetAce(dacl, index, &raw) == 0) {
+            safe = false;
+            break;
+        }
+        const auto* header = static_cast<const ACE_HEADER*>(raw);
+        if ((header->AceFlags & INHERIT_ONLY_ACE) != 0)
+            continue;
+        ACCESS_MASK mask = 0;
+        PSID sid = nullptr;
+        if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+            const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+            mask = ace->Mask;
+            sid = const_cast<DWORD*>(&ace->SidStart);
+        } else if (header->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE) {
+            const auto* ace = static_cast<const ACCESS_ALLOWED_OBJECT_ACE*>(raw);
+            mask = ace->Mask;
+            auto* cursor = reinterpret_cast<const std::uint8_t*>(&ace->ObjectType);
+            if ((ace->Flags & ACE_OBJECT_TYPE_PRESENT) != 0)
+                cursor += sizeof(GUID);
+            if ((ace->Flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) != 0)
+                cursor += sizeof(GUID);
+            sid = const_cast<std::uint8_t*>(cursor);
+        } else if (header->AceType == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
+                   header->AceType == ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE) {
+            // Conditional grants are deliberately rejected when they might grant
+            // namespace control; evaluating arbitrary AuthZ expressions here would
+            // make staging admission dependent on ambient claims.
+            const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+            if ((ace->Mask & dangerous) != 0)
+                safe = false;
+            continue;
+        } else {
+            continue;
+        }
+        if ((mask & dangerous) == 0)
+            continue;
+        if (sid == nullptr || IsValidSid(sid) == 0) {
+            safe = false;
+            continue;
+        }
+        const bool trusted = EqualSid(sid, token_user->User.Sid) != 0 ||
+                             EqualSid(sid, system_storage.data()) != 0 ||
+                             EqualSid(sid, administrators_storage.data()) != 0;
+        if (!trusted)
+            safe = false;
+    }
+    LocalFree(descriptor);
+    return safe;
 #else
     struct stat status{};
     if (::stat(parent.c_str(), &status) != 0 || !S_ISDIR(status.st_mode))
