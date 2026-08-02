@@ -5443,3 +5443,65 @@ Two rules when working on it:
   Node.js installations it checked (with versions) or, when there were none, the
   locations it searched. Listing the *browsers* it probed — the pre-fix
   behaviour — tells the user nothing about a missing Node.js.
+
+## A modern colour syntax that fails to parse paints WHITE, not nothing
+
+`parse_css_color` used to fall through to opaque white on `oklab()` / `oklch()`.
+That is worse than it sounds, because **Chromium's `getComputedStyle` serializes
+*every* modern colour syntax into those two** — `color-mix()`, relative colour,
+wide-gamut literals all arrive as `oklab(...)`. A dark faceplate therefore
+rendered as a white panel, and the first native render of a real capture came out
+white with stock widget art on top.
+
+Three separate places had to agree, and only one of them was visible:
+
+- `parse_css_color` — returned white instead of failing.
+- `linear-gradient(` — knew only the four `to <side>` keywords, so an angle was
+  handed to the colour parser and became that same white **first stop**, *and*
+  the direction silently reverted to `to bottom`. Note `to bottom right` matched
+  the `to bottom` prefix test, so even keyword handling was wrong.
+- The materializer's colour allowlist — knew only `rgb`/`hsl`, so `oklab()` text
+  and border colours were **never applied at all**. A silent loss, not a wrong
+  colour: the view simply kept its default.
+
+**How to test a colour path here.** Assert against **pixels read off Chrome's own
+render of that exact string**, never against hand-computed expectations — a
+fixture you derived from the same matrices as the code agrees with it by
+construction. On an out-of-gamut `oklch` the hand-written expectation was simply
+wrong and Chrome settled it.
+
+**Still open, diagnosed not fixed:** `apply_css_background_gradient` reads
+`local_bounds()` *before* layout, so the box is 1:1 and **every angled gradient
+resolves in the wrong direction**. Confirmed arithmetically against Chrome. It
+needs paint-time resolution. Radial `farthest-corner` separately uses a constant
+`0.7071·max(w,h)` and ignores an off-centre `at`, running ~28% short.
+
+## Scoring a native panel — the instrument lies in two specific ways
+
+`tools/import-validation/score_native_panel.py` renders the emitted artifact and
+attributes failing pixels to nodes. Two traps are baked into the *metric*, not
+the code, and both were found by measuring rather than reasoning:
+
+- **A blank render scores well against a dark design.** SPECTR's render was empty
+  (max channel 10) and scored **12.45% failing**, because black "matches" a
+  mostly-black reference — while rendering it *correctly* raised the number to
+  ~11% with text failure going 49%→69%. **Area-weighted failing fraction is not a
+  fidelity measure without a companion coverage statistic.**
+- **Per-node scores are not usable yet.** worst-node reads 1.0000 and ~0% of
+  ink-bearing nodes pass on every real design. Quote the area-weighted number and
+  say the per-node gate is not live.
+
+**Prove the bitmap is absent by substitution, not by scanning.** A static scan
+shows no node *references* the capture; it cannot show no pixel *comes from* it.
+Replace `browser.png` with solid magenta at identical dimensions, re-lower,
+re-render, and require the composite to be **byte-identical**. Note the envelope
+still validates the PNG's hash in native mode, so the file must exist even though
+nothing draws it.
+
+**τ must come from a control that contains native rasterisation.** The calibration
+control is an identity blit and measures exactly zero noise; carrying that `0.0`
+into native scoring guarantees failure. Measured properly: flat axis-aligned
+fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome and
+Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
+cannot be given a τ yet because its gradients are still measuring the defect
+above rather than noise.

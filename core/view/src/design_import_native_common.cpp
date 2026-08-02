@@ -1230,9 +1230,17 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 // A helper rather than six more fallbacks, because the bug is that the
 // knowledge lived at a call site: the eighth paint site added later would have
 // repeated it.
+// The allowlist is what decides whether a colour reaches the paint site at all,
+// so a function missing from it is a colour silently NOT applied — the view
+// keeps its default and nothing reports a loss. `oklab()` / `oklch()` are the
+// forms Chromium serializes every modern colour syntax into, so a captured
+// design's text and fills arrive in them; without these two entries a bright
+// accent label rendered in the default text colour.
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
-    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 || value == "transparent")
+    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 ||
+        value.rfind("oklab", 0) == 0 || value.rfind("oklch", 0) == 0 ||
+        value == "transparent")
         return parse_css_color(value);
     return std::nullopt;
 }

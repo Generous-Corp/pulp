@@ -2145,3 +2145,56 @@ TEST_CASE("whole-tree lowering census over a real captured design",
         CHECK_FALSE(entry.node->stable_anchor_id->empty());
     }
 }
+
+// Writes the natively-lowered IR for a capture directory so the panel can be
+// rendered from its own nodes and scored against Chrome's pixels. Separate tag
+// from the census so neither drags the other into a run that has no capture.
+//   PULP_NATIVE_LOWERING_CAPTURE=<capture-dir> \
+//   PULP_NATIVE_LOWERING_IR_OUT=<path.ir.json> \
+//     pulp-test-browser-capture-import "[.native-ir-emit]" -s
+TEST_CASE("natively lowered IR is emitted for a real captured design",
+          "[.native-ir-emit]") {
+    const char* directory = std::getenv("PULP_NATIVE_LOWERING_CAPTURE");
+    const char* out = std::getenv("PULP_NATIVE_LOWERING_IR_OUT");
+    REQUIRE(directory != nullptr);
+    REQUIRE(out != nullptr);
+    const auto envelope = fs::path(directory) / "capture.json";
+    REQUIRE(fs::is_regular_file(envelope));
+
+    BrowserCaptureIrOptions native_options;
+    native_options.native_panel_lowering = true;
+    const auto native = lower_browser_capture_to_ir(envelope, native_options);
+    INFO("native error: " << native.error);
+    REQUIRE(native.design_ir);
+
+    // The photograph must be gone from the tree before anything downstream
+    // reads it. Asserted here as well as on the written artifact, because a
+    // score over a composite that still contains the capture measures nothing.
+    REQUIRE_FALSE(any_capture_node(native.design_ir->root));
+
+    for (const char* key : {"native_painted_nodes", "native_nodes_native",
+                            "native_nodes_image_asset",
+                            "native_nodes_element_capture_fallback",
+                            "native_nodes_text", "native_nodes_pooled",
+                            "native_nodes_missing_paint_order",
+                            "native_tree_depth", "native_nodes_hoisted",
+                            "native_nodes_overlapping_reorders",
+                            "native_nodes_clip_over_applied",
+                            "native_nodes_clip_lost",
+                            "native_nodes_skipped_empty_box",
+                            "native_nodes_skipped_blank_text",
+                            "native_nodes_skipped_non_visual"}) {
+        const auto it = native.design_ir->root.attributes.find(key);
+        if (it != native.design_ir->root.attributes.end())
+            WARN("  " << key << " = " << it->second);
+    }
+    WARN("  root_width = " << native.design_ir->root.style.width.value_or(-1));
+    WARN("  root_height = " << native.design_ir->root.style.height.value_or(-1));
+
+    std::ofstream stream(out, std::ios::binary);
+    REQUIRE(stream.good());
+    stream << pulp::view::serialize_design_ir(*native.design_ir);
+    stream.close();
+    REQUIRE(fs::is_regular_file(out));
+    REQUIRE(fs::file_size(out) > 0);
+}
