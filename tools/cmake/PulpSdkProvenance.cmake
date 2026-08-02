@@ -93,6 +93,10 @@ if(EXISTS "${_pulp_sdk_provenance}")
                TYPE "${_pulp_sdk_provenance_json}" source_git_ref)
         string(JSON _pulp_sdk_platform_type ERROR_VARIABLE _pulp_sdk_platform_type_error
                TYPE "${_pulp_sdk_provenance_json}" platform)
+        set(_pulp_sdk_expected_inspector TRUE)
+        if(_pulp_sdk_version VERSION_LESS "0.772.0")
+            set(_pulp_sdk_expected_inspector FALSE)
+        endif()
         if(_pulp_sdk_profile_error OR _pulp_sdk_dirty_error OR
            _pulp_sdk_build_type_error OR _pulp_sdk_audio_probes_error OR
            _pulp_sdk_inspector_error OR _pulp_sdk_version_error OR
@@ -112,7 +116,9 @@ if(EXISTS "${_pulp_sdk_provenance}")
            NOT _pulp_sdk_profile STREQUAL "official-release" OR
            NOT _pulp_sdk_eligible OR _pulp_sdk_dirty OR
            NOT _pulp_sdk_build_type STREQUAL "Release" OR
-           _pulp_sdk_audio_probes OR NOT _pulp_sdk_inspector OR
+           _pulp_sdk_audio_probes OR
+           (_pulp_sdk_expected_inspector AND NOT _pulp_sdk_inspector) OR
+           (NOT _pulp_sdk_expected_inspector AND _pulp_sdk_inspector) OR
            NOT _pulp_sdk_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
            NOT _pulp_sdk_source_ref STREQUAL "v${_pulp_sdk_version}" OR
            NOT _pulp_sdk_platform MATCHES "^(darwin|linux|windows)-(arm64|x64)$" OR
@@ -124,7 +130,7 @@ if(EXISTS "${_pulp_sdk_provenance}")
         set(PULP_SDK_DISTRIBUTION_ELIGIBLE TRUE)
         set(PULP_SDK_PLATFORM "${_pulp_sdk_platform}")
         set(PULP_SDK_AUDIO_PROBES_ENABLED FALSE)
-        set(PULP_SDK_INSPECTOR_ENABLED TRUE)
+        set(PULP_SDK_INSPECTOR_ENABLED "${_pulp_sdk_inspector}")
     else()
         message(FATAL_ERROR
             "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "
@@ -196,6 +202,7 @@ unset(_pulp_sdk_audio_probes_type)
 unset(_pulp_sdk_audio_probes_type_error)
 unset(_pulp_sdk_inspector_type)
 unset(_pulp_sdk_inspector_type_error)
+unset(_pulp_sdk_expected_inspector)
 unset(_pulp_sdk_version_type)
 unset(_pulp_sdk_version_type_error)
 unset(_pulp_sdk_source_ref_type)

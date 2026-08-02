@@ -43,6 +43,21 @@ if(PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
 endif()
 
 file(WRITE "${_sdk}/sdk-provenance.json"
+    "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
+    "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"0.771.0\",\"source_git_ref\":\"v0.771.0\","
+    "\"source_git_sha\":\"dddddddddddddddddddddddddddddddddddddddd\","
+    "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
+    "\"features\":{\"audio_probes\":false,\"inspector\":false}}")
+include("${_module}")
+if(PULP_SDK_DEVELOPMENT OR NOT PULP_SDK_DISTRIBUTION_ELIGIBLE OR
+   NOT PULP_SDK_PROVENANCE_KIND STREQUAL "release" OR
+   PULP_SDK_AUDIO_PROBES_ENABLED OR PULP_SDK_INSPECTOR_ENABLED OR
+   NOT PULP_SDK_SOURCE_GIT_SHA STREQUAL "dddddddddddddddddddddddddddddddddddddddd")
+    message(FATAL_ERROR "historical release SDK contract was not exported")
+endif()
+
+file(WRITE "${_sdk}/sdk-provenance.json"
     "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\","
     "\"distribution_eligible\":true,\"source_git_sha\":\"bad\"}")
 execute_process(
@@ -64,6 +79,7 @@ endif()
 file(WRITE "${_sdk}/sdk-provenance.json"
     "{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"release\","
     "\"profile\":\"official-release\",\"distribution_eligible\":true,"
+    "\"sdk_version\":\"9.8.7\",\"source_git_ref\":\"v9.8.7\","
     "\"source_git_sha\":\"cccccccccccccccccccccccccccccccccccccccc\","
     "\"source_git_dirty\":false,\"platform\":\"darwin-arm64\",\"build_type\":\"Release\","
     "\"features\":{\"audio_probes\":false,\"inspector\":false}}")

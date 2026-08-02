@@ -61,6 +61,7 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 class ProductMatrix:
     contract_floor: str
     sdk_provenance_floor: str
+    inspector_sdk_floor: str
     platforms: tuple[str, ...]
     cli_contract_declared: bool
     cli_binary_stems: frozenset[str]
@@ -90,6 +91,9 @@ class ProductMatrix:
                 sdk_provenance_floor=str(
                     doc.get("sdk_provenance_floor", "999999.0.0")
                 ),
+                inspector_sdk_floor=str(
+                    doc.get("inspector_sdk_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
                 cli_contract_declared=cli_contract_declared,
                 # Matrices versioned before the import-design CLI payload did
@@ -117,6 +121,7 @@ class ProductMatrix:
             raise ContentError(f"invalid release product matrix {path}: empty contract")
         version_tuple(matrix.contract_floor)
         version_tuple(matrix.sdk_provenance_floor)
+        version_tuple(matrix.inspector_sdk_floor)
         return matrix
 
 
@@ -459,7 +464,11 @@ def verify_sdk_archive(
                 "source_git_dirty": False,
                 "platform": platform,
                 "build_type": "Release",
-                "features": {"audio_probes": False, "inspector": True},
+                "features": {
+                    "audio_probes": False,
+                    "inspector": version_tuple(version)
+                    >= version_tuple(matrix.inspector_sdk_floor),
+                },
             }
             mismatches = {
                 key: (provenance.get(key), value)

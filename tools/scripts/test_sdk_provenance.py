@@ -122,6 +122,30 @@ class SdkProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(provenance.ProvenanceError, "inspector=ON"):
             self.marker()
 
+    def test_historical_release_before_inspector_floor_requires_component_off(self) -> None:
+        version = "0.771.0"
+        (self.prefix / "version.txt").write_text(f"{version}\n", encoding="utf-8")
+        (self.build / "CMakeCache.txt").write_text(
+            "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "-C", self.source, "-c", "tag.gpgSign=false", "tag", f"v{version}"],
+            check=True,
+        )
+        marker = self.marker(release_tag=f"v{version}")
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(marker["features"], {"audio_probes": False, "inspector": False})
+        self.assertEqual(
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            ),
+            marker,
+        )
+
     def test_rejects_release_audio_probes(self) -> None:
         (self.build / "CMakeCache.txt").write_text(
             "PULP_ENABLE_AUDIO_PROBES:BOOL=ON\n"

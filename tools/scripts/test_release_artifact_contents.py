@@ -618,9 +618,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             path = Path(td) / "historical-matrix.json"
             document = json.loads(rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8"))
             del document["sdk_provenance_floor"]
+            del document["inspector_sdk_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
+            self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertNotIn(
                 "pulp-sdk/sdk-provenance.json",
                 rac.required_sdk_members("linux-x64", historical, "0.763.0"),
