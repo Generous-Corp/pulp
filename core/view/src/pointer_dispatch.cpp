@@ -372,7 +372,10 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // dropdown paints as an overlay with no view backing, so a plain hit_test
     // lands on the sibling underneath — this mirrors the popup bypass so the
     // wheel scrolls the open menu, not the page behind it.
-    if (auto* combo = ComboBox::active_popup_) {
+    // THIS root's popup, never the process-wide mirror: a second editor in the
+    // same host process must not eat this one's wheel just because it opened a
+    // dropdown whose rect happens to overlap the pointer.
+    if (auto* combo = ComboBox::active_popup_in(root)) {
         float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
         if (combo->dropdown_window_rect(ddx, ddy, ddw, ddh) &&
             root_pt.x >= ddx && root_pt.x <= ddx + ddw &&

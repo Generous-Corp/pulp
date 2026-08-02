@@ -39,6 +39,9 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     set(au_type "${_pulp_auv3_meta_TYPE}")
     set(au_tag "${_pulp_auv3_meta_TAG}")
     set(_au_version_int "${_pulp_auv3_meta_VERSION_INT}")
+    _pulp_metadata_claim_au_component("${target}"
+        "pulp_add_plugin(${target}) AUv3"
+        "${au_type}" "${plugin_code}" "${manufacturer_code}")
 
     # Find per-plugin AU v3 entry (convention: au_v3_entry.cpp in plugin
     # source dir). Uses PULP_AUV3_PLUGIN to register the processor factory
