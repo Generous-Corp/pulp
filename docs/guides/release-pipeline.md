@@ -163,6 +163,13 @@ self-hosted VMs that were already booted and idle. Measured on v0.663.1: the loc
 macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**, while the hosted
 legs took **39-72 min to execute** and `darwin-x64` sat **127 minutes** in the queue.
 
+Both Darwin rows now prefer the dedicated
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` Tart pool. For `darwin-x64`, the precedence is
+the per-leg `PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON` override, the shared release
+pool, the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` override, then hosted
+`macos-15`. The x64 row still cross-compiles on ARM and smokes under Rosetta;
+the native Intel Mac Mini remains a separate advisory/nightly portability lane.
+
 ### What can and cannot go local
 
 | leg | local? | why |

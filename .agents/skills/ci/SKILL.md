@@ -1603,13 +1603,18 @@ belt for any un-baked runner.
 
 `release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
 `resolve-macos-runner`) and `darwin-x64`, which **cross-compiles on an
-Apple-Silicon runner** via the `macos-15-xcompile` sentinel — routed by
-`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), deliberately
-NOT through `resolve-macos-runner`. It builds with
+Apple-Silicon runner** via the `macos-15-xcompile` sentinel. Its selector
+priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the
+dedicated `pulp-build-vm-release` Tart pool), the legacy
+`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, then hosted `macos-15`. It builds with
 `-DCMAKE_OSX_ARCHITECTURES=x86_64` plus
 `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, and smoke-tests the thin binary
 under Rosetta. It is a **REQUIRED** leg, the same reliability class as
 `darwin-arm64`, so Intel ships in every release.
+
+Do not route this required artifact build to the native Intel Mac Mini. Native
+Intel remains a separate advisory/nightly portability canary; it must not become
+release capacity or gate publication.
 
 The native `macos-15-intel` image is **not** used: it CPU-pegs, queues for hours,
 and never reliably shipped an artifact. Do not "restore" a native Intel leg, and
