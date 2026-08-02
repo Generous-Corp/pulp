@@ -249,6 +249,8 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
+pulp run --inspect                                  # authenticated develop-profile inspector
+pulp run --inspect=observe                          # read-only inspector profile
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
@@ -293,6 +295,41 @@ audio live: ask for a readout in the same run (`--audio-probe-json`,
 each produced by the render callback), or opt in explicitly with
 `PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
 when the pixels themselves must show live signal.
+
+#### Development Inspector profiles
+
+Standalone inspector activation requires a GPU-enabled desktop build and a
+window host that can drain accepted owning-thread work while its event loop
+exits and defer a startup-failure close to a later native event turn. Pulp
+currently supplies that complete host contract in its built-in macOS
+standalone window hosts, for both rendering paths. On Windows and Linux,
+`WindowHost` instances come from an external factory. A factory host that wants
+to support an active inspector profile must override
+`event_loop_supports_exit_drain()`, `run_event_loop_until()`,
+`supports_deferred_close()`, and `request_close_deferred()`. The exit drain must
+keep its owning-thread dispatcher live until the readiness callback returns
+true, and deferred close must never invoke the close callback in the idle-pump
+stack that requested it. Active profiles fail closed when either contract is
+absent. A build with
+`PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
+even when the protocol/client SDK components are present.
+
+- `--inspect` enables the `develop` profile for this standalone instance.
+- `--inspect=observe|develop` selects a named capability set.
+- `--inspect=custom --inspect-capability <id>...` selects an explicit,
+  nonempty capability set; the capability option is repeatable. A custom set
+  containing `state.write` or `authoring.tweaks` must also contain
+  `session.control`, because mutations require a controller lease.
+- `--inspect=off` is the default and starts no listener or discovery artifact.
+
+The active session binds only to loopback, publishes an owner-private ephemeral
+record and credential, and displays an `INSPECT <profile>` badge in the live
+window. `PULP_INSPECT_PROFILE` and comma-separated
+`PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+Plugin scanning, validation, and an ordinary `pulp run` never activate it.
+The standalone runtime supports in-place scripted-UI hot reload. A processor
+that replaces its entire editor at runtime fails inspector startup closed
+because its borrowed sources cannot be reattached atomically.
 
 #### Live Audio Inspector flags
 
@@ -1257,8 +1294,10 @@ Remaining limitation:
 **Status**: experimental
 
 Authenticated low-level client for an explicitly enabled inspector session.
-Normal `pulp run` and plugin-format launches do not currently start an
-endpoint. The client reads owner-private ephemeral discovery records, selects
+Use `pulp run --inspect` (or `--inspect=<profile>`) in a GPU-enabled desktop
+build to activate a standalone; normal `pulp run`, GPU-off/mobile builds, and
+plugin-format launches start no endpoint. The client reads
+owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
@@ -1289,9 +1328,11 @@ response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
 the connection. Do not automatically retry that operation: the server may
 already have executed it.
 
-`Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
-protocol methods that currently return explicit unavailable errors until
-host-capture references are wired into the inspector domain.
+`Capture.screenshot` returns a base64 PNG plus the selected standalone window's
+dimensions. Screenshot-capable sessions and clients use a bounded 16 MiB
+message ceiling (large enough for ordinary multi-megabyte compositor PNGs);
+larger responses fail explicitly. `Capture.screenshotNode` remains explicitly
+unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.

@@ -132,6 +132,8 @@ public:
     void suspend_dispatches();
     /// Reopen domain-handler admission for a new authenticated server generation.
     void resume_dispatches();
+    /// Snapshot whether new domain dispatches are currently admitted.
+    bool dispatches_accepting() const;
 
     const InspectorSessionInfo& info() const { return info_; }
     const InspectorAccessPolicy& policy() const { return policy_; }

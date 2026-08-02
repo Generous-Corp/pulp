@@ -246,6 +246,12 @@ TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
     REQUIRE(empty.xrun_count == 0);
     REQUIRE(empty.process_load.callback_count == 0);
 
+    audio.set_xrun_count(2);
+    empty = audio.runtime_telemetry();
+    REQUIRE_FALSE(empty.available);
+    REQUIRE(empty.xrun_count == 2);
+    REQUIRE(empty.process_load.callback_count == 0);
+
     pulp::audio::AudioProcessLoadSnapshot load;
     load.load = 0.25f;
     load.peak_load = 0.75f;

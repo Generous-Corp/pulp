@@ -29,6 +29,7 @@ pub mod pr;
 pub mod project;
 pub mod projects;
 pub mod run_parse;
+pub(crate) mod run_inspector;
 pub mod scan;
 pub mod sdk;
 pub mod tool;

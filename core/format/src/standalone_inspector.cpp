@@ -1,0 +1,671 @@
+#include <pulp/format/detail/standalone_inspector.hpp>
+
+#include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/standalone.hpp>
+#include <pulp/format/view_bridge.hpp>
+#include <pulp/inspect/agent_context.hpp>
+#include <pulp/inspect/audio_inspector.hpp>
+#include <pulp/inspect/authentication.hpp>
+#include <pulp/inspect/capabilities.hpp>
+#include <pulp/inspect/capture_source.hpp>
+#include <pulp/inspect/console_capture.hpp>
+#include <pulp/inspect/discovery_publisher.hpp>
+#include <pulp/inspect/domain_handler.hpp>
+#include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/inspect/inspector_server.hpp>
+#include <pulp/inspect/main_thread_rpc.hpp>
+#include <pulp/inspect/session.hpp>
+#include <pulp/inspect/state_inspector.hpp>
+#include <pulp/inspect/tweak_store.hpp>
+#include <pulp/runtime/build_info.hpp>
+#include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/window_host.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <utility>
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
+
+namespace pulp::format::detail {
+namespace {
+
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+std::mutex rpc_post_hook_mutex;
+std::shared_ptr<const StandaloneInspectorRpcPostOverride> rpc_post_override;
+
+std::shared_ptr<const StandaloneInspectorRpcPostOverride> current_rpc_post_override() {
+    std::lock_guard lock(rpc_post_hook_mutex);
+    return rpc_post_override;
+}
+#endif
+
+std::optional<std::string> random_id(std::string_view prefix) {
+    const auto bytes = runtime::secure_random_bytes(16);
+    if (!bytes)
+        return std::nullopt;
+    return std::string(prefix) + runtime::hex_encode(*bytes);
+}
+
+std::filesystem::path executable_path() {
+#if defined(_WIN32)
+    std::wstring buffer(32768, L'\0');
+    const auto length =
+        GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size())
+        return {};
+    buffer.resize(length);
+    return std::filesystem::path(buffer);
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0)
+        return {};
+    buffer.resize(std::char_traits<char>::length(buffer.c_str()));
+    std::error_code error;
+    auto canonical = std::filesystem::weakly_canonical(buffer, error);
+    return error ? std::filesystem::path(buffer) : canonical;
+#else
+    std::string buffer(4096, '\0');
+    const auto length = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (length <= 0)
+        return {};
+    buffer.resize(static_cast<std::size_t>(length));
+    return std::filesystem::path(buffer);
+#endif
+}
+
+std::int64_t mtime_unix_ms(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto mtime = std::filesystem::last_write_time(path, error);
+    if (error)
+        return 0;
+    const auto system_time = std::chrono::time_point_cast<std::chrono::milliseconds>(
+        mtime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    return system_time.time_since_epoch().count();
+}
+
+std::optional<inspect::InspectorProfile> parse_profile(std::string_view profile) {
+    if (profile.empty() || profile == "off")
+        return inspect::InspectorProfile::Off;
+    return inspect::profile_from_id(profile);
+}
+
+std::vector<inspect::InspectorCapability>
+standalone_capabilities(bool compositor_capture) {
+    using C = inspect::InspectorCapability;
+    std::vector<inspect::InspectorCapability> result{
+        C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
+        C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::AuthoringTweaks};
+    if (compositor_capture)
+        result.push_back(C::CaptureImage);
+    return result;
+}
+
+bool standalone_capability_available(inspect::InspectorCapability capability,
+                                     bool compositor_capture) {
+    const auto available = standalone_capabilities(compositor_capture);
+    return std::find(available.begin(), available.end(), capability) != available.end();
+}
+
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
+png_dimensions(const std::vector<std::uint8_t>& png) {
+    constexpr std::uint8_t signature[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+    if (png.size() < 24 || !std::equal(std::begin(signature), std::end(signature), png.begin())
+        || !std::equal(png.begin() + 12, png.begin() + 16, "IHDR")) {
+        return std::nullopt;
+    }
+    const auto read_be32 = [&png](std::size_t offset) {
+        return (static_cast<std::uint32_t>(png[offset]) << 24u)
+             | (static_cast<std::uint32_t>(png[offset + 1]) << 16u)
+             | (static_cast<std::uint32_t>(png[offset + 2]) << 8u)
+             | static_cast<std::uint32_t>(png[offset + 3]);
+    };
+    const auto width = read_be32(16);
+    const auto height = read_be32(20);
+    if (width == 0 || height == 0)
+        return std::nullopt;
+    return std::pair{width, height};
+}
+
+} // namespace
+
+class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
+                                               public inspect::InspectorCaptureSource {
+  public:
+    struct IndicatorState {
+        bool active = false;
+        bool pending = false;
+        std::string label;
+    };
+
+    Impl(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
+         view::WindowHost& window, inspect::InspectorOverlay* overlay,
+         inspect::InspectorProfile profile, std::vector<inspect::InspectorCapability> custom,
+         std::string session_id, std::string instance_id)
+        : app_(app), processor_(processor), bridge_(bridge), root_(root), window_(window),
+          overlay_(overlay), profile_(profile), session_id_(std::move(session_id)),
+          instance_id_(std::move(instance_id)), executable_(executable_path()), state_(app.state()),
+          rpc_(std::make_shared<inspect::InspectorMainThreadRpc>(
+              inspect::InspectorMainThreadRpc::Config{},
+              [](std::function<void()> task) {
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+                  if (const auto post_override = current_rpc_post_override()) {
+                      if (const auto result = (*post_override)(task))
+                          return *result;
+                  }
+#endif
+                  return events::MainThreadDispatcher::call_async(std::move(task));
+              },
+              [] { return events::MainThreadDispatcher::is_main_thread(); })),
+          session_(inspect::InspectorSessionInfo{session_id_, instance_id_,
+                                                 processor.descriptor().bundle_id, "1"},
+                   make_policy(profile, std::move(custom), window.supports_compositor_capture()),
+                   [this](const inspect::InspectorMessage& request) {
+                       refresh_live_state();
+                       return domains_.handle(request);
+                   }) {
+        state_.set_value_channels(processor_.value_channels());
+        audio_.set_config(inspect::AudioConfig{app_.config().sample_rate, app_.config().buffer_size,
+                                               app_.config().input_channels,
+                                               app_.config().output_channels,
+                                               std::max(0, processor_.latency_samples())});
+        domains_.set_root_view(&root_);
+        domains_.set_agent_context_source(this);
+        if (window_.supports_compositor_capture())
+            domains_.set_capture_source(this);
+        domains_.set_state_inspector(&state_);
+        domains_.set_console_capture(&console_);
+        domains_.set_audio_inspector(&audio_);
+        domains_.set_tweak_store(&tweaks_);
+        domains_.set_overlay(overlay_);
+        if (auto* scripted = bridge_.scripted_ui()) {
+            log_subscription_ = scripted->add_log_callback(console_.callback());
+            domains_.set_script_inspector(scripted->script_inspector());
+        }
+        if (overlay_)
+            overlay_->set_tweak_store(&tweaks_);
+    }
+
+    ~Impl() { stop(); }
+
+    bool start(std::vector<std::uint8_t> token) {
+        inspect::InspectorDiscoveryRecord record;
+        record.session_id = session_id_;
+        record.instance_id = instance_id_;
+        record.plugin_id = processor_.descriptor().bundle_id;
+        record.profile = profile_;
+        inspect::InspectorServerConfig config;
+        config.session = &session_;
+        config.discovery = &publisher_;
+        config.record = std::move(record);
+        config.token = std::move(token);
+        config.authentication_timeout = std::chrono::seconds(3);
+        config.frame_read_timeout = std::chrono::seconds(3);
+        config.heartbeat_interval = std::chrono::seconds(10);
+        config.max_message_bytes = inspect::kInspectorExtendedMessageBytes;
+        config.max_clients = 16;
+        config.domain_bindings = &domains_;
+        config.main_thread_rpc = rpc_;
+        if (!server_->start_authenticated(std::move(config))) {
+            return false;
+        }
+        active_ = true;
+        indicator_->active = true;
+        indicator_->label =
+            "INSPECT " + std::string(inspect::profile_id(profile_));
+        runtime::log_info(
+            "Standalone: Development Inspector active (profile={}, session={}, port={})",
+            inspect::profile_id(profile_), session_id_, server_->port());
+        return true;
+    }
+
+    void stop() {
+        begin_stop();
+        if (shutdown_fence_.ready())
+            detach_borrowed_sources();
+    }
+
+    inspect::InspectorServerShutdownFence begin_stop() {
+        if (stopped_)
+            return shutdown_fence_;
+        stopped_ = true;
+        active_ = false;
+        indicator_->active = false;
+        if (server_) {
+            shutdown_fence_ = server_->shutdown_fence();
+            server_->stop();
+            server_.reset();
+        }
+        return shutdown_fence_;
+    }
+
+    StandaloneInspectorLifecycleState lifecycle_state() const {
+        return {
+            .rpc_accepting = rpc_ && rpc_->active(),
+            .dispatch_accepting = session_.dispatches_accepting(),
+            .borrowed_sources_attached = !sources_detached_,
+        };
+    }
+
+    void detach_borrowed_sources() {
+        if (sources_detached_)
+            return;
+        sources_detached_ = true;
+        domains_.set_script_inspector(nullptr);
+        if (auto* scripted = bridge_.scripted_ui();
+            scripted && log_subscription_ != 0) {
+            scripted->remove_log_callback(log_subscription_);
+        }
+        log_subscription_ = 0;
+        if (overlay_)
+            overlay_->set_tweak_store(nullptr);
+    }
+
+    inspect::InspectorAgentContext snapshot() const override {
+        inspect::InspectorAgentContext result;
+        result.binary_path = executable_.string();
+        result.binary_mtime_unix_ms = mtime_unix_ms(executable_);
+        result.binary_build_id = std::string(runtime::kStampLabel);
+        result.plugin_id = processor_.descriptor().bundle_id;
+        result.session_id = session_id_;
+        result.instance_id = instance_id_;
+        result.editor_open = bridge_.view() != nullptr;
+        result.window_visible = window_.is_visible();
+        result.processing = app_.is_running();
+        result.xrun_count = app_.audio_xrun_count();
+        if (auto* scripted = bridge_.scripted_ui()) {
+            result.hot_reload_available = true;
+            result.hot_reload_enabled = scripted->hot_reload_enabled();
+            result.hot_reload_pending = scripted->hot_reload_pending();
+        }
+        result.unsaved_tweak_count = tweaks_.count();
+        if (result.binary_path.empty())
+            result.actionable_issues.push_back("Executable path is unavailable");
+        if (result.xrun_count > 0)
+            result.actionable_issues.push_back("Audio device reported " +
+                                               std::to_string(result.xrun_count) + " xruns");
+        return result;
+    }
+
+    inspect::InspectorCapture capture_png() override {
+        inspect::InspectorCapture result;
+        result.png = window_.capture_png();
+        const auto dimensions = png_dimensions(result.png);
+        if (!dimensions) {
+            result.png.clear();
+            result.error = "Selected standalone window did not provide a valid compositor PNG";
+            return result;
+        }
+        result.width = dimensions->first;
+        result.height = dimensions->second;
+        return result;
+    }
+
+    void enqueue_indicator() {
+        if (!active_ || indicator_->pending)
+            return;
+        refresh_live_state();
+        indicator_->pending = true;
+        auto indicator = indicator_;
+        root_.interaction().overlay_queue.push_back(
+            {[indicator = std::move(indicator)](canvas::Canvas& canvas) {
+                 indicator->pending = false;
+                 if (!indicator->active)
+                     return;
+                 canvas.save();
+                 canvas.set_fill_color(pulp::canvas::Color::rgba(0.08f, 0.10f, 0.14f, 0.92f));
+                 canvas.fill_rect(8.0f, 8.0f, 126.0f, 24.0f);
+                 canvas.set_fill_color(pulp::canvas::Color::rgba(0.35f, 0.85f, 1.0f, 1.0f));
+                 canvas.set_font("monospace", 11.0f);
+                 canvas.fill_text(indicator->label, 15.0f, 24.0f);
+                 canvas.restore();
+             },
+             &root_});
+        root_.request_repaint();
+    }
+
+  private:
+    void refresh_live_state() {
+        const auto& config = app_.config();
+        audio_.set_config(inspect::AudioConfig{config.sample_rate, config.buffer_size,
+                                               config.input_channels, config.output_channels,
+                                               std::max(0, processor_.latency_samples())});
+        audio_.set_xrun_count(app_.audio_xrun_count());
+    }
+
+    static inspect::InspectorPolicyConfig
+    make_policy(inspect::InspectorProfile profile,
+                std::vector<inspect::InspectorCapability> custom,
+                bool compositor_capture) {
+        inspect::InspectorPolicyConfig policy;
+        policy.profile = profile;
+        policy.custom_capabilities = std::move(custom);
+        policy.available_capabilities = standalone_capabilities(compositor_capture);
+        return policy;
+    }
+
+    StandaloneApp& app_;
+    Processor& processor_;
+    ViewBridge& bridge_;
+    view::View& root_;
+    view::WindowHost& window_;
+    inspect::InspectorOverlay* overlay_ = nullptr;
+    inspect::InspectorProfile profile_ = inspect::InspectorProfile::Off;
+    std::string session_id_;
+    std::string instance_id_;
+    std::filesystem::path executable_;
+    inspect::InspectorDiscoveryPublisher publisher_;
+    inspect::DomainHandler domains_;
+    inspect::StateInspector state_;
+    inspect::ConsoleCapture console_;
+    inspect::AudioInspector audio_;
+    inspect::TweakStore tweaks_;
+    std::shared_ptr<inspect::InspectorMainThreadRpc> rpc_;
+    inspect::InspectorSession session_;
+    std::unique_ptr<inspect::InspectorServer> server_ =
+        std::make_unique<inspect::InspectorServer>();
+    inspect::InspectorServerShutdownFence shutdown_fence_;
+    std::shared_ptr<IndicatorState> indicator_ = std::make_shared<IndicatorState>();
+    std::uint64_t log_subscription_ = 0;
+    bool active_ = false;
+    bool stopped_ = false;
+    bool sources_detached_ = false;
+};
+
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+void set_standalone_inspector_rpc_post_override_for_testing(
+    StandaloneInspectorRpcPostOverride post_override) {
+    std::lock_guard lock(rpc_post_hook_mutex);
+    rpc_post_override =
+        post_override
+            ? std::make_shared<StandaloneInspectorRpcPostOverride>(std::move(post_override))
+            : nullptr;
+}
+#endif
+
+class StandaloneInspectorRuntime::RetirementCoordinator final
+    : public std::enable_shared_from_this<RetirementCoordinator> {
+  public:
+    RetirementCoordinator(std::shared_ptr<inspect::InspectorOverlay> overlay,
+                          std::shared_ptr<Impl> impl)
+        : overlay_(std::move(overlay)), impl_(std::move(impl)) {}
+
+    void set_close_editor(std::function<void()> close_editor) {
+        std::lock_guard lock(mutex_);
+        if (!close_editor_)
+            close_editor_ = std::move(close_editor);
+    }
+
+    void begin() {
+        {
+            std::lock_guard lock(mutex_);
+            if (!begun_) {
+                begun_ = true;
+                if (impl_)
+                    fence_ = impl_->begin_stop();
+            }
+        }
+        if (!try_finalize())
+            schedule_poll();
+    }
+
+    bool try_finalize() {
+        std::shared_ptr<Impl> impl;
+        std::shared_ptr<inspect::InspectorOverlay> overlay;
+        std::function<void()> close_editor;
+        {
+            std::lock_guard lock(mutex_);
+            if (finalized_)
+                return true;
+            if (!begun_ || !fence_.ready())
+                return false;
+            finalized_ = true;
+            impl = std::move(impl_);
+            overlay = std::move(overlay_);
+            close_editor = std::move(close_editor_);
+        }
+
+        if (impl)
+            impl->detach_borrowed_sources();
+        if (close_editor)
+            close_editor();
+        // The overlay's process-wide hooks borrow the root view. Destroy it only
+        // after the editor close has retired that view, while the local shared
+        // owners above still keep every inspector source alive.
+        overlay.reset();
+        impl.reset();
+        return true;
+    }
+
+    bool pending() const {
+        std::lock_guard lock(mutex_);
+        return begun_ && !finalized_;
+    }
+
+    bool begun() const {
+        std::lock_guard lock(mutex_);
+        return begun_;
+    }
+
+  private:
+    void schedule_poll() {
+        {
+            std::lock_guard lock(mutex_);
+            if (finalized_ || poll_posted_)
+                return;
+            poll_posted_ = true;
+        }
+        const std::weak_ptr<RetirementCoordinator> weak = shared_from_this();
+        const bool posted = events::MainThreadDispatcher::call_async_after(
+            [weak] {
+                if (const auto self = weak.lock()) {
+                    {
+                        std::lock_guard lock(self->mutex_);
+                        self->poll_posted_ = false;
+                    }
+                    if (!self->try_finalize())
+                        self->schedule_poll();
+                }
+            },
+            1);
+        if (!posted) {
+            std::lock_guard lock(mutex_);
+            poll_posted_ = false;
+        }
+    }
+
+    mutable std::mutex mutex_;
+    std::shared_ptr<inspect::InspectorOverlay> overlay_;
+    std::shared_ptr<Impl> impl_;
+    inspect::InspectorServerShutdownFence fence_;
+    std::function<void()> close_editor_;
+    bool begun_ = false;
+    bool finalized_ = false;
+    bool poll_posted_ = false;
+};
+
+StandaloneInspectorRuntime::StandaloneInspectorRuntime(
+    std::shared_ptr<inspect::InspectorOverlay> overlay, std::shared_ptr<Impl> impl,
+    std::vector<std::uint8_t> token, view::View& root, view::WindowHost& window)
+    : overlay_(std::move(overlay)), impl_(std::move(impl)),
+      retirement_(std::make_shared<RetirementCoordinator>(overlay_, impl_)),
+      token_(std::move(token)), root_(root), window_(window) {}
+
+StandaloneInspectorRuntime::~StandaloneInspectorRuntime() {
+    stop();
+}
+
+bool StandaloneInspectorRuntime::profile_is_off(std::string_view profile) {
+    const auto parsed_profile = parse_profile(profile);
+    return parsed_profile && *parsed_profile == inspect::InspectorProfile::Off;
+}
+
+std::unique_ptr<StandaloneInspectorRuntime>
+StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, ViewBridge& bridge,
+                                   view::View& root, view::WindowHost& window,
+                                   std::string profile,
+                                   std::vector<std::string> custom_capabilities) {
+    const bool local_only = profile == "local";
+    const auto parsed_profile = parse_profile(profile);
+    if (!local_only && !parsed_profile)
+        return nullptr;
+    if (!local_only && *parsed_profile == inspect::InspectorProfile::Off)
+        return nullptr;
+
+    auto overlay = std::make_shared<inspect::InspectorOverlay>(root);
+    inspect::install_inspector_hooks(*overlay);
+    if (local_only) {
+        overlay->set_active(true);
+        return std::unique_ptr<StandaloneInspectorRuntime>(
+            new StandaloneInspectorRuntime(std::move(overlay), nullptr, {}, root, window));
+    }
+    // This composition root is stack-owned by StandaloneApp::run() and is
+    // stopped after run_event_loop() returns. A page-owned/non-blocking loop
+    // would otherwise return before the first idle pump, falsely report a
+    // successful start, and immediately destroy the inspector runtime.
+    if (!window.event_loop_blocks_until_close()) {
+        runtime::log_error(
+            "Standalone: Development Inspector requires a blocking window event loop");
+        return nullptr;
+    }
+    if (!window.event_loop_supports_exit_drain()) {
+        runtime::log_error("Standalone: Development Inspector requires an event-loop exit drain");
+        return nullptr;
+    }
+    if (!window.supports_deferred_close()) {
+        runtime::log_error(
+            "Standalone: Development Inspector requires deferred window close support");
+        return nullptr;
+    }
+    // Processor-level editor replacement needs every borrowed inspector source
+    // to detach before the swap and reattach to the new processor lifetime.
+    // Fail closed unless both operations are available; publishing through a
+    // partially detached scripted bridge would expose stale sources.
+    if (processor.supports_editor_reload()) {
+        runtime::log_error(
+            "Standalone: Development Inspector does not support processors "
+            "that replace the editor at runtime");
+        return nullptr;
+    }
+
+    std::vector<inspect::InspectorCapability> custom;
+    if (*parsed_profile == inspect::InspectorProfile::Custom) {
+        bool has_session_control = false;
+        bool needs_session_control = false;
+        for (const auto& id : custom_capabilities) {
+            const auto capability = inspect::capability_from_id(id);
+            if (!capability || !inspect::capability_is_grantable(*capability) ||
+                !standalone_capability_available(
+                    *capability, window.supports_compositor_capture())) {
+                runtime::log_error("Standalone: invalid custom inspector capability '{}'", id);
+                return nullptr;
+            }
+            custom.push_back(*capability);
+            has_session_control |=
+                *capability == inspect::InspectorCapability::SessionControl;
+            needs_session_control |=
+                *capability != inspect::InspectorCapability::SessionControl
+                && inspect::capability_requires_controller_lease(*capability);
+        }
+        if (custom.empty()) {
+            runtime::log_error("Standalone: custom inspector profile requires capabilities");
+            return nullptr;
+        }
+        if (needs_session_control && !has_session_control) {
+            runtime::log_error(
+                "Standalone: custom inspector mutation capabilities require session.control");
+            return nullptr;
+        }
+    }
+
+    auto token = inspect::generate_inspector_secret();
+    if (!token) {
+        runtime::log_error("Standalone: could not generate inspector credential");
+        return nullptr;
+    }
+    auto session_id = random_id("session-");
+    auto instance_id = random_id("instance-");
+    if (!session_id || !instance_id) {
+        runtime::log_error("Standalone: could not generate inspector identity");
+        return nullptr;
+    }
+    auto impl =
+        std::make_shared<Impl>(app, processor, bridge, root, window, overlay.get(), *parsed_profile,
+                               std::move(custom), std::move(*session_id), std::move(*instance_id));
+    return std::unique_ptr<StandaloneInspectorRuntime>(
+        new StandaloneInspectorRuntime(std::move(overlay), std::move(impl),
+                                       std::move(*token), root, window));
+}
+
+void StandaloneInspectorRuntime::pump() {
+    if (stopped_ || retirement_->begun())
+        return;
+    if (impl_ && !startup_attempted_) {
+        startup_attempted_ = true;
+        if (!impl_->start(std::move(token_))) {
+            startup_failed_ = true;
+            runtime::log_error(
+                "Standalone: could not start authenticated inspector session");
+            window_.request_close_deferred();
+            return;
+        }
+    }
+    if (impl_)
+        impl_->enqueue_indicator();
+    if (overlay_->is_active()) {
+        auto* overlay = overlay_.get();
+        root_.interaction().overlay_queue.push_back(
+            {[overlay](canvas::Canvas& canvas) { overlay->paint(canvas); },
+             &root_});
+    }
+}
+
+void StandaloneInspectorRuntime::stop() {
+    if (stopped_)
+        return;
+    stopped_ = true;
+    retirement_->begin();
+}
+
+bool StandaloneInspectorRuntime::try_finish_retirement() {
+    return retirement_->try_finalize();
+}
+
+bool StandaloneInspectorRuntime::retirement_pending() const {
+    return retirement_->pending();
+}
+
+StandaloneInspectorLifecycleState StandaloneInspectorRuntime::lifecycle_state() const {
+    return impl_ ? impl_->lifecycle_state() : StandaloneInspectorLifecycleState{};
+}
+
+void StandaloneInspectorRuntime::set_overlay_active(bool active) {
+    if (retirement_->begun())
+        return;
+    overlay_->set_active(active);
+}
+
+std::function<void()> StandaloneInspectorRuntime::wrap_close(
+    std::function<void()> close_editor) {
+    retirement_->set_close_editor(std::move(close_editor));
+    const auto retirement = retirement_;
+    return [retirement] { retirement->begin(); };
+}
+
+} // namespace pulp::format::detail

@@ -398,6 +398,12 @@ void InspectorSession::resume_dispatches() {
     state->dispatch_cv.notify_all();
 }
 
+bool InspectorSession::dispatches_accepting() const {
+    const auto state = state_;
+    std::lock_guard lock(state->dispatch_mutex);
+    return state->dispatch_accepting;
+}
+
 void InspectorSession::set_main_thread_rpc(
     std::shared_ptr<InspectorMainThreadRpc> rpc) {
     std::lock_guard lock(state_->mutex);

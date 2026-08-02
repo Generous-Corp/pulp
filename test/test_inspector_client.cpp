@@ -359,6 +359,47 @@ TEST_CASE("oversized inspector responses return a bounded protocol error",
         client.request("Session.getCapabilities").is_error);
 }
 
+TEST_CASE("extended inspector transport carries a multi-megabyte capture response",
+          "[inspect][client][capture][resource-limit]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {InspectorCapability::CaptureImage};
+    const std::string payload =
+        std::string("{\"mimeType\":\"image/png\",\"data\":\"")
+        + std::string(2u * 1024u * 1024u, 'A') + "\"}";
+    InspectorSession session(
+        {"session-large-capture", "instance", "plugin", "1"}, policy,
+        [&payload](const auto& request) {
+            return make_response(request.id, payload);
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{&session, &publisher, record, *token};
+    config.max_message_bytes = pulp::inspect::kInspectorExtendedMessageBytes;
+    config.main_thread_rpc = make_inline_test_main_thread_rpc();
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    const auto response = client.request(
+        "Capture.screenshot", "{}", std::chrono::seconds(3));
+    INFO("error code: " << response.error_code);
+    INFO("error payload: " << response.error_data_json);
+    REQUIRE_FALSE(response.is_error);
+    const auto decoded = choc::json::parse(response.params_json);
+    REQUIRE(decoded["data"].getString().size() == 2u * 1024u * 1024u);
+}
+
 TEST_CASE("authenticated client rejects a challenge for another instance",
           "[inspect][client][authentication][instance]") {
     AuthenticatedFixture fixture;
