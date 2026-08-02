@@ -100,6 +100,47 @@ const pulp::view::IRNode* find_text_node(const pulp::view::IRNode& root,
     return found;
 }
 
+/// The first text node anywhere in the tree whose content CONTAINS `needle`.
+const pulp::view::IRNode* find_text_node_containing(
+    const pulp::view::IRNode& root, const std::string& needle) {
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (found) return;
+            if (node.type == "text" &&
+                node.text_content.find(needle) != std::string::npos) {
+                found = &node;
+                return;
+            }
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(root);
+    return found;
+}
+
+/// The first non-text node whose CHILDREN carry `needle` — the shape a
+/// per-line-box run lowers to.
+const pulp::view::IRNode* find_frame_containing(const pulp::view::IRNode& root,
+                                                const std::string& needle) {
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (found) return;
+            if (node.type != "text") {
+                for (const auto& child : node.children) {
+                    if (child.type == "text" &&
+                        child.text_content.find(needle) != std::string::npos) {
+                        found = &node;
+                        return;
+                    }
+                }
+            }
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(root);
+    return found;
+}
+
 }  // namespace
 
 TEST_CASE("wrapped run reports one box per line, not its own bounds",
@@ -253,28 +294,99 @@ TEST_CASE("a nowrap run lowers with white-space present and restrictive",
     CHECK(*unwrapped->style.white_space == "nowrap");
 }
 
-TEST_CASE("a run continuing an earlier sibling's line refuses to wrap",
+TEST_CASE("a run that resumes a sibling's line lowers one node per line box",
           "[browser-capture][text-metrics]") {
-    // On `delay` this class is 8 of 277 runs. Wrapping one lays its first line
-    // where the sibling's text already is, so the two overprint; a single Label
-    // cannot express "start mid-line, then return to the left edge". The
-    // lowering marks them nowrap until per-line-box lowering exists.
-    //
-    // The wrap fixture has no inline continuation — every run starts its own
-    // line — so the guard must leave all of its wrapping runs alone. That is
-    // the half of the contract this fixture can prove: no false positives.
+    // An inline <span> splits one visual paragraph into sibling runs, and the
+    // run after the span resumes mid-line before returning to the left edge.
+    // Its layout box is the UNION of the lines it shares with its siblings, so
+    // no single box says where its text goes: wrapping inside that union puts
+    // the first line on top of the sibling's text, and refusing to wrap freezes
+    // it at one line. Both are wrong, so this run is lowered per line box.
+    const auto result = lower_wrap_fixture();
+    // No node carries text spanning a line break. That substring exists only
+    // if the run was lowered whole; the fragments each stop at their own line,
+    // so asserting on a fragment's own text would pass either way.
+    const auto* spanning =
+        find_text_node_containing(root_of(result), "resumes this sentence");
+    REQUIRE(spanning == nullptr);
+
+    const auto* frame = find_frame_containing(root_of(result), "resumes");
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->children.size() == 4);
+
+    // Each fragment carries exactly the substring Chrome put on that line, at
+    // that line's own rect expressed against the run's box.
+    const std::vector<std::string> expected_text{
+        " resumes",
+        "this sentence mid-line and then",
+        "returns to the block\u2019s left edge",
+        "for the rest.",
+    };
+    const std::vector<double> expected_left{162.0, 0.0, 0.0, 0.0};
+    const std::vector<double> expected_top{0.0, 20.0, 40.0, 60.0};
+    for (size_t i = 0; i < frame->children.size(); ++i) {
+        const auto& fragment = frame->children[i];
+        CHECK(fragment.type == "text");
+        CHECK(fragment.text_content == expected_text[i]);
+        REQUIRE(fragment.style.left.has_value());
+        REQUIRE(fragment.style.top.has_value());
+        CHECK_THAT(static_cast<double>(*fragment.style.left),
+                   WithinAbs(expected_left[i], 0.5));
+        CHECK_THAT(static_cast<double>(*fragment.style.top),
+                   WithinAbs(expected_top[i], 0.5));
+        // A fragment IS one of Chrome's lines, so it must never re-wrap.
+        REQUIRE(fragment.style.white_space.has_value());
+        CHECK(*fragment.style.white_space == "nowrap");
+    }
+
+    // The first line starting 162px into the run's own block is the whole
+    // point: that offset cannot be expressed by any per-run model.
+    CHECK(*frame->children.front().style.left > 100.0f);
+}
+
+TEST_CASE("line offsets are UTF-16, and slicing them as bytes corrupts text",
+          "[browser-capture][text-metrics]") {
+    // Chrome counts `start` / `length` in UTF-16 code units because that is how
+    // CDP indexes strings; the run's text arrives as UTF-8. The fixture line
+    // below contains a curly apostrophe, so the two disagree from that point
+    // on — and slicing by bytes splits the sequence and emits text that is not
+    // valid UTF-8 at all, which the IR writer then refuses.
+    const auto result = lower_wrap_fixture();
+    const auto* frame = find_frame_containing(root_of(result), "resumes");
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->children.size() >= 3);
+
+    const auto& with_apostrophe = frame->children[2].text_content;
+    CHECK(with_apostrophe == "returns to the block\u2019s left edge");
+    // Valid UTF-8: every continuation byte follows a lead byte that claims it.
+    size_t i = 0;
+    while (i < with_apostrophe.size()) {
+        const auto lead = static_cast<unsigned char>(with_apostrophe[i]);
+        size_t width = 1;
+        if ((lead & 0xE0u) == 0xC0u) width = 2;
+        else if ((lead & 0xF0u) == 0xE0u) width = 3;
+        else if ((lead & 0xF8u) == 0xF0u) width = 4;
+        REQUIRE(i + width <= with_apostrophe.size());
+        for (size_t k = 1; k < width; ++k) {
+            REQUIRE((static_cast<unsigned char>(with_apostrophe[i + k])
+                     & 0xC0u) == 0x80u);
+        }
+        i += width;
+    }
+    // The last line must still be the tail of the run, not a byte-shifted
+    // window into it — the off-by-N a byte/UTF-16 mixup produces.
+    CHECK(frame->children.back().text_content == "for the rest.");
+}
+
+TEST_CASE("a run that owns its block keeps reflowing text",
+          "[browser-capture][text-metrics]") {
+    // Per-line-box lowering pins a node to Chrome's break positions, so it is
+    // applied ONLY where reflow cannot be correct. A paragraph that starts its
+    // own line stays one text node that wraps.
     const auto result = lower_wrap_fixture();
     const auto* wrapped = find_text_node(root_of(result), "Chrome breaks this");
     REQUIRE(wrapped != nullptr);
-    // REQUIRE, not CHECK: dereferencing an unset optional below is undefined
-    // and prints a plausible-looking garbage string rather than failing here.
+    CHECK(wrapped->children.empty());
     REQUIRE(wrapped->style.white_space.has_value());
     CHECK(*wrapped->style.white_space == "normal");
-
-    const auto index = load_wrap_fixture();
-    for (const auto& node : index.painted_nodes()) {
-        const auto boxes = index.text_boxes_for_layout(node.layout_index);
-        if (boxes.size() <= 1) continue;
-        CHECK(boxes.front().bounds.left <= node.bounds.left + 1.0);
-    }
 }

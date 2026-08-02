@@ -15,6 +15,39 @@
 
 namespace pulp::import_design {
 namespace {
+/// Slice a UTF-8 string by a UTF-16 offset and length.
+///
+/// Chrome's `textBoxes` `start` / `length` count UTF-16 code units, because
+/// that is how CDP indexes strings; the run's text arrives as UTF-8. Treating
+/// one as the other splits a multi-byte sequence the moment a run contains a
+/// dash, a curly apostrophe or a multiplication sign — which produces bytes
+/// that are not valid UTF-8 at all, not merely an off-by-one.
+std::string utf16_slice(const std::string& text, int start, int length) {
+    if (start < 0 || length <= 0) return {};
+    const auto begin = static_cast<size_t>(start);
+    const auto count = static_cast<size_t>(length);
+    size_t units = 0;
+    size_t byte_begin = std::string::npos;
+    size_t i = 0;
+    while (i <= text.size()) {
+        if (units == begin && byte_begin == std::string::npos) byte_begin = i;
+        if (byte_begin != std::string::npos && units == begin + count)
+            return text.substr(byte_begin, i - byte_begin);
+        if (i >= text.size()) break;
+        const auto lead = static_cast<unsigned char>(text[i]);
+        size_t bytes = 1;
+        if      ((lead & 0x80u) == 0x00u) bytes = 1;
+        else if ((lead & 0xE0u) == 0xC0u) bytes = 2;
+        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
+        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
+        // A codepoint outside the BMP is a surrogate PAIR in UTF-16.
+        units += (bytes == 4) ? 2 : 1;
+        i += bytes;
+    }
+    if (byte_begin == std::string::npos) return {};
+    return text.substr(byte_begin);
+}
+
 
 using pulp::view::IRNode;
 
@@ -569,24 +602,19 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                       : ComputedStyleScope::box_and_text);
 
         // A run whose FIRST line box starts to the right of its own block is
-        // continuing a line an earlier inline sibling began. Its box is the
-        // union of lines it shares with those siblings, so wrapping it inside
-        // that box lays its first line where the sibling's text already is and
-        // the two overprint. One Label cannot express "start here, then return
-        // to the left edge" — that needs per-line-box lowering.
-        //
-        // Until then, refuse to wrap exactly those runs rather than wrap them
-        // wrongly: they keep the single-line behaviour they had, which is
-        // incomplete but not overlapping. On the delay capture this is 8 of 277
-        // runs; the other 26 wrapped runs are unaffected.
-        if (is_text) {
-            const auto line_boxes =
-                index.text_boxes_for_layout(node.layout_index);
-            if (line_boxes.size() > 1 &&
-                line_boxes.front().bounds.left > box.left + 1.0) {
-                lowered.style.white_space = "nowrap";
-            }
-        }
+        // continuing a line an earlier inline sibling began — an inline `<span>`
+        // splits one visual paragraph into several sibling runs, and the run
+        // after the span resumes mid-line before returning to the left edge.
+        // Its `bounds` is the UNION of the lines it shares with those siblings,
+        // so no single box describes where its text goes: wrapping inside that
+        // union lays the first line on top of the sibling's text, and refusing
+        // to wrap freezes it at one line. Both are wrong, in opposite ways.
+        const auto line_boxes =
+            is_text ? index.text_boxes_for_layout(node.layout_index)
+                    : std::vector<CapturedTextBox>{};
+        const bool resumes_a_line =
+            line_boxes.size() > 1 &&
+            line_boxes.front().bounds.left > box.left + 1.0;
 
         PaintClass paint_class = PaintClass::native;
         if (capture_only) {
@@ -598,6 +626,51 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // transform the IR does not carry yet.
             lowered.attributes["capture_fallback_reason"] =
                 is_capture_only_element(node.tag_name) ? "element" : "transform";
+        } else if (is_text && resumes_a_line) {
+            // Emit ONE NODE PER LINE BOX rather than one per run. Each line
+            // carries the substring Chrome put on it, at the rect Chrome put it
+            // at, so a line beginning at x=1336 inside a block whose left edge
+            // is 1168 simply IS at 1336 — the case that defeats any per-run
+            // model regardless of how it wraps. The run's own node becomes a
+            // frame holding them, so parentage, paint order and the anchor path
+            // are unchanged.
+            //
+            // The tradeoff, stated because it is permanent for these nodes:
+            // a per-line node is pinned to Chrome's break positions and cannot
+            // reflow. Runs that own their block keep the reflowing text path
+            // above, so only the runs that CANNOT reflow correctly give it up.
+            lowered.type = "frame";
+            for (const auto& line : line_boxes) {
+                if (line.length <= 0 || line.start < 0) continue;
+                pulp::view::IRNode fragment;
+                fragment.type = "text";
+                fragment.name = "#text";
+                fragment.text_content =
+                    utf16_slice(node.text, line.start, line.length);
+                if (fragment.text_content.empty()) continue;
+                // Typography only — the box half belongs to the run, and a
+                // fragment repeating it would paint the parent's surfaces once
+                // per line.
+                apply_computed_styles(computed, box, fragment.style,
+                                      ComputedStyleScope::text_only);
+                // A fragment never wraps: its width IS one of Chrome's lines,
+                // so any reflow inside it would be Pulp disagreeing with a
+                // measurement it already has.
+                fragment.style.white_space = "nowrap";
+                fragment.style.position = "absolute";
+                // Relative to the run's union box, which is where this frame
+                // lands. Fragments are not slots, so the assembly pass that
+                // stamps slot geometry leaves these alone — they are already
+                // expressed against their parent.
+                fragment.style.left =
+                    static_cast<float>(line.bounds.left - box.left);
+                fragment.style.top =
+                    static_cast<float>(line.bounds.top - box.top);
+                fragment.style.width = static_cast<float>(line.bounds.width);
+                fragment.style.height = static_cast<float>(line.bounds.height);
+                lowered.children.push_back(std::move(fragment));
+            }
+            ++counts.text;
         } else if (is_text) {
             lowered.type = "text";
             lowered.text_content = node.text;
@@ -645,7 +718,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 ++counts.element_capture_fallback;
                 break;
         }
-        if (is_text) ++counts.text;
+        if (is_text && !resumes_a_line) ++counts.text;
         ++counts.lowered;
 
         node_to_slot[node.node_index] = static_cast<int>(slots.size());

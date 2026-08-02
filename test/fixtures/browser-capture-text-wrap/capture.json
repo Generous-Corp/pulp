@@ -12,7 +12,7 @@
     },
     "source": {
       "entry": "panel.html",
-      "sha256": "3c944a7b5c5269a768bd2d13dfb8c49ed4877985765af5452035bb560e1b08d2"
+      "sha256": "6d3af755ffeb7b04c029b5164fb1087e51bfcd5359b04658d6923b8d612bbb47"
     },
     "viewport": {
       "initial": {
@@ -42,7 +42,7 @@
     "settle": {
       "rounds": 15,
       "stable_rounds": 13,
-      "elapsed_ms": 1404
+      "elapsed_ms": 1384
     },
     "network": {
       "external_allowed": false,
@@ -52,9 +52,9 @@
     },
     "health": {
       "status": "healthy",
-      "layout_count": 11,
-      "visible_elements": 4,
-      "visible_text_characters": 208,
+      "layout_count": 16,
+      "visible_elements": 6,
+      "visible_text_characters": 216,
       "painted_surfaces": 0,
       "runtime_exceptions": [],
       "log_errors": [],
@@ -70,8 +70,8 @@
     {
       "id": "document:0",
       "url": "pulp-capture:///panel.html",
-      "node_count": 30,
-      "layout_count": 11,
+      "node_count": 36,
+      "layout_count": 16,
       "paint_order": true,
       "snapshot_asset": "dom-snapshot.json"
     }
@@ -82,7 +82,7 @@
       "kind": "screenshot",
       "mime_type": "image/png",
       "path": "browser.png",
-      "sha256": "8f781c2e01d23235b8fa153948e5e9aa6594938a61674254c4681b737cc31dac",
+      "sha256": "87dada8df1a825f7c39d8d570930b06e4676094df310cef803a22b7e61f214d0",
       "width_px": 1688,
       "height_px": 720
     }
@@ -104,8 +104,8 @@
   "platform_fonts": {
     "schema": "pulp-browser-platform-fonts-v1",
     "report": "platform-fonts.json",
-    "text_run_count": 4,
-    "resolved_run_count": 4,
+    "text_run_count": 7,
+    "resolved_run_count": 7,
     "face_count": 3
   },
   "states": [
