@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_tree.hpp"
 
+#include "svg_shape_lowering.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -21,23 +25,44 @@ using pulp::view::IRNode;
 constexpr int kElementNode = 1;
 constexpr int kTextNode = 3;
 
+/// Bound to the reference a non-`<svg>` node reads, so the classification
+/// below can name one `SvgSubtree` unconditionally.
+const SvgSubtree kNoSvgSubtree{};
+
+/// A number as compact text for an IR attribute a downstream parser reads back
+/// as a float.
+std::string format_number(double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.6g", value);
+    return buffer;
+}
+
 /// Stands in for "this edge does not clip". Far outside any page coordinate a
 /// capture can hold, and finite so an unclipped edge still survives the
 /// arithmetic that intersects, offsets and rounds a clip.
 constexpr double kUnbounded = 1e7;
 
-/// Elements whose pixels do not come from CSS at all.
+/// Elements that own their whole subtree's pixels: whatever is under them is
+/// covered by what they draw, so lowering a descendant separately would paint
+/// the same content twice, once wrongly.
 ///
-/// `<canvas>` is imperative drawing; `<video>`/`<iframe>`/`<embed>`/`<object>`
-/// host a separate document or decoder. `<svg>` is here for now because its
-/// painted content is a shape tree the IR does not carry yet — it is the
-/// largest single cause on the can't-draw list and is scoped as its own piece
-/// of work, not something to half-do inside the tree walk.
-bool is_capture_only_element(std::string_view tag) {
+/// `<svg>` is here because it is one drawing whose children share a coordinate
+/// space — it is lowered from its own shape tree, not captured. The rest draw
+/// from outside CSS entirely: `<canvas>` is imperative JS, and
+/// `<video>`/`<iframe>`/`<embed>`/`<object>` host a separate document or
+/// decoder.
+bool owns_its_subtree(std::string_view tag) {
     static const std::unordered_set<std::string_view> kTags{
         "canvas", "svg", "video", "iframe", "embed", "object", "math",
     };
     return kTags.count(tag) != 0;
+}
+
+/// Of those, the ones with no style-describable content at all — the elements
+/// for which capturing the element's own pixels is the correct permanent
+/// answer rather than a stopgap.
+bool is_capture_only_element(std::string_view tag) {
+    return tag != "svg" && owns_its_subtree(tag);
 }
 
 bool is_blank(const std::string& text) {
@@ -478,15 +503,16 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     std::unordered_map<int, int> layout_of;
     for (const auto& node : painted) layout_of[node.node_index] = node.layout_index;
 
-    // "Are this element's pixels something style can reproduce at all?" Two
-    // separate reasons say no: the tag draws from outside CSS, or a transform
-    // has taken the element's outline off the axes so the box the snapshot
-    // reports is its bounding box rather than its shape.
+    // "Does this element own every pixel under it?" Two separate reasons say
+    // yes: the tag is one drawing (an `<svg>`) or draws from outside CSS (a
+    // `<canvas>`), or a transform has taken the element's outline off the axes
+    // so the box the snapshot reports is its bounding box rather than its
+    // shape. Either way its descendants must not be lowered separately.
     std::unordered_map<int, bool> capture_only_memo;
     const auto capture_only_node = [&](int node_index) {
         const auto seen = capture_only_memo.find(node_index);
         if (seen != capture_only_memo.end()) return seen->second;
-        bool answer = is_capture_only_element(index.tag_name(node_index));
+        bool answer = owns_its_subtree(index.tag_name(node_index));
         if (!answer) {
             const auto layout = layout_of.find(node_index);
             if (layout != layout_of.end()) {
@@ -533,6 +559,33 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     std::vector<LoweredNode> slots;
     std::unordered_map<int, int> node_to_slot;
 
+    // ── Every `<svg>`, resolved before the walk ──────────────────────────────
+    // A shape's fate is decided by the `<svg>` above it, and Chrome's paint
+    // order does not guarantee the root is visited first (it ranks a whole
+    // stacking phase together, and a shape can sort ahead of its own root). So
+    // the answer is settled here, keyed by node, and the walk only reads it —
+    // the same reason ancestry is answered from the document tree rather than
+    // from what the walk has already seen.
+    std::unordered_map<int, SvgSubtree> svg_subtrees;
+    std::unordered_set<int> vector_shapes;
+    {
+        std::optional<std::vector<std::vector<int>>> child_index;
+        for (const auto& node : painted) {
+            if (node.node_type != kElementNode || node.tag_name != "svg")
+                continue;
+            // A nested `<svg>` is covered by the outer one, which refuses on it
+            // as an unsupported element. Lowering it too would draw its shapes
+            // on top of that capture.
+            if (under_capture_only(node.node_index)) continue;
+            if (!child_index) child_index = build_child_index(index);
+            auto subtree =
+                lower_svg_subtree(index, *child_index, node.node_index);
+            for (const auto& shape : subtree.shapes)
+                vector_shapes.insert(shape.node_index);
+            svg_subtrees.emplace(node.node_index, std::move(subtree));
+        }
+    }
+
     for (const auto& node : painted) {
         if (node.node_type != kElementNode && node.node_type != kTextNode) {
             ++counts.skipped_non_visual;
@@ -546,7 +599,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // The captured ancestor covers this node's pixels already. Emitting
             // it too would draw the same content twice, once wrongly. A nested
             // `<svg>` inside an `<svg>` pools for the same reason.
-            ++counts.pooled_into_fallback;
+            //
+            // A shape inside a DRAWN `<svg>` is the exception: it is not pooled
+            // away, it is emitted as a vector node alongside its root below.
+            // Counting it here too would report a design as pooling the very
+            // geometry it draws.
+            if (vector_shapes.count(node.node_index) == 0)
+                ++counts.pooled_into_fallback;
             continue;
         }
 
@@ -568,8 +627,34 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text);
 
+        // An `<svg>` whose shapes all lower: the element itself keeps whatever
+        // CSS gave its box, and its geometry arrives as vector children below.
+        const auto resolved_svg = svg_subtrees.find(node.node_index);
+        const bool svg_root = resolved_svg != svg_subtrees.end();
+        const SvgSubtree& svg_subtree =
+            svg_root ? resolved_svg->second : kNoSvgSubtree;
+
         PaintClass paint_class = PaintClass::native;
-        if (capture_only) {
+        if (svg_root && svg_subtree.drawable()) {
+            lowered.type = "frame";
+            lowered.attributes["svg_shapes"] =
+                std::to_string(svg_subtree.shapes.size());
+            ++counts.svg_lowered;
+        } else if (svg_root) {
+            // An `<svg>` the vector lowering refused. It is still one drawing
+            // that owns its subtree, so it falls back to the captured element —
+            // carrying WHICH construct refused, because that is the whole
+            // can't-draw list for this design in one string.
+            paint_class = PaintClass::element_capture_fallback;
+            lowered.type = "frame";
+            lowered.attributes["capture_fallback_element"] = node.tag_name;
+            lowered.attributes["capture_fallback_reason"] =
+                "svg-" + std::string(to_string(svg_subtree.refusal));
+            if (!svg_subtree.refusal_detail.empty())
+                lowered.attributes["capture_fallback_detail"] =
+                    svg_subtree.refusal_detail;
+            ++counts.svg_refused;
+        } else if (capture_only) {
             paint_class = PaintClass::element_capture_fallback;
             lowered.type = "frame";
             lowered.attributes["capture_fallback_element"] = node.tag_name;
@@ -635,6 +720,64 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         slot.paint_order = node.paint_order;
         slot.box = box;
         slots.push_back(std::move(slot));
+
+        // One vector node per shape, immediately after the `<svg>` that owns
+        // them, in document order — which for a shape tree IS paint order, and
+        // which the slot order already encodes.
+        //
+        // Every shape gets the `<svg>` element's OWN box, not the shape's. The
+        // shapes share one user-coordinate space (the root `viewBox`), so
+        // giving each its own box would rescale each path by a different factor
+        // and scatter the icon; carrying the same box and the same viewBox on
+        // all of them reproduces the single transform SVG defines. It is the
+        // one place a lowered node's geometry is deliberately not the box
+        // Chrome solved for that node.
+        for (const auto& shape : svg_subtree.shapes) {
+            IRNode vector_node;
+            vector_node.type = "path";
+            vector_node.name = describe(index, shape.node_index);
+            vector_node.attributes["path_data"] = shape.path_data;
+            if (svg_subtree.viewbox_width > 0.0 &&
+                svg_subtree.viewbox_height > 0.0) {
+                vector_node.attributes["svg_viewbox"] =
+                    "0 0 " + format_number(svg_subtree.viewbox_width) + " " +
+                    format_number(svg_subtree.viewbox_height);
+            }
+            // Both paints are ALWAYS stated, `none` included. SVG's own
+            // default fill is opaque black and the renderer's default matches
+            // it, so omitting the fill on a stroke-only icon does not leave it
+            // unfilled — it fills the outline solid black, which is how a
+            // waveform becomes a blob.
+            vector_node.attributes["svg_fill"] = shape.fill.value_or("none");
+            if (shape.even_odd_fill)
+                vector_node.attributes["svg_fill_rule"] = "evenodd";
+            vector_node.attributes["svg_stroke"] =
+                shape.stroke.value_or("none");
+            if (shape.stroke) {
+                vector_node.attributes["svg_stroke_width"] =
+                    format_number(shape.stroke_width);
+            }
+            vector_node.style.position = "absolute";
+            vector_node.attributes["paint_class"] =
+                std::string(to_string(PaintClass::native));
+            vector_node.attributes["paint_order"] =
+                std::to_string(node.paint_order);
+            vector_node.attributes["source_tag"] = shape.tag;
+            vector_node.stable_anchor_id =
+                anchor_path(index, ordinal, shape.node_index);
+            vector_node.anchor_strategy = "capture-path";
+
+            ++counts.native;
+            ++counts.lowered;
+            ++counts.svg_shapes;
+            node_to_slot[shape.node_index] = static_cast<int>(slots.size());
+            LoweredNode shape_slot;
+            shape_slot.node = std::move(vector_node);
+            shape_slot.node_index = shape.node_index;
+            shape_slot.paint_order = node.paint_order;
+            shape_slot.box = box;
+            slots.push_back(std::move(shape_slot));
+        }
     }
 
     // ── Parentage ───────────────────────────────────────────────────────────
