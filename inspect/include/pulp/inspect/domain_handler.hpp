@@ -1,6 +1,8 @@
 // domain_handler.hpp — Dispatches inspector protocol requests to data sources
 #pragma once
 
+#include <pulp/inspect/agent_context.hpp>
+#include <pulp/inspect/capture_source.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/publication_binding.hpp>
@@ -31,6 +33,12 @@ public:
 
     // ── Data sources (all optional) ─────────────────────────────────
     void set_root_view(view::View* root) { root_ = root; }
+    void set_agent_context_source(InspectorAgentContextSource* source) {
+        agent_context_ = source;
+    }
+    void set_capture_source(InspectorCaptureSource* source) {
+        capture_ = source;
+    }
     /// Attach the overlay. Also seeds the overlay's source-jump config
     /// with the handler's current config so the `J` hotkey matches
     /// `Inspector.jumpToSource`. Out-of-line for the same reason as
@@ -91,6 +99,8 @@ public:
 
 private:
     view::View* root_ = nullptr;
+    InspectorAgentContextSource* agent_context_ = nullptr;
+    InspectorCaptureSource* capture_ = nullptr;
     InspectorOverlay* overlay_ = nullptr;
     StateInspector* state_ = nullptr;
     ConsoleCapture* console_ = nullptr;

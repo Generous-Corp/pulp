@@ -481,8 +481,25 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE_FALSE(set_param.is_error);
     REQUIRE(store.get_value(9) == -12.5f);
 
+    // JSON parsers preserve whole-number literals as integers. The wire API
+    // accepts either JSON numeric representation for a parameter value.
+    auto set_integer_param = handler.handle(
+        make_request(53, methods::kStateSetParameter, R"({"id":9,"value":3})"));
+    REQUIRE_FALSE(set_integer_param.is_error);
+    REQUIRE(store.get_value(9) == 3.0f);
+
     auto bad_set_param = handler.handle(make_request(22, methods::kStateSetParameter, "not json"));
     REQUIRE(bad_set_param.is_error);
+
+    // ParamID is uint32_t on the protocol boundary. Reject values that would
+    // otherwise wrap onto a different, valid parameter before touching state.
+    auto negative_id = handler.handle(make_request(
+        54, methods::kStateSetParameter, R"({"id":-1,"value":1.0})"));
+    REQUIRE(negative_id.is_error);
+    auto overflowing_id = handler.handle(make_request(
+        55, methods::kStateSetParameter, R"({"id":4294967296,"value":1.0})"));
+    REQUIRE(overflowing_id.is_error);
+    REQUIRE(store.get_value(9) == 3.0f);
 
     // An unknown parameter id is a clean error, not a silent no-op buried in
     // StateStore.

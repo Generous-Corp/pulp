@@ -553,6 +553,42 @@ public:
     // inserting a virtual among existing methods would shift every later slot.
     virtual bool is_gpu_backed() const { return gpu_surface() != nullptr; }
 
+    /// True only when request_close_deferred() schedules close handling for a
+    /// later native event-loop turn. External standalone hosts must override
+    /// both methods when inspector startup can occur from an idle callback.
+    virtual bool supports_deferred_close() const {
+        return false;
+    }
+
+    /// Schedule request_close() for a later native event-loop turn. The base
+    /// implementation deliberately does not close synchronously.
+    virtual void request_close_deferred() {
+        note_unsupported_feature("request_close_deferred");
+    }
+
+    /// True when capture_png() returns pixels from the visible compositor
+    /// rather than a deterministic host-managed back buffer.
+    virtual bool supports_compositor_capture() const { return false; }
+
+    /// Browser hosts override this query because their page-owned loop returns
+    /// immediately. Stack-owned runtime state may use it to fail closed.
+    virtual bool event_loop_blocks_until_close() const { return true; }
+
+    /// True only when run_event_loop_until() continues dispatching accepted
+    /// main-thread work after the native loop receives its stop signal.
+    virtual bool event_loop_supports_exit_drain() const {
+        return false;
+    }
+
+    /// Run the event loop, then keep dispatching main-thread work until
+    /// `ready_to_return` reports that stack-borrowed state may be destroyed.
+    /// Hosts advertising exit-drain support must override this fallback.
+    virtual void run_event_loop_until(std::function<bool()> ready_to_return) {
+        run_event_loop();
+        if (ready_to_return)
+            (void)ready_to_return();
+    }
+
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently
     /// no-ops (the base-class default ran because the host did not override it).

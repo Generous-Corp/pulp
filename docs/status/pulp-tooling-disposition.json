@@ -2918,6 +2918,14 @@
             "kind": "flag"
           },
           {
+            "name": "--inspect",
+            "kind": "option"
+          },
+          {
+            "name": "--inspect-capability",
+            "kind": "option"
+          },
+          {
             "name": "--audio-inspector",
             "kind": "flag"
           },
