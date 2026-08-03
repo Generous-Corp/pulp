@@ -145,6 +145,10 @@ private:
     void draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& panel,
                       const RackModule& mod, float scale) const;
 
+    /// Every jack the scan recorded, patched or not.
+    void draw_jacks(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                    const RackModule& mod, float scale) const;
+
     void draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
                     const RackModule& mod, float scale) const;
     mutable std::map<std::string, std::vector<KnobSpec>> knob_cache_;

@@ -447,22 +447,34 @@ void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& pan
             static const bool sharp[12] = {false, true, false, true, false,
                                            false, true, false, true, false,
                                            true, false};
-            // Seven white keys to the octave, laid out first.
+            // In Rack's own colours, which is the point of drawing it at all.
+            //
+            // A pale piano was the first attempt, and at preview scale a
+            // light strip on a light panel is the one thing it must not be:
+            // it disappears into the faceplate and reads as an empty window,
+            // which is exactly what a touch plate looked like before it was
+            // drawn. Rack lights this plate amber on near-black, so the
+            // module is identifiable at a glance across the rack -- the same
+            // reason its cables are coloured.
+            canvas.set_fill_color(from_rgb(0x0C0E11, 1.0f));
+            canvas.fill_rect(x, y, w, h);
+            // Seven natural keys to the octave, laid out first.
             const float wh = h / 7.0f;
             for (int i = 0; i < 7; ++i) {
                 const float ky = y + static_cast<float>(i) * wh;
-                canvas.set_fill_color(from_rgb(0xC8CFD8, 1.0f));
-                canvas.fill_rect(x + w * 0.06f, ky + 0.5f * scale,
-                                 w * 0.88f, wh - 1.0f * scale);
+                canvas.set_fill_color(from_rgb(0xC9971F, 1.0f));
+                canvas.fill_rect(x + w * 0.08f, ky + 0.6f * scale,
+                                 w * 0.84f, wh - 1.2f * scale);
             }
-            // Then the black keys, over the joins.
+            // Then the sharps, over the joins and darker, so the overlap that
+            // makes a keyboard legible survives.
             const float bh = h / 12.0f;
             for (int i = 0; i < 12; ++i) {
                 if (!sharp[11 - i]) continue;
                 const float ky = y + static_cast<float>(i) * bh;
-                canvas.set_fill_color(from_rgb(0x14181E, 1.0f));
-                canvas.fill_rect(x + w * 0.06f, ky + bh * 0.15f,
-                                 w * 0.52f, bh * 0.70f);
+                canvas.set_fill_color(from_rgb(0x0C0E11, 1.0f));
+                canvas.fill_rect(x + w * 0.08f, ky + bh * 0.14f,
+                                 w * 0.50f, bh * 0.72f);
             }
         }
     }
@@ -486,6 +498,29 @@ void RackPreview::draw_screens(pulp::canvas::Canvas& canvas, const PanelBox& pan
         canvas.set_line_width(std::max(0.6f, r * 0.30f));
         canvas.stroke_circle(cx, cy, r * 0.78f);
     }
+}
+
+void RackPreview::draw_jacks(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                             const RackModule& mod, float scale) const {
+    const auto* m = PortMap::shared().find(mod.brand, mod.name);
+    if (!m) return;
+
+    // Every jack the module has, not only the ones with a cable in them.
+    //
+    // Sockets used to be drawn by the cable pass, and only for panels with no
+    // artwork of their own -- the reasoning being that a panel WITH artwork
+    // draws its own. It does not. A panel SVG is a background; Rack composites
+    // the jacks on top of it, exactly as it composites the knobs. So a module
+    // with artwork showed a jack only where a lead happened to land, and VCA
+    // -- three jacks, one patched -- came out with two holes missing.
+    //
+    // Drawn here, before the cables, so a lead still lands on a plug in its
+    // own colour: the cable pass paints over the ones it uses.
+    const float r = std::max(2.6f, kJackRadius * scale);
+    for (const auto* group : {&m->inputs, &m->outputs})
+        for (const auto& j : *group)
+            draw_socket(canvas, panel.x + j.x * scale, panel.y + j.y * scale, r,
+                        from_rgb(0x0B0E12, 1.0f));
 }
 
 void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
@@ -528,6 +563,53 @@ void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel
             // refusing those would empty panels that draw correctly today.
             if (!PortMap::draws_as_knob(p)) continue;
             knobs.push_back({p.x, p.y, std::min(p.w, p.h), /*already_points=*/true});
+        }
+        // Everything that is NOT a knob, drawn as what it is.
+        //
+        // Skipping these was right when the only alternative was drawing a
+        // fader as a dial. It is not right as a resting state: MIX's four
+        // channel faders and the ten switches across our modules simply were
+        // not there, so a four-channel mixer showed its channel labels over
+        // bare panel. "Wrong shape" and "no shape" are both wrong; this draws
+        // the shape the scan actually recorded.
+        for (const auto& p : m->params) {
+            if (PortMap::draws_as_knob(p)) continue;
+            if (!(p.w > 0.0f) || !(p.h > 0.0f)) continue;
+            const float cx = panel.x + p.x * scale;
+            const float cy = panel.y + p.y * scale;
+            const float w = p.w * scale;
+            const float h = p.h * scale;
+            if (p.kind == "slider") {
+                // A recessed track with a cap across it. The cap sits at the
+                // middle, for the same reason a knob's indicator points at a
+                // fixed angle: the map records where a control IS, not where
+                // it is set, and a cap drawn at an invented position would
+                // read as a value.
+                const float tw = std::max(1.0f, w * 0.22f);
+                canvas.set_fill_color(from_rgb(0x11151B, 1.0f));
+                canvas.fill_rounded_rect(cx - tw / 2.0f, cy - h / 2.0f, tw, h,
+                                         tw / 2.0f);
+                const float ch = std::max(2.0f, h * 0.13f);
+                const float cw = std::max(3.0f, w * 0.82f);
+                canvas.set_fill_color(from_rgb(0x2A323D, 1.0f));
+                canvas.fill_rounded_rect(cx - cw / 2.0f, cy - ch / 2.0f, cw, ch,
+                                         std::min(2.0f * scale, ch * 0.4f));
+                canvas.set_stroke_color(from_rgb(0x3FD9A4, 1.0f));
+                canvas.set_line_width(std::max(0.8f, ch * 0.22f));
+                canvas.stroke_line(cx - cw * 0.34f, cy, cx + cw * 0.34f, cy);
+            } else {
+                // Switches and buttons: a raised nub in a recess. Small enough
+                // that anything more detailed is noise at panel scale.
+                const float sw = std::max(2.0f, w * 0.72f);
+                const float sh = std::max(2.0f, h * 0.72f);
+                canvas.set_fill_color(from_rgb(0x11151B, 1.0f));
+                canvas.fill_rounded_rect(cx - sw / 2.0f, cy - sh / 2.0f, sw, sh,
+                                         std::min(2.0f * scale, sw * 0.3f));
+                canvas.set_fill_color(from_rgb(0x3B4553, 1.0f));
+                canvas.fill_rounded_rect(cx - sw * 0.32f, cy - sh * 0.32f,
+                                         sw * 0.64f, sh * 0.64f,
+                                         std::min(1.5f * scale, sw * 0.2f));
+            }
         }
     }
     // Only ours have a manifest to fall back to; a vendor module nobody has
@@ -703,6 +785,7 @@ void RackPreview::paint(Canvas& canvas) {
             // same file the panel was emitted from, so a knob lands exactly
             // where Rack will draw one rather than where we guess.
             draw_screens(canvas, panel, *mod_for_panel, L.scale);
+            draw_jacks(canvas, panel, *mod_for_panel, L.scale);
             draw_knobs(canvas, panel, *mod_for_panel, L.scale);
             continue;
         }
