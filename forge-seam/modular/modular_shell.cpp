@@ -446,11 +446,26 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
         const std::string who = what.brand.empty()
                                     ? what.name
                                     : what.brand + " " + what.name;
-        mentions_.show_notice(
-            what.state == MentionCandidate::Availability::paid
-                ? who + " is paid — buy it in Rack's Library, then rescan"
-                : who + " is not installed yet — get it free in Rack's "
-                        "Library, then rescan. The prompt can still name it.");
+        if (what.state == MentionCandidate::Availability::paid) {
+            // Not "buy it". Nothing here spends money, and telling somebody to
+            // go and buy something is a sales pitch, not an answer.
+            mentions_.show_notice(who + " is a paid module this account does "
+                                        "not own. The prompt can still name it.");
+            return;
+        }
+        // FETCH IT. Telling somebody to go to Rack's Library, install a free
+        // module by hand and come back to rescan is handing them a chore we
+        // can do in about ten seconds — and it is the reason a patch that
+        // asked for Surge XT got a lookalike instead.
+        mentions_.show_notice("fetching " + who + "… it will be usable after "
+                              "Rack restarts.");
+        // The row knows a module; patch.py resolves which plugin carries it.
+        // Output is kept rather than discarded: a silent background fetch that
+        // fails leaves somebody staring at a module that never arrives.
+        const std::string log = std::string(std::getenv("HOME") ? std::getenv("HOME") : ".") +
+            "/Library/Application Support/Forge Modular/runs/install.log";
+        run_detached("cd " + quoted(tools_dir()) + " && python3 patch.py install " +
+                     quoted(what.slug) + " >> " + quoted(log) + " 2>&1");
     };
     mentions_.on_choose = [this](const std::string& slug) {
         if (auto* c = chrome()) {

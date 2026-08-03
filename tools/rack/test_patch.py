@@ -798,7 +798,12 @@ def check_library_brief() -> tuple:
     # A brand the user NAMED must never be lost to the length cut. Filling the
     # list alphabetically buried Valley, Sapphire, Squinky and Stoermelder
     # behind "+51 more" -- named in the prompt, free, and invisible.
-    head = brief[brief.index("### free"):].split("(+")[0]
+    # Everything OFFERED, whichever bucket it landed in. Checking only the
+    # free block made this fail the moment Valley got installed, which is a
+    # brittle test rather than a real regression: what matters is that a brand
+    # the prompt named is somewhere the model can see, not which list it is in.
+    offered = brief.split("### not available")[0]
+    head = offered.split("(+")[0] + offered.split("### free")[0]
     for want in ["valley", "sapphire", "squinky", "stoermelder",
                  "count modula", "frozen wasteland", "impromptu"]:
         if want not in head:

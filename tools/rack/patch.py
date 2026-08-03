@@ -2054,9 +2054,25 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
                      "Use these first. They are already here and cost nothing."))
     out.append(block("Owned, not yet installed", owned_missing,
                      "Paid for by this user. Prefer these over free alternatives."))
-    out.append(block("Free, fetched automatically if you name them", fetchable,
-                     "Naming one of these installs it. Treat it as available.",
-                     ranked=True))
+    # Say what will ACTUALLY happen. Promising an automatic download while not
+    # signed in, or while auto_download is off, is the same false promise as
+    # the download path that answered 403 for a year: the model plans around a
+    # module that then never arrives, and the user is the one who finds out.
+    signed_in = bool(rack_library_token())
+    may_fetch = settings().get("auto_download", "entitled") != "none"
+    if not signed_in:
+        free_title = "Free, but NOT signed in to the VCV library"
+        free_note = ("These cannot be fetched until the user signs in via "
+                     "Rack's Library menu. Prefer installed modules; if one of "
+                     "these is genuinely needed, say so plainly.")
+    elif not may_fetch:
+        free_title = "Free, but automatic downloading is switched off"
+        free_note = ("The user has asked to install things themselves. Prefer "
+                     "installed modules and name any of these you need.")
+    else:
+        free_title = "Free, fetched automatically if you name them"
+        free_note = "Naming one of these installs it. Treat it as available."
+    out.append(block(free_title, fetchable, free_note, ranked=True))
     out.append(block("NOT available", unavailable,
                      "Paid plugins this user does not own. Do not use them; "
                      "nothing here will buy a plugin."))
@@ -2276,6 +2292,45 @@ def main(argv):
             extra = f"  ({named} with known port names)" if named else ""
             print(f"  {slug:20} {p['version']:10} {len(p['modules']):3} modules{extra}")
         return 0
+
+    if cmd == "install" and len(argv) > 2:
+        # One plugin, by slug, so the @-mention row can fetch what it just
+        # refused. Exit codes are the contract with the shell: 0 installed,
+        # 3 cannot be had (unowned, or no build for this machine), 4 not
+        # signed in, 1 the request failed and may work on a retry. The shell
+        # needs to tell "ask them to sign in" apart from "try again".
+        slug = argv[2]
+        cat_ = catalog()
+        entry = cat_.get(slug)
+        if not entry:
+            # The @-mention row knows a MODULE, and what has to be installed
+            # is the PLUGIN carrying it. Resolving here rather than adding a
+            # field to the candidate struct keeps every positional
+            # brace-initialiser in the shell's tests working.
+            for pslug, mods in module_index().items():
+                if slug in mods and pslug in cat_:
+                    slug, entry = pslug, cat_[pslug]
+                    break
+        if not entry:
+            print(f"{slug} is not in the VCV library")
+            return 3
+        if not rack_library_token():
+            print("not signed in to the VCV library. Open Rack, use "
+                  "Library -> Log In, then try again.")
+            return 4
+        if slug not in inv and not installable_here(entry):
+            print(f"{slug} has no build for this machine")
+            return 3
+        premium = bool(entry.get("premium"))
+        owned = slug in entitlements_cached(refresh=True)
+        if premium and not owned:
+            print(f"{entry.get('brand') or slug} is paid and not on this "
+                  f"account. Naming it, not buying it.")
+            return 3
+        ok, msg = install_module(slug, entry.get("version") or "",
+                                 premium, owned)
+        print(msg)
+        return 0 if ok else 1
 
     if cmd in ("explain", "lint") and len(argv) > 2:
         patch = json.load(open(argv[2]))
