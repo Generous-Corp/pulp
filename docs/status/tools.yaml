@@ -89,6 +89,66 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: check-pipeline-stages
+    path: tools/import-validation/check_pipeline_stages.py
+    category: visual-compare
+    use_when: Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel.
+    invocation: python3 tools/import-validation/check_pipeline_stages.py <project>/build.design.pulp.json
+    inputs: A DesignIR JSON produced by an import or a generation.
+    outputs: One PASS/FAIL line per stage and a non-zero exit naming the stage that did not happen.
+    caveat: Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: check-agent-panel-invariants
+    path: tools/import-validation/check_agent_panel_invariants.py
+    category: visual-compare
+    use_when: Regression-guard the native design path — run it after touching capture, lowering or paint.
+    invocation: python3 tools/import-validation/check_agent_panel_invariants.py --repo . --panel test/fixtures/agent-panels/magneto --pack-css <pack.css> --pack-fonts <dir>
+    inputs: A saved agent-authored panel fixture and the design pack it links.
+    outputs: PASS lines for 100% native, text-is-text, capture-currency and paint order; exit 77 with a named reason when a dependency is missing.
+    caveat: Skips rather than fails without the importer or a design pack, so a green run is only meaningful if it printed PASS lines. A skip is not a pass.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: replay-agent-panel
+    path: tools/import-validation/replay-agent-panel.sh
+    category: visual-compare
+    use_when: Iterate on the RENDERER against real generated markup without paying for a model call each round.
+    invocation: bash tools/import-validation/replay-agent-panel.sh [panel-dir] [WxH]
+    inputs: A checked-in agent panel fixture; design pack via PULP_FORGE_REPO or PULP_REPLAY_PACK.
+    outputs: Gate result, fidelity score with a per-class failure table, and chrome.png / native.png / diff.png side by side.
+    caveat: Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: check-panel-presence
+    path: tools/import-validation/check_panel_presence.py
+    category: visual-compare
+    use_when: Assert named elements are present in a rendered panel rather than eyeballing a screenshot.
+    invocation: python3 tools/import-validation/check_panel_presence.py --help
+    inputs: A rendered panel and the labels expected in it.
+    outputs: Present/absent per expected label.
+    caveat: Presence is not correctness — an element can be present, misplaced and unreadable.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: chrome-gradient-oracle
+    path: tools/import-validation/chrome_gradient_oracle.py
+    category: visual-compare
+    use_when: Get Chrome's own answer for a CSS gradient when the native paint disagrees.
+    invocation: python3 tools/import-validation/chrome_gradient_oracle.py --help
+    inputs: A CSS gradient declaration.
+    outputs: The rasterised stops Chrome produces, for comparison against Pulp's.
+    caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: diff-against-reference
     path: tools/import-validation/diff_against_reference.py
     category: visual-compare
