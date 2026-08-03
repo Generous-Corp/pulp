@@ -1266,7 +1266,12 @@ void ForgeModularShell::on_poll() {
     // Read what the generator has written FIRST. Evaluating the outcome before
     // pumping meant judging lines that had not been read yet, so every verdict
     // arrived a tick late -- and in a test that polls once, never.
-    pump_build_log();
+    // Only when there is a log to read. This ran on EVERY poll, which the
+    // display link drives at up to 120Hz, so an idle app with no build in
+    // sight was opening and reading a file a hundred times a second. Nothing
+    // downstream uses the result unless `watching_` is set, so the read was
+    // pure cost.
+    if (watching_) pump_build_log();
 
     // Keep the stage card in step with what the generator is actually doing.
     if (watching_) {
