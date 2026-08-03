@@ -35,5 +35,17 @@ Failing ink by class, worst first, as a share of each class's own ink:
 
 Read the percentage, not the pixel count. `gradient` loses more absolute pixels
 than `shadow` while failing a third as much of what it draws — it is simply the
-larger surface. The two classes actually failing are `blend` at 44% and
-`filter` at essentially all of its single node.
+larger surface.
+
+Then do not believe the percentage either, without ablating. `blend` at 44%
+reads as the obvious defect and is not one: neutralising `mix-blend-mode` here
+and re-scoring gives 0.8390, *worse* than the 0.8479 baseline. The scorer bills
+each pixel to the smallest node containing it, so a large blended overlay is
+charged for every error showing through it. Measured on this panel:
+
+    baseline 0.8479 · no-blend 0.8390 · no-backdrop 0.8480
+    no-filter 0.8569 · no-boxshadow 0.8771
+
+Stripping every box-shadow — the largest single term — recovers 0.029 of a
+0.152 gap, so no one feature explains it. Text is likewise mostly contextual:
+13.7% of its ink fails on a flat fill against 31.3% here.

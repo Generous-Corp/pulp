@@ -33,6 +33,12 @@ Failing ink by class, worst first, as a share of each class's own ink:
 
 The lowest score of the three panels, and the most useful one. `shadow` fails
 30.7% of its ink across 72 nodes here versus 17.6% on kelvin — the grid is
-exactly the many-small-shadows case. `blend` fails ~44% on both panels
-independently, which is what makes it a renderer defect rather than a property
-of any one design.
+exactly the many-small-shadows case.
+
+`blend` fails ~44% on both panels independently, which looked like a renderer
+defect. **It is not.** Ablating `mix-blend-mode` from kelvin and re-scoring
+makes the panel worse (0.8479 -> 0.8390), which a broken feature cannot do.
+The scorer bills each pixel to the smallest node containing it, so a large
+blended overlay is charged for everything showing through it. Both of these
+classes are locations, not causes — ablate before believing either.
+A repeated 48-cell inset-shadow grid scores 0.9920 in isolation.
