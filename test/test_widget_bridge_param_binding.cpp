@@ -1550,6 +1550,40 @@ TEST_CASE("value bindings lease and re-resolve the replacement channel set",
     CHECK_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
 }
 
+TEST_CASE("a temporarily unavailable value-channel lease preserves its neutral",
+          "[view][bridge][state-binding][value-channel][hot-swap][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* level = channels.declare_meter("level", {}, 0.35f);
+    REQUIRE(level != nullptr);
+    ValueChannelSet* active = &channels;
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channel_access(
+        [&](const ValueChannelVisitor& visitor) { visitor(active); });
+    bridge.load_script(R"(
+        createMeter('live');
+        bindMeter('live', 'value:level');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("live"));
+    REQUIRE(meter != nullptr);
+
+    level->publish(mono_frame(0.25f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.25f, 1e-5f));
+
+    active = nullptr;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.35f, 1e-5f));
+}
+
 TEST_CASE("value generation identity survives same-address replacement ABA",
           "[view][bridge][state-binding][value-channel][hot-swap][aba]") {
     ScriptEngine engine;

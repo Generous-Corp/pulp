@@ -175,6 +175,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/platform_services_api.cpp
     src/widget_bridge/runtime_api.cpp
     src/widget_bridge/state_binding_api.cpp
+    src/widget_bridge/value_channel_binding_service.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
     src/widget_bridge/svg_api.cpp
