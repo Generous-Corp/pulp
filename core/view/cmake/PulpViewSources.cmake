@@ -22,6 +22,8 @@ target_sources(pulp-view-core PRIVATE
     src/gesture.cpp
     src/value_channel_json.cpp
     src/value_channel_set.cpp
+    src/value_channel_telemetry.cpp
+    src/value_source.cpp
     src/value_source_binding.cpp
     src/view.cpp
     src/view_paint.cpp
@@ -150,6 +152,7 @@ target_sources(pulp-view-script PRIVATE
     src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
+    src/widget_bridge/value_channel_access.cpp
     src/widget_bridge/bridge_dispatch.cpp
     src/widget_bridge/css_color.cpp
     src/widget_bridge/accessibility_api.cpp
@@ -172,6 +175,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/platform_services_api.cpp
     src/widget_bridge/runtime_api.cpp
     src/widget_bridge/state_binding_api.cpp
+    src/widget_bridge/value_channel_binding_service.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
     src/widget_bridge/svg_api.cpp

@@ -98,8 +98,11 @@ bool ViewBridge::open(std::string* error) {
         }
     } else {
         // Fall back to the scripted-UI or AutoUi default.
-        auto instance = build_editor_ui(store_, options_.enable_hot_reload, &last_error_,
-                                        processor_.value_channels());
+        auto value_channel_access =
+            processor_value_channel_access(processor_, owner_alive_);
+        auto instance = build_editor_ui_with_value_channel_access(
+            store_, options_.enable_hot_reload, &last_error_,
+            std::move(value_channel_access));
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;
@@ -255,6 +258,34 @@ const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     if (!owner_is_alive()) return nullptr;
     PULP_TRY { return processor_.active_scripted_ui(); }
     PULP_CATCH_ALL { return nullptr; }
+}
+
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(view::ScriptedUiSession*)>& visitor) {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    processor_.visit_active_scripted_ui(visitor);
+}
+
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(const view::ScriptedUiSession*)>& visitor) const {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    static_cast<const Processor&>(processor_).visit_active_scripted_ui(visitor);
 }
 
 void ViewBridge::notify_attached() {

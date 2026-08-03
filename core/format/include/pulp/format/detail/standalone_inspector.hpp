@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -48,12 +49,24 @@ struct StandaloneInspectorAuditEntry {
     std::string error_code;
 };
 
+struct StandaloneInspectorTelemetryState {
+    std::size_t pending_disconnects = 0;
+    std::size_t active_subscriptions = 0;
+    std::uint64_t source_generation = 0;
+    std::uint64_t source_transition_count = 0;
+    std::uint64_t attachment_attempt_count = 0;
+};
+
 /// Process-local fixture seam that may take ownership of the next inspector
 /// RPC closure and report whether it accepted that closure.
 using StandaloneInspectorRpcPostOverride =
     std::function<std::optional<bool>(std::function<void()>&)>;
 void set_standalone_inspector_rpc_post_override_for_testing(
     StandaloneInspectorRpcPostOverride post_override);
+using StandaloneInspectorTelemetryClock =
+    std::function<std::chrono::steady_clock::time_point()>;
+void set_standalone_inspector_telemetry_clock_for_testing(
+    StandaloneInspectorTelemetryClock clock);
 #endif
 
 /// Host-owned composition root for one explicitly activated standalone
@@ -81,6 +94,7 @@ class StandaloneInspectorRuntime {
     StandaloneInspectorLifecycleState lifecycle_state() const;
 #if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
     std::vector<StandaloneInspectorAuditEntry> audit_snapshot_for_testing() const;
+    StandaloneInspectorTelemetryState telemetry_state_for_testing() const;
 #endif
     void set_overlay_active(bool active);
     bool startup_failed() const { return startup_failed_; }

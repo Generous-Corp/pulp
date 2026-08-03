@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/editor_ui.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
@@ -1048,6 +1049,48 @@ TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bri
     // A non-reloadable processor never rebuilds — poll is always false, no wrapper.
     REQUIRE_FALSE(bridge.poll_editor_reload());
     REQUIRE_FALSE(bridge.poll_editor_reload());
+}
+
+TEST_CASE("processor value-channel access fails closed after owner destruction",
+          "[view_bridge][value-channel][owner-lifetime][lifecycle]") {
+    runtime::AliveToken owner_alive;
+    view::ValueChannelAccess access;
+    int processor_visits = 0;
+
+    struct ChannelProcessor final : StubProcessor {
+        explicit ChannelProcessor(int& visits) : visits_(visits) {
+            channels_.declare_meter("level");
+        }
+        void visit_value_channels(
+            const std::function<void(view::ValueChannelSet*)>& visitor) override {
+            ++visits_;
+            visitor(&channels_);
+        }
+        int& visits_;
+        view::ValueChannelSet channels_;
+    };
+
+    {
+        ChannelProcessor processor(processor_visits);
+        access = format::processor_value_channel_access(
+            processor, owner_alive.capture());
+        bool saw_channels = false;
+        access([&](view::ValueChannelSet* channels) {
+            saw_channels = channels != nullptr;
+        });
+        CHECK(saw_channels);
+        CHECK(processor_visits == 1);
+
+        // The owner contract retires the token before releasing Processor.
+        owner_alive.retire();
+    }
+
+    bool saw_channels_after_destruction = true;
+    access([&](view::ValueChannelSet* channels) {
+        saw_channels_after_destruction = channels != nullptr;
+    });
+    CHECK_FALSE(saw_channels_after_destruction);
+    CHECK(processor_visits == 1);
 }
 
 // Regression: the GPU display-link scripted-idle pump is dispatched to the main

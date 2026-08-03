@@ -851,6 +851,42 @@ public:
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
     virtual view::ValueChannelSet* value_channels() { return nullptr; }
 
+    /// Synchronously visit the current value-channel set while the processor
+    /// keeps it alive. Callers that need to claim an attachment from a processor
+    /// whose implementation can replace its backing instance must do so inside
+    /// this callback rather than retaining the raw value_channels() result.
+    ///
+    /// The callback must stay bounded and must not re-enter this processor. The
+    /// pointer is non-owning and is valid only for the callback unless the
+    /// concrete processor independently guarantees a longer lifetime.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual void visit_value_channels(
+        const std::function<void(view::ValueChannelSet*)>& visitor) {
+        if (visitor) visitor(value_channels());
+    }
+
+    /// Synchronously visit the active scripted-UI session while the processor
+    /// keeps it alive. Reloadable processors must retain their active-generation
+    /// lease for the full callback instead of returning a reload-owned raw
+    /// pointer to the caller.
+    ///
+    /// The pointer is non-owning and is valid only for the callback. The
+    /// callback must stay bounded and must not re-enter this processor.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual void visit_active_scripted_ui(
+        const std::function<void(view::ScriptedUiSession*)>& visitor) {
+        if (visitor) visitor(active_scripted_ui());
+    }
+
+    /// Const counterpart to visit_active_scripted_ui().
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual void visit_active_scripted_ui(
+        const std::function<void(const view::ScriptedUiSession*)>& visitor) const {
+        if (visitor) visitor(active_scripted_ui());
+    }
+
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;

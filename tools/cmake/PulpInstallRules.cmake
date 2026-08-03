@@ -109,6 +109,9 @@ endif()
 if(TARGET pulp-inspect-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
 endif()
+if(TARGET pulp-inspect-telemetry)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-telemetry)
+endif()
 if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
 endif()
@@ -295,6 +298,7 @@ if(TARGET pulp-inspect)
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inc")
 elseif(TARGET pulp-inspect-protocol)
     install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/audit.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
@@ -307,8 +311,10 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/test_input.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/value_channel_telemetry_broker.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
 endif()
 

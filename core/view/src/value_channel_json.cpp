@@ -22,9 +22,15 @@ choc::value::Value value_channel_to_value(const ValueChannelInfo& info) {
 }
 
 choc::value::Value value_channels_to_value(const ValueChannelSet* channels) {
+    return value_channels_to_value(
+        channels ? std::span<const ValueChannelInfo>(channels->infos())
+                 : std::span<const ValueChannelInfo>{});
+}
+
+choc::value::Value
+value_channels_to_value(std::span<const ValueChannelInfo> channels) {
     auto arr = choc::value::createEmptyArray();
-    if (channels == nullptr) return arr;
-    for (const auto& info : channels->infos()) arr.addArrayElement(value_channel_to_value(info));
+    for (const auto& info : channels) arr.addArrayElement(value_channel_to_value(info));
     return arr;
 }
 

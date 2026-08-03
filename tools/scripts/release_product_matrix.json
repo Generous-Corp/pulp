@@ -49,6 +49,7 @@
     "pulp-inspect-protocol",
     "pulp-inspect-publication",
     "pulp-inspect-runtime",
+    "pulp-inspect-telemetry",
     "pulp-interchange",
     "pulp-midi",
     "pulp-native-components",
