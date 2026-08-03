@@ -1133,7 +1133,11 @@ commands:
       - name: --output
         kind: option
         required: false
-        description: File path for the one-shot command response
+        description: File path for a legacy one-shot command response
+      - name: --out
+        kind: option
+        required: false
+        description: Screenshot subcommand output path for decoded PNG bytes
       - name: --id
         kind: option
         required: false
@@ -1181,7 +1185,7 @@ commands:
       - name: --json
         kind: flag
         required: false
-        description: Emit schemaVersion 1 JSON for profiles, list, capabilities, or doctor
+        description: Emit stable JSON for named commands, including screenshot capture or unsupported status
     subcommands:
       - name: profiles
         summary: List the declared off, observe, and develop profiles and capabilities
@@ -1191,6 +1195,8 @@ commands:
         summary: Authenticate and report available/effective capabilities for one exact publication
       - name: doctor
         summary: Report discovery runtime-directory readiness and live-session count
+      - name: screenshot
+        summary: Save the selected standalone's deterministic in-process back buffer as validated PNG bytes; unsupported hosts exit 3 without creating an output
       - name: set-parameter
         summary: Apply one typed numeric parameter mutation under state.write and a controller lease
       - name: inject-midi

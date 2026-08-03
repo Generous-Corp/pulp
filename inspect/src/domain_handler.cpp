@@ -880,7 +880,7 @@ InspectorMessage DomainHandler::handle_capture(const InspectorMessage& req) {
                               "capture_unavailable");
         auto captured = capture_->capture_png();
         if (!captured.error.empty())
-            return make_error(req.id, captured.error, "capture_failed");
+            return make_error(req.id, captured.error, captured.error_code.empty() ? "capture_failed" : captured.error_code);
         if (captured.png.empty())
             return make_error(req.id, "Capture source returned no PNG bytes",
                               "capture_failed");

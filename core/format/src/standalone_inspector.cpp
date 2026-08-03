@@ -23,6 +23,8 @@
 #include <pulp/runtime/build_info.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
@@ -122,41 +124,49 @@ std::optional<inspect::InspectorProfile> parse_profile(std::string_view profile)
 }
 
 std::vector<inspect::InspectorCapability>
-standalone_capabilities(bool compositor_capture) {
+standalone_capabilities(bool back_buffer_capture) {
     using C = inspect::InspectorCapability;
     std::vector<inspect::InspectorCapability> result{
         C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
         C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::TestInput,
         C::AuthoringTweaks, C::TelemetryStream};
-    if (compositor_capture)
+    if (back_buffer_capture)
         result.push_back(C::CaptureImage);
     return result;
 }
 
 bool standalone_capability_available(inspect::InspectorCapability capability,
-                                     bool compositor_capture) {
-    const auto available = standalone_capabilities(compositor_capture);
+                                     bool back_buffer_capture) {
+    const auto available = standalone_capabilities(back_buffer_capture);
     return std::find(available.begin(), available.end(), capability) != available.end();
 }
 
-std::optional<std::pair<std::uint32_t, std::uint32_t>>
-png_dimensions(const std::vector<std::uint8_t>& png) {
-    constexpr std::uint8_t signature[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
-    if (png.size() < 24 || !std::equal(std::begin(signature), std::end(signature), png.begin())
-        || !std::equal(png.begin() + 12, png.begin() + 16, "IHDR")) {
-        return std::nullopt;
+bool standalone_capture_available(view::View& root,
+                                  const view::WindowHost& window) {
+    const auto requirements = view::inspect_capture_requirements(root);
+    const bool live_back_buffer = window.supports_back_buffer_capture()
+        && view::has_screenshot_decoder();
+    if (requirements.native_overlay)
+        return false;
+    float sx = 0.0f;
+    float sy = 0.0f;
+    float tx = 0.0f;
+    float ty = 0.0f;
+    if (window.design_viewport_transform(sx, sy, tx, ty)) {
+        return live_back_buffer
+            && (!requirements.requires_gpu || window.is_gpu_backed());
     }
-    const auto read_be32 = [&png](std::size_t offset) {
-        return (static_cast<std::uint32_t>(png[offset]) << 24u)
-             | (static_cast<std::uint32_t>(png[offset + 1]) << 16u)
-             | (static_cast<std::uint32_t>(png[offset + 2]) << 8u)
-             | static_cast<std::uint32_t>(png[offset + 3]);
-    };
-    const auto width = read_be32(16);
-    const auto height = read_be32(20);
-    if (width == 0 || height == 0)
-        return std::nullopt;
-    return std::pair{width, height};
+    if (requirements.requires_gpu) {
+        const bool live_gpu_readback = window.is_gpu_backed()
+            && live_back_buffer;
+        return live_gpu_readback || view::has_gpu_capture();
+    }
+    return live_back_buffer || view::has_screenshot_backend();
+}
+
+bool standalone_capture_producer_available(const view::WindowHost& window) {
+    return (window.supports_back_buffer_capture() && view::has_screenshot_decoder())
+        || view::has_screenshot_backend();
 }
 
 } // namespace
@@ -205,7 +215,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
               [] { return events::MainThreadDispatcher::is_main_thread(); })),
           session_(inspect::InspectorSessionInfo{session_id_, instance_id_,
                                                  processor.descriptor().bundle_id, "1"},
-                   make_policy(profile, std::move(custom), window.supports_compositor_capture()),
+                   make_policy(profile, std::move(custom),
+                               standalone_capture_available(root, window)),
                    [this](const inspect::InspectorRequestContext& context,
                           const inspect::InspectorMessage& request) {
                        refresh_live_state();
@@ -236,7 +247,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                                                std::max(0, processor_.latency_samples())});
         domains_.set_root_view(&root_);
         domains_.set_agent_context_source(this);
-        if (window_.supports_compositor_capture())
+        if (standalone_capture_producer_available(window_))
             domains_.set_capture_source(this);
         domains_.set_state_inspector(&state_);
         domains_.set_console_capture(console_.get());
@@ -403,15 +414,88 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
 
     inspect::InspectorCapture capture_png() override {
         inspect::InspectorCapture result;
-        result.png = window_.capture_png();
-        const auto dimensions = png_dimensions(result.png);
-        if (!dimensions) {
-            result.png.clear();
-            result.error = "Selected standalone window did not provide a valid compositor PNG";
+        const auto requirements = view::inspect_capture_requirements(root_);
+        if (!standalone_capture_available(root_, window_)) {
+            result.error_code = "capture_unavailable";
+            if (requirements.native_overlay) {
+                result.error =
+                    "Selected standalone view contains an OS-composited native overlay";
+            } else if (requirements.requires_gpu) {
+                result.error = "Selected standalone view requires a GPU capture backend";
+            } else {
+                result.error = "Selected standalone view has no in-process screenshot backend";
+            }
             return result;
         }
-        result.width = dimensions->first;
-        result.height = dimensions->second;
+        const bool use_live_back_buffer = window_.supports_back_buffer_capture()
+            && view::has_screenshot_decoder()
+            && (!requirements.requires_gpu || window_.is_gpu_backed());
+        if (use_live_back_buffer) {
+            result.png = window_.capture_back_buffer_png();
+            const auto metadata = view::inspect_png_metadata(result.png);
+            if (metadata.valid && view::passes_capture_content_floor(result.png)) {
+                result.width = metadata.width;
+                result.height = metadata.height;
+                return result;
+            }
+            result.png.clear();
+        }
+
+        float viewport_sx = 0.0f;
+        float viewport_sy = 0.0f;
+        float viewport_tx = 0.0f;
+        float viewport_ty = 0.0f;
+        if (window_.design_viewport_transform(
+                viewport_sx, viewport_sy, viewport_tx, viewport_ty)) {
+            result.error = use_live_back_buffer
+                ? "Selected standalone window did not provide a valid design-viewport PNG"
+                : "Selected standalone design viewport has no live back-buffer capture";
+            return result;
+        }
+
+        const bool portable_capture_available = requirements.requires_gpu
+            ? view::has_gpu_capture()
+            : view::has_screenshot_backend();
+        if (portable_capture_available) {
+            auto size = window_.get_content_size();
+            if (size.width == 0 || size.height == 0) {
+                const auto bounds = root_.bounds();
+                if (bounds.width > 0.0f && bounds.height > 0.0f) {
+                    size.width = static_cast<std::uint32_t>(bounds.width);
+                    size.height = static_cast<std::uint32_t>(bounds.height);
+                }
+            }
+            if (size.width == 0 || size.height == 0) {
+                const auto preferred = processor_.view_size();
+                size.width = preferred.preferred_width;
+                size.height = preferred.preferred_height;
+            }
+            if (size.width == 0 || size.height == 0) {
+                result.error = "Selected standalone window has no capturable dimensions";
+                return result;
+            }
+            auto captured = view::capture_view(root_, size.width, size.height, 1.0f);
+            if (!captured.ok) {
+                result.error = captured.reason.empty()
+                    ? "Selected standalone view could not be rendered in process"
+                    : std::move(captured.reason);
+                return result;
+            }
+            result.png = std::move(captured.png);
+        } else {
+            result.error = use_live_back_buffer
+                ? "Selected standalone window did not provide a valid in-process PNG"
+                : "Selected standalone view has no in-process screenshot backend";
+            return result;
+        }
+        const auto metadata = view::inspect_png_metadata(result.png);
+        if (!metadata.valid) {
+            result.png.clear();
+            result.error = "Selected standalone window did not provide a valid in-process PNG";
+            return result;
+        }
+        result.width = metadata.width;
+        result.height = metadata.height;
         return result;
     }
 
@@ -645,11 +729,11 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     static inspect::InspectorPolicyConfig
     make_policy(inspect::InspectorProfile profile,
                 std::vector<inspect::InspectorCapability> custom,
-                bool compositor_capture) {
+                bool back_buffer_capture) {
         inspect::InspectorPolicyConfig policy;
         policy.profile = profile;
         policy.custom_capabilities = std::move(custom);
-        policy.available_capabilities = standalone_capabilities(compositor_capture);
+        policy.available_capabilities = standalone_capabilities(back_buffer_capture);
         return policy;
     }
 
@@ -877,7 +961,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
             const auto capability = inspect::capability_from_id(id);
             if (!capability || !inspect::capability_is_grantable(*capability) ||
                 !standalone_capability_available(
-                    *capability, window.supports_compositor_capture())) {
+                    *capability, standalone_capture_available(root, window))) {
                 runtime::log_error("Standalone: invalid custom inspector capability '{}'", id);
                 return nullptr;
             }

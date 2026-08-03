@@ -127,15 +127,19 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
             self.assertEqual(cap._which_or_none("xcrun"), "/bin/xcrun")
             self.assertTrue(cap._source_available("macos", "1,2,3,4"))
             self.assertTrue(cap._source_available("simulator", None))
+            self.assertTrue(cap._source_available("inspector", None))
 
         with mock.patch.object(cap.shutil, "which", return_value=None):
             self.assertIsNone(cap._which_or_none("missing"))
             self.assertFalse(cap._source_available("macos", "1,2,3,4"))
             self.assertFalse(cap._source_available("simulator", None))
+            self.assertFalse(cap._source_available("inspector", None))
 
         with mock.patch.object(cap.shutil, "which", return_value="/bin/screencapture"):
             self.assertFalse(cap._source_available("macos", None))
             self.assertFalse(cap._source_available("other", "1,2,3,4"))
+
+        self.assertTrue(cap._source_available("inspector", None, "/tmp/pulp-cpp"))
 
     def test_capture_macos_requires_tool_and_nonempty_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,6 +175,64 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
                 ["/usr/bin/xcrun", "simctl", "io", "booted", "screenshot"],
             )
 
+    def test_capture_inspector_uses_named_png_command_and_exact_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "live.png"
+
+            def write_png(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                Path(args[args.index("--out") + 1]).write_bytes(b"png")
+                return subprocess.CompletedProcess(args, 0)
+
+            with mock.patch.object(cap.subprocess, "run", side_effect=write_png) as run:
+                self.assertEqual(
+                    cap._capture_inspector(
+                        dest,
+                        "/tmp/pulp-cpp",
+                        session="session-a",
+                        instance="instance-b",
+                        publication="publication-c",
+                    ),
+                    0,
+                )
+            self.assertEqual(
+                run.call_args.args[0],
+                [
+                    "/tmp/pulp-cpp", "inspect", "screenshot", "--out", str(dest),
+                    "--session", "session-a", "--instance", "instance-b",
+                    "--publication", "publication-c",
+                ],
+            )
+
+    def test_capture_inspector_converts_launch_and_timeout_errors_to_failed_grabs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "live.png"
+            stderr = io.StringIO()
+            errors = [
+                FileNotFoundError("missing pulp"),
+                subprocess.TimeoutExpired(["pulp"], 10),
+            ]
+            for error in errors:
+                with self.subTest(error=type(error).__name__):
+                    with mock.patch.object(cap.subprocess, "run", side_effect=error):
+                        with contextlib.redirect_stderr(stderr):
+                            self.assertEqual(cap._capture_inspector(dest, "/missing/pulp"), 1)
+            self.assertIn("inspector capture failed", stderr.getvalue())
+
+    def test_capture_inspector_preserves_cli_failure_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "live.png"
+            failed = subprocess.CompletedProcess(
+                ["pulp", "inspect", "screenshot"],
+                3,
+                stderr=b"Capture.screenshot is unsupported by this host\n",
+            )
+            stderr = io.StringIO()
+            with mock.patch.object(cap.subprocess, "run", return_value=failed):
+                with contextlib.redirect_stderr(stderr):
+                    self.assertEqual(cap._capture_inspector(dest, "/tmp/pulp-cpp"), 3)
+            self.assertIn("exit 3", stderr.getvalue())
+            self.assertIn("unsupported by this host", stderr.getvalue())
+
     def test_mean_diff_crops_mismatched_shapes_before_abs_mean(self) -> None:
         prev_arr = FakeArray([
             [[10, 20, 30], [40, 50, 60]],
@@ -201,6 +263,13 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
                         self.assertEqual(cap.capture("macos", Path(tmp), bounds=None), 3)
             self.assertIn("source `macos` unavailable", stderr.getvalue())
 
+            with mock.patch.object(cap, "_load_deps", return_value=(FakeNumpy, FakeImageModule)):
+                with mock.patch.object(cap, "_which_or_none", return_value=None):
+                    self.assertEqual(
+                        cap.capture("inspector", Path(tmp), pulp_bin="/missing/pulp"),
+                        3,
+                    )
+
     def test_capture_reports_initial_grab_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stderr = io.StringIO()
@@ -212,6 +281,21 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
 
         self.assertEqual(status, 3)
         self.assertIn("before any frames captured", stderr.getvalue())
+
+    def test_capture_preserves_initial_inspector_failure_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(cap, "_load_deps", return_value=(FakeNumpy, FakeImageModule)):
+                with mock.patch.object(cap, "_which_or_none", return_value="/tmp/pulp-cpp"):
+                    with mock.patch.object(cap, "_capture_inspector", return_value=1):
+                        self.assertEqual(
+                            cap.capture(
+                                "inspector",
+                                Path(tmp),
+                                pulp_bin="/tmp/pulp-cpp",
+                                idle_timeout_s=0.01,
+                            ),
+                            1,
+                        )
 
     def test_capture_reports_partial_mid_run_failure_after_saved_frame(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -292,6 +376,18 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertIn("--bounds X,Y,W,H is required", stderr.getvalue())
 
+    def test_main_requires_complete_inspector_identity(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            status = cap.main([
+                "--source", "inspector",
+                "--output-dir", "frames",
+                "--session", "session-only",
+            ])
+
+        self.assertEqual(status, 2)
+        self.assertIn("must be provided together", stderr.getvalue())
+
     def test_main_forwards_cli_options_to_capture(self) -> None:
         with mock.patch.object(cap, "capture", return_value=0) as capture:
             self.assertEqual(
@@ -316,6 +412,10 @@ class MotionVisualCaptureSimFramesTests(unittest.TestCase):
             gate_consecutive=2,
             idle_timeout_s=7.0,
             bounds=None,
+            pulp_bin=None,
+            session=None,
+            instance=None,
+            publication=None,
         )
 
 

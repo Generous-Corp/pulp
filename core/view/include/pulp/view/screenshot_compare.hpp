@@ -78,6 +78,18 @@ struct ScreenshotContentStats {
     }
 };
 
+/// Decoder-independent PNG structure and dimensions. Validates the signature,
+/// IHDR, bounded chunk framing, at least one IDAT, and terminal IEND. This is
+/// suitable for transport validation on builds that intentionally omit a PNG
+/// pixel decoder; use analyze_screenshot_content() when pixel statistics matter.
+struct PngMetadata {
+    bool valid = false;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+PngMetadata inspect_png_metadata(const std::vector<uint8_t>& png);
+
 /// Compare two PNG images for visual similarity.
 /// @param reference_png  Raw PNG bytes of the reference (source design) image
 /// @param rendered_png   Raw PNG bytes of the rendered Pulp output

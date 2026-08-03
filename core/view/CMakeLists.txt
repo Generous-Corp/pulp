@@ -406,6 +406,23 @@ elseif(UNIX)
     # (libdbus-1 dlopen'd). No atk-bridge-2.0 / libatspi at build time.
 endif()
 
+# Capability probe used by remote inspector capture. Desktop macOS has the
+# CoreGraphics implementation above; Skia-enabled Windows/Linux builds use the
+# portable raster implementation. Other targets remain provider/GPU-dependent
+# and therefore report unsupported until they install a real producer.
+if((APPLE AND NOT PULP_IOS) OR (WIN32 AND PULP_HAS_SKIA)
+   OR (UNIX AND NOT APPLE AND NOT ANDROID AND PULP_HAS_SKIA))
+    target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_BUILTIN_SCREENSHOT=1)
+endif()
+
+# capture_view() only accepts provider output after its blank/content floor can
+# decode the PNG. Apple uses ImageIO; Skia builds use SkPngDecoder. A provider
+# without either remains available to direct render_to_png() callers, but is
+# not advertised as an always-honest smart-capture backend.
+if(APPLE OR PULP_HAS_SKIA)
+    target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_SCREENSHOT_DECODER=1)
+endif()
+
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
 # visualization_bridge.hpp forward-declares PerfCounters and the dereferencing
 # code lives in visualization_bridge.cpp, so the link stays PRIVATE regardless

@@ -361,7 +361,7 @@ tools:
     use_when: Validate the Spectr import lane end to end.
     invocation: bash tools/import-validation/spectr-roundtrip.sh
     inputs: The in-tree Spectr fixtures.
-    outputs: Parser + render validation for the lane.
+    outputs: Parser + live in-process standalone PNG + render validation for the lane; capture does not require macOS Screen Recording permission.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md

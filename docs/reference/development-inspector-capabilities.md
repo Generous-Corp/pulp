@@ -34,7 +34,7 @@ trip.
 | `ui.read` | yes | yes | The standalone session exposes its live view tree and value-channel catalog |
 | `diagnostics.read` | yes | yes | Agent context and audio configuration are attached; individual performance sources may report unavailable |
 | `logs.read` | yes | yes | Scripted-UI console capture remains attached across in-place reloads |
-| `capture.image` | yes | yes | Whole-window compositor capture is available when the selected standalone host supports it; node capture remains unavailable |
+| `capture.image` | yes | yes | Advertised only when the initial standalone tree has an honest live or portable whole-window capture route; each request revalidates reload-sensitive native-overlay/GPU requirements; node capture remains unavailable |
 | `trace.control` | no | yes | Domain components exist but the standalone owner does not advertise them without a trace binding |
 | `trace.session.control` | no | yes | Process-global Trace sessions require a publication-scoped binding |
 | `state.write` | no | yes | The `develop` standalone profile applies legal parameter mutations on the main thread after acquiring the same-connection controller lease |
@@ -58,7 +58,7 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |
 | CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
 | MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
-| Capture/telemetry | Whole-window compositor capture, owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture and CLI/MCP watch commands |
+| Capture/telemetry | Whole-window in-process capture (live host back-buffer when available, portable view rendering otherwise), owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture, external-host compositing, and CLI/MCP watch commands |
 | Shipping | The component gate removes inspector targets and CLI commands fail explicitly when disabled; ordinary-format symbol stripping is continuously checked | Per-target declaration, shipped-product manifest, and override proof |
 
 The production server binds loopback only and requires fresh, role-separated

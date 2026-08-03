@@ -140,7 +140,7 @@ InspectorPolicyConfig fixture_policy() {
         InspectorCapability::StateRead,       InspectorCapability::StateWrite,
         InspectorCapability::TestInput,       InspectorCapability::UiRead,
         InspectorCapability::DiagnosticsRead, InspectorCapability::LogsRead,
-        InspectorCapability::AuthoringTweaks,
+        InspectorCapability::AuthoringTweaks, InspectorCapability::CaptureImage,
     };
     return policy;
 }
@@ -266,6 +266,118 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
     REQUIRE(fixture.seen.size() == 1);
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE((fixture.seen[0].params_json.empty() || fixture.seen[0].params_json == "{}"));
+}
+
+TEST_CASE("pulp inspect screenshot writes decoded PNG bytes",
+          "[cli][shellout][inspect][screenshot]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    InspectServerFixture fixture;
+    fixture.handler = [](const InspectorMessage& request) {
+        REQUIRE(request.method == pulp::inspect::methods::kCaptureScreenshot);
+        return make_response(
+            request.id,
+            R"({"mimeType":"image/png","width":1,"height":1,"data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="})");
+    };
+
+    const auto nested = fixture.temp / "artifacts" / "live.png";
+    const auto result = run_pulp(
+        {"inspect", "screenshot", "--out", nested.string(), "--json"}, 10000);
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(fs::exists(nested));
+    const auto bytes = read_text_file(nested);
+    REQUIRE(bytes.size() > 24);
+    CHECK(static_cast<unsigned char>(bytes[0]) == 0x89);
+    CHECK(bytes.substr(1, 3) == "PNG");
+    const auto output = choc::json::parse(result.stdout_output);
+    CHECK(output["schemaVersion"].getString() == "pulp.inspect.screenshot.v1");
+    CHECK(output["status"].getString() == "captured");
+    CHECK(output["width"].getInt64() == 1);
+    CHECK(output["height"].getInt64() == 1);
+    CHECK(output["path"].getString() == nested.string());
+    REQUIRE(fixture.seen.size() == 1);
+
+    const auto bare_path = fixture.temp / "bare.png";
+    {
+        std::ofstream existing(bare_path, std::ios::binary);
+        existing << "old screenshot";
+    }
+    const auto bare = run_pulp_in_directory(
+        fixture.temp, {"inspect", "screenshot", "--out", "bare.png"}, 10000);
+    REQUIRE_FALSE(bare.timed_out);
+    REQUIRE(bare.exit_code == 0);
+    const auto bare_bytes = read_text_file(bare_path);
+    CHECK(bare_bytes.size() > 24);
+    CHECK(bare_bytes.substr(1, 3) == "PNG");
+}
+
+TEST_CASE("pulp inspect screenshot reports unsupported and malformed captures",
+          "[cli][shellout][inspect][screenshot][errors]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    InspectServerFixture fixture;
+    const auto output = fixture.temp / "should-not-exist.png";
+    const auto missing = run_pulp(
+        {"inspect", "screenshot", "--out", output.string(), "--json",
+         "--session", "missing-session", "--instance", "missing-instance",
+         "--publication", "missing-publication"},
+        10000);
+    REQUIRE_FALSE(missing.timed_out);
+    CHECK(missing.exit_code == 1);
+    const auto missing_payload = choc::json::parse(missing.stdout_output);
+    CHECK(missing_payload["schemaVersion"].getString() ==
+          "pulp.inspect.screenshot.v1");
+    CHECK(missing_payload["status"].getString() == "failed");
+    CHECK(missing_payload["error"]["code"].getString() == "selection_failed");
+
+    fixture.handler = [](const InspectorMessage& request) {
+        return make_error(request.id, "No capture source attached", "capture_unavailable");
+    };
+    auto unsupported = run_pulp(
+        {"inspect", "screenshot", "--out", output.string()}, 10000);
+    REQUIRE_FALSE(unsupported.timed_out);
+    CHECK(unsupported.exit_code == 3);
+    CHECK(unsupported.stderr_output.find("Screenshot unsupported [capture_unavailable]") !=
+          std::string::npos);
+    CHECK_FALSE(fs::exists(output));
+
+    auto unsupported_json = run_pulp(
+        {"inspect", "screenshot", "--out", output.string(), "--json"}, 10000);
+    REQUIRE_FALSE(unsupported_json.timed_out);
+    CHECK(unsupported_json.exit_code == 3);
+    const auto unsupported_payload = choc::json::parse(unsupported_json.stdout_output);
+    CHECK(unsupported_payload["schemaVersion"].getString() ==
+          "pulp.inspect.screenshot.v1");
+    CHECK_FALSE(unsupported_payload["ok"].getWithDefault<bool>(true));
+    CHECK(unsupported_payload["status"].getString() == "unsupported");
+    CHECK(unsupported_payload["error"]["code"].getString() == "capture_unavailable");
+    CHECK_FALSE(fs::exists(output));
+
+    fixture.handler = [](const InspectorMessage& request) {
+        return make_response(request.id,
+                             R"({"mimeType":"image/png","width":1,"height":1,"data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"})");
+    };
+    auto malformed = run_pulp(
+        {"inspect", "screenshot", "--out", output.string(), "--json"}, 10000);
+    REQUIRE_FALSE(malformed.timed_out);
+    CHECK(malformed.exit_code == 1);
+    const auto malformed_payload = choc::json::parse(malformed.stdout_output);
+    CHECK(malformed_payload["schemaVersion"].getString() ==
+          "pulp.inspect.screenshot.v1");
+    CHECK(malformed_payload["status"].getString() == "failed");
+    CHECK(malformed_payload["error"]["code"].getString() == "invalid_response");
+    CHECK(malformed_payload["error"]["message"].getString().find("malformed PNG") !=
+          std::string::npos);
+    CHECK_FALSE(fs::exists(output));
 }
 
 TEST_CASE("pulp inspect exposes bounded typed MIDI and transport commands",

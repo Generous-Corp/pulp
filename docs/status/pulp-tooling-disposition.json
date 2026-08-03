@@ -2114,6 +2114,11 @@
             "required": false
           },
           {
+            "name": "--out",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--id",
             "kind": "option",
             "required": false
@@ -2192,6 +2197,11 @@
           },
           {
             "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "screenshot",
             "arguments": [],
             "subcommands": []
           },
