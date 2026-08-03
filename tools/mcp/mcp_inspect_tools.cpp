@@ -56,6 +56,11 @@ consteval bool inspector_mcp_tool_names_are_unique() {
 
 static_assert(inspector_mcp_tool_names_are_unique());
 
+constexpr bool is_inspector_metadata_tool(std::string_view name) {
+    return name == "pulp_inspect_profiles" || name == "pulp_inspect_list" ||
+           name == "pulp_inspect_capabilities" || name == "pulp_inspect_doctor";
+}
+
 } // namespace
 
 std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry() {
@@ -92,8 +97,7 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
         const bool discovers_and_pins_publication =
             tool.name == "pulp_motion_start_trace" || tool.name == "pulp_trace_start";
         if (!discovers_and_pins_publication) {
-            constexpr std::string_view input_marker =
-                "\"inputSchema\":{\"type\":\"object\",";
+            constexpr std::string_view input_marker = "\"inputSchema\":{\"type\":\"object\",";
             constexpr std::string_view required_selectors =
                 "\"required\":[\"session_id\",\"instance_id\",\"publication_id\"],";
             const auto tool_end = tools_json.find("},{\"name\":", insertion);
@@ -112,13 +116,11 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
                 const auto required_end = tools_json.find(']', existing_required);
                 if (required_end == std::string::npos || required_end > properties)
                     return false;
-                const std::string_view required_fields(
-                    tools_json.data() + existing_required,
-                    required_end - existing_required);
+                const std::string_view required_fields(tools_json.data() + existing_required,
+                                                       required_end - existing_required);
                 if (required_fields.find("\"session_id\"") == std::string_view::npos) {
-                    tools_json.insert(
-                        required_end,
-                        ",\"session_id\",\"instance_id\",\"publication_id\"");
+                    tools_json.insert(required_end,
+                                      ",\"session_id\",\"instance_id\",\"publication_id\"");
                 }
             }
 
@@ -131,8 +133,7 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
             while (optional != std::string::npos && optional < updated_tool_end) {
                 tools_json.replace(optional, optional_exact.size(), required_exact);
                 updated_tool_end -= optional_exact.size() - required_exact.size();
-                optional = tools_json.find(optional_exact,
-                                           optional + required_exact.size());
+                optional = tools_json.find(optional_exact, optional + required_exact.size());
             }
         }
     }
@@ -149,7 +150,7 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
                                       name.starts_with("pulp_motion_") ||
                                       name.starts_with("pulp_trace_");
         if (inspector_shaped && name != "pulp_inspect_pending_requests" &&
-            find_inspector_mcp_tool(name) == nullptr) {
+            !is_inspector_metadata_tool(name) && find_inspector_mcp_tool(name) == nullptr) {
             return false;
         }
         cursor = name_end + 1;

@@ -1302,12 +1302,27 @@ an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
 ```bash
-pulp inspect
-pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect --port 49152
-pulp inspect --command DOM.getDocument
-pulp inspect --command State.getParameters
+pulp inspect profiles --json
+pulp inspect doctor --json
+pulp inspect list --json
+pulp inspect capabilities --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters
 ```
+
+The named commands are the stable orientation surface:
+
+| Command | Result |
+|---|---|
+| `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
+| `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
+| `doctor` | Discovery runtime directory, live-session count, and issues. |
+
+Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
+The installed Rust `pulp` forwards `inspect` to its installed sibling
+`pulp-cpp`, so these commands do not require source-build paths.
 
 Options:
 
@@ -1320,6 +1335,7 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--json` - stable JSON for `profiles`, `list`, `capabilities`, or `doctor`
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.
@@ -1336,6 +1352,13 @@ unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.
+
+Installed `pulp-mcp` uses the same in-process typed client rather than spawning
+the CLI. Its `pulp_inspect_profiles`, `pulp_inspect_list`,
+`pulp_inspect_capabilities`, and `pulp_inspect_doctor` tools provide orientation;
+operational tools require the exact identity returned by `list`. Success
+payloads include that identity, and errors use
+`structuredContent: {ok:false,error:{code,message,data}}`.
 
 ### motion
 

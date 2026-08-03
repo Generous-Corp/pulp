@@ -1609,7 +1609,7 @@ TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shel
 
 #if PULP_TEST_INSPECTOR_ENABLED
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
-          "[cli][shellout][inspect][issue-643][issue-641]") {
+          "[cli][shellout][inspect][orientation]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
         return;
@@ -1621,7 +1621,9 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
     auto help = run_pulp({"inspect", "--help"}, 10000);
     REQUIRE_FALSE(help.timed_out);
     REQUIRE(help.exit_code == 0);
-    REQUIRE(help.stdout_output.find("Usage: pulp inspect [options]") != std::string::npos);
+    REQUIRE(help.stdout_output.find(
+                "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]") !=
+            std::string::npos);
     REQUIRE(help.stdout_output.find("--port PORT") != std::string::npos);
     REQUIRE(help.stdout_output.find("--output FILE") != std::string::npos);
 

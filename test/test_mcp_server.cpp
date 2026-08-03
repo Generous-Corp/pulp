@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -27,6 +28,13 @@
 #include <pulp/inspect/agent_request_queue.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
+#if PULP_TEST_INSPECTOR_RUNTIME
+#include <pulp/inspect/authentication.hpp>
+#include <pulp/inspect/discovery_publisher.hpp>
+#include <pulp/inspect/inspector_server.hpp>
+#endif
+
+#include <choc/text/choc_JSON.h>
 
 namespace {
 
@@ -89,6 +97,157 @@ class ScopedEnvVar {
     std::string previous_;
     bool had_previous_ = false;
 };
+
+#if PULP_TEST_INSPECTOR_RUNTIME
+class TestPublicationLease final : public pulp::inspect::InspectorPublicationLease {};
+
+class TestPublicationBinding final : public pulp::inspect::InspectorPublicationBinding {
+  public:
+    std::unique_ptr<pulp::inspect::InspectorPublicationLease>
+    bind_publication(const pulp::inspect::InspectorDiscoveryRecord&) override {
+        return std::make_unique<TestPublicationLease>();
+    }
+};
+
+class TestDomainBindings final : public pulp::inspect::InspectorDomainPublicationBindings {
+  public:
+    std::vector<pulp::inspect::InspectorPublicationBindingRegistration>
+    publication_bindings() const override {
+        return {{pulp::inspect::InspectorCapability::TraceSessionControl, binding_}};
+    }
+
+  private:
+    std::shared_ptr<TestPublicationBinding> binding_ = std::make_shared<TestPublicationBinding>();
+};
+
+class InspectorMcpFixture {
+  public:
+    InspectorMcpFixture()
+        : runtime_env_("PULP_INSPECTOR_RUNTIME_DIR", runtime_.path.string()),
+          publisher_(runtime_.path), reader_(runtime_.path), policy_(make_policy()),
+          session_(
+              {"session-a", "instance-b", "com.pulp.mcp-test", "1"}, policy_,
+              [this](const auto& request) {
+                  std::string response_payload;
+                  std::string error_code;
+                  {
+                      std::lock_guard lock(mutex_);
+                      calls_.emplace_back(request.method, request.params_json);
+                      response_payload = response_payload_;
+                      error_code = error_code_;
+                  }
+                  if (!error_code.empty())
+                      return pulp::inspect::make_error(
+                          request.id, "authenticated inspector failure", error_code);
+                  if (!response_payload.empty())
+                      return pulp::inspect::make_response(request.id, std::move(response_payload));
+                  auto payload = choc::value::createObject("");
+                  payload.addMember("method", choc::value::createString(request.method));
+                  try {
+                      payload.addMember("params", choc::json::parse(request.params_json));
+                  } catch (...) {
+                      payload.addMember("params", choc::value::createString(request.params_json));
+                  }
+                  return pulp::inspect::make_response(request.id,
+                                                      choc::json::toString(payload, false));
+              }) {
+#if !defined(_WIN32)
+        std::filesystem::permissions(runtime_.path, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::replace);
+#endif
+        const auto token = pulp::inspect::generate_inspector_secret();
+        REQUIRE(token.has_value());
+        pulp::inspect::InspectorDiscoveryRecord record;
+        record.session_id = session_.info().session_id;
+        record.instance_id = session_.info().instance_id;
+        record.plugin_id = session_.info().plugin_id;
+        auto main_thread_rpc = std::make_shared<pulp::inspect::InspectorMainThreadRpc>(
+            pulp::inspect::InspectorMainThreadRpc::Config{},
+            [](auto task) {
+                task();
+                return true;
+            },
+            [] { return false; });
+        pulp::inspect::InspectorServerConfig config;
+        config.session = &session_;
+        config.discovery = &publisher_;
+        config.record = std::move(record);
+        config.token = *token;
+        config.main_thread_rpc = std::move(main_thread_rpc);
+        config.domain_bindings = &domain_bindings_;
+        config.max_message_bytes = pulp::inspect::kInspectorExtendedMessageBytes;
+        REQUIRE(server_.start_authenticated(std::move(config)));
+        const auto records = reader_.list();
+        REQUIRE(records.size() == 1);
+        publication_ = records.front();
+    }
+
+    ~InspectorMcpFixture() {
+        server_.stop();
+    }
+
+    std::string exact_arguments(std::string fields = {}) const {
+        std::string arguments = "{";
+        if (!fields.empty()) {
+            arguments += std::move(fields);
+            arguments += ',';
+        }
+        arguments += "\"session_id\":" + json_string(publication_.session_id) +
+                     ",\"instance_id\":" + json_string(publication_.instance_id) +
+                     ",\"publication_id\":" + json_string(publication_.publication_id) + "}";
+        return arguments;
+    }
+
+    bool saw(std::string_view method, std::string_view params_fragment = {}) const {
+        std::lock_guard lock(mutex_);
+        return std::any_of(calls_.begin(), calls_.end(), [&](const auto& call) {
+            return call.first == method && (params_fragment.empty() ||
+                                            call.second.find(params_fragment) != std::string::npos);
+        });
+    }
+
+    void respond_with(std::string payload) {
+        std::lock_guard lock(mutex_);
+        response_payload_ = std::move(payload);
+        error_code_.clear();
+    }
+
+    void fail_with(std::string code) {
+        std::lock_guard lock(mutex_);
+        error_code_ = std::move(code);
+        response_payload_.clear();
+    }
+
+    const pulp::inspect::InspectorDiscoveryRecord& publication() const {
+        return publication_;
+    }
+
+  private:
+    static pulp::inspect::InspectorPolicyConfig make_policy() {
+        pulp::inspect::InspectorPolicyConfig policy;
+        policy.profile = pulp::inspect::InspectorProfile::Develop;
+        for (const auto capability :
+             pulp::inspect::profile_capabilities(pulp::inspect::InspectorProfile::Develop)) {
+            policy.available_capabilities.push_back(capability);
+        }
+        return policy;
+    }
+
+    TempDir runtime_;
+    ScopedEnvVar runtime_env_;
+    pulp::inspect::InspectorDiscoveryPublisher publisher_;
+    pulp::inspect::InspectorDiscoveryReader reader_;
+    pulp::inspect::InspectorPolicyConfig policy_;
+    mutable std::mutex mutex_;
+    std::vector<std::pair<std::string, std::string>> calls_;
+    std::string response_payload_;
+    std::string error_code_;
+    TestDomainBindings domain_bindings_;
+    pulp::inspect::InspectorSession session_;
+    pulp::inspect::InspectorServer server_;
+    pulp::inspect::InspectorDiscoveryRecord publication_;
+};
+#endif
 
 // Several tests below shell out to `git -C <tempdir> …` on throwaway repos.
 // If this binary is launched from a git-invoked context — a hook (pre-push),
@@ -169,8 +328,8 @@ void require_tool_name(const std::string& tools, std::string_view name) {
     const auto compact = "\"name\":\"" + std::string(name) + "\"";
     const auto formatted = "\"name\" : \"" + std::string(name) + "\"";
     INFO("missing tool: " << name);
-    REQUIRE((tools.find(compact) != std::string::npos ||
-             tools.find(formatted) != std::string::npos));
+    REQUIRE(
+        (tools.find(compact) != std::string::npos || tools.find(formatted) != std::string::npos));
 }
 
 std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
@@ -194,11 +353,9 @@ std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
     return cli;
 }
 
-std::filesystem::path make_fake_inspector_cli(
-    const std::filesystem::path& root) {
+std::filesystem::path make_fake_inspector_cli(const std::filesystem::path& root) {
 #if defined(_WIN32)
-    const auto cli =
-        root / "build" / "tools" / "cli" / "pulp-cpp.exe";
+    const auto cli = root / "build" / "tools" / "cli" / "pulp-cpp.exe";
 #else
     const auto cli = root / "build" / "tools" / "cli" / "pulp-cpp";
 #endif
@@ -808,6 +965,10 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_docs_search",
         "pulp_get_view_tree",
         "pulp_inspect_audio",
+        "pulp_inspect_profiles",
+        "pulp_inspect_list",
+        "pulp_inspect_capabilities",
+        "pulp_inspect_doctor",
         "pulp_inspect_dom",
         "pulp_inspect_evaluate",
         "pulp_inspect_params",
@@ -920,32 +1081,25 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-TEST_CASE("pulp_inspect_set_param delegates a typed payload and exact selector to pulp-cpp",
+#if PULP_TEST_INSPECTOR_RUNTIME
+TEST_CASE("pulp_inspect_set_param sends a typed payload through the shared client",
           "[mcp][tools][mcp-set-param]") {
-#if defined(_WIN32)
-    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    make_fake_inspector_cli(project.path);
-    ScopedCurrentPath cwd(project.path);
+    InspectorMcpFixture fixture;
 
-    auto response = handle_request(tool_call(
-        "60", "pulp_inspect_set_param",
-        R"({"id":0,"value":1.0,"normalized":true,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
+    auto response = handle_request(
+        tool_call("60", "pulp_inspect_set_param",
+                  fixture.exact_arguments(R"("id":0,"value":1.0,"normalized":true)")));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(
-        response,
-        R"JSON(fake-inspector [inspect] [--session] [session-a] [--instance] [instance-b] [--publication] [publication-c] [--command] [State.setParameter] [--params] [{\"id\":0,\"value\":1.000000,\"normalized\":true}])JSON");
+    require_contains(response, R"JSON("structuredContent":{"ok":true)JSON");
+    require_contains(response, "State.setParameter");
+    CHECK(fixture.saw("State.setParameter", R"("id": 0)"));
+    CHECK(fixture.saw("State.setParameter", R"("normalized": true)"));
 
-    const auto max_id = handle_request(tool_call(
-        "62", "pulp_inspect_set_param",
-        exact_inspector_arguments(R"("id":4294967295,"value":0.25)")));
-    require_contains(
-        max_id,
-        R"JSON([--params] [{\"id\":4294967295,\"value\":0.250000,\"normalized\":false}])JSON");
+    const auto max_id =
+        handle_request(tool_call("62", "pulp_inspect_set_param",
+                                 fixture.exact_arguments(R"("id":4294967295,"value":0.25)")));
+    require_contains(max_id, R"JSON("id": 4294967295)JSON");
+    CHECK(fixture.saw("State.setParameter", R"("id": 4294967295)"));
 
     const auto partial = handle_request(tool_call(
         "61", "pulp_inspect_set_param",
@@ -953,7 +1107,6 @@ TEST_CASE("pulp_inspect_set_param delegates a typed payload and exact selector t
     require_contains(partial, R"JSON("isError":true)JSON");
     require_contains(partial,
                      "session_id, instance_id, and publication_id must be supplied together");
-    REQUIRE(partial.find("fake-inspector") == std::string::npos);
 
     const char* invalid_ids[] = {"-1", "4294967296", "1.5", "null", "\"9\""};
     int request_id = 63;
@@ -961,75 +1114,48 @@ TEST_CASE("pulp_inspect_set_param delegates a typed payload and exact selector t
         INFO("id=" << invalid_id);
         const auto invalid = handle_request(tool_call(
             std::to_string(request_id++), "pulp_inspect_set_param",
-            exact_inspector_arguments(
-                std::string("\"id\":") + invalid_id + ",\"value\":1.0")));
+            fixture.exact_arguments(std::string("\"id\":") + invalid_id + ",\"value\":1.0")));
         require_contains(invalid, "id must be an integer from 0 through 4294967295");
-        REQUIRE(invalid.find("fake-inspector") == std::string::npos);
     }
 
     const auto malformed_number = handle_request(tool_call(
         "69", "pulp_inspect_set_param",
         R"({"id":01,"value":1.0,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
     require_contains(malformed_number, "Parse error");
-    REQUIRE(malformed_number.find("fake-inspector") == std::string::npos);
 
     const auto nested_id = handle_request(tool_call(
         "70", "pulp_inspect_set_param",
         R"({"meta":{"id":7},"value":1.0,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
     require_contains(nested_id, "id must be an integer from 0 through 4294967295");
-    REQUIRE(nested_id.find("fake-inspector") == std::string::npos);
 
     const auto duplicate_id = handle_request(tool_call(
         "71", "pulp_inspect_set_param",
         R"({"id":7,"\u0069d":8,"value":1.0,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
     require_contains(duplicate_id, "Parse error");
-    REQUIRE(duplicate_id.find("fake-inspector") == std::string::npos);
 
     const auto nested_selector = handle_request(tool_call(
         "72", "pulp_inspect_set_param",
-        R"({"meta":{"session_id":"attacker","instance_id":"attacker","publication_id":"attacker"},"id":0,"value":1.0,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
-    require_contains(
-        nested_selector,
-        "[--session] [session-a] [--instance] [instance-b] [--publication] [publication-c]");
-    REQUIRE(nested_selector.find("[--session] [attacker]") == std::string::npos);
-#endif
+        fixture.exact_arguments(
+            R"("meta":{"session_id":"attacker","instance_id":"attacker","publication_id":"attacker"},"id":0,"value":1.0)")));
+    require_contains(nested_selector, R"JSON("ok":true)JSON");
+    CHECK(fixture.saw("State.setParameter", R"("id": 0)"));
 }
 
 TEST_CASE("MCP inspector delegate preserves responses above the old 2 MiB ceiling",
           "[mcp][tools][inspect][large-output]") {
-#if defined(_WIN32)
-    SUCCEED("The POSIX fake CLI supplies the large-output regression fixture");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    const auto cli = make_fake_inspector_cli(project.path);
-    std::ofstream script(cli, std::ios::trunc);
-    script << "#!/bin/sh\n"
-           << "dd if=/dev/zero bs=1048576 count=3 2>/dev/null | tr '\\000' x\n"
-           << "printf 'inspector-tail-marker'\n";
-    script.close();
-    ScopedCurrentPath cwd(project.path);
+    InspectorMcpFixture fixture;
+    fixture.respond_with(std::string("{\"data\":\"") + std::string(3u * 1024u * 1024u, 'x') +
+                         "inspector-tail-marker\"}");
 
-    const auto response = handle_request(tool_call(
-        "69", "pulp_inspect_dom", exact_inspector_arguments()));
+    const auto response =
+        handle_request(tool_call("69", "pulp_inspect_screenshot", fixture.exact_arguments()));
     require_contains(response, "inspector-tail-marker");
     REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
-#endif
 }
 
-TEST_CASE("MCP inspector families execute the shared pulp-cpp delegate",
+TEST_CASE("MCP inspector families execute the shared typed client",
           "[mcp][tools][inspect][delegate]") {
-#if defined(_WIN32)
-    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    make_fake_inspector_cli(project.path);
-    ScopedCurrentPath cwd(project.path);
+    InspectorMcpFixture fixture;
 
     const std::pair<const char*, const char*> cases[] = {
         {"pulp_inspect_dom", "DOM.getDocument"},
@@ -1040,113 +1166,101 @@ TEST_CASE("MCP inspector families execute the shared pulp-cpp delegate",
     for (const auto& [tool, method] : cases) {
         INFO("tool=" << tool << " method=" << method);
         const auto response =
-            handle_request(tool_call(std::to_string(id++), tool,
-                                     exact_inspector_arguments()));
-        require_contains(response,
-                         std::string("fake-inspector [inspect] [--session] [session-a] "
-                                     "[--instance] [instance-b] [--publication] "
-                                     "[publication-c] [--command] [") +
-                             method + "] [--params] [{}]");
-        REQUIRE(response.find(R"JSON("isError":true)JSON") ==
-                std::string::npos);
+            handle_request(tool_call(std::to_string(id++), tool, fixture.exact_arguments()));
+        require_contains(response, R"JSON("structuredContent":{"ok":true)JSON");
+        CHECK(fixture.saw(method));
+        REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
     }
-#endif
 }
+
+TEST_CASE("MCP inspector metadata tools discover and authenticate exact publications",
+          "[mcp][tools][inspect][metadata]") {
+    const auto profiles = handle_request(tool_call("601", "pulp_inspect_profiles"));
+    require_contains(profiles, R"JSON("schema_version": 1)JSON");
+    require_contains(profiles, R"JSON("id": "observe")JSON");
+
+    InspectorMcpFixture fixture;
+    const auto listed = handle_request(tool_call("602", "pulp_inspect_list"));
+    require_contains(listed, R"JSON("schema_version": 1)JSON");
+    require_contains(listed, fixture.publication().session_id);
+    require_contains(listed, fixture.publication().instance_id);
+    require_contains(listed, fixture.publication().publication_id);
+
+    const auto capabilities =
+        handle_request(tool_call("603", "pulp_inspect_capabilities", fixture.exact_arguments()));
+    require_contains(capabilities, R"JSON("structuredContent":{"ok":true)JSON");
+    require_contains(capabilities, fixture.publication().session_id);
+    require_contains(capabilities, fixture.publication().publication_id);
+    require_contains(capabilities, "session.describe");
+
+    const auto doctor = handle_request(tool_call("604", "pulp_inspect_doctor"));
+    require_contains(doctor, R"JSON("schema_version": 1)JSON");
+    require_contains(doctor, R"JSON("ok": true)JSON");
+    require_contains(doctor, R"JSON("session_count": 1)JSON");
+}
+
+#if !defined(_WIN32)
+TEST_CASE("MCP inspector doctor reports an insecure runtime directory",
+          "[mcp][tools][inspect][metadata][doctor]") {
+    TempDir runtime;
+    ScopedEnvVar runtime_env("PULP_INSPECTOR_RUNTIME_DIR", runtime.path.string());
+    std::filesystem::permissions(
+        runtime.path, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
+        std::filesystem::perm_options::replace);
+
+    const auto doctor = handle_request(tool_call("605", "pulp_inspect_doctor"));
+    require_contains(doctor, R"JSON("ok":false)JSON");
+    require_contains(doctor, R"JSON("isError":true)JSON");
+    require_contains(doctor, R"JSON("code":"discovery_unavailable")JSON");
+    require_contains(doctor, "runtime directory is not an owner-private directory");
+
+    const auto listed = handle_request(tool_call("606", "pulp_inspect_list"));
+    require_contains(listed, R"JSON("ok":false)JSON");
+    require_contains(listed, R"JSON("isError":true)JSON");
+    require_contains(listed, R"JSON("code":"discovery_unavailable")JSON");
+}
+#endif
 
 TEST_CASE("MCP capture workflows pin start and require the same stop identity",
           "[mcp][tools][inspect][selection]") {
-#if defined(_WIN32)
-    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    const auto cli = make_fake_inspector_cli(project.path);
-    std::ofstream script(cli, std::ios::trunc);
-    script
-        << "#!/bin/sh\n"
-        << "case \" $* \" in\n"
-        << "  *' Session.getCapabilities '*) "
-           "printf '{\"sessionId\":\"session-a\","
-           "\"instanceId\":\"instance-b\","
-           "\"publicationId\":\"publication-c\"}' ;;\n"
-        << "  *) printf 'fake-inspector'; "
-           "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done ;;\n"
-        << "esac\n";
-    script.close();
-    ScopedCurrentPath cwd(project.path);
+    InspectorMcpFixture fixture;
 
-    const auto trace_start = handle_request(tool_call(
-        "62", "pulp_trace_start", R"JSON({"categories":["dsp"]})JSON"));
-    require_contains(
-        trace_start,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Trace.startSession]");
-    require_contains(
-        trace_start,
-        R"JSON(Exact selection: {\"session_id\":\"session-a\",\"instance_id\":\"instance-b\",\"publication_id\":\"publication-c\"})JSON");
+    const auto trace_start =
+        handle_request(tool_call("62", "pulp_trace_start", R"JSON({"categories":["dsp"]})JSON"));
+    require_contains(trace_start, R"JSON("structuredContent":{"ok":true)JSON");
+    CHECK(fixture.saw("Trace.startSession"));
+    require_contains(trace_start, "Exact selection:");
+    require_contains(trace_start, fixture.publication().publication_id);
 
     const auto trace_start_without_arguments = handle_request(
         R"JSON({"jsonrpc":"2.0","id":621,"method":"tools/call","params":{"name":"pulp_trace_start"}})JSON");
-    require_contains(
-        trace_start_without_arguments,
-        "[--session] [session-a] [--instance] [instance-b] [--publication] "
-        "[publication-c] [--command] [Trace.startSession] [--params] [{}]");
+    require_contains(trace_start_without_arguments, R"JSON("structuredContent":{"ok":true)JSON");
+    CHECK(fixture.saw("Trace.startSession"));
 
-    const auto trace_query = handle_request(tool_call(
-        "63", "pulp_trace_query",
-        R"JSON({"sql":"select 1","session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
-    require_contains(
-        trace_query,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Trace.query]");
+    const auto trace_query = handle_request(
+        tool_call("63", "pulp_trace_query", fixture.exact_arguments(R"("sql":"select 1")")));
+    require_contains(trace_query, R"JSON("code":"capability_unavailable")JSON");
 
     const auto trace_explain = handle_request(tool_call(
-        "64", "pulp_trace_explain",
-        R"JSON({"question":"why slow?","session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
-    require_contains(
-        trace_explain,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Trace.explain]");
+        "64", "pulp_trace_explain", fixture.exact_arguments(R"("question":"why slow?")")));
+    require_contains(trace_explain, R"JSON("code":"capability_unavailable")JSON");
 
-    const auto exact_motion_start = handle_request(tool_call(
-        "65", "pulp_motion_start_trace",
-        R"JSON({"view_name":"Card","metrics":[],"session_id":"session-explicit","instance_id":"instance-explicit","publication_id":"publication-explicit"})JSON"));
-    require_contains(
-        exact_motion_start,
-        "fake-inspector [inspect] [--session] [session-explicit] [--instance] "
-        "[instance-explicit] [--publication] [publication-explicit] [--command] "
-        "[Motion.startTrace]");
+    const auto exact_motion_start =
+        handle_request(tool_call("65", "pulp_motion_start_trace",
+                                 fixture.exact_arguments(R"("view_name":"Card","metrics":[])")));
+    CHECK(fixture.saw("Motion.startTrace", "Card"));
 
-    const auto motion_stop = handle_request(tool_call(
-        "66", "pulp_motion_stop_trace",
-        R"JSON({"trace_id":7,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
-    require_contains(
-        motion_stop,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Motion.stopTrace]");
+    const auto motion_stop = handle_request(
+        tool_call("66", "pulp_motion_stop_trace", fixture.exact_arguments(R"("trace_id":7)")));
+    CHECK(fixture.saw("Motion.stopTrace", "trace_id"));
 
-    const auto motion_play = handle_request(tool_call(
-        "67", "pulp_motion_play",
-        R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
-    require_contains(
-        motion_play,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Motion.play]");
+    const auto motion_play =
+        handle_request(tool_call("67", "pulp_motion_play", fixture.exact_arguments()));
+    CHECK(fixture.saw("Motion.play"));
 
-    const auto unpinned_stop = handle_request(tool_call(
-        "68", "pulp_trace_stop"));
+    const auto unpinned_stop = handle_request(tool_call("68", "pulp_trace_stop"));
     require_contains(unpinned_stop, R"JSON("isError":true)JSON");
-    require_contains(
-        unpinned_stop,
-        "session_id, instance_id, and publication_id are required");
-#endif
+    require_contains(unpinned_stop, "session_id, instance_id, and publication_id are required");
 }
 
 TEST_CASE("MCP operational inspector wrappers require exact selectors",
@@ -1186,17 +1300,7 @@ TEST_CASE("MCP operational inspector wrappers require exact selectors",
 
 TEST_CASE("MCP read-only inspector wrappers forward only complete exact selectors",
           "[mcp][tools][inspect][selection]") {
-#if defined(_WIN32)
-    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.24)\n";
-    make_fake_inspector_cli(project.path);
-    ScopedCurrentPath cwd(project.path);
-
-    constexpr auto exact =
-        R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON";
+    InspectorMcpFixture fixture;
     const std::pair<const char*, const char*> exact_cases[] = {
         {"pulp_inspect_dom", "DOM.getDocument"},
         {"pulp_motion_snapshot", "Motion.snapshot"},
@@ -1206,11 +1310,10 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
     int id = 70;
     for (const auto& [tool, method] : exact_cases) {
         INFO("exact selector tool=" << tool);
-        const auto response = handle_request(tool_call(std::to_string(id++), tool, exact));
-        require_contains(response,
-                         std::string("fake-inspector [inspect] [--session] [session-a] ") +
-                             "[--instance] [instance-b] [--publication] [publication-c] " +
-                             "[--command] [" + method + "]");
+        const auto response =
+            handle_request(tool_call(std::to_string(id++), tool, fixture.exact_arguments()));
+        require_contains(response, R"JSON("structuredContent":{"ok":true)JSON");
+        CHECK(fixture.saw(method));
         REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
     }
 
@@ -1225,7 +1328,6 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
                       R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
         require_contains(response, R"JSON("isError":true)JSON");
         require_contains(response, "session_id, instance_id, and publication_id must be");
-        REQUIRE(response.find("fake-inspector") == std::string::npos);
     }
 
     for (const char* tool : {
@@ -1234,48 +1336,32 @@ TEST_CASE("MCP read-only inspector wrappers forward only complete exact selector
              "pulp_trace_snapshot",
          }) {
         INFO("omitted selector tool=" << tool);
-        const auto response =
-            handle_request(tool_call(std::to_string(id++), tool));
-        require_contains(response,
-                         "are required to select one exact inspector publication");
-        REQUIRE(response.find("fake-inspector") == std::string::npos);
+        const auto response = handle_request(tool_call(std::to_string(id++), tool));
+        require_contains(response, "are required to select one exact inspector publication");
     }
 
     const auto unpinned_mutation = handle_request(tool_call(
-        std::to_string(id++), "pulp_inspect_set_param",
-        R"JSON({"id":0,"value":1.0})JSON"));
-    require_contains(unpinned_mutation,
-                     "are required to select one exact inspector publication");
-    REQUIRE(unpinned_mutation.find("fake-inspector") == std::string::npos);
+        std::to_string(id++), "pulp_inspect_set_param", R"JSON({"id":0,"value":1.0})JSON"));
+    require_contains(unpinned_mutation, "are required to select one exact inspector publication");
 
     const auto unsafe = handle_request(tool_call(
         std::to_string(id++), "pulp_inspect_dom",
         R"JSON({"session_id":"../session","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
     require_contains(unsafe, R"JSON("isError":true)JSON");
-    REQUIRE(unsafe.find("fake-inspector") == std::string::npos);
-#endif
 }
 
 TEST_CASE("MCP inspector wrappers reject malformed selector fields instead of discovering",
           "[mcp][tools][inspect][selection][security]") {
-#if defined(_WIN32)
-    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.24)\n";
-    make_fake_inspector_cli(project.path);
-    ScopedCurrentPath cwd(project.path);
-
     const auto nested_envelope_keys = handle_request(
         R"JSON({"jsonrpc":"2.0","id":79,"meta":{"method":"ping","name":"pulp_build"},"method":"tools/call","params":{"name":"pulp_inspect_dom","arguments":{"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"}}})JSON");
-    require_contains(nested_envelope_keys, "[--command] [DOM.getDocument]");
+    require_contains(nested_envelope_keys, R"JSON("code":"selection_failed")JSON");
     REQUIRE(nested_envelope_keys.find("Unknown tool") == std::string::npos);
 
-    const auto trailing_value = handle_request(
-        tool_call("80", "pulp_inspect_dom") + R"JSON({"extra":1})JSON");
+    const auto trailing_value =
+        handle_request(tool_call("80", "pulp_inspect_dom") + R"JSON({"extra":1})JSON");
     require_contains(trailing_value, "Parse error");
-    REQUIRE(trailing_value.find("fake-inspector") == std::string::npos);
+
+    InspectorMcpFixture fixture;
 
     const char* tools[] = {
         "pulp_inspect_dom",     "pulp_inspect_evaluate", "pulp_inspect_set_param",
@@ -1294,82 +1380,83 @@ TEST_CASE("MCP inspector wrappers reject malformed selector fields instead of di
             require_contains(response, R"JSON("isError":true)JSON");
             require_contains(
                 response, "session_id, instance_id, and publication_id must be supplied together");
-            REQUIRE(response.find("fake-inspector") == std::string::npos);
         }
 
         const std::string required_mutation_fields =
-            std::string_view(tool) == "pulp_inspect_set_param"
-                ? R"JSON("id":0,"value":1.0,)JSON"
-                : "";
+            std::string_view(tool) == "pulp_inspect_set_param" ? R"JSON("id":0,"value":1.0)JSON"
+                                                               : "";
         const auto nested_before_exact = handle_request(tool_call(
             std::to_string(id++), tool,
-            std::string("{\"meta\":{\"session_id\":\"attacker\","
-                        "\"instance_id\":\"attacker\","
-                        "\"publication_id\":\"attacker\"},") +
-                required_mutation_fields +
-                R"JSON("session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
-        require_contains(
-            nested_before_exact,
-            "[--session] [session-a] [--instance] [instance-b] "
-            "[--publication] [publication-c]");
-        REQUIRE(nested_before_exact.find("[--session] [attacker]") ==
-                std::string::npos);
+            fixture.exact_arguments(
+                std::string("\"meta\":{\"session_id\":\"attacker\","
+                            "\"instance_id\":\"attacker\","
+                            "\"publication_id\":\"attacker\"}") +
+                (required_mutation_fields.empty() ? "" : "," + required_mutation_fields))));
+        CAPTURE(tool);
+        if (std::string_view(tool) == "pulp_inspect_evaluate") {
+            require_contains(nested_before_exact, R"JSON("code":"capability_unavailable")JSON");
+        } else {
+            require_contains(nested_before_exact, R"JSON("ok":true)JSON");
+        }
 
         const auto duplicate_selector = handle_request(tool_call(
             std::to_string(id++), tool,
             std::string("{") + required_mutation_fields +
-                R"JSON("session_id":"session-a","\u0073ession_id":"attacker","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
+                (required_mutation_fields.empty() ? "" : ",") +
+                "\"session_id\":" + json_string(fixture.publication().session_id) +
+                ",\"\\u0073ession_id\":\"attacker\",\"instance_id\":" +
+                json_string(fixture.publication().instance_id) +
+                ",\"publication_id\":" + json_string(fixture.publication().publication_id) + "}"));
         require_contains(duplicate_selector, "Parse error");
-        REQUIRE(duplicate_selector.find("fake-inspector") == std::string::npos);
     }
-#endif
 }
 
-TEST_CASE("MCP inspector families preserve subprocess failure status",
+TEST_CASE("MCP inspector families preserve structured protocol failures",
           "[mcp][tools][inspect][delegate][failure]") {
-#if defined(_WIN32)
-    SUCCEED("Nonzero native process status is covered by the shared process runner");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    const auto cli = make_fake_inspector_cli(project.path);
-    std::ofstream failing(cli, std::ios::trunc);
-    failing << "#!/bin/sh\n"
-            << "printf 'authenticated inspector failure' >&2\n"
-            << "exit 7\n";
-    failing.close();
-    ScopedCurrentPath cwd(project.path);
+    InspectorMcpFixture fixture;
+    fixture.fail_with("fixture_failure");
 
     for (const char* tool : {
              "pulp_inspect_dom",
              "pulp_motion_snapshot",
              "pulp_trace_snapshot",
-        }) {
+         }) {
         INFO("tool=" << tool);
-        const auto response = handle_request(tool_call(
-            "64", tool, exact_inspector_arguments()));
+        const auto response = handle_request(tool_call("64", tool, fixture.exact_arguments()));
         require_contains(response, "authenticated inspector failure");
+        require_contains(response, R"JSON("code":"fixture_failure")JSON");
         require_contains(response, R"JSON("isError":true)JSON");
     }
-#endif
 }
 
-TEST_CASE("MCP inspector spawn failures are tool errors",
-          "[mcp][tools][inspect][delegate][failure][spawn]") {
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n";
-    ScopedCurrentPath cwd(project.path);
+TEST_CASE("MCP inspector selection failures are structured tool errors",
+          "[mcp][tools][inspect][delegate][failure][selection]") {
+    TempDir runtime;
+#if !defined(_WIN32)
+    std::filesystem::permissions(runtime.path, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace);
+#endif
+    ScopedEnvVar runtime_env("PULP_INSPECTOR_RUNTIME_DIR", runtime.path.string());
 
     const auto response =
-        handle_request(tool_call(
-            "65", "pulp_inspect_dom", exact_inspector_arguments()));
+        handle_request(tool_call("65", "pulp_inspect_dom", exact_inspector_arguments()));
     require_contains(response, R"JSON("isError":true)JSON");
-    require_contains(response, "pulp inspect subprocess failed");
+    require_contains(response, R"JSON("ok":false)JSON");
+    require_contains(response, R"JSON("code":"selection_failed")JSON");
 }
+#else
+TEST_CASE("MCP inspector tools report the excluded optional component",
+          "[mcp][tools][inspect][component-off]") {
+    const auto profiles = handle_request(tool_call("65", "pulp_inspect_profiles"));
+    require_contains(profiles, R"JSON("schema_version": 1)JSON");
+
+    for (const char* tool : {"pulp_inspect_list", "pulp_inspect_doctor", "pulp_inspect_dom"}) {
+        const auto response = handle_request(tool_call("66", tool, exact_inspector_arguments()));
+        require_contains(response, R"JSON("isError":true)JSON");
+        require_contains(response, R"JSON("code":"component_unavailable")JSON");
+    }
+}
+#endif
 
 TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mcp][tools][audio]") {
     // Each invocation drives one guard branch in handle_audio_compare so the
@@ -2320,23 +2407,19 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
     }
 }
 
-// pulp #1997 — gap 1: each of the 11 previously-untested wrapper tools
-// (5 inspector + 4 view/screenshot/validate + 2 docs) reaches its
-// dispatch arm. Hermetic check: from a non-project tempdir, every tool
-// short-circuits with the project-root error BEFORE shelling out. This
-// proves the tool name routes to the right arm without depending on any
-// live binary, network, or running plugin process.
+// Wrapper tools reach their dispatch arms. Installed inspector tools deliberately
+// do not require a project root; the remaining wrappers do.
 //
 // The shellout-side semantics (no inspector found, etc.) are already
 // covered by test_cli_shellout.cpp. The MCP boundary is the
 // dispatch-routing layer — that's what we check here.
 TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate)",
-          "[mcp][tools][issue-1997]") {
+          "[mcp][tools][dispatch-routing]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
-    // Inspector tools (5 of 5). Every one wraps a pulp inspect --command
-    // call, all gated on find_project_root(). No live inspector required.
+    // Installed inspector tools reject an omitted exact identity through their
+    // structured client boundary, even outside a Pulp project.
     const auto inspector_tools = {
         "pulp_inspect_dom",
         "pulp_inspect_params",
@@ -2352,12 +2435,8 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
     for (const char* tool : inspector_tools) {
         INFO("inspector tool: " << tool);
         auto response = handle_request(tool_call(std::to_string(id++), tool));
-        // Reject reason proves: (a) the tool name was recognized, and
-        // (b) execution reached find_project_root() instead of falling
-        // through to the "Unknown tool" arm.
-        require_contains(response, "Error: not in a Pulp project");
-        // Also assert the dispatcher did NOT classify this as an unknown
-        // tool — that would be the silent regression we're guarding against.
+        require_contains(response, "session_id, instance_id, and publication_id");
+        REQUIRE(response.find("Error: not in a Pulp project") == std::string::npos);
         REQUIRE(response.find("Unknown tool") == std::string::npos);
     }
 
@@ -2398,42 +2477,28 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
     }
 }
 
+#if PULP_TEST_INSPECTOR_RUNTIME
 TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable text",
           "[mcp][tools][inspect]") {
-#if defined(_WIN32)
-    SKIP("POSIX fake script assertions are only used on non-Windows");
-#else
-    TempDir project;
-    std::filesystem::create_directories(project.path / "core");
-    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
-    make_fake_inspector_cli(project.path);
+    InspectorMcpFixture fixture;
 
-    ScopedCurrentPath cwd(project.path);
-
-    auto evaluate = handle_request(tool_call(
-        "50", "pulp_inspect_evaluate",
-        exact_inspector_arguments(R"JSON("expression":"window.title + ' ok'")JSON")));
+    auto evaluate = handle_request(
+        tool_call("50", "pulp_inspect_evaluate",
+                  fixture.exact_arguments(R"JSON("expression":"window.title + ' ok'")JSON")));
     require_contains(evaluate, R"JSON("id":50)JSON");
-    require_contains(evaluate,
-                     "fake-inspector [inspect] [--session] [session-a] [--instance] "
-                     "[instance-b] [--publication] [publication-c] [--command] "
-                     "[Runtime.evaluate] [--params]");
-    require_contains(evaluate, R"JSON([{\"expression\":\"window.title + ' ok'\"}])JSON");
-    REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON") == std::string::npos);
+    require_contains(evaluate, R"JSON("isError":true)JSON");
+    require_contains(evaluate, R"JSON("code":"capability_unavailable")JSON");
 
-    auto screenshot = handle_request(tool_call(
-        "51", "pulp_inspect_screenshot", exact_inspector_arguments()));
+    auto screenshot =
+        handle_request(tool_call("51", "pulp_inspect_screenshot", fixture.exact_arguments()));
     require_contains(screenshot, R"JSON("id":51)JSON");
     require_contains(screenshot, R"JSON("type":"text")JSON");
-    require_contains(
-        screenshot,
-        "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--publication] [publication-c] [--command] "
-        "[Capture.screenshot]");
+    require_contains(screenshot, R"JSON("structuredContent":{"ok":true)JSON");
+    CHECK(fixture.saw("Capture.screenshot"));
     REQUIRE(screenshot.find(R"JSON("type":"image")JSON") == std::string::npos);
     REQUIRE(screenshot.find(R"JSON("mimeType":"image/png")JSON") == std::string::npos);
-#endif
 }
+#endif
 
 TEST_CASE("MCP validate only passes --all for the explicit all flag", "[mcp][tools][validate]") {
 #if defined(_WIN32)
@@ -3100,12 +3165,10 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
 
 TEST_CASE("MCP does not expose filesystem-backed motion fixture loading",
           "[mcp][tools][motion][security]") {
-    const auto tools = handle_request(
-        R"JSON({"jsonrpc":"2.0","id":99,"method":"tools/list"})JSON");
+    const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":99,"method":"tools/list"})JSON");
     REQUIRE(tools.find("pulp_motion_load_fixture") == std::string::npos);
     const auto response = handle_request(tool_call(
-        "100", "pulp_motion_load_fixture",
-        R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
+        "100", "pulp_motion_load_fixture", R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
     require_contains(response, "Unknown tool: pulp_motion_load_fixture");
 }
 
@@ -3185,19 +3248,18 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
         INFO("required_window=" << required_window << " needle=" << needle);
         REQUIRE(required_window.find(needle) != std::string::npos);
     }
-    const auto motion_start =
-        tools.find(R"JSON("name":"pulp_motion_start_trace")JSON");
+    const auto motion_start = tools.find(R"JSON("name":"pulp_motion_start_trace")JSON");
     const auto motion_stop = tools.find(R"JSON("name":"pulp_motion_stop_trace")JSON");
     REQUIRE(motion_start != std::string::npos);
     REQUIRE(motion_stop != std::string::npos);
-    const auto motion_start_schema =
-        tools.substr(motion_start, motion_stop - motion_start);
+    const auto motion_start_schema = tools.substr(motion_start, motion_stop - motion_start);
     require_contains(motion_start_schema, R"JSON("session_id":{"type":"string")JSON");
     require_contains(motion_start_schema, R"JSON("instance_id":{"type":"string")JSON");
     require_contains(motion_start_schema, R"JSON("publication_id":{"type":"string")JSON");
     const auto motion_stop_schema = tools.substr(motion_stop, 1200);
-    require_contains(motion_stop_schema,
-                     R"JSON("required":["trace_id","session_id","instance_id","publication_id"])JSON");
+    require_contains(
+        motion_stop_schema,
+        R"JSON("required":["trace_id","session_id","instance_id","publication_id"])JSON");
     for (const char* tool : {
              "pulp_motion_play",
              "pulp_motion_pause",
@@ -3205,18 +3267,15 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
              "pulp_motion_disable_cost",
          }) {
         INFO("exact-session motion tool: " << tool);
-        const auto position =
-            tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
+        const auto position = tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
         REQUIRE(position != std::string::npos);
-        require_contains(
-            tools.substr(position, 900),
-            R"JSON("required":["session_id","instance_id","publication_id"])JSON");
+        require_contains(tools.substr(position, 900),
+                         R"JSON("required":["session_id","instance_id","publication_id"])JSON");
     }
     const auto scrub = tools.find(R"JSON("name":"pulp_motion_scrub_to")JSON");
     REQUIRE(scrub != std::string::npos);
-    require_contains(
-        tools.substr(scrub, 1000),
-        R"JSON("required":["frame","session_id","instance_id","publication_id"])JSON");
+    require_contains(tools.substr(scrub, 1000),
+                     R"JSON("required":["frame","session_id","instance_id","publication_id"])JSON");
 
     // Param-less tools still need a description + an inputSchema object.
     const auto param_less_tools = {
@@ -3255,31 +3314,29 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     require_contains(start, "Error: not in a Pulp project");
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
-    auto stop = handle_request(tool_call(
-        std::to_string(id++), "pulp_trace_stop",
-        R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
+    auto stop = handle_request(
+        tool_call(std::to_string(id++), "pulp_trace_stop",
+                  R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
     require_contains(stop, "Error: not in a Pulp project");
     REQUIRE(stop.find("Unknown tool") == std::string::npos);
 
-    const auto tools = handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})");
+    const auto tools =
+        handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})");
     const auto trace_start = tools.find(R"("name":"pulp_trace_start")");
     REQUIRE(trace_start != std::string::npos);
     const auto trace_stop = tools.find(R"("name":"pulp_trace_stop")", trace_start);
     REQUIRE(trace_stop != std::string::npos);
-    const auto trace_schema = tools.substr(
-        trace_start, trace_stop - trace_start);
+    const auto trace_schema = tools.substr(trace_start, trace_stop - trace_start);
     require_contains(trace_schema, R"("minimum":1)");
     require_contains(trace_schema, R"("maximum":512)");
     require_contains(trace_schema, R"JSON("session_id":{"type":"string")JSON");
     require_contains(trace_schema, R"JSON("instance_id":{"type":"string")JSON");
     require_contains(trace_schema, R"JSON("publication_id":{"type":"string")JSON");
     REQUIRE(trace_schema.find(R"("out_path")") == std::string::npos);
-    const auto trace_stop_schema =
-        tools.substr(trace_stop, tools.find(R"("name":"pulp_trace_snapshot")",
-                                           trace_stop) - trace_stop);
-    require_contains(
-        trace_stop_schema,
-        R"JSON("required":["session_id","instance_id","publication_id"])JSON");
+    const auto trace_stop_schema = tools.substr(
+        trace_stop, tools.find(R"("name":"pulp_trace_snapshot")", trace_stop) - trace_stop);
+    require_contains(trace_stop_schema,
+                     R"JSON("required":["session_id","instance_id","publication_id"])JSON");
 
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
                                           R"JSON({"sql":"select 1","format":"json"})JSON"));
@@ -3335,13 +3392,10 @@ TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas", "[mcp][tool
         REQUIRE(required_window.find(R"JSON("question")JSON") != std::string::npos);
     }
     for (const char* tool : {"pulp_trace_query", "pulp_trace_explain"}) {
-        const auto position =
-            tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
+        const auto position = tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
         REQUIRE(position != std::string::npos);
         const auto schema = tools.substr(position, 1600);
-        require_contains(
-            schema,
-            R"JSON("session_id","instance_id","publication_id")JSON");
+        require_contains(schema, R"JSON("session_id","instance_id","publication_id")JSON");
     }
 
     // Every trace tool needs a description + an inputSchema object.

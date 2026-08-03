@@ -128,7 +128,7 @@ REQUIRED_CLAIMS = {
     ".claude/commands/inspect.md": (
         "GPU-enabled desktop",
         "pulp run --inspect",
-        "explicitly wired custom fixture",
+        "installed `pulp` command",
     ),
     "docs/agent-integrations.md": (
         "unavailable in normal launches",
@@ -144,7 +144,7 @@ REQUIRED_CLAIMS = {
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "pulp run --inspect",
-        "explicit runtime profile",
+        "source checkout.",
         "selected standalone window",
         "owner-private ephemeral record/token files",
         "extended ACLs",
@@ -152,7 +152,7 @@ REQUIRED_CLAIMS = {
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "pulp run --inspect",
-        "exact multi-session selection",
+        "Installed in-process",
         "Standalone profiles do not grant runtime.eval",
     ),
     "docs/reference/scripted-ui-inspector.md": (
@@ -448,7 +448,16 @@ def check_root(
     for tool_name, description in MCP_TOOL_RE.findall(mcp_source):
         if tool_name == "pulp_inspect_pending_requests":
             continue
-        if "source-checkout" not in description:
+        if tool_name.startswith("pulp_inspect_"):
+            if "source-checkout" in description:
+                errors.append(
+                    f"{tool_name} retains a source-checkout-only client path"
+                )
+            if not re.search(r"\b(?:Installed|in-process)\b", description):
+                errors.append(
+                    f"{tool_name} must disclose its installed in-process client path"
+                )
+        elif "source-checkout" not in description:
             errors.append(
                 f"{tool_name} must disclose its source-checkout-only client path"
             )

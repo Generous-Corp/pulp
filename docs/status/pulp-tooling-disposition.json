@@ -2112,9 +2112,35 @@
             "name": "--output",
             "kind": "option",
             "required": false
+          },
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
           }
         ],
-        "subcommands": []
+        "subcommands": [
+          {
+            "name": "profiles",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "capabilities",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
       },
       {
         "name": "kit",
@@ -4488,11 +4514,23 @@
         "disposition": "excluded"
       },
       {
+        "name": "pulp_inspect_capabilities",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_doctor",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_dom",
         "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp_inspect_evaluate",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_list",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4505,6 +4543,10 @@
       },
       {
         "name": "pulp_inspect_performance",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_profiles",
         "disposition": "candidate-shared-later"
       },
       {
