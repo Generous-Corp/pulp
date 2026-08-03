@@ -74,6 +74,15 @@ target_link_libraries(pulp-design-panel-render-editor PRIVATE
     pulp::format pulp::view)
 target_compile_features(pulp-design-panel-render-editor PRIVATE cxx_std_20)
 
+# The same editor, obtained the way the adapters obtain it. A regression
+# BETWEEN the adapter and create_view() fails here and passes above.
+add_executable(pulp-design-panel-render-adapter-editor render_adapter_editor.cpp)
+target_include_directories(pulp-design-panel-render-adapter-editor PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(pulp-design-panel-render-adapter-editor PRIVATE
+    pulp::format pulp::view pulp::state)
+target_compile_features(pulp-design-panel-render-adapter-editor PRIVATE cxx_std_20)
+
 if(PULP_HAS_CLAP AND APPLE)
     add_test(
         NAME clap-dlopen-PulpDesignPanel

@@ -43,6 +43,22 @@ build/examples/design-panel-plugin/PulpDesignPanel.app/Contents/MacOS/PulpDesign
 started it would make every headless verification audible on whatever machine
 ran it, which is precisely where nobody expects sound.
 
+A third renderer goes through `ViewBridge` — the editor-lifecycle layer CLAP,
+VST3, AU and AUv3 **all** use to obtain an editor — rather than calling
+`create_view()` directly:
+
+```
+build/examples/design-panel-plugin/pulp-design-panel-render-adapter-editor \
+  --output editor.png --width 900 --height 602 --scale 2
+```
+
+This is the one that answers "does the adapter draw the DesignIR, or a scripted
+`ui.js`?". `ViewBridge` reaches its scripted-UI branch only when a processor
+supplies neither a native `create_view()` nor a tree, so a regression that lands
+BETWEEN the adapter and `create_view()` fails here and passes the two above.
+`open()` is not followed by `notify_attached()`: attachment is the host's
+native-window step, and the editor's content is fully built without it.
+
 `create_view()` returns `nullptr` rather than falling back to a generated UI
 when the embedded document is empty: a dropped design must not be able to look
 like a design choice.
