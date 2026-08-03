@@ -312,9 +312,9 @@ public:
         : info(std::move(session_info)),
           handler(std::move(request_handler)),
           lease(lease_ttl, std::move(clock)),
-          expiry_thread([this](std::stop_token stop) {
+          expiry_thread([this] {
               std::unique_lock lock(mutex);
-              while (!stop.stop_requested()) {
+              while (!expiry_stop_requested) {
                   const auto wait = lease.owner().has_value()
                       ? std::max(lease.remaining(),
                                  std::chrono::milliseconds(1))
@@ -340,7 +340,10 @@ public:
     }
 
     void request_expiry_stop() {
-        expiry_thread.request_stop();
+        {
+            std::lock_guard lock(mutex);
+            expiry_stop_requested = true;
+        }
         expiry_cv.notify_all();
     }
 
@@ -409,7 +412,8 @@ public:
     std::thread::id dispatch_owner;
     std::size_t dispatch_recursion = 0;
     std::shared_ptr<State> expiry_keep_alive;
-    std::jthread expiry_thread;
+    bool expiry_stop_requested = false;
+    std::thread expiry_thread;
 };
 
 InspectorSession::InspectorSession(InspectorSessionInfo info,
