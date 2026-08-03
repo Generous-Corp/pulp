@@ -1,3 +1,4 @@
+#include <pulp/playback/automation_cursor.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/program_wire.hpp>
 #include <pulp/playback/track_automation_program.hpp>
@@ -115,6 +116,32 @@ std::shared_ptr<const Project> wire_project() {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+/// Six automation lanes on one track. Six is not arbitrary: six lane records at
+/// this version's 56 bytes is 336, which divides exactly by the previous
+/// version's 48, so it is the smallest count at which a version 1 reader's
+/// stride arithmetic produces a whole number of records instead of a remainder.
+/// That is the case the version gate has to stop, so it is the case to build.
+std::shared_ptr<const Project> six_lane_project() {
+    TrackInput automated;
+    automated.id = {10};
+    automated.name = "six";
+    automated.device_chain = {{{40}}, {{41}}};
+    for (std::uint32_t i = 0; i < 6; ++i)
+        automated.automation_lanes.push_back(
+            device_lane(50 + i, (i % 2 == 0) ? 40 : 41, 7 + i, 0.25f));
+
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
+                                          std::vector<Track>{take(Track::create(
+                                              std::move(automated)))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "six";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 /// One track playing one audio clip, which is the program shape this version of
 /// the wire deliberately does not represent.
 std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
@@ -158,12 +185,17 @@ struct CompiledProgram {
     DeferredCompileExecutor executor;
     PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
 
+    /// `tempo_map` defaults to a fresh map. Pass one to make two compiles share
+    /// it: AutomationCursor refuses a program whose map is not the transport's,
+    /// so a case that judges two separately-compiled programs with one cursor
+    /// has to hand them one map or it never gets past TempoMapMismatch.
     explicit CompiledProgram(std::shared_ptr<const Project> project,
-                             std::shared_ptr<const DecodedAudioAssetPool> assets = nullptr) {
+                             std::shared_ptr<const DecodedAudioAssetPool> assets = nullptr,
+                             std::shared_ptr<const CompiledTempoMap> tempo_map = nullptr) {
         ProgramCompileRequest request;
         request.project = std::move(project);
         request.sequence_id = {2};
-        request.tempo_map = wire_tempo_map();
+        request.tempo_map = tempo_map ? std::move(tempo_map) : wire_tempo_map();
         request.document_revision = 7;
         request.dirty = {.all = true};
         request.audio_assets = std::move(assets);
@@ -202,12 +234,13 @@ class WireBuffer {
 /// Encodes the shared fixture once, so a corruption test can restore the byte
 /// it damaged and prove the payload was otherwise sound.
 struct EncodedFixture {
-    CompiledProgram compiled{wire_project()};
+    CompiledProgram compiled;
     PlaybackProgramStore::ReadGuard program = compiled.store.read();
     std::size_t size = take(program_wire_encoded_size(*program, kTempoPoints));
     WireBuffer buffer{size};
 
-    EncodedFixture() {
+    explicit EncodedFixture(std::shared_ptr<const CompiledTempoMap> tempo_map = nullptr)
+        : compiled(wire_project(), nullptr, std::move(tempo_map)) {
         REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
         REQUIRE(decode_program_wire(buffer.span()));
     }
@@ -251,6 +284,57 @@ void reseal(std::span<std::byte> bytes) {
 
 std::size_t section_entry_at(std::size_t index) {
     return kDirectoryAt + index * sizeof(ProgramWireSectionEntry);
+}
+
+/// One section's payload offset and byte length, read out of the directory
+/// rather than recomputed from record sizes, so a test that reaches into a
+/// section keeps targeting it when an earlier section's width changes.
+std::pair<std::size_t, std::size_t> section_span(std::span<const std::byte> bytes,
+                                                 ProgramWireSection section) {
+    ProgramWireHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    for (std::size_t i = 0; i < header.section_count; ++i) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry, bytes.data() + section_entry_at(i), sizeof(entry));
+        if (entry.id == static_cast<std::uint32_t>(section))
+            return {kPayloadAt + static_cast<std::size_t>(entry.offset),
+                    static_cast<std::size_t>(entry.bytes)};
+    }
+    std::abort();
+}
+
+std::size_t lane_token_at(std::span<const std::byte> bytes, std::size_t lane) {
+    return section_span(bytes, ProgramWireSection::AutomationLanes).first +
+           lane * sizeof(ProgramWireAutomationLaneRecord) +
+           offsetof(ProgramWireAutomationLaneRecord, instance_token);
+}
+
+/// What normalize_instance_tokens() writes into lane `index`.
+///
+/// A high sentinel rather than the ordinal, and the difference matters: in a
+/// fresh process the fixture's three lanes really are tokens 1, 2 and 3, so
+/// normalising to ordinals there is a no-op — and a normalisation that wrote to
+/// the wrong offset entirely would be indistinguishable from one that worked.
+/// The global counter would need ~1.8e19 compiles to reach these values, so
+/// observing them can only mean the write landed in the right field. Nonzero,
+/// so the normalised payload still decodes.
+constexpr std::uint64_t normalized_token(std::size_t index) noexcept {
+    return 0x7E57'0000'0000'0001ull + index;
+}
+
+/// Rewrites every lane's instance token to its sentinel and reseals. The token
+/// is minted per compile, so it is the one field a fixed document does not fix;
+/// a digest over a fixed document has to pin it or it would record how many
+/// programs this process happened to compile first. A value is written rather
+/// than the bytes skipped so the field's offset and width stay inside the
+/// digest's coverage.
+void normalize_instance_tokens(std::span<std::byte> bytes) {
+    const auto [offset, length] = section_span(bytes, ProgramWireSection::AutomationLanes);
+    for (std::size_t i = 0; i < length / sizeof(ProgramWireAutomationLaneRecord); ++i) {
+        const auto sentinel = normalized_token(i);
+        std::memcpy(bytes.data() + lane_token_at(bytes, i), &sentinel, sizeof(sentinel));
+    }
+    reseal(bytes);
 }
 
 } // namespace
@@ -385,7 +469,35 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
     // the field order, or the compiler's lowering does; any of those is a
     // deliberate change that has to be re-agreed here rather than silently
     // between the encoder and the decoder.
-    REQUIRE(program_wire_checksum(bytes) == 0xb2f8e42781eb1920ull);
+    //
+    // One field of a fixed document is not fixed: each lane's instance token is
+    // minted per compile, so it counts how many programs this process built
+    // first and would make the digest depend on test order. It is pinned to a
+    // sentinel — not dropped, so its offset and width stay covered.
+    WireBuffer canonical(fixture.size);
+    std::memcpy(canonical.span().data(), bytes.data(), fixture.size);
+    normalize_instance_tokens(canonical.span());
+    // Control on the normalisation itself: read the tokens back through the
+    // decoder and require the sentinel. A wrong offset would leave the raw
+    // tokens in place and the digest below would fail with no explanation. The
+    // sentinel is checked rather than "the bytes changed" because when this case
+    // runs alone the raw tokens are 1, 2, 3 and a change is not guaranteed.
+    auto normalized = decode_program_wire(canonical.span());
+    REQUIRE(normalized);
+    const auto normalized_lanes = normalized.value().automation_lanes();
+    REQUIRE(normalized_lanes.size() == 3);
+    for (std::size_t i = 0; i < normalized_lanes.size(); ++i)
+        REQUIRE(normalized_lanes[i].instance_token == normalized_token(i));
+
+    // Normalising the token's VALUE takes it out of the digest's reach, so the
+    // digest alone no longer guards where that field sits. Pin the offset and
+    // width here instead, or moving the token within the record — or widening
+    // it — would pass both the golden and every assertion above.
+    REQUIRE(offsetof(ProgramWireAutomationLaneRecord, instance_token) == 16);
+    REQUIRE(sizeof(ProgramWireAutomationLaneRecord::instance_token) == 8);
+    REQUIRE(lane_token_at(canonical.span(), 0) ==
+            section_span(canonical.span(), ProgramWireSection::AutomationLanes).first + 16);
+    REQUIRE(program_wire_checksum(canonical.span()) == 0xd4f6b232ebb9d781ull);
 }
 
 TEST_CASE("program wire rejects a malformed generation header", "[playback][wire]") {
@@ -751,14 +863,42 @@ TEST_CASE("program wire equality compares values rather than shared ownership",
     REQUIRE(program_wire_matches(decoded.value(), *fixture.program, kTempoPoints, kEpoch));
 
     // Recompiling the same document yields a program that shares no track,
-    // automation, or tempo ownership with the first, and the same bytes still
-    // describe it apart from the generation the compiler advanced.
+    // automation, or tempo ownership with the first. The equality walk must not
+    // notice any of that — it compares values, not the pointers the wire exists
+    // to leave behind — and it must still notice the one thing that genuinely
+    // differs, which is each lane's per-compile instance token.
     CompiledProgram rebuilt{wire_project()};
     const auto other = rebuilt.store.read();
     REQUIRE(other.get() != fixture.program.get());
     REQUIRE(other->find_track({10}) != fixture.program->find_track({10}));
     REQUIRE(&other->tempo_map() != &fixture.program->tempo_map());
-    REQUIRE(program_wire_matches(decoded.value(), *other, kTempoPoints, kEpoch));
+    REQUIRE_FALSE(program_wire_matches(decoded.value(), *other, kTempoPoints, kEpoch));
+
+    // Which of those two it is matters, so it is proven rather than assumed:
+    // restamp only the lane tokens with the rebuilt program's, and every other
+    // compared field must already agree. A match here says the walk is blind to
+    // ownership; the REQUIRE_FALSE above says it is not blind to identity. The
+    // original of this case asserted the match without the restamp, which could
+    // not tell those two apart.
+    const auto* rebuilt_automation = other->find_track({10})->automation_program();
+    REQUIRE(rebuilt_automation != nullptr);
+    const auto rebuilt_lanes = rebuilt_automation->programs();
+    REQUIRE(rebuilt_lanes.size() == 3);
+    WireBuffer restamped(fixture.size);
+    std::memcpy(restamped.span().data(), fixture.bytes().data(), fixture.size);
+    for (std::size_t i = 0; i < rebuilt_lanes.size(); ++i) {
+        const auto token = rebuilt_lanes[i]->instance_token().value;
+        REQUIRE(token != 0);
+        std::memcpy(restamped.span().data() + lane_token_at(restamped.span(), i), &token,
+                    sizeof(token));
+    }
+    reseal(restamped.span());
+    auto reidentified = decode_program_wire(restamped.span());
+    REQUIRE(reidentified);
+    REQUIRE(program_wire_matches(reidentified.value(), *other, kTempoPoints, kEpoch));
+    // ...and the restamped payload is a different byte range from the one it was
+    // copied from, so the match above is not the trivial one.
+    REQUIRE(std::memcmp(restamped.span().data(), fixture.bytes().data(), fixture.size) != 0);
 
     // And a real difference is seen: the equality walk is not vacuously true.
     WireBuffer swapped(fixture.size);
@@ -776,4 +916,223 @@ TEST_CASE("program wire equality compares values rather than shared ownership",
     const std::array shifted{TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
                              TempoPoint{{kTicksPerQuarter * 4}, 96.0}};
     REQUIRE_FALSE(program_wire_matches(decoded.value(), *fixture.program, shifted, kEpoch));
+}
+
+// `producer_epoch` distinguishes PRODUCERS; `instance_token` distinguishes
+// PROGRAMS FROM ONE PRODUCER. The wire needs both, because the two answer
+// different questions and only the first was carried. The producer-restart case
+// is covered above; this is the single producer recompiling, which is the more
+// common one — `generation` is caller-supplied rather than minted per compile,
+// so nothing else in the payload moves.
+//
+// The first half is a control with a known answer: two compiles of the same lane
+// at the same generation must NOT read as Unchanged in process. If that ever
+// stops holding, the premise is gone and this case says so rather than passing
+// quietly on a wire comparison that no longer means anything.
+TEST_CASE("one producer's successive programs are distinguishable on the wire",
+          "[playback][wire]") {
+    // The two halves below judge ONE pair of programs: the cursor half and the
+    // byte half must concern the same two, or the case proves two unconnected
+    // things — that some pair is distinguishable in process, and that some other
+    // pair is byte-identical — while claiming to have bridged them. The pair is
+    // therefore taken out of the two PlaybackPrograms that actually get encoded,
+    // rather than compiled separately alongside them.
+    //
+    // Both compiles share one tempo map, because AutomationCursor refuses a
+    // program whose map is not the transport's. Without sharing, one cursor
+    // cannot judge both, which is what pushed the two halves onto different
+    // pairs to begin with.
+    const auto map = wire_tempo_map();
+    EncodedFixture fixture{map};
+    CompiledProgram rebuilt{wire_project(), nullptr, map};
+    const auto second = rebuilt.store.read();
+    REQUIRE(second->generation() == fixture.program->generation());
+
+    const auto* first_automation = fixture.program->find_track({10})->automation_program();
+    const auto* second_automation = second->find_track({10})->automation_program();
+    REQUIRE(first_automation != nullptr);
+    REQUIRE(second_automation != nullptr);
+    const auto& first_program = *first_automation->programs()[0];
+    const auto& second_program = *second_automation->programs()[0];
+    REQUIRE(&first_program.tempo_map() == &second_program.tempo_map());
+
+    // Same lane, same generation — and a fresh token per compile, because
+    // next_instance_token() is a process-global monotonic counter.
+    REQUIRE(first_program.lane_id() == second_program.lane_id());
+    REQUIRE(first_program.generation() == second_program.generation());
+    REQUIRE(first_program.instance_token() != second_program.instance_token());
+
+    MasterTransport clock;
+    MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    config.initially_playing = true;
+    REQUIRE(clock.prepare(*map, config) == TransportError::None);
+
+    std::array<AutomationBlockEvent, 32> events{};
+    AutomationCursor cursor;
+    TransportSnapshot snapshot;
+    REQUIRE(clock.begin_block(32, snapshot) == TransportError::None);
+    REQUIRE(cursor.process(first_program, snapshot, events).adoption ==
+            AutomationProgramAdoption::Adopted);
+    REQUIRE(clock.begin_block(32, snapshot) == TransportError::None);
+    // The control, and it is over the very lane the payloads below carry: in
+    // process the cursor tells these two apart, because Unchanged requires the
+    // instance token to match as well as the lane key.
+    REQUIRE(cursor.process(second_program, snapshot, events).adoption !=
+            AutomationProgramAdoption::Unchanged);
+
+    // Across a realm the consumer must reach that same answer about that same
+    // pair. Both encode at one epoch, and their lane ids, generations and epochs
+    // all match — so before the token was carried the bytes matched too, and a
+    // consumer computing Unchanged from them contradicted the cursor above. That
+    // is a silently wrong render rather than a decode error.
+
+    WireBuffer again(fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch, again.span())) ==
+            fixture.size);
+    REQUIRE(fixture.size > 0);
+    REQUIRE(std::memcmp(fixture.bytes().data(), again.span().data(), fixture.size) != 0);
+
+    // The mirror of that assertion, and it is what stops the `!=` above from
+    // being vacuous: an inequality passes trivially against a comparison that
+    // can only ever report "different", exactly as the old equality assertion
+    // passed against one that could only report "same". Encoding ONE program
+    // twice — same tokens, same everything — must still compare EQUAL. Without
+    // this, "the payloads differ" is equally consistent with a nonce leaking
+    // into every field and no two encodings ever matching again.
+    WireBuffer repeated(fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch, repeated.span())) ==
+            fixture.size);
+    REQUIRE(std::memcmp(again.span().data(), repeated.span().data(), fixture.size) == 0);
+
+    // Negative control for the difference itself: it must be the tokens and
+    // nothing else. Normalising them collapses the two payloads to the same
+    // bytes, which says the rest of the encoding is as identical as it always
+    // was — the fix added an identity rather than perturbing the content.
+    WireBuffer flattened_first(fixture.size);
+    WireBuffer flattened_second(fixture.size);
+    std::memcpy(flattened_first.span().data(), fixture.bytes().data(), fixture.size);
+    std::memcpy(flattened_second.span().data(), again.span().data(), fixture.size);
+    normalize_instance_tokens(flattened_first.span());
+    normalize_instance_tokens(flattened_second.span());
+    REQUIRE(std::memcmp(flattened_first.span().data(), flattened_second.span().data(),
+                        fixture.size) == 0);
+
+    // And the difference is per lane, not one blanket stamp: each lane carries
+    // its own token, so a consumer can re-adopt the lanes that moved and keep
+    // its cursor state for the rest.
+    auto first_view = decode_program_wire(fixture.bytes());
+    auto second_view = decode_program_wire(again.span());
+    REQUIRE(first_view);
+    REQUIRE(second_view);
+    const auto first_lanes = first_view.value().automation_lanes();
+    const auto second_lanes = second_view.value().automation_lanes();
+    REQUIRE(first_lanes.size() == 3);
+    REQUIRE(second_lanes.size() == first_lanes.size());
+    for (std::size_t i = 0; i < first_lanes.size(); ++i) {
+        REQUIRE(first_lanes[i].lane_id == second_lanes[i].lane_id);
+        REQUIRE(first_lanes[i].generation == second_lanes[i].generation);
+        REQUIRE(first_lanes[i].instance_token != 0);
+        REQUIRE(second_lanes[i].instance_token != 0);
+        REQUIRE(first_lanes[i].instance_token != second_lanes[i].instance_token);
+    }
+
+    // Positive control for the comparison itself: the same two programs encoded
+    // under DIFFERENT epochs must also differ. Without it, "the bytes differed"
+    // is equally consistent with a comparison that cannot report a match.
+    WireBuffer separated(fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch + 1, separated.span())) ==
+            fixture.size);
+    REQUIRE(std::memcmp(again.span().data(), separated.span().data(), fixture.size) != 0);
+}
+
+// Growing a record is not a compatibility gap, it is a silent-corruption
+// hazard, and the two need different guards. A reader that MISSES a field
+// renders less than the writer meant; a reader that misreads the stride
+// fabricates records that were never written. This case pins the second, and it
+// is worth having whether or not the token is the field that grew.
+//
+// The decoder derives its record count from a compile-time `sizeof` — see
+// `records<>()` and the section walk in program_wire.cpp, which compute
+// `bytes / sizeof(Record)` and reject only a non-zero remainder. A remainder is
+// therefore the ONLY thing that makes a stride mismatch visible, and a count
+// whose byte length happens to divide by the old size has no remainder to
+// notice. `min_reader_version` is the entire defence, not a courtesy.
+TEST_CASE("a version 1 reader is refused rather than left to misread the lane stride",
+          "[playback][wire]") {
+    CompiledProgram compiled{six_lane_project()};
+    const auto program = compiled.store.read();
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer buffer{size};
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
+
+    auto decoded = decode_program_wire(buffer.span());
+    REQUIRE(decoded);
+    REQUIRE(decoded.value().automation_lanes().size() == 6);
+
+    const auto [lane_offset, lane_bytes] =
+        section_span(buffer.span(), ProgramWireSection::AutomationLanes);
+    REQUIRE(lane_bytes == 6 * sizeof(ProgramWireAutomationLaneRecord));
+
+    // The hazard, made concrete rather than asserted. A version 1 reader sized
+    // this section by its own 48-byte lane record. That divides 336 exactly, so
+    // it would find no remainder to reject and would hand its caller SEVEN
+    // records of shifted garbage — six lanes' worth of bytes reinterpreted at
+    // the wrong stride, every field past `generation` read from the wrong
+    // offset, and no error anywhere.
+    constexpr std::size_t kVersion1LaneRecordBytes = 48;
+    REQUIRE(lane_bytes % kVersion1LaneRecordBytes == 0);
+    REQUIRE(lane_bytes / kVersion1LaneRecordBytes == 7);
+    REQUIRE(lane_bytes / kVersion1LaneRecordBytes !=
+            decoded.value().automation_lanes().size());
+
+    // And the guard that stops it, which is the only one there is: the payload
+    // states a minimum reader version above 1, so a version 1 reader refuses at
+    // the header and never reaches the stride arithmetic at all.
+    constexpr std::uint16_t kVersion1Reader = 1;
+    ProgramWireHeader header;
+    std::memcpy(&header, buffer.span().data(), sizeof(header));
+    REQUIRE(header.min_reader_version > kVersion1Reader);
+
+    // Proven the same way the decoder proves it, rather than by reading the
+    // constant back: a payload demanding a reader newer than this build is
+    // refused, so the check the version rides on demonstrably fires.
+    const auto beyond = static_cast<std::uint16_t>(kProgramWireVersion + 1);
+    std::memcpy(buffer.span().data() + offsetof(ProgramWireHeader, min_reader_version), &beyond,
+                sizeof(beyond));
+    auto refused = decode_program_wire(buffer.span());
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == ProgramWireErrorCode::UnsupportedVersion);
+}
+
+// Zero is what an unwritten lane record holds, so it would compare equal to
+// every other unwritten lane and report Unchanged for a program never adopted —
+// the same wildcard failure a zero producer epoch would cause, one level down.
+TEST_CASE("program wire refuses a lane with no instance token", "[playback][wire]") {
+    EncodedFixture fixture;
+    const auto bytes = fixture.bytes();
+    const auto token_at = lane_token_at(bytes, 1);
+
+    std::uint64_t original = 0;
+    std::memcpy(&original, bytes.data() + token_at, sizeof(original));
+    REQUIRE(original != 0);
+
+    // Resealed rather than raw-corrupted: the token lives in the checksummed
+    // payload, so without re-sealing this would prove ChecksumMismatch fires and
+    // never reach the token check at all.
+    const std::uint64_t zero = 0;
+    std::memcpy(bytes.data() + token_at, &zero, sizeof(zero));
+    reseal(bytes);
+    auto rejected = decode_program_wire(bytes);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ProgramWireErrorCode::InvalidInstanceToken);
+    REQUIRE(rejected.error().section ==
+            static_cast<std::uint32_t>(ProgramWireSection::AutomationLanes));
+    REQUIRE(rejected.error().detail == 1);
+
+    // The restore is the negative control: without it the rejection above is
+    // equally consistent with a payload that never decoded in the first place.
+    std::memcpy(bytes.data() + token_at, &original, sizeof(original));
+    reseal(bytes);
+    REQUIRE(decode_program_wire(bytes));
 }

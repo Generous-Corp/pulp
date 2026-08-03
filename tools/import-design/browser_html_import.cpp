@@ -155,7 +155,8 @@ BrowserHtmlImportResult import_browser_html(
          // serialize the importing machine's absolute path into portable IR.
          .source_file = {},
          .require_interaction_report =
-             request.browser_interactions.has_value()});
+             request.browser_interactions.has_value(),
+         .native_panel_lowering = request.native_panel_lowering});
     if (!lowered) {
         return BrowserHtmlFailure{
             3,

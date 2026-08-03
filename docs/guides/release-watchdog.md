@@ -178,7 +178,9 @@ being rejected as unexpected. Executes three checks:
    less-indented content line).
 3. **`actionlint`** via the `raven-actions/actionlint` reusable action.
    Catches GitHub Actions-specific issues: unknown `uses:` refs,
-   deprecated action versions, shell escaping bugs, etc.
+   deprecated action versions, shell escaping bugs, etc. Custom self-hosted
+   runner labels are declared in `.github/actionlint.yaml`; changing that file
+   also triggers this workflow so the declaration cannot drift silently.
 
 Failure means the PR cannot merge until fixed. Running locally:
 
@@ -273,6 +275,16 @@ Triggered only when a PR touches files in the release-path scope:
 `tools/cli/CMakeLists.txt`, `core/{canvas,render,view}/CMakeLists.txt`,
 `CMakeLists.txt`, `release-cli.yml`. Most PRs (view / docs / examples /
 plugin) skip this gate entirely so iteration speed is unaffected.
+
+The macOS leg has its own `PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON`
+selector, falling back to the legacy shared `PULP_RELEASE_MACOS_RUNS_ON_JSON`
+only while a fleet migrates. Production uses mutually exclusive Tart CI class
+labels: tagged `Release CLI` / `Sign and Release` jobs request
+`pulp-release-tagged`, while this PR-time gate requests
+`pulp-release-pr-gate`. One release supervisor serves both classes but mints a
+JIT runner for only the highest class with demand, so an older PR gate cannot
+claim capacity while a tagged release is waiting. GitHub retains FIFO within
+each class.
 
 If `release-cli.yml`'s job structure ever drifts from this gate, the
 gate is lying. Mirror any structural change to release-cli.yml here

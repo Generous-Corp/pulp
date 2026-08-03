@@ -193,6 +193,18 @@ if(PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-css-gradient-render)
 endif()
 
+# CSS gradient geometry against Chrome's own render of the same string. Split
+# from the file above because its oracle is different in kind: those cases
+# assert that two CSS spellings agree with EACH OTHER, which cannot see an
+# arithmetic error both spellings share. These expectations are pixel
+# positions read off Chromium by tools/import-validation/chrome_gradient_oracle.py.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-css-gradient-geometry test_css_gradient_geometry.cpp)
+    target_link_libraries(pulp-test-css-gradient-geometry
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-css-gradient-geometry)
+endif()
+
 # CG-degraded gradient + pattern cluster. Apple-only TU: every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
 # fallback honours the canvas2d spec — conic / two-circle

@@ -1539,6 +1539,8 @@ TEST_CASE("IPC socket write timeout bounds the complete frame",
 TEST_CASE("IPC socket write timeout includes writer admission",
           "[events][ipc][socket][regression][concurrency]") {
     constexpr auto timeout = std::chrono::milliseconds(500);
+    constexpr auto writer_hold = std::chrono::milliseconds(200);
+    constexpr auto scheduler_headroom = std::chrono::milliseconds(150);
     constexpr std::size_t payload_size = 32u * 1024u * 1024u;
 
     Socket listener;
@@ -1558,7 +1560,7 @@ TEST_CASE("IPC socket write timeout includes writer admission",
                !second_started.load(std::memory_order_acquire)) {
             std::this_thread::yield();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::this_thread::sleep_for(writer_hold);
         std::vector<std::uint8_t> buffer(64u * 1024u);
         std::size_t remaining = payload_size + 4;
         while (socket && remaining > 0) {
@@ -1609,7 +1611,10 @@ TEST_CASE("IPC socket write timeout includes writer admission",
     REQUIRE(peer_accepted.load(std::memory_order_acquire));
     REQUIRE(first_sent);
     REQUIRE_FALSE(second_sent);
-    REQUIRE(duration < timeout + std::chrono::milliseconds(100));
+    // A fresh timeout after writer admission would take at least the hold plus
+    // the configured timeout. Keep the ceiling below that regression while
+    // allowing loaded CI hosts enough scheduling headroom around the deadline.
+    REQUIRE(duration < timeout + scheduler_headroom);
 }
 
 TEST_CASE("IPC timeout disconnect serializes with explicit teardown",

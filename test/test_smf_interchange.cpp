@@ -283,6 +283,50 @@ TEST_CASE("SMF interchange drops registered content only after exact consent",
     REQUIRE(note_count(imported.value().project) == 0);
 }
 
+TEST_CASE("SMF interchange drops controller lanes only after exact consent",
+          "[interchange][smf]") {
+    // Both halves of the seam matter and each can break alone: the raw entry
+    // point must refuse, and the adapter must CLEAR that refusal once the loss
+    // is accepted. Hardcoding the policy flag to false leaves the raw refusal
+    // green while making a lane-bearing export impossible through any path.
+    NoteEvent note{{1}, TickPosition{0}, TickDuration{kQuarter}, 0xffffu, 60, 0};
+    MidiExpressionLane lane;
+    lane.id = {6};
+    lane.address = {0, 0, 0x0B, 0, 1};
+    lane.points = {{{7}, TickPosition{0}, 0u}, {{8}, TickPosition{kQuarter / 2}, 0xFFFF'FFFFu}};
+    auto content = take(MidiContent::create({note}, {}, 0, {lane}));
+    auto clip = take(Clip::create({2}, {0}, {kQuarter}, std::move(content)));
+    auto track = take(Track::create({3}, "expressive", {std::move(clip)}));
+    auto sequence = take(Sequence::create({4}, "root", TickDuration{kQuarter},
+                                          {std::move(track)}));
+    const Project project = take(Project::create(
+        ProjectInput{{5}, "expressive", 10, {4}, {}, {std::move(sequence)}}));
+
+    const ExportPlan plan = plan_export(project, Format::Smf);
+    REQUIRE(plan.required_consent() ==
+            std::vector<Concept>{Concept::ClipMidiExpressionLane});
+
+    // The raw SDK entry point fails closed rather than writing a file whose
+    // controller movement silently vanished.
+    REQUIRE_FALSE(export_smf(project));
+
+    auto refused = run_export(plan, ExportOptions{}, smf::writer());
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == ExportErrorCode::UnacceptedLoss);
+
+    ExportOptions accepted;
+    accepted.accepted_losses = plan.required_consent();
+    auto exported = run_export(plan, accepted, smf::writer());
+    REQUIRE(exported);
+
+    // The notes survive; only the lanes are dropped. Asserting the note count
+    // is what separates "consent cleared the refusal" from "consent made the
+    // whole clip disappear".
+    auto imported = import_smf(artifact(exported.value(), "project.mid").bytes);
+    REQUIRE(imported);
+    REQUIRE(note_count(imported.value().project) == 1);
+}
+
 TEST_CASE("SMF lossless success still carries the canonical manifest",
           "[interchange][smf]") {
     const ExportPlan plan = plan_export(lossless_project(), Format::Smf);

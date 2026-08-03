@@ -79,6 +79,7 @@
     { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." },
     { "id": "clip.media-window", "detect": "model", "summary": "A media clip that plays a source subrange rather than the referenced asset's complete frame range." },
     { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." },
+    { "id": "clip.midi-expression-lane", "detect": "model", "summary": "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note." },
     { "id": "sequence.section-role", "detect": "model", "summary": "A region that names the structural part it spans, beyond its free-text name." },
     { "id": "context.chord-bass", "detect": "model", "summary": "A chord statement naming the pitch class in the bass, rather than sounding root position." },
     { "id": "context.chord-extension", "detect": "model", "summary": "A chord statement carrying added scale degrees beyond its quality." },

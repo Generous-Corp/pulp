@@ -264,10 +264,15 @@ echo "=== Configuring coverage build in ${BUILD_DIR} ==="
 if [ "${OS:-}" = "Windows_NT" ] || [ -n "${MSYSTEM:-}" ]; then
     CLANG_C=clang-cl
     CLANG_CXX=clang-cl
+elif [ "$(uname -s)" = "Darwin" ] && command -v xcrun >/dev/null 2>&1 \
+    && xcrun -f clang >/dev/null 2>&1 && xcrun -f clang++ >/dev/null 2>&1; then
+    CLANG_C="$(xcrun -f clang)"
+    CLANG_CXX="$(xcrun -f clang++)"
 else
     CLANG_C=clang
     CLANG_CXX=clang++
 fi
+CI_PYTHON="$(python3 "${REPO_ROOT}/tools/ci/find_python311.py")"
 
 cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Debug \
@@ -275,7 +280,8 @@ cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DPULP_ENABLE_GPU=OFF \
     -DPULP_BUILD_EXAMPLES=OFF \
     -DCMAKE_C_COMPILER="${CLANG_C}" \
-    -DCMAKE_CXX_COMPILER="${CLANG_CXX}" >/dev/null
+    -DCMAKE_CXX_COMPILER="${CLANG_CXX}" \
+    -DPython3_EXECUTABLE="${CI_PYTHON}" >/dev/null
 
 # Stale-cache guard (issue #570 in scripts/run_coverage.sh) — same hazard
 # applies here.

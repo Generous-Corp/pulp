@@ -87,8 +87,12 @@ CommandJournal::replay(const Project& checkpoint, DocumentRevision checkpoint_re
     if (checkpoint_revision != base_revision_ ||
         (base_snapshot_ && !detail::snapshots_equivalent(checkpoint, *base_snapshot_))) {
         TransactionError error;
+        // Two causes share this guard. A revision mismatch is stale optimistic
+        // concurrency; an equal revision that fails snapshot equivalence means
+        // the caller handed replay a different document, which says nothing
+        // about the journal.
         error.code = checkpoint_revision != base_revision_ ? ConflictCode::StaleRevision
-                                                           : ConflictCode::ModelInvariant;
+                                                           : ConflictCode::CheckpointMismatch;
         error.expected_revision = base_revision_;
         error.current_revision = checkpoint_revision;
         return runtime::Result<Project, TransactionError>(runtime::Err(error));
@@ -134,11 +138,19 @@ CommandJournal::replay(const Project& checkpoint, DocumentRevision checkpoint_re
         }
         auto reduced = detail::reduce_transaction(current, entry.transaction,
                                                   entry.kind == JournalEntryKind::History);
-        if (!reduced)
-            return runtime::Result<Project, TransactionError>(runtime::Err(reduced.error()));
+        if (!reduced) {
+            // A journaled entry that once reduced cleanly no longer does.
+            // Propagating the reducer's own code verbatim would report a replay
+            // failure as an ordinary live-edit rejection -- identically, down to
+            // a populated model_error. Name the replay failure and keep the
+            // reducer's targets and model detail as the explanation.
+            auto error = reduced.error();
+            error.code = ConflictCode::ReplayDivergence;
+            return runtime::Result<Project, TransactionError>(runtime::Err(std::move(error)));
+        }
         if (!same_dirty(reduced->dirty, entry.dirty)) {
             auto error = TransactionError{};
-            error.code = ConflictCode::ModelInvariant;
+            error.code = ConflictCode::ReplayDivergence;
             error.transaction = entry.transaction.id;
             return runtime::Result<Project, TransactionError>(runtime::Err(error));
         }
