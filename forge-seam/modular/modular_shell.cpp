@@ -1006,10 +1006,14 @@ std::string ForgeModularShell::artifact_path() const {
 }
 
 std::string RackPresence::phrase() const {
-    // One sentence, in the order a person cares about: can I use it right now,
-    // could I, or do I need to go and get it.
-    if (standalone_running) return "Rack is running";
-    if (standalone_installed) return "Rack is installed";
+    // Say something only when there is a PROBLEM.
+    //
+    // This reported the good news too -- "Rack is installed", greyed out beside
+    // the Open in Rack button -- which is a label that is present exactly when
+    // it is not needed and says nothing the button next to it does not already
+    // imply. The negative is the only case worth a person's attention, because
+    // it is the only one they have to act on.
+    if (standalone_running || standalone_installed) return {};
     if (plugin_installed) return "Rack is available as a plugin";
     return "Rack is not installed";
 }

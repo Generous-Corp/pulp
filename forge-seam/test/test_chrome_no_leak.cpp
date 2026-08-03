@@ -2408,30 +2408,39 @@ TEST_CASE("Rack is handed the patch, not left to restore its autosave",
 
 TEST_CASE("whether Rack is there is shown, not left to be discovered",
           "[rack][open]") {
-    // All three states were known to the app and reached a person only as the
+    // The states were known to the app and reached a person only as the
     // wording of a failure AFTER they pressed the button. Until then "Rack is
     // not installed" and "the button did nothing" looked the same.
+    //
+    // But only the ACTIONABLE states earn words. "Rack is installed", greyed
+    // beside an Open in Rack button, is a label present exactly when it is not
+    // needed, saying nothing the button does not already imply. Silence is the
+    // right answer when there is nothing to do.
     forge_modular::RackPresence p;
     CHECK(p.phrase() == "Rack is not installed");
     p.plugin_installed = true;
     CHECK(p.phrase() == "Rack is available as a plugin");
     p.standalone_installed = true;
-    CHECK(p.phrase() == "Rack is installed");
+    CHECK(p.phrase().empty());
     p.standalone_running = true;
-    CHECK(p.phrase() == "Rack is running");
+    CHECK(p.phrase().empty());
 
-    // Every state says something different. A phrase() that returned one
-    // string would satisfy nothing above but is worth pinning: the pill is
-    // only useful because the four readings are distinguishable.
+    // Every state that speaks says something DIFFERENT, and the states that
+    // have nothing to act on stay quiet. A phrase() returning one string would
+    // satisfy nothing above, but is worth pinning: the pill is only useful
+    // because its readings are distinguishable.
     std::set<std::string> said;
+    int silent = 0;
     for (int i = 0; i < 8; ++i) {
         forge_modular::RackPresence q;
         q.standalone_running = i & 1;
         q.standalone_installed = i & 2;
         q.plugin_installed = i & 4;
-        said.insert(q.phrase());
+        const auto s = q.phrase();
+        if (s.empty()) ++silent; else said.insert(s);
     }
-    CHECK(said.size() == 4);
+    CHECK(said.size() == 2);   // not installed; plugin only
+    CHECK(silent > 0);         // installed or running says nothing
 
     // And it reaches the screen. The pill is hidden until there is something
     // to open, then carries the words look_for_rack() found on this machine.
@@ -2451,10 +2460,13 @@ TEST_CASE("whether Rack is there is shown, not left to be discovered",
 
     shell.refresh_rack_presence();
     INFO("pill says: " << shell.rack_presence_phrase());
-    CHECK_FALSE(shell.rack_presence_phrase().empty());
     CHECK(shell.rack_presence_phrase() == pill->text());
-    // It has to say one of the four things, not any string at all.
-    CHECK(said.count(shell.rack_presence_phrase()) == 1);
+    // Whatever it says must be one of the things phrase() can say -- or
+    // nothing, which is the right answer on a machine where Rack is installed
+    // and there is therefore nothing to tell the user. Asserting non-empty
+    // here would pin the test to the DEVELOPER's machine having no Rack.
+    const auto shown = shell.rack_presence_phrase();
+    CHECK((shown.empty() || said.count(shown) == 1));
 
     // And it becomes VISIBLE once there is something to open.
     //
