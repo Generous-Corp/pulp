@@ -63,6 +63,21 @@ if(TARGET PulpDesignPanel_Standalone)
     target_sources(PulpDesignPanel_Standalone PRIVATE main.cpp)
 endif()
 
+# ── The audio proof ───────────────────────────────────────────────────────
+# Every other check here — dlopen, auval, clap-validator, headless screenshot —
+# passes on a plugin that copies input to output and whose knobs drive nothing.
+# These are the assertions that class of failure cannot survive.
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-design-panel-test test_design_panel_plugin.cpp)
+    target_include_directories(pulp-design-panel-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(pulp-design-panel-test PRIVATE
+        pulp::format pulp::view pulp::state pulp::signal
+        Catch2::Catch2WithMain)
+    target_compile_features(pulp-design-panel-test PRIVATE cxx_std_20)
+    catch_discover_tests(pulp-design-panel-test)
+endif()
+
 # ── The editor, rendered headlessly ───────────────────────────────────────
 # Subject is Processor::create_view() — the same call every format adapter
 # makes — so the PNG is what the plugin's editor draws, not what the importer

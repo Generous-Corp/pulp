@@ -15,18 +15,88 @@
 // The complete View type, not a forward declaration: create_view() returns a
 // unique_ptr, and every format entry TU instantiates its deleter.
 #include <pulp/view/view.hpp>
+// Knob / Fader / Meter are used by value in the binding context below.
+#include <pulp/view/widgets.hpp>
 
 #include "embedded_design_ir.hpp"
+#include "tape_echo_dsp.hpp"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 
 namespace pulp::examples {
 
+/// IDs are private; the panel binds by NAME. Each control carries its own
+/// `pulpParamKey` so the design states which parameter it drives, rather than
+/// the two agreeing on an ordering neither can see.
 enum DesignPanelParams : state::ParamID {
-    kMacroA = 1,
-    kMacroB = 2,
+    kTime = 1,
+    kFeedback = 2,
+    kTone = 3,
+    kMix = 4,
+};
+
+/// Resolves a control's `pulpParamKey` against the parameter of the same name.
+///
+/// Forge's own exporter resolves `param_N` positionally instead. Either
+/// contract works, but they are not interchangeable: a panel authored against
+/// one and bound by the other silently binds NOTHING — every knob renders,
+/// turns, and moves no parameter, which no screenshot and no validator can
+/// show. Hence the test that asserts every key in the IR resolves.
+class NameBindingContext final : public view::NativeImportBindingContext {
+public:
+    explicit NameBindingContext(state::StateStore& store,
+                                const TapeEcho& echo)
+        : store_(store), echo_(echo) {}
+
+    void bind_knob(view::Knob& knob,
+                   const view::NativeImportBindingDescriptor& d) override {
+        attach(knob, d.param_key);
+    }
+    void bind_fader(view::Fader& fader,
+                    const view::NativeImportBindingDescriptor& d) override {
+        attach(fader, d.param_key);
+    }
+    void bind_meter(view::Meter& meter,
+                    const view::NativeImportMeterBindingDescriptor&) override {
+        // Driven from real output level, so an idle plugin reads zero rather
+        // than whatever a parameter happens to say.
+        meter_ = &meter;
+    }
+
+    /// Non-null once the panel has been bound and it declared a meter.
+    view::Meter* meter() const { return meter_; }
+
+    /// Every key the design asked for, resolved or not — the test reads this
+    /// rather than inferring success from a plugin that merely opened.
+    const std::vector<std::pair<std::string, bool>>& resolutions() const {
+        return resolutions_;
+    }
+
+private:
+    template <typename Control>
+    void attach(Control& control, std::string_view key) {
+        const auto id = id_for(key);
+        resolutions_.emplace_back(std::string(key), id != 0);
+        if (id == 0) return;
+        control.set_value(store_.get_value(id));
+        control.on_change = [this, id](float v) { store_.set_value(id, v); };
+    }
+
+    static state::ParamID id_for(std::string_view key) {
+        if (key == "time") return kTime;
+        if (key == "feedback") return kFeedback;
+        if (key == "tone") return kTone;
+        if (key == "mix") return kMix;
+        return 0;
+    }
+
+    state::StateStore& store_;
+    const TapeEcho& echo_;
+    view::Meter* meter_ = nullptr;
+    std::vector<std::pair<std::string, bool>> resolutions_;
 };
 
 class DesignPanelProcessor : public format::Processor {
@@ -48,17 +118,31 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
+        // Ranges are the plugin's, not the panel's: a design states WHICH
+        // parameter a control drives, never what it means.
         store.add_parameter({
-            .id = kMacroA,
-            .name = "Macro A",
-            .unit = "",
-            .range = {0.0f, 1.0f, 0.5f, 0.0f},
+            .id = kTime,
+            .name = "Time",
+            .unit = "s",
+            .range = {0.02f, 2.0f, 0.38f, 0.0f},
         });
         store.add_parameter({
-            .id = kMacroB,
-            .name = "Macro B",
+            .id = kFeedback,
+            .name = "Feedback",
             .unit = "",
-            .range = {0.0f, 1.0f, 0.5f, 0.0f},
+            .range = {0.0f, 0.98f, 0.45f, 0.0f},
+        });
+        store.add_parameter({
+            .id = kTone,
+            .name = "Tone",
+            .unit = "",
+            .range = {0.0f, 1.0f, 0.55f, 0.0f},
+        });
+        store.add_parameter({
+            .id = kMix,
+            .name = "Mix",
+            .unit = "",
+            .range = {0.0f, 1.0f, 0.38f, 0.0f},
         });
     }
 
@@ -87,10 +171,29 @@ public:
     std::unique_ptr<view::View> create_view() override {
         const view::DesignIR& ir = embedded_design();
         if (ir.root.children.empty()) return nullptr;
-        return view::build_native_view_tree(ir, ir.asset_manifest);
+        auto root = view::build_native_view_tree(ir, ir.asset_manifest);
+        if (root == nullptr) return root;
+        // Building the tree deliberately installs no callbacks; binding is a
+        // separate, opt-in step. Skipping it yields a panel that renders and
+        // turns and drives nothing — which every validator, screenshot and
+        // dlopen check passes.
+        binding_ = std::make_unique<NameBindingContext>(state(), echo_);
+        view::bind_native_view_tree(*root, ir, *binding_);
+        return root;
     }
 
+    /// The binding context the editor was wired with, for the test that asserts
+    /// every control resolved. Exposed rather than inferred: "the plugin
+    /// opened" is not evidence that anything connected.
+    const NameBindingContext* binding_for_test() const { return binding_.get(); }
+
 private:
+    TapeEcho echo_;
+    /// Channel pointers handed to the DSP. Sized in prepare() so process()
+    /// allocates nothing — the one rule the audio thread cannot bend.
+    std::array<float*, 32> scratch_{};
+    std::unique_ptr<NameBindingContext> binding_;
+
     /// Parsed once. `view_size()` and `create_view()` must agree about the
     /// document, and re-parsing 100+ KB of JSON per editor open is waste.
     static const view::DesignIR& embedded_design() {
@@ -101,22 +204,37 @@ private:
 
 public:
 
-    void prepare(const format::PrepareContext&) override {}
+    void prepare(const format::PrepareContext& context) override {
+        echo_.prepare(context.sample_rate,
+                      std::max(1, context.output_channels));
+    }
 
     void process(audio::BufferView<float>& audio_output,
                  const audio::BufferView<const float>& audio_input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const format::ProcessContext&) override {
-        // Deliberately a pass-through: this example is about what the editor
-        // draws, and a gain stage here would only add a way for it to fail.
         const std::size_t channels =
             std::min(audio_output.num_channels(), audio_input.num_channels());
+        std::size_t frames = 0;
         for (std::size_t ch = 0; ch < channels; ++ch) {
             auto out = audio_output.channel(ch);
             const auto in = audio_input.channel(ch);
-            const std::size_t frames = std::min(out.size(), in.size());
+            frames = std::min(out.size(), in.size());
             for (std::size_t i = 0; i < frames; ++i) out[i] = in[i];
+            scratch_[ch] = out.data();
         }
+        if (channels == 0 || frames == 0) return;
+
+        // Parameters are read once per block, not per sample: the audio thread
+        // reads relaxed atomics and the DSP smooths internally, so a block is
+        // the right granularity and a per-sample read buys nothing.
+        echo_.set_time_seconds(state().get_value(kTime));
+        echo_.set_feedback(state().get_value(kFeedback));
+        echo_.set_tone(state().get_value(kTone));
+        echo_.set_mix(state().get_value(kMix));
+
+        echo_.process(scratch_.data(), static_cast<int>(channels),
+                      static_cast<int>(frames));
     }
 };
 
