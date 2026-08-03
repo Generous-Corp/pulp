@@ -1315,8 +1315,16 @@ void ForgeModularShell::on_poll() {
         // run. A model call takes minutes; without something moving, "asking
         // the model" is indistinguishable from a wedged process, which is
         // exactly how it read.
+        // in_flight_, not just `watching_ && running`: a clock that ticks when
+        // nothing is building is not merely wrong on screen, it is expensive.
+        // Rewriting the elapsed label every poll marks the view dirty every
+        // poll, and the host's repaint gate honours that -- so an idle app
+        // repainted the whole scene at vsync forever, for a number nobody was
+        // waiting on. `watching_` is true whenever a log is being tailed,
+        // including at rest against a finished run's file, and an empty log
+        // reads as `running`, so the pair of them is true at idle.
         if (auto* c = chrome();
-            c && monitor_.outcome() == BuildOutcome::running) {
+            c && in_flight_ && monitor_.outcome() == BuildOutcome::running) {
             c->set_active_stage_elapsed(format_elapsed(stage_started_));
             if (stage == 0) {
                 std::string note = "asking the model \u00b7 " +

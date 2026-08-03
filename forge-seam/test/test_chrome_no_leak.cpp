@@ -4241,6 +4241,8 @@ TEST_CASE("a running build shows a clock, not just a word", "[phase7][stage]") {
     // time; ours cleared the field.
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
     pulp::state::StateStore store;
     shell.set_state_store(&store);
     shell.define_parameters(store);
@@ -4255,6 +4257,11 @@ TEST_CASE("a running build shows a clock, not just a word", "[phase7][stage]") {
 
     const auto log = std::filesystem::temp_directory_path() / "fm-clock.log";
     std::filesystem::remove(log);
+    // A submission, so a run is genuinely in flight. The clock is deliberately
+    // silent otherwise: rewriting the elapsed label every poll marks the view
+    // dirty every poll, which had an IDLE app repainting the whole scene at
+    // vsync forever for a number nobody was waiting on.
+    CHECK(shell.submit_own("a clattering metallic texture").empty());
     shell.watch_build_log(log.string());
 
     { std::ofstream f(log); f << "  asking the model\n"; }
