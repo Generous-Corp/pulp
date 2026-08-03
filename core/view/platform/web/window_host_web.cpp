@@ -191,6 +191,7 @@ public:
         if (!render_and_read(rgba)) return {};
         return render::HeadlessSurface::encode_png(rgba);
     }
+    bool supports_back_buffer_capture() const override { return true; }
 
     /// The canvas element's CSS size changed (window resize / layout / dpr
     /// change). Re-sizes the backing store, the Skia surface, and the root.

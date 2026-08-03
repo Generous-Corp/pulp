@@ -11,6 +11,7 @@ struct InspectorCapture {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::string error;
+    std::string error_code;  ///< Optional protocol code; defaults to capture_failed.
 };
 
 /// Host-owned image source. Protocol/session code never depends on platform

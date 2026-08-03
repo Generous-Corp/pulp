@@ -4,6 +4,7 @@
 #include <pulp/format/detail/standalone_inspector.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
@@ -100,6 +101,7 @@ public:
     int repaint_calls = 0;
     std::vector<std::uint8_t> capture_bytes;
     bool capture_supported = true;
+    bool compositor_capture_supported = true;
     bool blocking_event_loop = true;
     bool exit_drain_supported = true;
     bool deferred_close_supported = true;
@@ -111,6 +113,8 @@ public:
     int run_until_calls = 0;
     int readiness_checks = 0;
     bool run_until_ready = false;
+    bool design_viewport_active = false;
+
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
@@ -120,7 +124,23 @@ public:
             capture_callback();
         return capture_bytes;
     }
-    bool supports_compositor_capture() const override { return capture_supported; }
+    std::vector<std::uint8_t> capture_back_buffer_png() override {
+        return capture_png();
+    }
+    bool supports_back_buffer_capture() const override { return capture_supported; }
+    bool supports_compositor_capture() const override {
+        return compositor_capture_supported;
+    }
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (!design_viewport_active)
+            return false;
+        sx = 1.5f;
+        sy = 1.5f;
+        tx = 0.0f;
+        ty = 0.0f;
+        return true;
+    }
     bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
     bool event_loop_supports_exit_drain() const override {
         return exit_drain_supported;
@@ -420,15 +440,43 @@ TEST_CASE("Standalone local inspector owns only the in-window overlay",
     REQUIRE(runtime->try_finish_retirement());
 }
 
-TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",
-          "[standalone][inspect][capabilities][negative]") {
+TEST_CASE("Standalone inspector uses the portable screenshot backend without host readback",
+          "[standalone][inspect][capabilities]") {
     StandaloneApp app(null_processor_factory);
     TestProcessor processor;
     pulp::state::StateStore store;
     ViewBridge bridge(processor, store);
     View root;
+    root.set_background_gradient_linear(
+        0.0f, 0.0f, 1.0f, 1.0f,
+        {pulp::canvas::Color::rgba8(28, 31, 46),
+         pulp::canvas::Color::rgba8(96, 150, 240),
+         pulp::canvas::Color::rgba8(168, 140, 250)},
+        {0.0f, 0.55f, 1.0f});
     StubWindowHost window;
     window.capture_supported = false;
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"session.describe", "capture.image"});
+    if (has_screenshot_backend())
+        REQUIRE(runtime != nullptr);
+    else
+        REQUIRE(runtime == nullptr);
+}
+
+TEST_CASE("Standalone inspector does not advertise capture for a native-overlay tree",
+          "[standalone][inspect][capabilities]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    auto container = std::make_unique<View>();
+    auto native_overlay = std::make_unique<View>();
+    native_overlay->set_contains_native_overlay(true);
+    container->add_child(std::move(native_overlay));
+    root.add_child(std::move(container));
+    StubWindowHost window;
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "custom",
         {"session.describe", "capture.image"});
@@ -809,6 +857,10 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
 
     StubWindowHost window;
     window.capture_bytes = inspector_test_png();
+    // Exercise the shared view renderer used by SSH/headless hosts that do not
+    // expose live back-buffer readback. Later lifecycle checks turn readback
+    // back on so their capture callback remains independently covered.
+    window.capture_supported = false;
     QueuedMainThreadBackend dispatcher;
     REQUIRE(dispatcher.valid());
     auto runtime = StandaloneInspectorRuntime::create(
@@ -947,12 +999,43 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     const auto audio_json = choc::json::parse(audio.params_json);
     REQUIRE(audio_json["sample_rate"].getWithDefault<double>(0.0) == 48'000.0);
     REQUIRE(audio_json["latency_samples"].getWithDefault<std::int64_t>(0) == 128);
+    const auto original_bounds = bridge.view()->bounds();
     const auto screenshot = request("Capture.screenshot", "{}");
     REQUIRE_FALSE(screenshot.is_error);
     const auto screenshot_json = choc::json::parse(screenshot.params_json);
-    REQUIRE(screenshot_json["width"].getWithDefault<std::int64_t>(0) == 1);
-    REQUIRE(screenshot_json["height"].getWithDefault<std::int64_t>(0) == 1);
+    REQUIRE(screenshot_json["width"].getWithDefault<std::int64_t>(0) == 400);
+    REQUIRE(screenshot_json["height"].getWithDefault<std::int64_t>(0) == 300);
     REQUIRE_FALSE(screenshot_json["data"].getString().empty());
+    REQUIRE(bridge.view()->bounds().x == Catch::Approx(original_bounds.x));
+    REQUIRE(bridge.view()->bounds().y == Catch::Approx(original_bounds.y));
+    REQUIRE(bridge.view()->bounds().width == Catch::Approx(original_bounds.width));
+    REQUIRE(bridge.view()->bounds().height == Catch::Approx(original_bounds.height));
+
+    auto reloaded_overlay = std::make_unique<View>();
+    reloaded_overlay->set_contains_native_overlay(true);
+    auto* reloaded_overlay_ptr = reloaded_overlay.get();
+    bridge.view()->add_child(std::move(reloaded_overlay));
+    const auto dynamically_unavailable = request("Capture.screenshot", "{}");
+    REQUIRE(dynamically_unavailable.is_error);
+    REQUIRE(dynamically_unavailable.error_code == "capture_unavailable");
+    REQUIRE(bridge.view()->remove_child(reloaded_overlay_ptr) != nullptr);
+
+    window.capture_supported = true;
+    // A structurally valid but one-color host frame must not bypass the
+    // portable capture_view() content floor.
+    window.capture_bytes = inspector_test_png();
+    window.design_viewport_active = true;
+    const auto viewport_failure = request("Capture.screenshot", "{}");
+    REQUIRE(viewport_failure.is_error);
+    REQUIRE(viewport_failure.error_code == "capture_failed");
+    window.design_viewport_active = false;
+    const auto fallback_after_host_failure = request("Capture.screenshot", "{}");
+    REQUIRE_FALSE(fallback_after_host_failure.is_error);
+    const auto fallback_json = choc::json::parse(fallback_after_host_failure.params_json);
+    REQUIRE(fallback_json["width"].getWithDefault<std::int64_t>(0) == 400);
+    REQUIRE(fallback_json["height"].getWithDefault<std::int64_t>(0) == 300);
+    REQUIRE_FALSE(fallback_json["data"].getString().empty());
+    window.capture_bytes = inspector_test_png();
 
     const auto denied = request(
         "State.setParameter",

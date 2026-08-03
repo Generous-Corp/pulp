@@ -12,7 +12,7 @@ submodule) for the full design.
 
 | Script | Purpose |
 |--------|---------|
-| `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch → capture → diff. Top-level entry point for "did my Pulp fix narrow the gap?" |
+| `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch with an observe inspector → capture in-process → diff. The capture works over SSH without Screen Recording permission; set `PULP_CAPTURE_CLI` to the matching feature-build CLI when validating an uninstalled branch. |
 | `diff_against_reference.py` | Single-score histogram + pixel-distance diff between two PNGs. Used by `spectr-roundtrip.sh` step 5. |
 | `diff_against_reference_regions.py` | Per-region masked diff — fails on the FIRST broken sub-region instead of averaging the whole frame. Recommended over the single-score variant once landed. |
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |

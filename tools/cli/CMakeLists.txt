@@ -21,7 +21,7 @@ configure_file(
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(TARGET pulp::inspect-client)
-    set(_pulp_inspect_command_source cmd_inspect.cpp)
+    set(_pulp_inspect_command_source cmd_inspect.cpp cmd_inspect_screenshot.cpp)
 else()
     set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
 endif()
@@ -203,6 +203,15 @@ if(TARGET pulp-test-cli-designmd-subcommands)
     add_dependencies(pulp-test-cli-designmd-subcommands pulp-cli)
     target_compile_definitions(pulp-test-cli-designmd-subcommands PRIVATE
         PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+
+# The real-process inspector test is declared before this top-level-only CLI.
+# Attach the shell-out binary only after pulp-cli exists so vendored Pulp test
+# configurations never reference a target they cannot create.
+if(TARGET pulp-test-standalone-inspector-process)
+    add_dependencies(pulp-test-standalone-inspector-process pulp-cli)
+    target_compile_definitions(pulp-test-standalone-inspector-process PRIVATE
+        "PULP_INSPECT_CLI_BINARY=\"$<TARGET_FILE:pulp-cli>\"")
 endif()
 
 # RPATH so the installed binary can find shared libraries (e.g.,

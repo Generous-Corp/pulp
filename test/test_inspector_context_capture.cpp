@@ -41,10 +41,14 @@ class TestCaptureSource final : public InspectorCaptureSource {
 public:
     InspectorCapture capture_png() override {
         ++calls;
-        return {{0x89, 0x50, 0x4e, 0x47}, 320, 200, {}};
+        if (!error.empty())
+            return {{}, 0, 0, error, error_code};
+        return {{0x89, 0x50, 0x4e, 0x47}, 320, 200, {}, {}};
     }
 
     int calls = 0;
+    std::string error;
+    std::string error_code;
 };
 
 } // namespace
@@ -77,6 +81,10 @@ TEST_CASE("DomainHandler: agent context is typed and host-owned",
     REQUIRE(value["unsavedTweakCount"].getInt64() == 2);
     REQUIRE(value["actionableIssues"][0].getString()
             == "audio device changed");
+    const auto first_issues = response.params_json.find("\"actionableIssues\"");
+    REQUIRE(first_issues != std::string::npos);
+    REQUIRE(response.params_json.find("\"actionableIssues\"", first_issues + 1) ==
+            std::string::npos);
 
     auto hot_reload = handler.handle(
         make_request(3, methods::kRuntimeGetHotReloadStatus));
@@ -117,8 +125,15 @@ TEST_CASE("DomainHandler: screenshot uses the selected host capture seam",
     REQUIRE(value["height"].getInt64() == 200);
     REQUIRE(value["data"].getString() == "iVBORw==");
 
+    source.error = "current view contains a native overlay";
+    source.error_code = "capture_unavailable";
+    auto dynamic_unavailable = handler.handle(
+        make_request(3, methods::kCaptureScreenshot));
+    REQUIRE(dynamic_unavailable.is_error);
+    REQUIRE(dynamic_unavailable.error_code == "capture_unavailable");
+
     auto node = handler.handle(
-        make_request(3, methods::kCaptureScreenshotNode));
+        make_request(4, methods::kCaptureScreenshotNode));
     REQUIRE(node.is_error);
     REQUIRE(node.error_code == "method_unavailable");
 }

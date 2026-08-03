@@ -1326,6 +1326,7 @@ The named commands are the stable orientation surface:
 | `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
 | `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
 | `doctor` | Discovery runtime directory, live-session count, and issues. |
+| `screenshot` | Decode and save the selected standalone's in-process whole-window PNG. Missing host capability is an explicit unsupported result (exit 3), never an empty file. |
 | `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
 | `inject-midi` | One bounded note-on/off event under `test.input`. |
 | `set-transport` | One idempotent partial standalone transport update under `test.input`. |
@@ -1345,6 +1346,7 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--out FILE` - write decoded PNG bytes for `screenshot`
 - `--id`, `--value`, `--normalized` - typed `set-parameter` fields
 - `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
   `inject-midi` fields; note-on duration is 1 through 2000 ms
@@ -1374,11 +1376,37 @@ response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
 the connection. Do not automatically retry that operation: the server may
 already have executed it.
 
-`Capture.screenshot` returns a base64 PNG plus the selected standalone window's
-dimensions. Screenshot-capable sessions and clients use a bounded 16 MiB
-message ceiling (large enough for ordinary multi-megabyte compositor PNGs);
-larger responses fail explicitly. `Capture.screenshotNode` remains explicitly
-unavailable.
+Use the named capture command when the artifact itself is wanted:
+
+```bash
+pulp inspect screenshot --out artifacts/live.png
+# Pin a specific publication when more than one app is live:
+pulp inspect screenshot --out artifacts/live.png \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The command requests `Capture.screenshot` inside the running app, decodes the
+base64 response, verifies the PNG signature and dimensions, and atomically
+writes the output. It therefore works from an SSH shell without granting the
+shell or `sshd` macOS Screen Recording permission. It prefers the selected
+Pulp standalone's readable back buffer and otherwise uses Pulp's in-process
+`capture_view()` renderer (portable Skia/GPU or a registered provider). It does
+not capture a plugin editor as composited by Logic, REAPER, or another external
+host. An active design viewport requires live back-buffer capture; Pulp does not
+re-layout that live tree at window size and mislabel the result as the visible
+frame. If neither capture route is available, or the view contains an
+OS-composited native overlay, the app does not advertise `capture.image`; the
+command reports `unsupported`, exits 3, and writes nothing. `--json` uses the
+`pulp.inspect.screenshot.v1` schema. Capability publication reflects the initial
+tree. If an in-place UI reload later introduces a native overlay or another
+unsupported requirement, the existing session remains stable but the request
+returns `capture_unavailable` instead of emitting an incomplete frame.
+
+The underlying `Capture.screenshot` response contains a base64 PNG plus the
+selected standalone window's dimensions. Screenshot-capable sessions and
+clients use a bounded 16 MiB message ceiling (large enough for ordinary
+multi-megabyte window PNGs); larger responses fail explicitly.
+`Capture.screenshotNode` remains explicitly unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.
