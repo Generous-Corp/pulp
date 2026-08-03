@@ -2407,14 +2407,14 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
     }
 }
 
-// pulp #1997 — wrapper tools reach their dispatch arms. Installed inspector
-// tools deliberately do not require a project root; the remaining wrappers do.
+// Wrapper tools reach their dispatch arms. Installed inspector tools deliberately
+// do not require a project root; the remaining wrappers do.
 //
 // The shellout-side semantics (no inspector found, etc.) are already
 // covered by test_cli_shellout.cpp. The MCP boundary is the
 // dispatch-routing layer — that's what we check here.
 TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate)",
-          "[mcp][tools][issue-1997]") {
+          "[mcp][tools][dispatch-routing]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
