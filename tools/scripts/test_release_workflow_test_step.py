@@ -1332,10 +1332,20 @@ class ReleaseBotSshSigning(unittest.TestCase):
 
     def test_signing_helper_requires_release_bot_private_key_secret(self) -> None:
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY:?RELEASE_BOT_SSH_SIGNING_KEY", self.helper)
-        self.assertIn("git config --global gpg.format ssh", self.helper)
-        self.assertIn("git config --global user.signingkey", self.helper)
-        self.assertIn("git config --global commit.gpgsign true", self.helper)
-        self.assertIn("git config --global tag.gpgSign true", self.helper)
+        # The bot identity goes into a config file the script owns, reached via
+        # GIT_CONFIG_GLOBAL — never `--global`. On a hosted runner the two are
+        # the same file; on a SELF-HOSTED runner, which is where the required
+        # macOS lane runs, `--global` is the human's ~/.gitconfig, and a release
+        # job would replace their name, email and signing key with the bot's in
+        # every repo on the machine. That is not hypothetical: it silently
+        # unsigned a developer's commits and kept failing after this script's
+        # RUNNER_TEMP key was cleaned up.
+        self.assertNotIn("git config --global", self.helper)
+        self.assertIn('export GIT_CONFIG_GLOBAL="${bot_config}"', self.helper)
+        self.assertIn('git config --file "${bot_config}" gpg.format ssh', self.helper)
+        self.assertIn('git config --file "${bot_config}" user.signingkey', self.helper)
+        self.assertIn('git config --file "${bot_config}" commit.gpgsign true', self.helper)
+        self.assertIn('git config --file "${bot_config}" tag.gpgSign true', self.helper)
         self.assertIn(self.BOT_EMAIL, self.helper)
 
     def test_auto_release_signs_version_tags(self) -> None:
