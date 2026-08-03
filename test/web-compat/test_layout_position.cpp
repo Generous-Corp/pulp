@@ -586,3 +586,84 @@ TEST_CASE("Viewport reconcile: explicit right:0 / bottom:0 is edge-anchored, not
     REQUIRE(childPtr->flex().preferred_width == 1320.0f);
     REQUIRE(childPtr->flex().preferred_height == 860.0f);
 }
+
+// ── PULP_SHOT_NO_RECONCILE opt-out ───────────────────────────────────────────
+//
+// Mirrors the screenshot tool's call site so these cases exercise the
+// gate the tool actually uses, not a paraphrase of it. Asserting only
+// that the predicate returned true would pass while the geometry moved,
+// which is the failure the opt-out exists to prevent — so every case
+// below asserts the resulting size.
+static void reconcile_as_screenshot_tool_would(pulp::view::View& root,
+                                               std::uint32_t viewport_width,
+                                               std::uint32_t viewport_height,
+                                               const char* env_value) {
+    if (!pulp::view::reconcile_disabled_by_env(env_value)) {
+        pulp::view::reconcile_oversize_absolute_subtree(root,
+                                                        viewport_width,
+                                                        viewport_height);
+    }
+}
+
+// An imported faithful capture: a 1280x800 backdrop pinned top/left with
+// no opposite-edge anchor, inside a 920px root. This matches the clamp's
+// predicate exactly, which is why the opt-out is needed.
+static std::unique_ptr<View> make_imported_capture_backdrop() {
+    auto backdrop = std::make_unique<View>();
+    backdrop->set_position(View::Position::absolute);
+    backdrop->set_top(0);
+    backdrop->set_left(0);
+    backdrop->flex().preferred_width = 1280;
+    backdrop->flex().preferred_height = 800;
+    return backdrop;
+}
+
+TEST_CASE("Viewport reconcile: opt-out leaves the imported backdrop at its authored size",
+          "[layout][viewport-reconcile][screenshot]") {
+    View root;
+    root.set_bounds({0, 0, 920, 620});
+    auto backdrop = make_imported_capture_backdrop();
+    auto* backdropPtr = backdrop.get();
+    root.add_child(std::move(backdrop));
+
+    reconcile_as_screenshot_tool_would(root, 920, 620, "1");
+
+    // The artwork keeps the size the design authored, so controls
+    // positioned against it still land on the pixels they were placed on.
+    REQUIRE(backdropPtr->flex().preferred_width == 1280.0f);
+    REQUIRE(backdropPtr->flex().preferred_height == 800.0f);
+}
+
+TEST_CASE("Viewport reconcile: default still clamps the same backdrop",
+          "[layout][viewport-reconcile][screenshot]") {
+    View root;
+    root.set_bounds({0, 0, 920, 620});
+    auto backdrop = make_imported_capture_backdrop();
+    auto* backdropPtr = backdrop.get();
+    root.add_child(std::move(backdrop));
+
+    // Unset variable — the behaviour every existing screenshot path gets.
+    reconcile_as_screenshot_tool_would(root, 920, 620, nullptr);
+
+    REQUIRE(backdropPtr->flex().preferred_width == 920.0f);
+    REQUIRE(backdropPtr->flex().preferred_height == 620.0f);
+}
+
+TEST_CASE("Viewport reconcile: a falsey opt-out value still reconciles",
+          "[layout][viewport-reconcile][screenshot]") {
+    // A variable left exported as 0/false/empty must not silently
+    // disable reconciliation for every screenshot on the machine.
+    for (const char* falsey : {"0", "false", ""}) {
+        View root;
+        root.set_bounds({0, 0, 920, 620});
+        auto backdrop = make_imported_capture_backdrop();
+        auto* backdropPtr = backdrop.get();
+        root.add_child(std::move(backdrop));
+
+        reconcile_as_screenshot_tool_would(root, 920, 620, falsey);
+
+        INFO("PULP_SHOT_NO_RECONCILE=" << falsey);
+        REQUIRE(backdropPtr->flex().preferred_width == 920.0f);
+        REQUIRE(backdropPtr->flex().preferred_height == 620.0f);
+    }
+}

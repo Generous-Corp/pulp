@@ -232,6 +232,23 @@ export async function freezeDynamicTime(cdp) {
   });
 }
 
+export async function resumeDynamicTime(cdp) {
+  // Paused virtual time suppresses the compositor's BeginFrame source, and
+  // Chromium's screenshot path waits for a fresh presented frame. The first
+  // Page.captureScreenshot after a pause still resolves because
+  // captureBeyondViewport resizes the capture surface and forces one commit;
+  // every subsequent call then waits forever for a frame that virtual time
+  // will never produce. Pixels therefore have to be read with virtual time
+  // running. Page-driven motion is already gone by this point — tracked
+  // timers/intervals/rAFs are cancelled, the schedulers are stubbed, and CSS
+  // animations and transitions are disabled — and the byte-identical trailing
+  // run required by captureStableScreenshot is the observable proof of
+  // stillness, so determinism does not rest on the pause.
+  await cdp.call("Emulation.setVirtualTimePolicy", {
+    policy: "advance",
+  });
+}
+
 export async function captureStableScreenshot(
   cdp, screenshotOptions, maximumAttempts = 32, intervalMs = 16,
   requiredTrailingFrames = 3) {

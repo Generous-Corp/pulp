@@ -183,6 +183,8 @@ endif()
 if(APPLE)
     add_executable(pulp-test-web-compat-reftest
         test_reftests.cpp
+        test_native_css_probe.cpp
+        test_computed_style_paint.cpp
     )
     target_link_libraries(pulp-test-web-compat-reftest PRIVATE pulp::view Catch2::Catch2WithMain)
     target_include_directories(pulp-test-web-compat-reftest PRIVATE ${WEBCOMPAT_INCLUDE_DIR})

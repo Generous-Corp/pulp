@@ -27,6 +27,11 @@ catch_discover_tests(pulp-test-hot-reload
         RESOURCE_LOCK hot-reload-file-watcher
         LABELS slow)
 
+# Inspector component tests exist only when the optional SDK component is
+# present. A gate-off build must not compile inspector implementation sources
+# back into its test artifacts.
+if(PULP_ENABLE_INSPECTOR)
+
 # Non-GPU inspector helpers. The full inspector-domain suite is GPU-gated
 # because it exercises View/Render integration, but these domain helpers are
 # plain data/StateStore contracts and should stay covered in CPU-only builds.
@@ -43,6 +48,53 @@ target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
     pulp::audio pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
+
+# CPU-only inspector session policy, capability enforcement, and lease tests.
+add_executable(pulp-test-inspector-session
+    test_inspector_session.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/authentication.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/capabilities.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/protocol.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/session.cpp)
+target_include_directories(pulp-test-inspector-session PRIVATE
+    ${CMAKE_SOURCE_DIR}/inspect/include
+    ${CMAKE_SOURCE_DIR}/inspect/src)
+target_link_libraries(pulp-test-inspector-session PRIVATE
+    pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-session)
+
+add_executable(pulp-test-inspector-server
+    test_inspector_server.cpp
+    unsafe_legacy_inspector_server.cpp)
+target_link_libraries(pulp-test-inspector-server PRIVATE
+    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
+if(WIN32)
+    catch_discover_tests(pulp-test-inspector-server
+        PROPERTIES
+            ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
+            LABELS "windows-pr-quarantine")
+else()
+    catch_discover_tests(pulp-test-inspector-server
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+endif()
+
+add_executable(pulp-test-inspector-discovery test_inspector_discovery.cpp)
+target_link_libraries(pulp-test-inspector-discovery PRIVATE
+    pulp::inspect-discovery
+    pulp::inspect-publication
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-discovery)
+
+add_executable(
+    pulp-test-inspector-client
+    test_inspector_client.cpp
+    test_inspector_server_lifecycle.cpp
+    test_inspector_client_limits.cpp
+)
+target_link_libraries(pulp-test-inspector-client PRIVATE
+    pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-client)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
@@ -87,23 +139,25 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-atlas-viewer
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-server test_inspector_server.cpp)
-    target_link_libraries(pulp-test-inspector-server PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    if(WIN32)
-        catch_discover_tests(pulp-test-inspector-server
-            PROPERTIES
-                ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
-                LABELS "windows-pr-quarantine")
-    else()
-        catch_discover_tests(pulp-test-inspector-server
-            PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
-    endif()
-
     # Additional inspector sibling TUs. Same registration as
     # pulp-test-inspector.
     add_executable(pulp-test-inspector-domains test_inspector_domains.cpp)
     target_link_libraries(pulp-test-inspector-domains PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector-domains
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-hook-lifecycle
+        test_inspector_hook_lifecycle.cpp)
+    target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-hook-lifecycle
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-context-capture
+        test_inspector_context_capture.cpp)
+    target_link_libraries(pulp-test-inspector-context-capture PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-context-capture
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Trace.* bridge to the process-global pulp::runtime::Tracing controller.
@@ -160,6 +214,54 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-agent-request-queue
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
+endif()
+
+# An ordinary pulp-format consumer is the inspector-stripped artifact fixture.
+# The post-build scan is non-vacuous when inspector components are present:
+# it first proves their archive contains pulp::inspect symbols, then rejects
+# every defined pulp::inspect symbol in this consumer.
+add_executable(pulp-test-inspector-stripped-artifact
+    fixtures/inspector_stripped_artifact.cpp)
+target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
+    pulp::format)
+add_test(NAME inspector-stripped-artifact-runs
+    COMMAND pulp-test-inspector-stripped-artifact)
+unset(_pulp_inspector_symbol_tool)
+set(_pulp_inspector_symbol_mode "NM")
+if(MSVC)
+    get_filename_component(_pulp_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_pulp_inspector_symbol_tool
+        NAMES dumpbin.exe dumpbin llvm-nm.exe llvm-nm
+        HINTS "${_pulp_compiler_dir}")
+    if(_pulp_inspector_symbol_tool MATCHES "llvm-nm")
+        set(_pulp_inspector_symbol_mode "COFF_NM")
+    else()
+        set(_pulp_inspector_symbol_mode "DUMPBIN")
+    endif()
+elseif(CMAKE_NM)
+    set(_pulp_inspector_symbol_tool "${CMAKE_NM}")
+endif()
+if(NOT _pulp_inspector_symbol_tool)
+    message(FATAL_ERROR
+        "The inspector stripped-artifact proof requires nm, llvm-nm, or dumpbin")
+else()
+    set(_pulp_inspector_archive "")
+    if(TARGET pulp-inspect-runtime)
+        set(_pulp_inspector_archive "$<TARGET_FILE:pulp-inspect-runtime>")
+    endif()
+    add_custom_command(TARGET pulp-test-inspector-stripped-artifact POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DSYMBOL_TOOL=${_pulp_inspector_symbol_tool}"
+            "-DSYMBOL_MODE=${_pulp_inspector_symbol_mode}"
+            "-DSTRIPPED_ARTIFACT=$<TARGET_FILE:pulp-test-inspector-stripped-artifact>"
+            "-DINSPECTOR_ARCHIVE=${_pulp_inspector_archive}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_inspector_stripped_artifact.cmake"
+        COMMENT "Checking ordinary format consumers contain no inspector symbols")
+    unset(_pulp_inspector_archive)
+endif()
+unset(_pulp_compiler_dir)
+unset(_pulp_inspector_symbol_mode)
+unset(_pulp_inspector_symbol_tool)
 
 # Widget bridge tests
 set(_pulp_widget_bridge_test_libs pulp::view)

@@ -158,6 +158,64 @@ void build_continuous_corner_rounded_rect_path(
 }
 }  // namespace
 
+// CSS radial sizing (css-images-3 §3.3). The ending shape is measured from the
+// gradient's own centre, not the box's, so an off-centre `at` changes every
+// radius — which is why a constant fraction of the box cannot stand in for any
+// of these keywords.
+//
+// For an ellipse the two corner keywords are NOT the corner distance: the spec
+// gives the ending ellipse the aspect ratio it would have under the matching
+// `-side` keyword and then scales it until it passes through that corner.
+// Substituting (dx, dy) into (dx/rx)^2 + (dy/ry)^2 = 1 with ry/rx = dy/dx makes
+// both terms equal, so the scale factor is exactly sqrt(2) on each axis.
+View::ResolvedRadial View::resolve_radial(const BackgroundGradient& g,
+                                          float w, float h) {
+    const float cx = g.x0 * w;
+    const float cy = g.y0 * h;
+    // Distances from the centre to each side, folded into a nearest and a
+    // farthest per axis.
+    const float near_x = std::min(std::fabs(cx), std::fabs(w - cx));
+    const float near_y = std::min(std::fabs(cy), std::fabs(h - cy));
+    const float far_x = std::max(std::fabs(cx), std::fabs(w - cx));
+    const float far_y = std::max(std::fabs(cy), std::fabs(h - cy));
+    constexpr float kSqrt2 = 1.41421356f;
+
+    float rx = 0.0f, ry = 0.0f;
+    switch (g.radial_size) {
+        case BackgroundGradient::RadialSize::explicit_radii:
+            rx = g.radial_rx * w + g.radial_rx_px;
+            ry = g.radial_ry * h + g.radial_ry_px;
+            break;
+        case BackgroundGradient::RadialSize::closest_side:
+            rx = g.radial_circle ? std::min(near_x, near_y) : near_x;
+            ry = g.radial_circle ? std::min(near_x, near_y) : near_y;
+            break;
+        case BackgroundGradient::RadialSize::farthest_side:
+            rx = g.radial_circle ? std::max(far_x, far_y) : far_x;
+            ry = g.radial_circle ? std::max(far_x, far_y) : far_y;
+            break;
+        case BackgroundGradient::RadialSize::closest_corner:
+            rx = g.radial_circle ? std::sqrt(near_x * near_x + near_y * near_y)
+                                 : near_x * kSqrt2;
+            ry = g.radial_circle ? rx : near_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::farthest_corner:
+            rx = g.radial_circle ? std::sqrt(far_x * far_x + far_y * far_y)
+                                 : far_x * kSqrt2;
+            ry = g.radial_circle ? rx : far_y * kSqrt2;
+            break;
+        case BackgroundGradient::RadialSize::max_side:
+            rx = ry = g.radius * std::max(w, h);
+            break;
+    }
+    // A zero radius makes the shader degenerate (Skia returns null, which
+    // paints nothing at all). CSS treats a zero-size ending shape as the
+    // smallest non-zero one, so clamp rather than drop the layer.
+    rx = std::max(rx, 0.001f);
+    ry = std::max(ry, 0.001f);
+    return {cx, cy, rx, ry};
+}
+
 void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     // CSS transforms: translate, rotate, scale, skew — around transform-origin
     bool has_transform = (scale_ != 1.0f || rotation_deg_ != 0 ||
@@ -544,23 +602,60 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // The canvas + Skia/CoreGraphics backends implement all three; the View
     // just dispatches on the stored type. cx/cy are box fractions; radial
     // radius is a fraction of the larger box dimension; conic angle is radians.
-    if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
-        const int grad_n = static_cast<int>(bg_gradient_colors_.size());
-        const Color* grad_c = bg_gradient_colors_.data();
-        const float* grad_p = bg_gradient_positions_.data();
-        if (bg_gradient_type_ == 2) {  // radial
-            canvas.set_fill_gradient_radial(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_radius_ * std::max(bounds_.width, bounds_.height),
-                grad_c, grad_p, grad_n);
-        } else if (bg_gradient_type_ == 3) {  // conic / sweep
-            canvas.set_fill_gradient_conic(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_angle_, grad_c, grad_p, grad_n);
+    // CSS lists background layers first-on-top, so paint the stack in reverse:
+    // the last entry goes down first and the first entry lands over it. Each
+    // pass is self-contained (set gradient → fill → clear), so layering needs
+    // only the loop.
+    for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
+        if (layer->type <= 0 || layer->colors.empty()) continue;
+        const int grad_n = static_cast<int>(layer->colors.size());
+        const Color* grad_c = layer->colors.data();
+        const float* grad_p = layer->positions.data();
+        if (layer->type == 2) {  // radial
+            const ResolvedRadial r =
+                resolve_radial(*layer, bounds_.width, bounds_.height);
+            canvas.set_fill_gradient_radial_elliptical(
+                r.cx, r.cy, r.rx, r.ry, grad_c, grad_p, grad_n);
+        } else if (layer->type == 3) {  // conic / sweep
+            // One call for both spellings: a plain conic spans a full turn, so
+            // the repeating entry point resolves to the same shader for it.
+            canvas.set_fill_gradient_conic_repeating(
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
         } else {  // linear
+            float lx0 = layer->x0, ly0 = layer->y0;
+            float lx1 = layer->x1, ly1 = layer->y1;
+            if (layer->linear_from != BackgroundGradient::LinearFrom::endpoints) {
+                float radians = layer->linear_angle;
+                if (layer->linear_from == BackgroundGradient::LinearFrom::corner) {
+                    // A corner gradient's line is perpendicular to the OTHER
+                    // diagonal, so its end colour lands exactly on the named
+                    // corner — which makes the angle a function of the box's
+                    // aspect ratio and impossible to bake before layout.
+                    //
+                    // The perpendicular to the bottom-left..top-right diagonal
+                    // (w, -h) is (h, w), so the angle off vertical is
+                    // atan2(HEIGHT, width) — the transposed atan2(w, h) is a
+                    // different angle on any box that is not square, and on a
+                    // 160x100 box it misses Chrome's boundary by 48px.
+                    const float a = std::atan2(bounds_.height, bounds_.width);
+                    radians = layer->corner_y < 0.0f
+                                  ? layer->corner_x * a
+                                  : 3.14159265f - layer->corner_x * a;
+                }
+                // The line runs through the centre; its length is the box's
+                // projection onto it, so the end stops sit on the corners.
+                const float w = bounds_.width, h = bounds_.height;
+                const float dx = std::sin(radians), dy = -std::cos(radians);
+                const float len = std::fabs(w * dx) + std::fabs(h * dy);
+                lx0 = (w * 0.5f - dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly0 = (h * 0.5f - dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+                lx1 = (w * 0.5f + dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
+                ly1 = (h * 0.5f + dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
+            }
             canvas.set_fill_gradient_linear(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_x1_ * bounds_.width, bg_grad_y1_ * bounds_.height,
+                lx0 * bounds_.width, ly0 * bounds_.height,
+                lx1 * bounds_.width, ly1 * bounds_.height,
                 grad_c, grad_p, grad_n);
         }
         if (use_per_corner) {
@@ -576,7 +671,7 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     }
 
     // Paint background if set
-    if (has_bg_ && bg_gradient_type_ == 0) {
+    if (has_bg_ && bg_gradients_.empty()) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,
@@ -757,14 +852,70 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     // push_effect_layers opened. Kept as one unit so FU-3's subtree cache can
     // wrap exactly this (background/border/paint()/children/decorations) while
     // the animatable layer wrappers stay outside the cache.
+    // An import-resolved ancestor clip wraps this view's OWN ink — its shadow,
+    // its box, its widget painting — and is released before the children, each
+    // of which carries the rectangle its own CSS clip chain resolves to. That
+    // asymmetry against `overflow` below is the point: `overflow` clips the
+    // subtree, this clips the view, and only the latter can express a child
+    // that escapes a clip its parent is inside.
+    const bool has_ancestor_clip = ancestor_clip_rect().has_value();
+    const auto open_ancestor_clip = [&] {
+        if (!has_ancestor_clip) return;
+        const Rect& r = *ancestor_clip_rect();
+        canvas.save();
+        // CSS clips overflow to the clipper's ROUNDED padding box, so a child
+        // with square corners inside a rounded card is cut to the card's curve.
+        // Clipping to the bare rectangle paints that child square into the
+        // corner and the card reads as unrounded even though its border curves.
+        const auto& cr = ancestor_clip_radii();
+        const float m = 0.5f * std::min(r.width, r.height);
+        const float tl = std::min(cr[0], m), tr = std::min(cr[1], m);
+        const float br = std::min(cr[2], m), bl = std::min(cr[3], m);
+        const bool rounded =
+            (tl > 0.5f || tr > 0.5f || br > 0.5f || bl > 0.5f) &&
+            canvas.supports(canvas::CanvasCapability::clip_path_svg);
+        if (!rounded) {
+            canvas.clip_rect(r.x, r.y, r.width, r.height);
+            return;
+        }
+        const float x = r.x, y = r.y, w = r.width, h = r.height;
+        std::ostringstream d;
+        d << "M " << (x + tl) << " " << y
+          << " H " << (x + w - tr)
+          << " A " << tr << " " << tr << " 0 0 1 " << (x + w) << " " << (y + tr)
+          << " V " << (y + h - br)
+          << " A " << br << " " << br << " 0 0 1 " << (x + w - br) << " " << (y + h)
+          << " H " << (x + bl)
+          << " A " << bl << " " << bl << " 0 0 1 " << x << " " << (y + h - bl)
+          << " V " << (y + tl)
+          << " A " << tl << " " << tl << " 0 0 1 " << (x + tl) << " " << y << " Z";
+        canvas.clip_path_svg(d.str());
+    };
+    const auto close_ancestor_clip = [&] {
+        if (has_ancestor_clip) canvas.restore();
+    };
+
+    // The shadow is painted before the view's own `overflow` clip is installed
+    // — a box does not clip its own outset shadow — but an ANCESTOR's clip does
+    // cut it, so when there IS a shadow it gets its own scope. Skipped
+    // otherwise, so the common case installs the rectangle exactly once.
+    const bool clip_shadows = has_ancestor_clip && has_box_shadow();
+    if (clip_shadows) open_ancestor_clip();
     paint_outset_shadows(canvas);
+    if (clip_shadows) close_ancestor_clip();
+
+    // Pushed outside the scope below because `overflow` / `clip-path` DO apply
+    // to the children, and the ancestor clip deliberately does not.
     apply_overflow_and_clip_path(canvas);
+
+    open_ancestor_clip();
     paint_background_and_border(canvas);
 
     // Widget-specific painting. The outer timer wraps the whole paint_all body,
     // so `paint(canvas)` no-op overrides on styled containers still get
     // accurate self-time attribution.
     paint(canvas);
+    close_ancestor_clip();
 
     // Time only the recursive child paint so self_ns = outer - children in
     // paint_all correctly attributes framework drawing to this view.

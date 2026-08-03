@@ -113,6 +113,10 @@
         "tools/scripts/hotspot_size_guard.json",
         "tools/scripts/test_hotspot_size_guard.py",
         "tools/scripts/gates.sh",
+        "tools/scripts/skill_path_map_lint.py",
+        "tools/scripts/skill_path_map.schema.json",
+        "tools/scripts/json_schema_lite.py",
+        "tools/scripts/test_skill_path_map_lint.py",
         "tools/scripts/scheduled_workflow_fork_guard_check.py",
         "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
         "tools/scripts/host_vitals.sh",
@@ -166,7 +170,6 @@
         "tools/kits/**",
         "fixtures/packages/basic-content-pack/**",
         "tools/cli/content_commands.*",
-        "planning/2026-06-11-pulp-package-format-proposal.md",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml"
       ]
@@ -215,7 +218,12 @@
         "tools/cmake/PulpFaust.cmake"
       ]
     },
-    "friction-report": [],
+    "friction-report": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "friction-report is a cross-session process skill for turning a moment of friction into a routed report; it owns no source path, so no diff triggers a required update (same pattern as code-comments and handoff)."
+      }
+    },
     "handoff": {
       "paths": [],
       "_doc": {
@@ -229,7 +237,8 @@
         "test/**/*sample_heritage*",
         "tools/audio/quality-lab/**/*sampler_heritage*",
         "tools/cli/**/*heritage*",
-        "docs/**/*heritage*"
+        "docs/research/sample-heritage/**",
+        "docs/validation/sample-heritage/**"
       ]
     },
     "hosting": {
@@ -296,7 +305,6 @@
         "tools/kits/**",
         "fixtures/packages/**",
         "tools/cli/kit_commands.*",
-        "planning/2026-06-11-pulp-package-format-proposal.md",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml"
       ]
@@ -582,7 +590,9 @@
         "core/dawproject/**",
         "core/smf/**",
         "core/timeline/**",
+        "core/project_package/**",
         "core/timeline_editor/**",
+        "examples/timeline-sdk-consumer/**",
         "test/test_timeline_*.cpp",
         "test/test_sequencer_ui_host.cpp",
         "test/test_interchange_*.cpp",
@@ -620,16 +630,18 @@
         "tools/cmake/PulpWam.cmake",
         "tools/cmake/PulpWclap.cmake",
         "tools/cmake/PulpPortableWav.cmake",
-        "core/timebase/**",
-        "core/timeline/**",
-        "core/playback/**",
+        "core/timeline/PulpTimelineSources.cmake",
+        "core/playback/PulpPlaybackSources.cmake",
         "core/audio/include/pulp/audio/wav_decoder.hpp",
         "core/audio/src/wav_decoder.cpp",
         "external/dr_libs/dr_wav.h",
         "tools/scripts/*web_timeline_source_closure_check.py",
         ".github/workflows/web-plugins.yml",
         "tools/cmake/PulpWebUi.cmake"
-      ]
+      ],
+      "_doc": {
+        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list — so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer — the habit that lets a genuinely missed skill update through."
+      }
     },
     "webview-ui": {
       "paths": [

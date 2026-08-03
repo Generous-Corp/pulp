@@ -3,9 +3,17 @@
 // including it. Keep request and event names here so capability coverage cannot
 // drift from the constants used by dispatch.
 
+PULP_INSPECT_METHOD(kSessionGetCapabilities, "Session.getCapabilities", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kSessionAuthenticate, "Session.authenticate", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kSessionAuthChallenge, "Session.authChallenge", SessionDescribe, Event)
+PULP_INSPECT_METHOD(kSessionAcquireController, "Session.acquireController", SessionControl, Request)
+PULP_INSPECT_METHOD(kSessionRenewController, "Session.renewController", SessionControl, Request)
+PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", SessionControl, Request)
+
 PULP_INSPECT_METHOD(kInspectorEnable, "Inspector.enable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorDisable, "Inspector.disable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorGetInfo, "Inspector.getInfo", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kInspectorGetAgentContext, "Inspector.getAgentContext", SessionDescribe, Request)
 PULP_INSPECT_METHOD(kInspectorApplyTweak, "Inspector.applyTweak", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorListTweaks, "Inspector.listTweaks", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorClearTweaks, "Inspector.clearTweaks", AuthoringTweaks, Request)
@@ -79,8 +87,8 @@ PULP_INSPECT_METHOD(kMotionSample, "Motion.sample", TelemetryStream, Event)
 PULP_INSPECT_METHOD(kMotionEnd, "Motion.end", TelemetryStream, Event)
 PULP_INSPECT_METHOD(kMotionCost, "Motion.cost", TelemetryStream, Event)
 
-PULP_INSPECT_METHOD(kTraceStartSession, "Trace.startSession", TraceControl, Request)
-PULP_INSPECT_METHOD(kTraceStopSession, "Trace.stopSession", TraceControl, Request)
+PULP_INSPECT_METHOD(kTraceStartSession, "Trace.startSession", TraceSessionControl, Request)
+PULP_INSPECT_METHOD(kTraceStopSession, "Trace.stopSession", TraceSessionControl, Request)
 PULP_INSPECT_METHOD(kTraceSnapshot, "Trace.snapshot", DiagnosticsRead, Request)
-PULP_INSPECT_METHOD(kTraceQuery, "Trace.query", DiagnosticsRead, Request)
-PULP_INSPECT_METHOD(kTraceExplain, "Trace.explain", DiagnosticsRead, Request)
+PULP_INSPECT_METHOD(kTraceQuery, "Trace.query", Unavailable, Request)
+PULP_INSPECT_METHOD(kTraceExplain, "Trace.explain", Unavailable, Request)

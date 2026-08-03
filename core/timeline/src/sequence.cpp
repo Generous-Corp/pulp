@@ -24,6 +24,24 @@ bool marker_less(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept 
            std::pair(rhs.position.value, rhs.id.value);
 }
 
+constexpr bool valid_section_role(SectionRole role) noexcept {
+    switch (role) {
+    case SectionRole::Unspecified:
+    case SectionRole::Intro:
+    case SectionRole::Verse:
+    case SectionRole::PreChorus:
+    case SectionRole::Chorus:
+    case SectionRole::Bridge:
+    case SectionRole::Breakdown:
+    case SectionRole::Drop:
+    case SectionRole::Solo:
+    case SectionRole::Interlude:
+    case SectionRole::Outro:
+        return true;
+    }
+    return false;
+}
+
 bool region_less(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
     return std::tuple(lhs.position.value, lhs.duration.value, lhs.id.value) <
            std::tuple(rhs.position.value, rhs.duration.value, rhs.id.value);
@@ -56,6 +74,8 @@ validate_regions(const std::vector<SequenceRegion>& regions,
             return ModelError{ModelErrorCode::InvalidItemId, region.id, {}};
         if (region.duration.value <= 0 ||
             !within_musical_span(region.position.value, region.duration.value, musical))
+            return ModelError{ModelErrorCode::InvalidRegion, region.id, {}};
+        if (!valid_section_role(region.role))
             return ModelError{ModelErrorCode::InvalidRegion, region.id, {}};
     }
     return std::nullopt;

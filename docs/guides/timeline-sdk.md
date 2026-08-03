@@ -18,10 +18,10 @@ capabilities and losses.
 Use the cookbook's
 [library-selection recipe](timeline-cookbook.md#choose-libraries-for-an-external-consumer)
 for the minimal `find_package()` and `target_link_libraries()` setup. The
-lowercase aliases `pulp::timebase`, `pulp::timeline`, and `pulp::playback` are
-also available. Components validate that the installed SDK contains each
-requested target; the package still defines its complete set of installed
-targets.
+lowercase aliases `pulp::timebase`, `pulp::timeline`, `pulp::project-package`,
+and `pulp::playback` are also available. Components validate that the installed
+SDK contains each requested target; the package still defines its complete set
+of installed targets.
 
 ## Dependency boundary
 
@@ -53,6 +53,29 @@ host targets enter the closure.
 
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.
+
+## Optional durable project publication
+
+Canonical Timeline JSON remains a document-model concern. When an application
+needs to publish that JSON together with package-relative assets, request the
+separate project-package component. It no-replace publishes hash-verified,
+fenced content-addressed blobs, then validates their references before
+atomically replacing `project.json` inside the stable package root. Unpublished
+staging remains unreachable:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS project-package)
+target_link_libraries(my_timeline_app PRIVATE Pulp::project-package)
+```
+
+This component does not add an archive format or interchange policy. Those stay
+in the DAWproject, SMF, and interchange components below. Its lower-level
+generic file and directory publisher is also no-replace; that guarantee does
+not apply to the stable root's replaceable `project.json` generation.
+Configuring Pulp from source with `-DPULP_ENABLE_PROJECT_PACKAGE=OFF` omits this
+component and the Timeline authoring tools that depend on it. An SDK installed
+from that build cannot satisfy `find_package(Pulp REQUIRED COMPONENTS
+project-package)`.
 
 ## Optional DAWproject importer
 
@@ -345,17 +368,43 @@ Set
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
 and reference traversal, including charges carried by reused track programs.
 `AudioRendererLimits::max_clips` remains the separate ceiling for compiled audio
-regions. When compiling incrementally, build and retain one snapshot-scoped
-`CompileInvalidationIndex` from the project, root sequence, and
-`CompileContextRegistry`, then pass each transaction dirty set through
-`resolve_dirty_tracks()`. The bundled index combines direct edits, transitive
-sequence dependencies, and nested context readers so every affected root track
-is rebuilt. Resolution compares an O(1) immutable Project structure token plus
-the root identity and registry generation; it fails closed to a full recompile
-when any of them is stale or mismatched. Rebuild the index after a relevant
-structural edit or registry declaration. Context lane contents, ordinary
-note/audio edits, freeze selection, and active-take selection preserve the
-structure token.
+regions. When compiling incrementally, keep one shared
+`CompileContextRegistry` and put it plus the committed transaction `DirtySet`
+in `ProgramCompileRequest::invalidation` by constructing it from that exact
+`CommitResult`. `PlaybackProgramCompiler::submit()`
+builds the snapshot-scoped `CompileInvalidationIndex` and resolves the exact
+`DirtyTrackSet` in the same production path that accepts the compile. The index
+combines direct edits, transitive sequence dependencies, built-in MIDI groove
+reads, and registered/nested context readers. The input must carry the exact
+request snapshot pointer, document revision, and exact predecessor snapshot.
+Sparse reuse occurs only when that predecessor is the currently published
+project; a restored or forked lineage rebuilds the cumulative target in full.
+It copies an immutable registry snapshot, so later control-thread registry
+changes affect the next request; a changed registry generation forces a full
+compile even at the same document revision.
+Because such a refresh can publish the same document revision twice, wait for
+`CompilerStatus::latest_published_epoch >= CompileTicket::submission_epoch`;
+document-revision equality alone is not a terminal signal. The epoch is a
+successful-publication watermark: reaching a ticket means its request published
+or was superseded by a later successful publication. Callers that require the
+exact ticket to be the latest successful publication require epoch equality and
+must also compare the published program identity/revision for their document.
+Epochs are scoped to one compiler instance; destroying its facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+Once `busy` is false, an error with the watermark still below the ticket means
+that ticket did not terminate successfully.
+Callers that need to inspect a prospective delta may still build an index and
+call `resolve_dirty_tracks()` directly, but must not use a separately resolved
+set as a substitute for the request's generation-pinned invalidation input.
+
+Built-in MIDI clips render their owning sequence's `GrooveTemplate`: one timing
+displacement from the authored onset moves note-on and note-off together, and
+the authored-onset accent scales velocity with deterministic half-up rounding
+and saturation. Ratchets inherit that single displacement and accent. A root
+leaf reads root groove; a nested leaf reads child groove exactly once. A
+`SequenceRef` that trims a grooved MIDI leaf currently fails with
+`TrimmedGrooveUnsupported`, because chasing displaced material across the
+retained source-window boundary has no defined contract yet.
 
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree

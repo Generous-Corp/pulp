@@ -16,6 +16,8 @@
 
 #include <pulp/view/design_import.hpp>
 
+#include <pulp/view/css_gradient.hpp>
+
 #include <choc/text/choc_JSON.h>
 #include <algorithm>
 #include <cctype>
@@ -141,41 +143,222 @@ std::string export_css_variables(const Theme& theme) {
     return ss.str();
 }
 
-Theme ir_tokens_to_theme(const IRTokens& tokens) {
-    Theme theme;
-    for (auto& [name, hex] : tokens.colors)
-        theme.colors[name] = parse_hex_color_str(hex);
+namespace {
 
-    // Derive the widget tokens a design does not name for itself.
+/// Parse one design colour token, or nothing.
+///
+/// A captured design states its colours in CSS, so a token is as likely to be
+/// `rgba(60,50,30,0.18)` as `#C4622A`. parse_hex_color_str understands only
+/// hex and answers a default-constructed (transparent black) Color for the
+/// rest, which paints as BLACK — and the knob path never saw it because it
+/// resolves the same tokens through parse_css_color. One design, two parsers,
+/// two answers.
+///
+/// parse_css_color is that one parser, but it returns opaque WHITE for a token
+/// it does not recognize, which is a colour from nowhere in the same way a
+/// fallback palette is. So recognize the forms it handles first and answer
+/// nothing for anything else: an unparseable token leaves its widget key unset
+/// and reported, rather than painting white or black.
+std::optional<Color> parse_design_color(const std::string& token) {
+    if (token.empty()) return std::nullopt;
+    if (token == "transparent") return parse_css_color(token);
+    if (token[0] == '#') {
+        // parse_css_color leaves any component it cannot read at its default,
+        // so a truncated hex would come back part-white. Only the three
+        // complete forms are a colour.
+        if (token.size() != 4 && token.size() != 7 && token.size() != 9)
+            return std::nullopt;
+        if (token.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+            return std::nullopt;
+        return parse_css_color(token);
+    }
+    for (std::string_view fn : {"rgb(", "rgba(", "hsl(", "hsla("}) {
+        if (token.compare(0, fn.size(), fn) == 0 &&
+            token.find(')') != std::string::npos)
+            return parse_css_color(token);
+    }
+    // Named colours, oklab(), colour-mix() and anything else this parser does
+    // not model. Refusing is the honest answer; guessing is not.
+    return std::nullopt;
+}
+
+/// One widget theme key and the design tokens that may supply it, most
+/// specific first. Sources are tried in order; the first that the design
+/// actually states wins.
+struct WidgetTokenRule {
+    const char* widget;
+    std::vector<const char*> sources;
+};
+
+const std::vector<WidgetTokenRule>& widget_token_rules() {
+    // The design → widget colour map, in one place, as data.
     //
-    // Tokens are copied across by NAME, so a design that says `primary` has no
-    // `knob.arc` — and Knob::paint resolves `knob.arc`, falling back to a
-    // built-in blue. The result: an imported design's accent reached its
-    // panels and text but never its controls, so every knob wore the same
-    // colour whatever the design said. theme_presets.cpp already states the
-    // semantic → widget mapping for built-in themes; an imported design
-    // deserves the same one rather than a second, silently different answer.
+    // Tokens are copied into the theme by NAME, so a design that says `accent`
+    // has no `control.fill` — and Fader::paint resolves `control.fill`, misses,
+    // and paints its built-in blue. An imported design's palette reached its
+    // panels and text but never its primitives: a blue fader and a green meter
+    // on a cream-and-rust faceplate.
     //
-    // Only fills what is ABSENT: a design that names knob.arc explicitly keeps
-    // it, and this never overwrites a deliberate choice.
-    const auto derive = [&theme](const char* widget, const char* semantic) {
-        if (theme.colors.count(widget)) return;
-        auto it = theme.colors.find(semantic);
-        if (it != theme.colors.end()) theme.colors[widget] = it->second;
+    // Each rule is a widget key and the design tokens that MEAN the same thing,
+    // most specific first. Every entry is a direct copy — no hue shift, no
+    // blend, no built-in default. theme_presets.cpp derives a built-in theme's
+    // meter zones by rotating the accent's hue; doing that here would invent a
+    // colour the design never chose. A widget key whose sources are all absent
+    // therefore stays UNSET and is reported: the widget's own default is an
+    // honest "the design did not say", while a synthesized colour is a second
+    // palette that silently drifts from the first.
+    //
+    // Three source vocabularies are accepted so a design need not know Pulp's:
+    // the Pulp design-system semantic names (`accent`, `line-strong`,
+    // `signal-low` — shared by every pack), the shadcn-style names the Figma /
+    // Stitch / W3C importers emit (`primary`, `muted`, `foreground`), and the
+    // Material spelling (`outline`, `on-surface`).
+    static const std::vector<WidgetTokenRule> rules = {
+        // Accents. `danger` / `warning` / `success` / `info` are stated
+        // outright by the design; none of them is derived.
+        {"accent.primary",   {"primary", "accent"}},
+        {"accent.secondary", {"secondary", "accent-soft"}},
+        {"accent.error",     {"destructive", "danger"}},
+        {"accent.warning",   {"warning"}},
+        {"accent.success",   {"success"}},
+        {"accent.info",      {"info"}},
+
+        // Controls, knobs and sliders share one shape: an empty track, a
+        // filled value portion, and a mark that moves. The knob path already
+        // resolved that shape against this design (browser_capture_ir.cpp
+        // lowers `css/accent` / `css/line-strong` / `css/text-strong` onto a
+        // control's design_accent / design_track / design_indicator
+        // attributes), so the fader and the meter answer to the same three
+        // tokens the knob does. Two paths reading one source is the point —
+        // giving the fader its own answer is how they drift apart.
+        {"control.fill",   {"primary", "accent"}},
+        {"control.track",  {"line-strong", "muted", "outline"}},
+        {"control.thumb",  {"text-strong", "foreground", "on-surface"}},
+        {"control.border", {"border", "control-line", "outline"}},
+
+        {"knob.arc",    {"primary", "accent"}},
+        {"knob.arc.bg", {"line-strong", "muted", "outline"}},
+        {"knob.thumb",  {"text-strong", "foreground", "on-surface"}},
+
+        {"slider.track", {"line-strong", "muted", "outline"}},
+        {"slider.fill",  {"primary", "accent"}},
+        {"slider.thumb", {"text-strong", "foreground", "on-surface"}},
+
+        // A meter's three zones are the design's own signal ramp: the level a
+        // signal sits at normally, the level that wants attention, and the
+        // level that is too hot. `green` / `yellow` / `red` name Pulp's
+        // built-in hues, not required hues — a design whose ramp runs through
+        // one colour gets a meter in that one colour, which is what it asked
+        // for.
+        {"meter.green",  {"signal-low"}},
+        {"meter.yellow", {"signal-mid"}},
+        {"meter.red",    {"signal-high"}},
+
+        {"waveform.line", {"signal-wave", "primary", "accent"}},
+        {"waveform.grid", {"line-soft"}},
+        {"waveform.fill", {"signal-wave", "primary", "accent"}},
+
+        {"focus.ring", {"accent-ring", "primary", "accent"}},
+
+        // Text and surfaces. Not primitives, but the same bug one widget
+        // over: outline_api.cpp resolves `text.primary` and would paint its
+        // built-in near-white the first time an imported design set an
+        // outline. Nothing here is derived either — `text.secondary` is the
+        // design's own muted text, not a blend of its foreground toward its
+        // muted, which is how theme_presets.cpp builds it for a built-in theme.
+        {"text.primary",   {"foreground", "text-strong", "text"}},
+        {"text.secondary", {"muted-foreground", "text-muted"}},
+        {"text.disabled",  {"text-faint"}},
+        {"text.link",      {"primary", "accent"}},
+        {"accent.text",    {"primary-foreground", "accent-text", "on-ink"}},
+
+        {"bg.primary",   {"background", "surface-app"}},
+        {"bg.secondary", {"secondary", "surface-sunken"}},
+        {"bg.surface",   {"card", "surface-panel"}},
+        {"bg.elevated",  {"popover", "surface-raised"}},
+
+        {"divider",      {"border", "line"}},
+        {"modal.bg",     {"popover", "surface-overlay", "card"}},
+        {"modal.border", {"border", "line"}},
+
+        // Unprefixed spellings a few older panels resolve directly. They mean
+        // the same thing as their dotted siblings above and would otherwise
+        // miss for exactly the same reason.
+        {"text",        {"foreground", "text-strong", "text"}},
+        {"text_muted",  {"muted-foreground", "text-muted"}},
+        {"surface",     {"card", "surface-panel"}},
+        {"accent",      {"primary", "accent"}},
+        {"border",      {"border", "control-line", "line"}},
     };
-    derive("knob.arc", "primary");
-    derive("knob.arc.bg", "muted");
-    derive("knob.thumb", "foreground");
-    derive("focus.ring", "primary");
-    // Material-style palettes name these differently; accept either spelling
-    // rather than forcing a design to know Pulp's internal vocabulary.
-    derive("knob.arc", "accent");
-    derive("knob.arc.bg", "outline");
-    derive("knob.thumb", "on-surface");
+    return rules;
+}
+
+}  // namespace
+
+Theme ir_tokens_to_theme(const IRTokens& tokens,
+                         std::vector<std::string>* unresolved_widget_tokens) {
+    Theme theme;
+    for (auto& [name, value] : tokens.colors) {
+        // A token this parser cannot read is left OUT rather than stored as
+        // the default black it used to become. A theme entry is a colour the
+        // design chose; a parse failure is not one, and storing it as black
+        // hands every widget resolving that key a colour from nowhere.
+        if (const auto colour = parse_design_color(value))
+            theme.colors[name] = *colour;
+    }
+
+    // A design captured from CSS names its tokens `css/<custom-property>`; the
+    // Figma / Stitch / W3C importers use the bare name. Trying both lets one
+    // rule table serve every producer.
+    const auto find_source = [&theme](const char* name) -> std::optional<Color> {
+        auto it = theme.colors.find(name);
+        if (it != theme.colors.end()) return it->second;
+        it = theme.colors.find("css/" + std::string(name));
+        if (it != theme.colors.end()) return it->second;
+        return std::nullopt;
+    };
+
+    for (const auto& rule : widget_token_rules()) {
+        // Fills only what is ABSENT: a design that names knob.arc itself keeps
+        // it, so the more specific instruction never loses to the general one.
+        if (theme.colors.count(rule.widget) != 0) continue;
+        bool resolved = false;
+        for (const char* source : rule.sources) {
+            // Copy the value out before inserting — inserting into
+            // theme.colors can rehash and invalidate a reference into it.
+            if (const auto colour = find_source(source)) {
+                theme.colors[rule.widget] = *colour;
+                resolved = true;
+                break;
+            }
+        }
+        if (!resolved && unresolved_widget_tokens != nullptr)
+            unresolved_widget_tokens->emplace_back(rule.widget);
+    }
 
     theme.dimensions = tokens.dimensions;
     theme.strings = tokens.strings;
     return theme;
+}
+
+std::optional<ImportDiagnostic> unmapped_widget_token_diagnostic(
+    const std::vector<std::string>& unresolved) {
+    if (unresolved.empty()) return std::nullopt;
+    // One diagnostic naming all of them, not one each: a design with no token
+    // set at all leaves every widget key unset, and twenty warnings for one
+    // cause is how a reader learns to skip the diagnostics.
+    std::string keys;
+    for (const auto& key : unresolved) keys += (keys.empty() ? "" : ", ") + key;
+    return ImportDiagnostic{
+        ImportDiagnosticSeverity::warning,
+        "design-token-unmapped",
+        "$",
+        "the design states no colour for " + std::to_string(unresolved.size()) +
+            " widget token(s), so widgets resolving them paint their built-in "
+            "default: " + keys,
+        ImportDiagnosticKind::fallback_used,
+        std::nullopt,
+        std::nullopt};
 }
 
 IRTokens theme_to_ir_tokens(const Theme& theme) {

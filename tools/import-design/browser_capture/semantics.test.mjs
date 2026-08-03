@@ -3,9 +3,209 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  COMPUTED_STYLES,
   evaluateSemantics,
   semanticExpression,
 } from "./semantics.mjs";
+
+test("the capture collects the properties a whole panel needs to be drawn",
+  () => {
+    // Each of these is a property whose absence renders as a plausible wrong
+    // picture rather than an error, so nothing downstream can report the miss.
+    for (const property of [
+      // A tiled gradient with a hard stop is the standard CSS grid idiom; the
+      // repeat length lives only here, so without it eight columns collapse to
+      // one hairline.
+      "background-size",
+      "background-position",
+      "background-repeat",
+      "background-clip",
+      "background-origin",
+      // All four edges: reading only the top makes a dashed left border vanish.
+      "border-top-style",
+      "border-right-style",
+      "border-bottom-style",
+      "border-left-style",
+      "outline-color",
+      "outline-style",
+      "outline-width",
+      "outline-offset",
+      "text-decoration-color",
+      "text-decoration-style",
+      "text-decoration-thickness",
+      "text-underline-offset",
+      "word-spacing",
+      // ::before / ::after inject text that exists in no DOM text node.
+      "content",
+    ]) {
+      assert.ok(COMPUTED_STYLES.includes(property),
+        `${property} must be collected; a property the capture skips is one ` +
+        "no consumer can draw");
+    }
+    assert.equal(new Set(COMPUTED_STYLES).size, COMPUTED_STYLES.length,
+      "a duplicated property wastes a style column on every node");
+  });
+
+test("candidates carry the paint order Chromium reported", async () => {
+  // Node 1 and node 3 are laid out; node 2 is not. Element indexes are the
+  // nodeType === 1 positions, so they are 0, 1 and 2 respectively.
+  const snapshot = {
+    documents: [{
+      nodes: {
+        nodeType: [9, 1, 1, 1],
+        backendNodeId: [10, 20, 30, 40],
+      },
+      layout: {
+        nodeIndex: [1, 3],
+        paintOrders: [0, 4],
+      },
+    }],
+  };
+  const cdp = {
+    async call() {
+      return {
+        result: {
+          value: [
+            { dom_index: 0, resolved: true, binding_status: "unbound", conflicts: [] },
+            { dom_index: 1, resolved: true, binding_status: "unbound", conflicts: [] },
+            { dom_index: 2, resolved: true, binding_status: "unbound", conflicts: [] },
+          ],
+        },
+      };
+    },
+  };
+  const report = await evaluateSemantics(cdp, snapshot, { width: 10, height: 10 });
+  // Zero is a real paint order -- the bottom-most painted box -- and must not
+  // be coalesced into "no data".
+  assert.equal(report.candidates[0].paint_order, 0);
+  assert.equal(report.candidates[1].paint_order, null,
+    "an element with no layout entry paints nothing and says so explicitly");
+  assert.equal(report.candidates[2].paint_order, 4);
+  assert.equal(report.summary.paint_ordered, 2);
+});
+
+test("pseudo-element and shadow nodes do not shift snapshot lookups", async () => {
+  // querySelectorAll returns neither a ::before box nor shadow-tree content,
+  // but the snapshot emits both as element nodes. Counting them makes every
+  // control after the first ::before read the node before its own -- which
+  // still resolves, still looks like data, and is the wrong node.
+  //
+  // Node layout: 0 document, 1 <div>, 2 ::before on it, 3 shadow root,
+  // 4 <span> inside that shadow root, 5 <button>. The page sees exactly two
+  // elements: the div at 0 and the button at 1.
+  const snapshot = {
+    strings: ["#document", "DIV", "::before", "#shadow-root", "SPAN", "BUTTON"],
+    documents: [{
+      nodes: {
+        nodeType: [9, 1, 1, 11, 1, 1],
+        nodeName: [0, 1, 2, 3, 4, 5],
+        parentIndex: [-1, 0, 1, 1, 3, 0],
+        backendNodeId: [10, 20, 30, 40, 50, 60],
+        pseudoType: { index: [2], value: [0] },
+        shadowRootType: { index: [3], value: [0] },
+      },
+      layout: {
+        nodeIndex: [1, 2, 4, 5],
+        paintOrders: [1, 2, 3, 9],
+      },
+    }],
+  };
+  const cdp = {
+    async call() {
+      return {
+        result: {
+          value: [
+            { dom_index: 0, tag: "div", resolved: true, binding_status: "unbound", conflicts: [] },
+            { dom_index: 1, tag: "button", resolved: true, binding_status: "unbound", conflicts: [] },
+          ],
+        },
+      };
+    },
+  };
+  const report = await evaluateSemantics(cdp, snapshot, { width: 10, height: 10 });
+  assert.deepEqual(
+    report.candidates.map((candidate) => candidate.backend_node_id),
+    [20, 60],
+    "the button must resolve to its own node, not the shadow span's");
+  assert.deepEqual(
+    report.candidates.map((candidate) => candidate.paint_order),
+    [1, 9],
+    "counting the ::before box would hand the button paint order 3");
+});
+
+test("a page walk that disagrees with the snapshot walk fails loudly",
+  async () => {
+    // Belt to the pseudo-element brace: any future node kind the snapshot emits
+    // and querySelectorAll does not must surface as an error rather than as
+    // every control silently wearing its neighbour's data.
+    const snapshot = {
+      strings: ["#document", "DIV", "BUTTON"],
+      documents: [{
+        nodes: {
+          nodeType: [9, 1, 1],
+          nodeName: [0, 1, 2],
+          parentIndex: [-1, 0, 0],
+          backendNodeId: [10, 20, 30],
+        },
+        layout: { nodeIndex: [1, 2], paintOrders: [0, 1] },
+      }],
+    };
+    const cdp = {
+      async call() {
+        return {
+          result: {
+            value: [{
+              dom_index: 1,
+              tag: "canvas",
+              resolved: true,
+              binding_status: "unbound",
+              conflicts: [],
+            }],
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      evaluateSemantics(cdp, snapshot, { width: 10, height: 10 }),
+      (error) => error.code === "capture-node-alignment-mismatch");
+  });
+
+test("a laid out snapshot without paint orders fails loudly", async () => {
+  // Chromium omits paintOrders only when includePaintOrder was not requested.
+  // Resolving that to a tree of nulls would read as "this page has no
+  // layering" and every consumer would draw a plausible wrong stack.
+  const cdp = {
+    async call() {
+      return {
+        result: {
+          value: [{
+            dom_index: 0,
+            resolved: true,
+            binding_status: "unbound",
+            conflicts: [],
+          }],
+        },
+      };
+    },
+  };
+  await assert.rejects(
+    evaluateSemantics(cdp, {
+      documents: [{
+        nodes: { nodeType: [9, 1], backendNodeId: [10, 20] },
+        layout: { nodeIndex: [1] },
+      }],
+    }, { width: 10, height: 10 }),
+    (error) => error.code === "capture-paint-order-missing");
+
+  await assert.rejects(
+    evaluateSemantics(cdp, {
+      documents: [{
+        nodes: { nodeType: [9, 1, 1], backendNodeId: [10, 20, 30] },
+        layout: { nodeIndex: [1, 2], paintOrders: [3] },
+      }],
+    }, { width: 10, height: 10 }),
+    (error) => error.code === "capture-paint-order-mismatch");
+});
 
 test("semantic expression receives DOMSnapshot clickable element indexes", () => {
   const expression = semanticExpression([2, 7]);

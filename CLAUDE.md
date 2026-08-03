@@ -822,6 +822,8 @@ Reach for the tool whose *use when* matches your need; open its `skill`
 for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
+- Get the expected numbers for a CSS gradient geometry test from Chromium rather than from your own formula. → `tools/import-validation/chrome_gradient_oracle.py`
+  - ⚠ **Cannot see:** Exists because a fixture derived from the same formula as the implementation agrees with it BY CONSTRUCTION, including when both are wrong. Chromium is an independent implementation of the same spec, so it can disagree, which is the only reason those tests can fail for a real cause. Cases use hard-edged stops so a scanline reads the boundary exactly, and a 160x100 box on purpose: a square box makes an ellipse a circle and a 45-degree angle its own reflection, hiding every defect worth testing.
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
   - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
@@ -842,8 +844,12 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
   - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
+- Measure how much of a natively-rendered panel disagrees with Chrome, attributed per node and per drawing feature. → `tools/import-validation/score_native_panel.py`
+  - ⚠ **Cannot see:** Two traps live in the METRIC, not the code. (1) A blank render scores WELL against a dark design: an empty SPECTR render scored 12.45% failing while the correct one scored 10.99%, because black matches black and the denominator comes from the capture side, so it never notices the render contributed no ink. ALWAYS read coverage beside the failing fraction. (2) It is AREA-weighted while perception is salience-weighted: a gradient fix moved one design 46% with no visible change, while a missing icon or a lost accent fill costs a fraction of a percent. Per-node scores are not usable yet (worst-node 1.0000, ~0% of ink nodes passing everywhere). Never inherit tau from the identity-blit calibration control, which contains no native rasterisation.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+- Prove the emitted ui.js artifact renders like the importer output it claims to ship. → `tools/import-validation/verify_rendered_panel.py`
+  - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 
 **design-import** — get a design into Pulp
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
@@ -912,6 +918,40 @@ Applies to:
 What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#292`), an atomic-refcount P1 bug (`#281`), and a silent-empty-Ed25519-signature P0 bug (`#295`) — all caught by Codex review comments *after* merge because the PRs had no dedicated unit test. A 20-line Catch2 fixture would have caught each of them during PR development.
 
 **The only acceptable "no test in this PR" justification** is: pre-existing historical coverage gap in a subsystem you are not modifying. In that case, file a follow-up issue linked to `#290` and reference it in the commit trailer. Anything else — ship the test.
+
+### Confirm the failure — a green test proves nothing on its own
+
+A test that passes may be asserting the same thing the code assumes, or never
+reaching the code at all. Before believing a new test covers its fix, **break the
+fix and watch that test fail.** This has repeatedly caught tests that could not
+fail: a guard that skips its check when the thing it needs is absent, an
+assertion that restates the code's own assumption, a probe whose inputs never
+reach the changed path.
+
+Run that loop with **`tools/scripts/confirm_failure.sh`** rather than by hand:
+
+```bash
+tools/scripts/confirm_failure.sh \
+  --file core/midi/include/pulp/midi/synthesiser.hpp \
+  --break "perl -0pi -e 's/policy\.priority/0/'" \
+  --build-dir build --target pulp-test-synthesiser \
+  --test ./build/test/pulp-test-synthesiser
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+```
+
+**Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
+source and rebuilding within the same filesystem second leaves make comparing
+equal mtimes, so the object is judged current and the binary keeps the OLD code —
+`touch` does not reliably fix this, because the touch lands in the same second.
+Both directions give a wrong answer, and the quiet one is worse: a stale object
+during the *break* step makes the control falsely pass, which reads as "my test
+does not cover this" and sends you off to rewrite a test that was already fine.
+The script restores through git, deletes the objects, and refuses to report a
+verdict unless it observed the recompile in the build log. `"Built target"` is
+not evidence; a compile line for your file is.
+
+Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
+`confirm-failure-harness` ctest so it is executed rather than merely present.
 
 **Test hygiene:**
 

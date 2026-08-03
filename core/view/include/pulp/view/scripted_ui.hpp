@@ -7,6 +7,7 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -59,6 +60,15 @@ public:
     bool reload_from(std::filesystem::path script_path, std::string* error = nullptr);
 
     void set_repaint_callback(std::function<void()> cb);
+    /// Replace the live JS console sink and retain it across hot reloads.
+    /// This is the primary application-owned sink; secondary scoped observers
+    /// installed with add_log_callback() are preserved.
+    void set_log_callback(LogCallback callback);
+    /// Add a secondary console observer without replacing the primary sink.
+    /// The returned nonzero token remains valid until explicitly removed or
+    /// this session is destroyed, and survives engine hot reloads.
+    std::uint64_t add_log_callback(LogCallback callback);
+    void remove_log_callback(std::uint64_t token);
     WidgetBridge* bridge() const { return bridge_.get(); }
 
     /// The runtime-inspector bridge for this session's JS engine. Always
@@ -106,6 +116,9 @@ public:
     const std::filesystem::path& script_path() const { return script_path_; }
     const std::filesystem::path& theme_path() const { return theme_path_; }
     bool hot_reload_enabled() const { return hot_reload_enabled_; }
+    bool hot_reload_pending() const {
+        return reloader_ && reloader_->has_pending_reload();
+    }
     bool theme_reload_enabled() const { return theme_reload_enabled_; }
 
 private:
@@ -127,6 +140,9 @@ private:
     ScriptInspectorBridge inspector_bridge_;
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
+    LogCallback log_callback_;
+    std::unordered_map<std::uint64_t, LogCallback> log_subscribers_;
+    std::uint64_t next_log_subscription_ = 0;
     render::GpuSurface* gpu_surface_ = nullptr;
 
     Theme base_theme_;
@@ -144,6 +160,8 @@ private:
                                 std::optional<std::filesystem::file_time_type>& out_write_time,
                                 std::string* error) const;
     bool poll_theme_reload(std::string* error);
+    LogCallback engine_log_callback();
+    void dispatch_log(std::string_view level, std::string_view message);
 
     static std::string read_text_file(const std::filesystem::path& path);
     static std::string describe_exception();
