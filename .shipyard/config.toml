@@ -354,6 +354,7 @@ trailers = [
 ]
 only_for_tag_pattern = "v*"
 max_push_attempts    = 5
+ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"
 
 [release.post_tag_hook.bot_identity]
 name  = "pulp-release-bot"
