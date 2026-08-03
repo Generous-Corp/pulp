@@ -106,11 +106,20 @@ bool ProcessEngine::ensure_running() {
 }
 
 bool ProcessEngine::generator_running() const {
-    // Matched on the interpreter invocation, not the bare filename: `pgrep -f
-    // patch.py` also matches any shell whose command line merely mentions it,
-    // including the one doing the matching.
+    // Matched on the SCRIPT plus its verb, not on the interpreter invocation.
+    //
+    // This used to look for the literal "python3 patch.py", which stopped
+    // matching the moment the launch line gained a flag: `python3 -u patch.py`
+    // is the same run and a different string, so the guard reported "nothing
+    // running" while a generation was in flight, silently. Anything that
+    // matches the interpreter's exact spelling breaks on the next flag.
+    //
+    // The original reason for including "python3" was to avoid matching a
+    // shell whose command line merely mentions the filename -- including the
+    // matching shell itself. "patch.py build" keeps that property: the verb
+    // is only ever on a real invocation.
     std::string out;
-    for (const char* pattern : {"python3 patch.py", "python3 generate.py"})
+    for (const char* pattern : {"patch.py build", "generate.py "})
         if (run(std::string("pgrep -f '") + pattern + "' >/dev/null 2>&1", out) == 0)
             return true;
     return false;

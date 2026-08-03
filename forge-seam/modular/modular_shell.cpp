@@ -1281,12 +1281,31 @@ void ForgeModularShell::on_poll() {
         // launched. So a silent run shows the first stage and counts from
         // submission; the log refines that as soon as it says anything.
         const int reported = monitor_.stage();
-        const bool silent = reported < 0;
+        // Silence only counts as "stage 0" for a run THIS shell started and is
+        // still waiting on. `watching_` alone is true whenever a log is being
+        // tailed, including at startup against a finished run's file -- and
+        // treating that as a live stage 0 logged a phantom Thinking before any
+        // build was pressed, and left reported_stage_ already sitting at 0 so
+        // the real build's transition never fired. A card that lights for
+        // nothing is the same defect as one that stays dark for something.
+        const bool silent = reported < 0 && in_flight_;
         const int stage = silent ? 0 : reported;
         if (stage != reported_stage_) {
             reported_stage_ = stage;
             stage_started_ = std::chrono::steady_clock::now();
             if (auto* c = chrome()) c->set_active_stage(stage);
+            // Written down, because "the card is grey" is a symptom with at
+            // least four causes -- not watching, no chrome, the monitor
+            // reporting nothing, or the outcome already terminal -- and
+            // telling them apart from a screenshot is impossible. Each one
+            // cost a round trip through somebody else's machine.
+            pulp::runtime::log_info(
+                "Forge Modular: stage {} (log reported {}, chrome {}, "
+                "outcome {})",
+                stage, reported,
+                chrome() ? "attached" : "MISSING",
+                monitor_.outcome() == BuildOutcome::running ? "running"
+                                                            : "terminal");
         }
         // A live clock on the active chip, and a cumulative one for the whole
         // run. A model call takes minutes; without something moving, "asking

@@ -4103,6 +4103,8 @@ TEST_CASE("a run that has printed nothing still shows a stage and a clock",
     // when; that is enough to show a stage and count.
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
     pulp::state::StateStore store;
     shell.set_state_store(&store);
     shell.define_parameters(store);
@@ -4118,6 +4120,19 @@ TEST_CASE("a run that has printed nothing still shows a stage and a clock",
     const auto log = std::filesystem::temp_directory_path() / "fm-silent.log";
     std::filesystem::remove(log);
     { std::ofstream f(log); }                    // exists, and is EMPTY
+
+    // Watching an empty log with NO build in flight must show nothing. The
+    // first version of this fix skipped that condition, so the app logged a
+    // phantom stage 0 at startup against a previous run's file -- and worse,
+    // left reported_stage_ at 0, so the real build's transition never fired
+    // and the card stayed grey for the run that mattered.
+    shell.watch_build_log(log.string());
+    shell.on_poll();
+    CHECK(chrome->active_chip() != 0);
+
+    // Now a real submission, which is what makes the run ours to report.
+    CHECK(shell.submit_own("a clattering metallic texture").empty());
+    CHECK(engine.submissions.size() == 1);
     shell.watch_build_log(log.string());
     shell.on_poll();
 
