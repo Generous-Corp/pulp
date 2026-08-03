@@ -147,6 +147,48 @@ Two things that WILL bite:
   subscribe) that first publish is lost, and the consumer waits for a change that
   already happened.
 
+## A Worker and a worklet share no heap — a program crosses as bytes
+
+A Worker's wasm and a worklet's wasm are **separate linear memories**, so a
+pointer either one writes is meaningless in the other. That is why a compiled
+`playback::PlaybackProgram` — a graph of `shared_ptr` and `std::vector` — can
+never be published from a compiler Worker to a realtime worklet directly, and
+why `pulp/playback/program_wire.hpp` exists: it is the flat, pointer-free,
+versioned byte range that crossing form takes, with a validating decoder that
+allocates nothing and borrows typed spans straight out of the buffer.
+
+Consequences for anything on the web lane that publishes program state:
+
+- Size the destination with `program_wire_encoded_size` and write into a
+  caller-owned span. Both the encoder and the decoder allocate nothing, which is
+  what lets a producer write straight into a `SharedArrayBuffer` ring and a
+  worklet adopt without touching the allocator.
+- The buffer's base must be eight-byte aligned or the decoder rejects it — a
+  ring's slot stride has to be a multiple of eight, not merely large enough.
+- Payloads crossing this boundary are **untrusted input**. Never hand a worklet
+  bytes it has not run through `decode_program_wire`; the decoder is where
+  truncation, a spliced length, an unknown section, and an out-of-range index
+  all become typed rejections instead of an out-of-bounds read in the render
+  callback.
+- A rejected generation must leave the previously adopted program playing.
+  Adoption is `decode` then swap, never swap then validate.
+- **Adopt on `(producer_epoch, generation)`, never on `generation` alone.** A
+  differing epoch means a different producer: reset carried cursor state and
+  adopt unconditionally, because generations from two producers are not
+  comparable. This is the case a page hits whenever it rebuilds its Worker while
+  the `AudioContext` survives — the new Worker republishes generation 1, and a
+  consumer comparing generations alone refuses every publish from then on and
+  renders a stale program with no diagnostic to distinguish it from silence.
+- **Decide a lane `Unchanged` on its `instance_token` too, not on
+  `(lane_id, generation)`.** The epoch separates producers; it does not separate
+  two programs from one producer, and that is the common case — a worklet's
+  Worker recompiling. `generation` is supplied by the caller rather than minted
+  per compile, so everything else about the lane can be identical. Each
+  `ProgramWireAutomationLaneRecord` carries the producer's own token for exactly
+  this; compare it for equality only, and only against a token from the same
+  `producer_epoch`. Keeping cursor state on a lane whose token moved renders the
+  stale curve with nothing malformed for the decoder to reject.
+
 ## Capability tiers are shared with mobile — do not mint a browser-local enum
 
 When a browser lane needs to say "this page can only do the degraded thing",
@@ -409,6 +451,22 @@ per-ABI entry point for it.** Go through the plugin's own state:
   no-exceptions proof together. Hand-editing any of the four consumer lists for a
   timeline unit is not just unnecessary, it is wrong.
 
+- **This skill owns the engines' web-ABI source closure, not the engines.**
+  `skill_path_map.json` maps `web-plugins` to
+  `core/timeline/PulpTimelineSources.cmake`,
+  `core/playback/PulpPlaybackSources.cmake`, `PulpWam.cmake` (which carries the
+  literal `core/timebase/src` list) and `PulpWclap.cmake` — the surfaces that
+  decide what the browser lanes compile. It does **not** claim
+  `core/timebase/**`, `core/timeline/**`, or `core/playback/**` wholesale.
+  Adding or splitting an engine TU still lands on this skill, because it edits
+  one of those lists; editing an existing engine TU does not, because nothing
+  here goes stale. Whole-subsystem claims made the gate fire on every engine
+  edit, which trains reflexive `Skill-Update: skip` trailers — and that reflex
+  is how a genuinely missed skill update gets waved through. `web-timeline-
+  source-closure` (a ctest, not this gate) is what proves the closure itself.
+  `tools/scripts/test_skill_sync.py::RealSkillPathMapOwnershipTests` asserts
+  the boundary from both sides, so widening it back fails a test.
+
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,
   `transaction_marker_internal.cpp` — belong in the shared timeline source
@@ -493,6 +551,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   `ProgramCompileRequest::maximum_note_events_per_track`: wasm's memory ceiling
   makes an unbounded ratchet fan-out especially dangerous. This engine support
   does not by itself add a JavaScript authoring surface.
+
+- Sequence groove rendering and compile-context invalidation are equally
+  portable. Built-in MIDI subscribes to `CompileContextKind::Groove`; its owner
+  sequence timing displacement and velocity accent are compiled before the
+  bounded ratchet expansion. WAM and WebCLAP therefore inherit the same note
+  program without browser-only math. Keep `CommitResult` predecessor provenance,
+  registry snapshots, and MIDI compile-structure tokens in the shared timeline /
+  playback lane so sparse reuse cannot publish stale browser programs. This also
+  does not create a JavaScript authoring surface by itself.
 
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
@@ -623,6 +690,14 @@ The `WAMv2 + WebCLAP (Linux, headless Chrome)` lane
 The lane pins emsdk (never `latest`) and fetches the Skia wasm slice from
 `tools/deps/manifest.json` — see the `ci` skill's `web-plugins.yml` section
 before touching either.
+
+`web-plugins.yml` also carries a second, unrelated job:
+`Timeline fixture corpus (WASM)`, which builds `pulp-fixture-runner` under
+emscripten and runs the timeline conformance corpus through it. It shares the
+file only for the emsdk pin — it needs no Skia, no Chrome, no wasi-sdk, no npm,
+so keep it a separate job rather than a step in the lane above, or a one-minute
+check starts waiting on a fifteen-minute one. It is not a browser lane; if you
+are here for WAM/WebCLAP behavior, it is not the job you want.
 
 ### Landmine: `pulp_add_wclap(Foo)` declares the target as `Foo-wclap`
 

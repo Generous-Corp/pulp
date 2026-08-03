@@ -70,8 +70,20 @@ runtime::Result<TakeLane, PersistenceError>
 decode_take_lane(const JsonValue& value, DecodeContext& context, std::string path);
 runtime::Result<SequenceMarker, PersistenceError>
 decode_marker(const JsonValue& value, DecodeContext& context, std::string path);
+// Whether a payload must carry a member introduced by a later schema version,
+// must not carry it, or may omit it. A document's schema version decides
+// exactly. A command payload is authored input with no version-gated migration
+// path of its own, so an omitted member has to keep meaning what it meant
+// before the field existed.
+enum class MemberPolicy : std::uint8_t { Forbidden, Required, Optional };
+
+constexpr MemberPolicy member_policy_for(bool required) noexcept {
+    return required ? MemberPolicy::Required : MemberPolicy::Forbidden;
+}
+
 runtime::Result<SequenceRegion, PersistenceError>
-decode_region(const JsonValue& value, DecodeContext& context, std::string path);
+decode_region(const JsonValue& value, MemberPolicy role_policy, DecodeContext& context,
+              std::string path);
 runtime::Result<Scene, PersistenceError>
 decode_scene(const JsonValue& value, DecodeContext& context, std::string path);
 runtime::Result<Slot, PersistenceError>
@@ -79,12 +91,17 @@ decode_slot(const JsonValue& value, DecodeContext& context, std::string path);
 // A null value decodes as an empty lane, which is what a pre-lane sequence
 // version means. `lane_path` is the full diagnostic path of the array itself.
 runtime::Result<ChordScaleLane, PersistenceError>
-decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path);
+decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
+                        DecodeContext& context, std::string lane_path);
 // A null value decodes as the groove that states no feel, which is what a
 // pre-groove sequence version means. `groove_path` is the full diagnostic path
 // of the object itself.
 runtime::Result<GrooveTemplate, PersistenceError>
 decode_groove(const JsonValue* value, DecodeContext& context, std::string groove_path);
+// Decodes the fixed four-member tuning object. The caller owns the decision
+// about whether the payload's version may carry one at all.
+runtime::Result<TuningReference, PersistenceError> decode_tuning(const JsonValue& value,
+                                                                 std::string path);
 
 runtime::Result<Track, PersistenceError>
 decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,

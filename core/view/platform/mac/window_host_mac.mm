@@ -112,6 +112,26 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
     });
 }
 
+static void request_cocoa_window_close_deferred(NSWindow* window, bool initially_hidden) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (initially_hidden) {
+          mark_cocoa_dispatchers_stopping();
+          if (window != nil)
+              [window close];
+          [NSApp stop:nil];
+          post_cocoa_stop_event();
+          return;
+      }
+      if (window != nil) {
+          [window performClose:nil];
+      } else {
+          mark_cocoa_dispatchers_stopping();
+          [NSApp stop:nil];
+          post_cocoa_stop_event();
+      }
+    });
+}
+
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
@@ -141,6 +161,17 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             return [NSThread isMainThread];
         },
     };
+}
+
+static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_return) {
+    if (!ready_to_return)
+        return;
+    while (!ready_to_return()) {
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
+    }
 }
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
@@ -1560,6 +1591,7 @@ public:
         auto live = pulp::view::mac_capture::capture_window_screencapture_png(window_);
         return !live.empty() ? live : pulp::view::mac_capture::capture_window_content_png(window_, view_);
     }
+    bool supports_compositor_capture() const override { return true; }
 
     // Host-managed pixels only. CG-backed host has no GPU
     // back-buffer, so the deterministic surface is the rasterized content
@@ -1575,6 +1607,14 @@ public:
             return;
         }
         request_app_close(window_);
+    }
+
+    bool supports_deferred_close() const override {
+        return true;
+    }
+
+    void request_close_deferred() override {
+        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -1611,6 +1651,14 @@ public:
     }
 
     void run_event_loop() override {
+        run_event_loop_until({});
+    }
+
+    bool event_loop_supports_exit_drain() const override {
+        return true;
+    }
+
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
@@ -1629,6 +1677,7 @@ public:
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
+            pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }
@@ -1894,6 +1943,7 @@ public:
 
         return pulp::view::mac_capture::capture_window_content_png(window_, metal_view_);
     }
+    bool supports_compositor_capture() const override { return true; }
 
     // Deterministic GPU back-buffer readback for hidden /
     // headless test windows. Bypasses screencapture (which fails on hidden
@@ -1926,6 +1976,14 @@ public:
             return;
         }
         request_app_close(window_);
+    }
+
+    bool supports_deferred_close() const override {
+        return true;
+    }
+
+    void request_close_deferred() override {
+        request_cocoa_window_close_deferred(window_, options_initially_hidden_);
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -1979,6 +2037,14 @@ public:
     }
 
     void run_event_loop() override {
+        run_event_loop_until({});
+    }
+
+    bool event_loop_supports_exit_drain() const override {
+        return true;
+    }
+
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
@@ -2009,6 +2075,7 @@ public:
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
+            pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }

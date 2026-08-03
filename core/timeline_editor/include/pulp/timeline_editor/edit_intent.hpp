@@ -7,6 +7,7 @@
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
 
 #include <optional>
+#include <utility>
 
 namespace pulp::timeline_editor {
 
@@ -22,10 +23,10 @@ namespace pulp::timeline_editor {
 /// of the three appear here — routing them through this type would push transient
 /// UI state into the undo history.
 enum class EditIntentKind : std::uint8_t {
-    Draw,    ///< Create a clip. Lowers to InsertClip.
-    Erase,   ///< Delete a clip. Lowers to RemoveClip.
-    Move,    ///< Reposition a clip. Lowers to MoveClip.
-    Resize,  ///< Change a clip's extent. Lowers to MoveClip with a changed range.
+    Draw,   ///< Create a clip. Lowers to InsertClip.
+    Erase,  ///< Delete a clip. Lowers to RemoveClip.
+    Move,   ///< Reposition a clip. Lowers to MoveClip.
+    Resize, ///< Change a clip's extent. Lowers to MoveClip with a changed range.
 };
 
 /// One editing step expressed without reference to the device that produced it.
@@ -65,7 +66,75 @@ struct EditIntent {
     std::optional<timeline::ClipTimeRange> replacement_range;
     /// Payload for Draw.
     std::optional<timeline::Clip> clip;
+
+    bool operator==(const EditIntent& other) const noexcept;
 };
+
+/// What a piano-roll gesture does to one note.
+///
+/// This vocabulary is separate from EditIntentKind because note lowering depends
+/// on the granular note commands. A view and a ScriptedUiHost can still exchange
+/// and compare the complete edit before those commands are available; no note
+/// verb pretends to lower to a clip command in the meantime.
+enum class NoteEditIntentKind : std::uint8_t {
+    Insert,      ///< Add `replacement` to the target MIDI clip.
+    Erase,       ///< Remove `expected` from the target MIDI clip.
+    Move,        ///< Replace a note after changing its start and/or pitch.
+    Resize,      ///< Replace a note after changing its start and/or duration.
+    SetVelocity, ///< Replace a note after changing its velocity.
+};
+
+/// One validated note editing step, independent of pointer or view geometry.
+///
+/// `sequence_id`, `track_id`, and `clip_id` locate the owning MIDI clip. Insert
+/// carries only `replacement`, Erase carries only `expected`, and the three
+/// transforms carry both with the same note identity. The values are snapshots,
+/// not references into MidiContent, so a host may retain the intent safely.
+struct NoteEditIntent {
+    NoteEditIntentKind kind = NoteEditIntentKind::Move;
+    timeline::GesturePhase phase = timeline::GesturePhase::Single;
+
+    timeline::ItemId sequence_id;
+    timeline::ItemId track_id;
+    timeline::ItemId clip_id;
+
+    std::optional<timeline::NoteEvent> expected;
+    std::optional<timeline::NoteEvent> replacement;
+
+    bool operator==(const NoteEditIntent& other) const noexcept;
+};
+
+/// Returns the first structural or note-domain error, or nullopt when valid.
+///
+/// This checks only the device-neutral intent contract. Project membership and
+/// optimistic concurrency remain the future transaction builder's responsibility.
+std::optional<timeline::ModelError>
+validate_note_edit_intent(const NoteEditIntent& intent) noexcept;
+
+/// A note intent that passed validate_note_edit_intent and may cross a host seam.
+class ValidatedNoteEditIntent {
+  public:
+    /// Validates and owns one complete intent, or returns its first error.
+    static runtime::Result<ValidatedNoteEditIntent, timeline::ModelError>
+    create(NoteEditIntent intent) noexcept;
+
+    /// Returns the immutable validated value retained by this wrapper.
+    const NoteEditIntent& value() const noexcept {
+        return value_;
+    }
+
+    bool operator==(const ValidatedNoteEditIntent& other) const noexcept {
+        return value_ == other.value_;
+    }
+
+  private:
+    explicit ValidatedNoteEditIntent(NoteEditIntent intent) noexcept : value_(std::move(intent)) {}
+
+    NoteEditIntent value_;
+};
+
+/// Host binding used by a piano-roll front-end before command lowering.
+using NoteEditIntentHost = SequencerUiHostT<ValidatedNoteEditIntent>;
 
 /// Identities a lowered transaction needs and an intent deliberately does not carry.
 ///

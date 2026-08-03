@@ -281,6 +281,37 @@ TEST_CASE("TcpStream round-trips bytes on loopback", "[network_stream]") {
     REQUIRE(server_done.load());
 }
 
+TEST_CASE("Socket timed connect resolves IPv4 hostnames",
+          "[network_stream][socket][dns]") {
+    Socket server;
+    REQUIRE(server.create(SocketType::TCP));
+
+    std::uint16_t port = 0;
+    for (std::uint16_t candidate = 45401; candidate < 45500; ++candidate) {
+        if (auto bound = try_bind_loopback(server, candidate)) {
+            port = *bound;
+            break;
+        }
+    }
+    if (port == 0) {
+        SUCCEED("could not bind loopback port; skipping");
+        return;
+    }
+
+    std::thread server_thread([&] {
+        auto client = server.accept();
+        if (client)
+            client->close();
+    });
+    ThreadJoiner join_server{server_thread};
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("localhost", port, 2s));
+    client.close();
+    join_server.join();
+}
+
 TEST_CASE("HttpStream reports transport error for unreachable host", "[network_stream]") {
     HttpStream::Request req;
     req.url = "http://127.0.0.1:1";  // guaranteed-unused port

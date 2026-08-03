@@ -87,6 +87,19 @@ private:
     fs::path original_;
 };
 
+// Real bytes on disk for a manifest asset. The materializer only emits a
+// `file://` image source for a file that exists — a synthetic path resolves to
+// nothing and materializes the unresolved-asset placeholder instead — so a test
+// that asserts on a resolved image has to put a file where the manifest says.
+fs::path write_asset_file(const fs::path& path) {
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    REQUIRE(out.is_open());
+    out << "pulp-test-asset-bytes";
+    REQUIRE(out.good());
+    return path;
+}
+
 // [[maybe_unused]]: only the codegen-compile test cases use these helpers, and
 // those compile legs are skipped on Windows (see the SKIP guards below), so the
 // helpers are unreferenced in a Windows build.
@@ -641,6 +654,90 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     CHECK(border.a > 0.0f);
 }
 
+TEST_CASE("baked native materializer accepts the oklab colours Chromium serializes",
+          "[view][import][native-materializer][color]") {
+    // A captured design does not reach the materializer in the syntax it was
+    // authored in: Chromium serializes lab/lch/oklab/oklch/color-mix and any
+    // wide-gamut literal into `oklab()` or `oklch()`. The colour allowlist knew
+    // only `rgb`/`hsl`, so those values were not parsed and never applied — the
+    // view kept its DEFAULT colour, which is a silent loss rather than a visibly
+    // wrong one. A real capture's accent label rendered in the inherited colour.
+    //
+    // Asserted on text, border and background together for the same reason the
+    // rgba() case above does: the allowlist is one gate in front of seven paint
+    // sites, so a single-site check passes throughout the bug.
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "DRIVE";
+    ir.root.stable_anchor_id = "label";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 20.0f;
+    // Chromium paints these exact strings as rgb(6, 8, 9), rgb(142, 255, 157)
+    // and rgb(192, 255, 198); the values below are read off its own render.
+    ir.root.style.background_color = "oklab(0.152 0 -0.005)";
+    ir.root.style.color = "oklab(0.913804 -0.143517 0.0939829)";
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "oklch(0.7 0.2 145)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    const auto text = root->inheritable_text_color();
+    REQUIRE(text.has_value());
+    CHECK(text->r == Catch::Approx(142.0f / 255.0f).margin(0.01f));
+    CHECK(text->g == Catch::Approx(255.0f / 255.0f).margin(0.01f));
+    CHECK(text->b == Catch::Approx(157.0f / 255.0f).margin(0.01f));
+
+    const auto border = root->border_color();
+    CHECK(border.r == Catch::Approx(48.0f / 255.0f).margin(0.01f));
+    CHECK(border.g == Catch::Approx(189.0f / 255.0f).margin(0.01f));
+    CHECK(border.a > 0.0f);
+
+    // The background must be the design's near-black, not the parser's
+    // opaque-white fallback for a token it does not know. Without this the case
+    // passes when every value above resolves to white.
+    CHECK(root->background_color().r < 0.2f);
+    CHECK(root->background_color().g < 0.2f);
+    CHECK(root->background_color().b < 0.2f);
+}
+
+TEST_CASE("baked native materializer carries a resolved clip rectangle to the view",
+          "[view][import][native-materializer][clip-model]") {
+    // The importer resolves a node's real CSS clip chain to one rectangle in
+    // the node's own space. It reaches the renderer through this slot and NOT
+    // through `overflow`, because `overflow` clips whatever the node's children
+    // turn out to be — DOM parentage — and that is the chain CSS does not use.
+    // Two nodes, so the child proves the clip is per-node rather than something
+    // the parent's rectangle happened to cover.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 200.0f;
+    ir.root.style.clip_rect = IRStyle::ClipRect{5.0f, 5.0f, 90.0f, 90.0f};
+
+    IRNode child;
+    child.type = "frame";
+    child.stable_anchor_id = "escapee";
+    child.style.position = "absolute";
+    child.style.left = 10.0f;
+    child.style.top = 10.0f;
+    child.style.width = 50.0f;
+    child.style.height = 50.0f;
+    ir.root.children.push_back(std::move(child));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->ancestor_clip_rect().has_value());
+    CHECK(root->ancestor_clip_rect()->x == 5.0f);
+    CHECK(root->ancestor_clip_rect()->width == 90.0f);
+
+    // A node with no resolved clip gets none — it is not inherited from the
+    // parent's rectangle, which is the whole reason the slot is per-node.
+    REQUIRE(root->child_count() == 1);
+    CHECK_FALSE(root->child_at(0)->ancestor_clip_rect().has_value());
+}
+
 TEST_CASE("baked native materializer applies the SVG fill rule to the path widget",
           "[view][import][native-materializer][fill-rule]") {
     // The winding rule decides which regions of a multi-subpath path are
@@ -687,10 +784,13 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     ir.root.style.width = 64.0f;
     ir.root.style.height = 32.0f;
 
+    TempDir cache("pulp-materializer-asset-manifest");
+    const auto logo = write_asset_file(cache.path / "cache" / "logo.png");
+
     IRAssetRef asset;
     asset.asset_id = "asset-logo";
     asset.original_uri = "/raw/source-logo.png";
-    asset.local_path = "/resolved/cache/logo.png";
+    asset.local_path = logo.string();
     asset.content_hash = "sha256:test";
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
@@ -700,7 +800,8 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     REQUIRE(root != nullptr);
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
-    REQUIRE(image->image_source() == "file:///resolved/cache/logo.png");
+    REQUIRE(image->image_source() ==
+            "file://" + logo.lexically_normal().generic_string());
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
@@ -715,10 +816,13 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     ir.root.style.width = 64.0f;
     ir.root.style.height = 32.0f;
 
+    TempDir imported("pulp-materializer-figma-asset-ref");
+    const auto sprite = write_asset_file(imported.path / "assets" / "3_43.png");
+
     IRAssetRef asset;
     asset.asset_id = "3:43";
     asset.original_uri = "figma://KCKIyZoWXjde6qVNCm4qPa/3:43";
-    asset.local_path = "/resolved/import/assets/3_43.png";
+    asset.local_path = sprite.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 
@@ -727,7 +831,8 @@ TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sourc
     REQUIRE(root != nullptr);
     auto* image = dynamic_cast<ImageView*>(root.get());
     REQUIRE(image != nullptr);
-    REQUIRE(image->image_source() == "file:///resolved/import/assets/3_43.png");
+    REQUIRE(image->image_source() ==
+            "file://" + sprite.lexically_normal().generic_string());
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
@@ -1309,7 +1414,10 @@ TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
     // shape_fill_gradient; the materializer forwards it to ImageView so a later
     // opt-in fill reveals the shape's real colors. Storing it is inert (no fill
     // value), so the image still renders plainly — the capability stays opt-in.
-    auto make = [](const char* grad) {
+    TempDir resolved("pulp-materializer-shape-fill");
+    const auto shape = write_asset_file(resolved.path / "shape.png");
+
+    auto make = [&](const char* grad) {
         DesignIR ir;
         ir.source = DesignSource::figma_plugin;
         ir.root.type = "image";
@@ -1319,7 +1427,7 @@ TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
         if (grad) ir.root.attributes["shape_fill_gradient"] = grad;
         IRAssetRef asset;
         asset.asset_id = "shape";
-        asset.local_path = "/resolved/shape.png";
+        asset.local_path = shape.string();
         asset.mime = "image/png";
         ir.asset_manifest.assets.push_back(asset);
         std::vector<ImportDiagnostic> diag;
@@ -1363,10 +1471,13 @@ TEST_CASE("baked native materializer preserves figma-plugin bleed sprite geometr
     ir.root.style.top = 30.0f;
     ir.root.style.render_bounds = IRStyle::RenderBounds{210.0f, 116.0f, -74.0f, 0.0f};
 
+    TempDir bleed("pulp-materializer-bleed-sprite");
+    const auto sprite_file = write_asset_file(bleed.path / "assets" / "sprite.png");
+
     IRAssetRef asset;
     asset.asset_id = "sprite";
     asset.original_uri = "figma://fixture/sprite";
-    asset.local_path = "/resolved/import/assets/sprite.png";
+    asset.local_path = sprite_file.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 
@@ -1528,10 +1639,14 @@ TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box bor
     ir.root.style.border_color = "#7e6aff";
     ir.root.style.border_width = 1.0f;
 
+    TempDir rasterized("pulp-materializer-rasterized-vector");
+    const auto rasterized_file =
+        write_asset_file(rasterized.path / "assets" / "3_188.png");
+
     IRAssetRef asset;
     asset.asset_id = "3:188";
     asset.original_uri = "figma://fixture/3:188";
-    asset.local_path = "/resolved/assets/3_188.png";
+    asset.local_path = rasterized_file.string();
     asset.mime = "image/png";
     ir.asset_manifest.assets.push_back(asset);
 

@@ -253,6 +253,28 @@ class ShipyardPinCheckTests(unittest.TestCase):
             self.assertIn("no SHIPYARD_VERSION declared", r.stderr)
 
 
+class FeatureFloorTests(unittest.TestCase):
+    def test_signing_setup_requires_shipyard_0814(self) -> None:
+        import tempfile
+
+        csp = load_script_module()
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            config = tmp / ".shipyard" / "config.toml"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                '[release.post_tag_hook]\n'
+                'ssh_signing_setup_script = "tools/configure-signing.sh"\n',
+                encoding="utf-8",
+            )
+            csp.SHIPYARD_CONFIG = config
+
+            problems = csp.check_feature_floors("0.81.3")
+            self.assertEqual(len(problems), 1)
+            self.assertIn("0.81.4 floor", problems[0])
+            self.assertEqual(csp.check_feature_floors("0.81.4"), [])
+
+
 class ScriptRunsAgainstRealRepoTests(unittest.TestCase):
     """Smoke-run the script against the actual checkout to catch the
     case where someone bumps the pin without updating both workflows."""

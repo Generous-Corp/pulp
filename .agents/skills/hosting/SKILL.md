@@ -2128,3 +2128,19 @@ detail:
   after construction-time constraints. For example, a through-zero flanger
   whose fixed offset clamps modulation depth exports that offset as its maximum
   depth instead of advertising values the DSP collapses.
+
+## A live-swap test must wait for the swap, not budget for it
+
+`begin_swap_edit()` / `prepare_swap()` are control-thread calls, so a test that
+proves the no-silence contract runs them on a worker while the main thread
+renders. Nothing orders that worker's first iteration before a fixed render
+budget runs out. On a loaded machine the whole budget can be spent before the
+worker is ever scheduled, leaving every swap counter at zero — which reads as
+"`prepare_swap` never published", a `SignalGraph` regression, when the swap
+path was never entered at all.
+
+Assert on the worker's progress, not on the render budget: spend the budget,
+then keep rendering until a swap outcome is observed, under a deadline so a
+graph that genuinely never swaps fails the check instead of hanging. The same
+shape applies to any `SignalGraph` test whose assertion depends on a second
+thread having reached a specific call.

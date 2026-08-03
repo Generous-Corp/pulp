@@ -62,9 +62,23 @@ pulp_add_test_suite(pulp-test-playback-production
 # link is the test's alone — it stands where a front-end stands, above both
 # rungs, and is exactly what neither pulp::timeline-editor nor pulp::timeline
 # is allowed to name.
+# The track channel stands beside the clip one rather than inside it, so the two
+# are proven by separate suites: a link list naming only the editor rung and the
+# document model is what shows an arranger needs no view layer to rearrange
+# tracks, unlike the clip parity fixture below.
+pulp_add_test_suite(pulp-test-timeline-track-edit-intents
+    SOURCES test_timeline_track_edit_intents.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
+# The arranger rung. It links pulp::timeline-view and nothing from playback or
+# project_package: the acceptance vehicle here is a serialize round trip, which
+# is what makes the editor stack usable without a package format underneath it.
+pulp_add_test_suite(pulp-test-timeline-arranger-view
+    SOURCES test_timeline_arranger_view.cpp
+    LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
+        pulp::canvas)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -86,6 +100,9 @@ pulp_add_test_suite(pulp-test-standalone-recording
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::standalone pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-program-wire
+    SOURCES test_playback_program_wire.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-playback-external-sync
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
@@ -235,9 +252,11 @@ pulp_add_test_suite(pulp-test-timeline-journal
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-agent
-    SOURCES test_timeline_agent.cpp
-    LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    pulp_add_test_suite(pulp-test-timeline-agent
+        SOURCES test_timeline_agent.cpp
+        LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that
 # only resolves context a renderer declared.
@@ -269,6 +288,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_persistence_registry.cpp
         test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
+        test_timeline_tuning.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
@@ -516,5 +536,57 @@ add_test(NAME timeline-api-docs-check-selftest
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_api_docs_check.py --self-test)
 
+# Untrusted-document parsing. The oracles live in test/fuzz/ because two
+# drivers share them: this deterministic replay, which runs everywhere and
+# reproduces any case from a (seed, index) pair, and an optional coverage-guided
+# libFuzzer target. Keeping one oracle implementation is what stops the two
+# lanes from drifting into disagreeing about what a finding is.
+pulp_add_test_suite(pulp-test-timeline-document-fuzz
+    SOURCES test_timeline_document_fuzz.cpp
+        fuzz/timeline_document_oracle.cpp
+        fuzz/timeline_document_corpus.cpp
+    LIBRARIES pulp::timeline
+    LABELS fuzz)
+target_include_directories(pulp-test-timeline-document-fuzz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(pulp-test-timeline-document-fuzz PRIVATE
+    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+
+# Coverage-guided lane. Off by default: -fsanitize=fuzzer needs a compiler
+# runtime Apple's clang does not ship, so requesting it on a toolchain without
+# libclang_rt.fuzzer fails at configure time with a named cause rather than at
+# link time with a missing-library error.
+if(PULP_ENABLE_FUZZING)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+    check_cxx_source_compiles(
+        "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }"
+        PULP_HAVE_LIBFUZZER)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT PULP_HAVE_LIBFUZZER)
+        message(FATAL_ERROR
+            "PULP_ENABLE_FUZZING=ON but this toolchain has no libFuzzer runtime. "
+            "Apple's clang omits libclang_rt.fuzzer; use an LLVM that ships it "
+            "(for example CMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++).")
+    endif()
+    add_executable(pulp-fuzz-timeline-document
+        fuzz/timeline_document_fuzz_target.cpp
+        fuzz/timeline_document_oracle.cpp)
+    target_link_libraries(pulp-fuzz-timeline-document PRIVATE pulp::timeline)
+    target_include_directories(pulp-fuzz-timeline-document PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(pulp-fuzz-timeline-document PRIVATE
+        -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=fuzzer,address)
+endif()
+
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.
 include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
+
+# Durable project packages sit immediately above the timeline model and keep
+# their crash-recovery fixtures with the owning timeline test manifest.
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    include("${CMAKE_CURRENT_LIST_DIR}/project_package_tests.cmake")
+endif()
+# Keep focused Timeline submodule registrations beneath this owner hub.
+include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")

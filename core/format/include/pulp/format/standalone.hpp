@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -67,6 +68,15 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
+    // Development Inspector activation. Empty/"off" is inert, "local" owns
+    // only the in-window overlay, and agent profiles start an authenticated
+    // endpoint.
+    // Capability ids are only used with the "custom" profile. Kept as plain
+    // strings so public standalone headers remain independent of inspector SDK
+    // types when inspector support is compiled out.
+    std::string inspector_profile;
+    std::vector<std::string> inspector_capabilities;
+
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()
     // and writes to this path, then closes the window. Codified in the SDK
@@ -77,6 +87,16 @@ struct StandaloneConfig {
     // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
+
+    // A screenshot-only launch creates NO audio system and NO audio device: it
+    // paints a few frames, writes the PNG, and exits, so the render callback
+    // could only ever push silence at whoever is at the machine. Set this true
+    // (or export PULP_SCREENSHOT_KEEP_AUDIO=1) when the capture must show a UI
+    // driven by live audio — a meter or scope reading real signal. Requesting
+    // any live readout (audio_probe_json_path, audio_scope_json_path,
+    // audio_capture_wav_path, audio_capture_rolling_path) keeps audio on its
+    // own; this flag is for the case where only the pixels need it.
+    bool screenshot_keeps_audio = false;
 
     // When non-empty, run_with_editor() arms the same one-shot frame-delay
     // path as `screenshot_path` and, after the delay, writes the live output
@@ -186,6 +206,9 @@ public:
     bool start();
     void stop();
     bool is_running() const { return running_.load(); }
+    std::uint64_t audio_xrun_count() const {
+        return audio_device_ ? audio_device_->xrun_count() : 0;
+    }
     bool run_with_editor(bool use_gpu = false);
 
     /// Restart audio with a new config (stop → reconfigure → start).
@@ -193,6 +216,12 @@ public:
 
     Processor* processor() { return processor_.get(); }
     state::StateStore& state() { return store_; }
+
+    /// True when this launch skipped the audio backend entirely because it is a
+    /// screenshot-only capture (see StandaloneConfig::screenshot_keeps_audio).
+    /// No audio system, no device, and no render callback exist for such a run,
+    /// so a headless capture never opens an audio device on the host machine.
+    bool audio_skipped_for_capture() const { return audio_skipped_for_capture_; }
 
     TestSignalSource& test_signal() { return test_signal_; }
     view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
@@ -262,6 +291,11 @@ private:
     // render path is allocation/lock-free. Mirrors the @internal hook precedent.
     friend struct StandaloneRenderTestAccess;
 
+    // Test-only accessor (defined in test/test_standalone_capture_audio.cpp)
+    // that injects `audio_system_factory_` so the device lifecycle can be
+    // asserted without opening real hardware.
+    friend struct StandaloneAudioDeviceTestAccess;
+
     ProcessorFactory factory_;
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -280,6 +314,12 @@ private:
 
     std::unique_ptr<audio::AudioSystem> audio_system_;
     std::unique_ptr<audio::AudioDevice> audio_device_;
+    // Set by start(): this launch is a screenshot-only capture, so it created
+    // no audio system and no device. Reported by audio_skipped_for_capture().
+    bool audio_skipped_for_capture_ = false;
+    // Test seam: when set, start() builds the audio system from this factory
+    // instead of audio::create_audio_system(). Never set in shipped code.
+    std::function<std::unique_ptr<audio::AudioSystem>()> audio_system_factory_;
     std::unique_ptr<midi::MidiSystem> midi_system_;
     std::unique_ptr<midi::MidiInput> midi_input_;
 

@@ -2074,6 +2074,21 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--host",
             "kind": "option",
             "required": false
@@ -2097,9 +2112,35 @@
             "name": "--output",
             "kind": "option",
             "required": false
+          },
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
           }
         ],
-        "subcommands": []
+        "subcommands": [
+          {
+            "name": "profiles",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "capabilities",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
       },
       {
         "name": "kit",
@@ -2486,7 +2527,17 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
-            "name": "--host",
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
             "kind": "option",
             "required": false
           },
@@ -2547,17 +2598,6 @@
           {
             "name": "list-traces",
             "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "load-fixture",
-            "arguments": [
-              {
-                "name": "path",
-                "kind": "positional",
-                "required": true
-              }
-            ],
             "subcommands": []
           },
           {
@@ -2902,6 +2942,14 @@
           {
             "name": "--watch",
             "kind": "flag"
+          },
+          {
+            "name": "--inspect",
+            "kind": "option"
+          },
+          {
+            "name": "--inspect-capability",
+            "kind": "option"
           },
           {
             "name": "--audio-inspector",
@@ -3733,6 +3781,21 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--port",
             "kind": "option",
             "required": false
@@ -3749,11 +3812,6 @@
             "arguments": [
               {
                 "name": "--categories",
-                "kind": "option",
-                "required": false
-              },
-              {
-                "name": "--out",
                 "kind": "option",
                 "required": false
               },
@@ -4456,11 +4514,23 @@
         "disposition": "excluded"
       },
       {
+        "name": "pulp_inspect_capabilities",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_doctor",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_dom",
         "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp_inspect_evaluate",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_list",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4473,6 +4543,10 @@
       },
       {
         "name": "pulp_inspect_performance",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_profiles",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4548,10 +4622,6 @@
         "disposition": "candidate-shared-later"
       },
       {
-        "name": "pulp_motion_load_fixture",
-        "disposition": "candidate-shared-later"
-      },
-      {
         "name": "pulp_motion_pause",
         "disposition": "candidate-shared-later"
       },
@@ -4620,7 +4690,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.405.0",
+        "version": "0.412.1",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4635,13 +4705,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.405.0",
+        "catalog_version": "0.412.1",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.405.0",
+        "version": "0.412.1",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

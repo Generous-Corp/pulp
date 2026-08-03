@@ -29,6 +29,7 @@ Start with the smallest installed target set that owns the work:
 | --- | --- |
 | Musical/sample time and tempo or meter maps | `timebase`, `Pulp::timebase` |
 | Immutable projects, commands, sessions, and native persistence | `timeline`, `Pulp::timeline` |
+| Stable-root project publication with no-replace content-addressed blobs and unreachable unpublished staging | `project-package`, `Pulp::project-package` |
 | Compilation, transport, rendering, launch timing, and capture | `playback`, `Pulp::playback` |
 | Plugin-format-facing playback processor | `sequence`, `Pulp::sequence` |
 | DAWproject `project.xml` import | `dawproject-import`, `Pulp::dawproject-import` |
@@ -179,8 +180,8 @@ For a drag or other multi-transaction gesture, allocate one
 `End`. Keep the same writer and group throughout. Undo and redo are unavailable
 while a gesture is open.
 
-Use `redone->dirty` with `pulp::playback::lower_dirty_set()` to compile only
-affected tracks.
+Pass `redone->dirty` with a shared `CompileContextRegistry` in
+`ProgramCompileRequest::invalidation` to compile only affected tracks.
 
 ## Open or restore a durable session
 
@@ -231,6 +232,7 @@ block.
 
 ```cpp
 #include <pulp/playback/audio_renderer.hpp>
+#include <pulp/playback/compile_context_registry.hpp>
 #include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
@@ -256,27 +258,31 @@ playback::PlaybackProgramStore programs;
 playback::DeferredCompileExecutor executor;
 playback::PlaybackProgramCompiler compiler(
     programs, executor, std::chrono::microseconds{0});
+auto compile_contexts = std::make_shared<playback::CompileContextRegistry>();
 
 playback::ProgramCompileRequest request;
 request.project = redone->snapshot;
 request.sequence_id = redone->snapshot->root_sequence_id();
 request.tempo_map = std::move(tempo);
 request.document_revision = redone->revision.value;
-request.dirty = playback::lower_dirty_set(
-    *redone->snapshot, request.sequence_id, redone->dirty);
 request.dirty.all = true;
+request.invalidation = playback::CompileInvalidationInput{
+    compile_contexts, *redone};
 
 auto ticket = compiler.submit(std::move(request));
 if (!ticket)
     return report(ticket.error());
 while (compiler.status().busy)
     executor.run_for(std::chrono::milliseconds{1});
-if (compiler.status().has_error)
-    return report(compiler.status().last_error);
+const auto compile_status = compiler.status();
+if (compile_status.has_error ||
+    compile_status.latest_published_epoch < ticket.value().submission_epoch)
+    return report(compile_status.last_error);
 ```
 
 For later incremental compiles, omit the unconditional `all` assignment and
-use the lowered dirty set. Add the immutable decoded asset pool to
+keep passing the same registry plus each committed dirty set through
+`request.invalidation`. Add the immutable decoded asset pool to
 `request.audio_assets` when the project references audio. A native application
 can use `WorkerCompileExecutor`; check `supported()` before submitting. The
 store and executor must outlive the compiler and every accepted task.

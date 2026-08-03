@@ -134,12 +134,35 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
         if (std::binary_search(replacement_ids.begin(), replacement_ids.end(), modifier.note_id))
             surviving_modifiers.push_back(modifier);
 
+    // A payload that names the modifiers it expects gates them the same way the
+    // note arrays gate the notes: an inverse restoring a removed note's modifier
+    // must not overwrite a modifier set someone else has since changed. An empty
+    // array is how an authoring caller spells "unstated", so it gates nothing.
+    if (!replace.expected_modifiers.empty()) {
+        std::vector<NoteModifier> expected_modifiers = replace.expected_modifiers;
+        std::sort(expected_modifiers.begin(), expected_modifiers.end(),
+                  [](const NoteModifier& lhs, const NoteModifier& rhs) {
+                      return lhs.note_id < rhs.note_id;
+                  });
+        if (notes->modifiers().size() != expected_modifiers.size() ||
+            !std::equal(notes->modifiers().begin(), notes->modifiers().end(),
+                        expected_modifiers.begin()))
+            return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                          transaction, command, replace.clip_id);
+    }
+
     // The command's payload is notes, so everything else the clip authors
-    // carries across: the surviving modifiers, the seed their probability draws
-    // are derived from, and the controller and expression lanes. Rebuilding
-    // from the notes alone would silently erase all three.
+    // carries across: the modifiers, the seed their probability draws are
+    // derived from, and the controller and expression lanes. Rebuilding from
+    // the notes alone would silently erase all three. A payload that states its
+    // own modifiers replaces the surviving set outright rather than adding to
+    // it — that is how an inverse reinstates the modifier of a note this edit's
+    // replacement brings back, which no filter over live content can recover.
+    std::vector<NoteModifier> next_modifiers = replace.replacement_modifiers;
+    if (next_modifiers.empty())
+        next_modifiers = std::move(surviving_modifiers);
     auto next_notes = MidiContent::create(
-        replace.replacement, std::move(surviving_modifiers), notes->modifier_seed(),
+        replace.replacement, std::move(next_modifiers), notes->modifier_seed(),
         std::vector<MidiExpressionLane>(notes->lanes().begin(), notes->lanes().end()));
     if (!next_notes)
         return runtime::Err(model_failure(transaction, command, next_notes.error()));
@@ -173,6 +196,14 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
                                                     expected_notes->notes().end());
     const std::vector<NoteEvent> canonical_replacement(next_notes->notes().begin(),
                                                        next_notes->notes().end());
+    // The inverse names both modifier sets outright. Restoring the notes alone
+    // would leave a removed note's modifier unrecoverable: it is gone from the
+    // content the inverse reduces against, so no filter over live state can
+    // bring it back.
+    const std::vector<NoteModifier> modifiers_before(notes->modifiers().begin(),
+                                                     notes->modifiers().end());
+    const std::vector<NoteModifier> modifiers_after(next_notes->modifiers().begin(),
+                                                    next_notes->modifiers().end());
     auto next_project =
         replace_note_content(project, *sequence, *track, *clip, std::move(next_notes).value(),
                              identity_changes, identity_plan->next_item_id, transaction, command);
@@ -181,7 +212,8 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
     return runtime::Ok(NoteCommandReduction{
         std::move(next_project).value(),
         ReplaceNoteContent{replace.sequence_id, replace.track_id, replace.clip_id,
-                           canonical_replacement, canonical_expected},
+                           canonical_replacement, canonical_expected, modifiers_after,
+                           modifiers_before},
         {replace.clip_id, replace.track_id, replace.sequence_id,
          DirtyFlags::Content | DirtyFlags::Notes}});
 }
@@ -195,13 +227,33 @@ bool is_note_command(const Command& command) noexcept {
 runtime::Result<NoteCommandReduction, TransactionError>
 reduce_note_command(const Project& project, const Command& command, const Transaction& transaction,
                     CommandId command_id, bool allow_tombstone_restore) {
-    if (const auto* velocity = std::get_if<SetNoteVelocity>(&command))
-        return reduce_set_note_velocity(project, *velocity, transaction, command_id);
-    if (const auto* replace = std::get_if<ReplaceNoteContent>(&command))
-        return reduce_replace_note_content(project, *replace, transaction, command_id,
-                                           allow_tombstone_restore);
-    return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
-                                                  command_id);
+    // The family predicate above this call and the arms below it are two
+    // statements of the same list, and a chain of get_if proves nothing about
+    // its own coverage — so a command added to is_note_command_type without an
+    // arm here used to fall through to a runtime ModelInvariant. Visiting
+    // instead puts that case in front of the compiler, which is where the outer
+    // dispatch already resolves the same question.
+    return std::visit(
+        [&]<typename T>(const T& value) -> runtime::Result<NoteCommandReduction, TransactionError> {
+            if constexpr (std::is_same_v<T, SetNoteVelocity>)
+                return reduce_set_note_velocity(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, ReplaceNoteContent>)
+                return reduce_replace_note_content(project, value, transaction, command_id,
+                                                   allow_tombstone_restore);
+            else {
+                static_assert(!is_note_command_type<T>,
+                              "a note command claimed in transaction_dispatch_internal.hpp has no "
+                              "arm here; add one, or drop it from is_note_command_type");
+                // Reached only by an alternative no family claims, which the
+                // caller's predicate already excludes. Kept as a rejection
+                // rather than std::unreachable(): this TU is -fno-exceptions,
+                // so being wrong here would abort the process instead of
+                // failing one transaction.
+                return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant,
+                                                              transaction, command_id);
+            }
+        },
+        command);
 }
 
 } // namespace pulp::timeline::detail

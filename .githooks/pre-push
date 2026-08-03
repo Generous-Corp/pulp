@@ -126,6 +126,7 @@ fi
 PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
+SPML="$ROOT/tools/scripts/skill_path_map_lint.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
 CDC="$ROOT/tools/scripts/config_doc_check.py"
 CDC_MAP="$ROOT/tools/scripts/config_doc_map.json"
@@ -208,6 +209,17 @@ case $? in
     1) fail=1 ;;
     *) echo "[pre-push] skill_sync_check: internal error" >&2 ;;
 esac
+
+# The map skill-sync reads is itself checkable: a pattern matching no tracked
+# file reports nothing, which looks exactly like a clean run.
+if [ -f "$SPML" ]; then
+    run_gate_captured "$PYTHON" "$SPML" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] skill_path_map_lint: internal error" >&2 ;;
+    esac
+fi
 
 run_gate_captured "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
 case $? in

@@ -178,6 +178,32 @@ if(NOT _build_result EQUAL 0)
         "${_build_output}\n${_build_error}")
 endif()
 
+# This probe calls the archive-defined AgentView::create() entry point with an
+# invalid snapshot and succeeds only when the installed SDK links and preserves
+# the API's fail-closed runtime contract. Check both single- and multi-config
+# generator layouts.
+set(_timeline_agent_view_probe
+    "${_consumer_build}/PulpSDKSmokeTimelineAgentViewProbe${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${_timeline_agent_view_probe}")
+    set(_timeline_agent_view_probe
+        "${_consumer_build}/${_config}/PulpSDKSmokeTimelineAgentViewProbe${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+if(NOT EXISTS "${_timeline_agent_view_probe}")
+    message(FATAL_ERROR
+        "Installed SDK consumer did not produce PulpSDKSmokeTimelineAgentViewProbe")
+endif()
+execute_process(
+    COMMAND "${_timeline_agent_view_probe}"
+    RESULT_VARIABLE _timeline_agent_view_probe_result
+    OUTPUT_VARIABLE _timeline_agent_view_probe_output
+    ERROR_VARIABLE _timeline_agent_view_probe_error)
+if(NOT _timeline_agent_view_probe_result EQUAL 0)
+    message(FATAL_ERROR
+        "Installed SDK AgentView runtime probe failed "
+        "(${_timeline_agent_view_probe_result})\n"
+        "${_timeline_agent_view_probe_output}\n${_timeline_agent_view_probe_error}")
+endif()
+
 # The POST_BUILD check is a no-op when nothing is required, so assert
 # independently that it actually RAN for at least one target. Otherwise a
 # regression that silently stopped wiring the verification would look identical

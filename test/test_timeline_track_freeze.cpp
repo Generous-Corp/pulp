@@ -151,7 +151,7 @@ TEST_CASE("Track freeze persists canonically and older schema downgrade fails cl
     REQUIRE(encoded.json.find("\"freeze\":{\"asset_id\":\"21\"") != std::string::npos);
     REQUIRE(encoded.json.find("\"render_plan_hash\":\"" + std::string(64, 'c') + "\"") !=
             std::string::npos);
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":7") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":8") !=
             std::string::npos);
     const auto decoded = take_result(deserialize_project(encoded.json, registry));
     REQUIRE(track(decoded).freeze() == freeze());

@@ -2,6 +2,7 @@
 
 #include <pulp/view/design_import.hpp>
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -127,10 +128,12 @@ ResolvedNativeNode resolve_design_ir_native_json(std::string_view frozen_design_
 
 // Returns the SVG document text for a faithful_svg node's asset, or empty if it
 // can't be resolved. Handles `data:image/svg+xml[;base64],…` payloads and
-// on-disk files (local_path or a `file://` original_uri). Shared by the runtime
-// materializer (make_faithful_svg_frame) and the C++ codegen, so both lower a
-// faithful_svg node from the identical resolved bytes. Host-side / codegen-time
-// only — does file I/O; never the audio/render thread.
-std::string resolve_svg_document(const IRAssetRef& asset);
+// on-disk files (local_path, a `file://` original_uri, or the content-addressed
+// file under `asset_base_directory` when the recorded path does not resolve).
+// Shared by the runtime materializer (make_faithful_svg_frame) and the C++
+// codegen, so both lower a faithful_svg node from the identical resolved bytes.
+// Host-side / codegen-time only — does file I/O; never the audio/render thread.
+std::string resolve_svg_document(const IRAssetRef& asset,
+                                 const std::filesystem::path& asset_base_directory = {});
 
 } // namespace pulp::view

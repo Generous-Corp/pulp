@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-gradient-geometry-at-paint",
+  "kind": "change",
+  "created_at": "2026-08-02T17:20:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "CSS gradient geometry was resolved at parse time against a box that did not yet exist. apply_css_background_gradient read local_bounds() before layout, so the aspect ratio was 1:1 and every angled linear gradient pointed the wrong way, while every radial was modelled as a circle of 0.7071*max(w,h) regardless of its declared shape, explicit size or off-centre position. BackgroundGradient now carries CSS intent and paint resolves it against the box that actually paints, through one shared View::resolve_radial. Adds Canvas::set_fill_gradient_radial_elliptical so a radial can be elliptical, implemented in Skia via a local matrix on the shader rather than a canvas scale, which would have stretched rounded-rect corners. Also corrects a transposed aspect in the to-<corner> angle (atan2(w,h) where the spec gives atan2(h,w), correct on a square box and 48px off Chrome on 160x100), and sets premultiplied interpolation on gradient shaders: Skia defaults to unpremultiplied while CSS is premultiplied, so every fade to a transparent stop dragged its colour toward black as alpha fell. Opaque gradients are bit-identical either way, which is why sixteen existing gradient tests never saw it. Measured against Chrome on the design corpus, area-weighted failing fraction improves 0.1697 to 0.0919 and 0.2408 to 0.0817. Pulp-only: the defect and the fix both originate here, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-css-gradient-geometry",
+    "pulp-test-css-gradient-render",
+    "pulp-test-widget-bridge-wave2-cheap"
+  ],
+  "disposition": "pulp-only"
+}

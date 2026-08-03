@@ -514,7 +514,14 @@ int main(int argc, char* argv[]) {
         // subtree, not just direct children of root_, because
         // runtime-import adapters (Spectr's dom-adapter at tsx:440-441)
         // propagate the hardcoded oversize through multiple wrappers.
-        pulp::view::reconcile_oversize_absolute_subtree(root, options.width, options.height);
+        // `PULP_SHOT_NO_RECONCILE=1` opts out. A faithful-capture import
+        // is a backdrop that matches the clamp's predicate exactly, so
+        // reconciling rescales the artwork out from under the controls
+        // positioned against it. Default stays ON.
+        if (!pulp::view::reconcile_disabled_by_env(
+                std::getenv("PULP_SHOT_NO_RECONCILE"))) {
+            pulp::view::reconcile_oversize_absolute_subtree(root, options.width, options.height);
+        }
     }
 
     // Drain React's useEffect callbacks, requestAnimationFrame queue, and
