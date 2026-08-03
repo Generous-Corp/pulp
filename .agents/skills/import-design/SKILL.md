@@ -5011,6 +5011,34 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **A per-node clip RECTANGLE cannot carry a rounded clipper, and the node that
+  renders wrong is not the node that owns the radius.** Lowering flattens the
+  tree and gives each node its own resolved clip, deliberately dropping
+  `overflow` — correct, because CSS clips along the containing-block chain while
+  a view tree clips by parentage. But CSS confines overflow to the clipper's
+  **rounded padding box**, so a card with `border-radius` + `overflow: hidden`
+  cuts its children to that curve. With a bare rectangle the card's own border
+  curves while the child inside it paints a square corner, and the whole card
+  reads as unrounded.
+
+  This resists the obvious search. The radius is present and correct at every
+  layer you would check — captured by Chrome, carried in the IR, consumed by the
+  materializer, handled by `paint_background_and_border` — because the element
+  that *paints the wrong pixels* (the child) is not the element that *owns the
+  radius* (the card). **When ink is wrong, identify the node that painted those
+  pixels before auditing the node whose property looks missing.** A fast way to
+  settle it: rewrite every radius in the IR to something huge and re-render. A
+  node that does not move is not reading the field you are inspecting.
+
+  `IRStyle::ClipRect` carries four radii; a corner keeps its curve only while
+  that corner is still the rounded clipper's own, since a corner cut away by a
+  second, tighter clipper is square. Note also that a node sitting fully inside
+  the clip *rectangle* can still be cut by the *curve*, so any "this clip is a
+  no-op, skip it" shortcut has to test corner intrusion as well as containment.
+
+  The area metric is blind to this: forge moved 0.0522 → 0.0520 for a change
+  that visibly corrected every card corner. Judge it on a magnified crop.
+
 - **A slow `pulp-import-design` run is usually the scratch sweep, not the
   import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
   removes stale scratch siblings before every run by walking the temp root, so

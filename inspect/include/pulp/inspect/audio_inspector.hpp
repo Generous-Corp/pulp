@@ -80,6 +80,9 @@ public:
     void set_runtime_telemetry(
         const pulp::audio::AudioProcessLoadSnapshot& process_load,
         uint64_t xrun_count);
+    /// Update the independently valid backend xrun counter without claiming a
+    /// process-load producer is attached.
+    void set_xrun_count(uint64_t xrun_count);
     void clear_runtime_telemetry();
     AudioRuntimeTelemetry runtime_telemetry() const;
 

@@ -16,7 +16,11 @@ Examples:
 pulp run                          # launch default standalone
 pulp run PulpGain                 # launch specific plugin standalone
 pulp run --headless --screenshot /tmp/out.png  # capture screenshot instead
+pulp run --inspect                  # GPU-enabled desktop Development Inspector
 pulp run PulpGain -- --debug-port=9222         # pass args to launched binary
 ```
+
+`--inspect[=<profile>]` requires a GPU-enabled desktop build. GPU-off and
+mobile builds keep standalone inspector activation disabled.
 
 If the binary doesn't exist, build first with `/build`.

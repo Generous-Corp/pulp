@@ -146,6 +146,20 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-domains
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-hook-lifecycle
+        test_inspector_hook_lifecycle.cpp)
+    target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-hook-lifecycle
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-context-capture
+        test_inspector_context_capture.cpp)
+    target_link_libraries(pulp-test-inspector-context-capture PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-context-capture
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # Trace.* bridge to the process-global pulp::runtime::Tracing controller.
     # Config-agnostic: verifies the OFF (shipping) build reports tracing is not
     # compiled in, and the ON build round-trips a real .pftrace.
