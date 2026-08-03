@@ -1261,6 +1261,27 @@ SETTINGS_DEFAULTS = {
     # download or generate alike. On by default because the alternative is a
     # dead end.
     "auto_fill_gaps": True,
+    # WHERE A MODULE SHOULD COME FROM. The default was effectively
+    # "prefer_generated" and nobody chose it: a patch naming Surge XT, Valley
+    # and Frozen Wasteland came back with Forge-built lookalikes, because a
+    # module we could not download was a module the model could not use. All
+    # three are free and were one request away.
+    #
+    #   "prefer_existing"   use the library; build only when nothing fits or
+    #                       the module was asked for by name. THE DEFAULT:
+    #                       630-odd published modules beat anything generated
+    #                       in a minute, and they are already voiced, panelled
+    #                       and debugged.
+    #   "balanced"          library where it is strong, generate to taste.
+    #   "prefer_generated"  build our own. A real preference -- some people
+    #                       want a rack that is theirs -- and the behaviour
+    #                       that shipped before this setting existed.
+    "module_source": "prefer_existing",
+    # What may be fetched without asking. "entitled" covers free plugins and
+    # premium ones this account owns; it can never cover a premium plugin it
+    # does not own, because that would be a purchase. "none" disables silent
+    # downloads entirely for anyone who wants the machine left alone.
+    "auto_download": "entitled",
     # Fetch a FREE module from the VCV library when one would close the gap.
     # Needs a Rack account token, which Rack stores in its own settings after
     # you sign in to the library; without one this is inert and says so. We
@@ -1288,15 +1309,27 @@ RACK_PLUGIN_DIR = os.path.expanduser(
     "~/Library/Application Support/Rack2/plugins-mac-arm64")
 
 
-def install_free_module(plugin: str, version: str, premium: bool) -> tuple:
-    """Fetch a FREE library plugin into Rack's plugin directory.
+def install_module(plugin: str, version: str, premium: bool,
+                   entitled: bool = False) -> tuple:
+    """Fetch a library plugin into Rack's plugin directory.
 
-    Returns (ok, message). Never raises, and never spends money: a premium
-    plugin is refused here as well as upstream, so the guarantee does not
-    depend on every caller remembering it.
+    Returns (ok, message). Never raises, and never spends money.
+
+    PREMIUM IS NOT THE SAME AS UNOWNED, and conflating them was the bug this
+    signature exists to kill. The first version refused every premium plugin,
+    which meant a subscriber who owned 70 of them was told to go and get what
+    they had already paid for. What must never happen is BUYING; downloading
+    something already owned costs nothing. So the refusal is keyed on
+    entitlement, not on price.
+
+    Free plugins need no entitlement at all: the library serves them to any
+    signed-in account without an "add to library" step first. Measured, not
+    assumed -- SurgeXTRack, Valley and CountModula all fetch clean while
+    absent from this account's library.
     """
-    if premium:
-        return False, f"{plugin} is a paid plugin — naming it, not buying it"
+    if premium and not entitled:
+        return False, (f"{plugin} is a paid plugin you do not own -- naming "
+                       f"it, not buying it")
     token = rack_library_token()
     if not token:
         return False, ("not signed in to the VCV library. Open Rack, use "
@@ -1305,13 +1338,18 @@ def install_free_module(plugin: str, version: str, premium: bool) -> tuple:
     import urllib.parse
     import urllib.request
     query = urllib.parse.urlencode({"slug": plugin, "version": version,
-                                    "arch": "mac-arm64", "token": token})
+                                    "arch": "mac-arm64"})
     dest = os.path.join(RACK_PLUGIN_DIR,
                         f"{plugin}-{version}-mac-arm64.vcvplugin")
+    # The token goes in a COOKIE, which is how Rack itself sends it. Passing it
+    # as a query parameter returns 403 for every plugin, free or owned, so the
+    # download path could never once have succeeded in that form.
+    req = urllib.request.Request(
+        "https://api.vcvrack.com/download?" + query,
+        headers={"Cookie": "token=" + token, "User-Agent": "Rack/2.6.6"})
     try:
         os.makedirs(RACK_PLUGIN_DIR, exist_ok=True)
-        with urllib.request.urlopen(
-                "https://api.vcvrack.com/download?" + query, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=180) as r:
             if r.status != 200:
                 return False, f"the library returned HTTP {r.status}"
             data = r.read()
@@ -1328,7 +1366,68 @@ def install_free_module(plugin: str, version: str, premium: bool) -> tuple:
         os.replace(tmp, dest)                # atomic: never a half file
         return True, f"installed {plugin} {version} ({len(data) // 1024} KB)"
     except Exception as exc:                                # noqa: BLE001
-        return False, f"could not fetch {plugin}: {exc}"
+        # The library says WHY in the body, and it is the useful half: a 403
+        # reads "Plugin not owned or downloadable", which distinguishes "you
+        # have not bought this" from "there is no build for your machine".
+        # Without it every failure looks identical and unfixable.
+        detail = ""
+        try:
+            detail = json.loads(exc.read()).get("error", "")   # type: ignore
+        except Exception:                                   # noqa: BLE001
+            pass
+        return False, (f"could not fetch {plugin}: {detail or exc}")
+
+
+def rack_entitlements() -> set:
+    """The plugin slugs this account may download, or an empty set.
+
+    The library exposes ownership and nothing else: /user returns an email and
+    a newsletter flag, so the SUBSCRIPTION TIER is not readable and no code
+    here should claim to know it. What is readable is better anyway -- the
+    actual list of what you own, which is what the decision needs.
+
+    Empty means "not signed in, or the library is unreachable". Callers treat
+    that as "free plugins only", never as "you own nothing".
+    """
+    token = rack_library_token()
+    if not token:
+        return set()
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            "https://api.vcvrack.com/modules",
+            headers={"Cookie": "token=" + token, "User-Agent": "Rack/2.6.6"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return {str(s) for s in (json.load(r).get("modules") or {})}
+    except Exception:                                       # noqa: BLE001
+        return set()
+
+
+_ENTITLEMENTS_CACHE = {}
+
+
+def entitlements_cached() -> set:
+    """rack_entitlements() once per run, not once per ranking decision.
+
+    Ranking asks for this per tag, and a patch names dozens, so the unmemoised
+    version turns one HTTP round trip into dozens of them mid-generation.
+    Ownership does not change while a patch is being built.
+    """
+    if "v" not in _ENTITLEMENTS_CACHE:
+        _ENTITLEMENTS_CACHE["v"] = rack_entitlements()
+    return _ENTITLEMENTS_CACHE["v"]
+
+
+def installable_here(entry: dict) -> bool:
+    """Whether a catalog entry has a build this machine can actually load.
+
+    117 of the 547 published plugins have no mac-arm64 build -- Rack v1
+    survivors that are listed, described and tagged exactly like live ones.
+    Naming one in a patch produces a module that can never be installed, so
+    the catalog is filtered before the model ever sees it rather than failing
+    at download time with a plugin the user was told to expect.
+    """
+    return "mac-arm64" in (entry.get("arches") or [])
 
 
 RACK_APPS = ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2")
@@ -1453,22 +1552,52 @@ def _options_for(tags, inv: dict, midx: dict, cat: dict) -> dict:
     first tag is the wanted one is answering the question; a module carrying it
     fourth is incidental.
     """
+    owned = entitlements_cached()
     options: dict = {}
     for tag in sorted(tags):
         cands = []
         for pslug, mods in midx.items():
             p = cat.get(pslug, {})
+            premium = bool(p.get("premium"))
+            # An uninstalled plugin with no build for this machine is not a
+            # candidate at any price, and neither is one we would have to buy.
+            if pslug not in inv and not installable_here(p):
+                continue
+            cost = acquisition_cost(pslug, premium, inv, owned)
+            if cost >= 3:
+                continue
             for mslug, m in mods.items():
                 mtags = m.get("tags") or []
                 if tag not in mtags:
                     continue
                 cands.append({"plugin": pslug, "module": mslug,
                               "name": m["name"], "brand": p.get("brand", ""),
-                              "premium": bool(p.get("premium")),
+                              "premium": premium, "cost": cost,
                               "rank": mtags.index(tag)})
-        cands.sort(key=lambda c: (c["premium"], c["rank"], c["plugin"]))
+        cands.sort(key=lambda c: (c["cost"], c["rank"], c["plugin"]))
         options[tag] = cands[:4]
     return options
+
+
+def acquisition_cost(pslug: str, premium: bool, inv: dict, owned: set) -> int:
+    """How much standing between the user and this module. Lower is better.
+
+    Sorting on `premium` put free before paid, which sounds thrifty and is
+    wrong: it demoted the 70 premium plugins this account has BOUGHT below
+    every free alternative, so the modules someone paid for were the ones
+    least likely to be chosen. Price is not the cost here. Friction is, and a
+    plugin already on the disk has none whether or not it was expensive.
+
+    3 is unreachable rather than merely expensive -- it means buying, which
+    never happens (see never_buy), so those candidates are dropped instead.
+    """
+    if pslug in inv:
+        return 0                    # installed: nothing to do
+    if premium and pslug in owned:
+        return 1                    # paid for, not yet fetched
+    if not premium:
+        return 2                    # free: one download
+    return 3                        # premium, unowned: not ours to take
 
 
 def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
@@ -2123,9 +2252,16 @@ def main(argv):
             # setting allows it.
             st = settings()
             fetched = []
-            if st["auto_download_free"]:
+            if st["auto_download"] != "none" and st["auto_download_free"]:
+                owned = entitlements_cached()
                 for tag, opts in list(pf["missing"].items()):
-                    best = next((o for o in opts if not o["premium"]), None)
+                    # opts is already ordered by what it would COST to get
+                    # this, and anything unbuyable has been dropped, so the
+                    # first entry is the right one. Skipping every premium
+                    # option here -- as this did -- threw away the modules the
+                    # user had already paid for in favour of a free
+                    # second-best.
+                    best = opts[0] if opts else None
                     if not best:
                         continue
                     version = (cat.get(best["plugin"], {}) or {}).get("version")
@@ -2133,8 +2269,9 @@ def main(argv):
                         continue
                     print(f"  no {tag.lower()} module installed — fetching "
                           f"{best['plugin']}/{best['module']}…", flush=True)
-                    ok_dl, msg = install_free_module(best["plugin"], version,
-                                                     best["premium"])
+                    ok_dl, msg = install_module(best["plugin"], version,
+                                                best["premium"],
+                                                best["plugin"] in owned)
                     print(f"    {msg}")
                     if ok_dl:
                         fetched.append(best["plugin"])

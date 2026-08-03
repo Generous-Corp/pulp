@@ -726,13 +726,70 @@ def check_buildable_from_parts() -> tuple:
     return bad, ran
 
 
+
+def check_acquisition() -> tuple:
+    """Price is not friction, and owning is not buying.
+
+    Needs no installed Rack, so it is registered BEFORE the skip in main():
+    a check placed after it silently reports success on a machine without
+    Fundamental, which is most machines that are not this one.
+    """
+    bad = 0
+    inv = {"Bogaudio": {}}
+    owned = {"MindMeld-ShapeMasterPro"}
+    installed  = P.acquisition_cost("Bogaudio", False, inv, owned)
+    owned_prem = P.acquisition_cost("MindMeld-ShapeMasterPro", True, inv, owned)
+    free_dl    = P.acquisition_cost("SurgeXTRack", False, inv, owned)
+    unowned    = P.acquisition_cost("LindenbergResearch", True, inv, owned)
+    # The bug this replaces sorted on `premium`, putting every free plugin
+    # ahead of the 70 premium ones this account had bought.
+    if not installed < owned_prem < free_dl < unowned:
+        bad += 1
+        print(f"  WRONG  acquisition order: installed={installed} "
+              f"owned_premium={owned_prem} free={free_dl} unowned={unowned}")
+    else:
+        print("  ok     a module you own outranks one you must fetch")
+    if unowned != 3:
+        bad += 1
+        print("  WRONG  unowned premium must be unreachable, not merely last")
+
+    ok, msg = P.install_module("LindenbergResearch", "2.0", True, False)
+    if ok or "not buying" not in msg:
+        bad += 1
+        print(f"  WRONG  unowned premium was not refused: {msg}")
+    else:
+        print("  ok     unowned premium is refused before any request")
+    # ...and the same plugin, owned, must not be refused for being premium.
+    _, msg2 = P.install_module("LindenbergResearch", "2.0", True, True)
+    if "not buying" in msg2:
+        bad += 1
+        print("  WRONG  owning a premium plugin was treated as buying it")
+    else:
+        print("  ok     owning it is not buying it")
+
+    # 117 of 547 published plugins are Rack v1 survivors with no mac-arm64
+    # build: listed, described and tagged exactly like live ones.
+    cases = [({"arches": ["mac-arm64", "win-x64"]}, True),
+             ({"arches": ["win-x64"]}, False),
+             ({"arches": None}, False),
+             ({}, False)]
+    for entry, want in cases:
+        if P.installable_here(entry) != want:
+            bad += 1
+            print(f"  WRONG  installable_here({entry}) != {want}")
+    if not bad:
+        print("  ok     a plugin with no arm64 build is never offered")
+    return bad, 4
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
     # without Fundamental and reports success anyway.
     layout_bad, layout_ran = check_layout()
     parts_bad, parts_ran = check_buildable_from_parts()
-    layout_bad += parts_bad; layout_ran += parts_ran
+    acq_bad, acq_ran = check_acquisition()
+    layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
@@ -771,4 +828,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
