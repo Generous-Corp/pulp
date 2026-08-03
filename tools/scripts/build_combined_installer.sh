@@ -20,7 +20,18 @@
 #     --installer-identity <Developer ID Installer hash> \
 #     --out DIR \
 #     [--plugin au|vst3|clap PATH]...     (repeatable)
+#     [--product-title BUNDLE "Display Title"]...  (repeatable; renames the
+#                                                   expandable group for that
+#                                                   plugin, e.g. PulpDesignSynth
+#                                                   -> "Kelvin (instrument)")
 #     [--app "Title" PATH [ENTITLEMENTS]]...  (repeatable; installs to /Applications)
+#     [--app-for BUNDLE "Title" PATH [ENTITLEMENTS]]...  (repeatable; same, but
+#                                                   nests the app INSIDE that
+#                                                   plugin's group and makes it
+#                                                   REQUIRED — use for a
+#                                                   standalone that carries the
+#                                                   uninstaller, which a user
+#                                                   must not be able to skip)
 #     [--content "Title" "Desc" DEST SRCDIR]...  (repeatable; installs SRCDIR's
 #                                                 contents to DEST, e.g. sample
 #                                                 models/IRs into Application Support)
@@ -38,6 +49,8 @@ NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
 declare -a P_KIND P_PATH      # plugins: kind + bundle path
 declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
 declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
+declare -a A_GROUP                      # apps: plugin name to nest under ("" = top level)
+declare -a PT_NAME PT_TITLE             # product display titles: bundle name -> title
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,9 +61,13 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="$2"; shift 2;;
     --no-notarize) NOTARIZE=0; shift;;
     --plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;
+    --product-title) PT_NAME+=("$2"); PT_TITLE+=("$3"); shift 3;;
     --app)
-      A_TITLE+=("$2"); A_PATH+=("$3")
+      A_TITLE+=("$2"); A_PATH+=("$3"); A_GROUP+=("")
       if [[ "${4:-}" == --* || -z "${4:-}" ]]; then A_ENT+=(""); shift 3; else A_ENT+=("$4"); shift 4; fi;;
+    --app-for)
+      A_GROUP+=("$2"); A_TITLE+=("$3"); A_PATH+=("$4")
+      if [[ "${5:-}" == --* || -z "${5:-}" ]]; then A_ENT+=(""); shift 4; else A_ENT+=("$5"); shift 5; fi;;
     --content) C_TITLE+=("$2"); C_DESC+=("$3"); C_DEST+=("$4"); C_SRC+=("$5"); shift 5;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -103,6 +120,11 @@ xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " 
 }
 
 CHOICES=""; DEFS=""; REFS=""; APP_LINES=""
+# Nested-app bookkeeping. Initialized because `set -u` is on and an installer
+# built with no --app-for would otherwise abort on the first unset expansion.
+APP_GROUP_LINES=""    # one "pluginName<TAB>choiceId" line per nested app
+APP_TOP_LINES=""      # <line> elements for ungrouped apps
+REQUIRED_APP_IDS=""   # choice ids to mark non-deselectable
 # A choice with a real payload. $1=unique choice-id  $2=title  $3=desc  $4=pkgfile
 add_ref() {
   local title desc; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
@@ -141,21 +163,6 @@ for ((i=0; i<${#P_KIND[@]}; i++)); do
 "
 done
 
-# Outline: one expandable group per plugin when there is more than one; a flat
-# list of formats when there is only one (nothing to disambiguate).
-NPLUG="${#PLUGIN_NAMES[@]}"
-if [[ "$NPLUG" -le 1 ]]; then
-  CHOICES="$CHOICES$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' 'NF{printf "<line choice=\"%s\"/>",$3}')"
-else
-  for ((j=0; j<NPLUG; j++)); do
-    pn="${PLUGIN_NAMES[$j]}"
-    gid="plugin-$j"
-    DEFS="$DEFS<choice id=\"$gid\" title=\"$(xml_escape "$pn")\" description=\"\" selected=\"true\"></choice>"
-    inner="$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' -v p="$j" 'NF && $1==p{printf "<line choice=\"%s\"/>",$3}')"
-    CHOICES="$CHOICES<line choice=\"$gid\">$inner</line>"
-  done
-fi
-
 echo "== apps → /Applications =="
 for ((i=0; i<${#A_TITLE[@]}; i++)); do
   t="${A_TITLE[$i]}"; p="${A_PATH[$i]}"; ent="${A_ENT[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
@@ -184,8 +191,53 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
     --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
-  CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
+  if [[ -n "${A_GROUP[$i]}" ]]; then
+    # Nested under its product's group, and REQUIRED. The standalone carries
+    # the uninstaller, so a user who deselects it installs plugins they cannot
+    # later remove. `enabled="false" selected="true"` shows the row and refuses
+    # the checkbox, which is honest about it rather than hiding the row.
+    APP_GROUP_LINES="${APP_GROUP_LINES}${A_GROUP[$i]}	${id}
+"
+    REQUIRED_APP_IDS="$REQUIRED_APP_IDS $id"
+  else
+    APP_TOP_LINES="$APP_TOP_LINES<line choice=\"$id\"/>"  # ungrouped: top level
+  fi
 done
+
+# Mark every nested app choice non-deselectable. Done after add_ref so it
+# rewrites the choice the loop already emitted rather than racing it.
+for rid in $REQUIRED_APP_IDS; do
+  DEFS="${DEFS//<choice id=\"$rid\" title=/<choice id=\"$rid\" enabled=\"false\" selected=\"true\" title=}"
+done
+
+# Outline: one expandable group per product when there is more than one; a flat
+# list of formats when there is only one (nothing to disambiguate).
+#
+# Built AFTER the app loop so a product's standalone can be nested inside its
+# own group. A user thinks in products — "Kelvin, and which formats of it" —
+# not in a flat list where the same plugin appears once as a format group and
+# again as an app under a different name.
+NPLUG="${#PLUGIN_NAMES[@]}"
+if [[ "$NPLUG" -le 1 ]]; then
+  CHOICES="$CHOICES$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' 'NF{printf "<line choice=\"%s\"/>",$3}')"
+  CHOICES="$CHOICES$(printf '%s' "$APP_GROUP_LINES" | awk -F'\t' 'NF{printf "<line choice=\"%s\"/>",$2}')"
+else
+  for ((j=0; j<NPLUG; j++)); do
+    pn="${PLUGIN_NAMES[$j]}"
+    # A display title overrides the bundle name, so the group can read
+    # "Kelvin (instrument)" rather than "PulpDesignSynth".
+    ptitle="$pn"
+    for ((k=0; k<${#PT_NAME[@]}; k++)); do
+      [[ "${PT_NAME[$k]}" == "$pn" ]] && ptitle="${PT_TITLE[$k]}"
+    done
+    gid="plugin-$j"
+    DEFS="$DEFS<choice id=\"$gid\" title=\"$(xml_escape "$ptitle")\" description=\"\" selected=\"true\"></choice>"
+    inner="$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' -v p="$j" 'NF && $1==p{printf "<line choice=\"%s\"/>",$3}')"
+    inner="$inner$(printf '%s' "$APP_GROUP_LINES" | awk -F'\t' -v n="$pn" 'NF && $1==n{printf "<line choice=\"%s\"/>",$2}')"
+    CHOICES="$CHOICES<line choice=\"$gid\">$inner</line>"
+  done
+fi
+CHOICES="$CHOICES$APP_TOP_LINES"
 
 echo "== content =="
 for ((i=0; i<${#C_TITLE[@]}; i++)); do
