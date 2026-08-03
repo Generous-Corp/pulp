@@ -87,6 +87,7 @@ target_sources(pulp-audio PRIVATE
     src/waveform_overview_serialization.cpp
     src/wav_metadata.cpp
     src/audio_device_manager.cpp
+    src/audio_io_timing.cpp
     src/audio_probe.cpp
     src/audio_boundary_report.cpp
 )
@@ -149,6 +150,7 @@ target_include_directories(pulp-audio PRIVATE
 if(APPLE AND NOT IOS)
     target_sources(pulp-audio PRIVATE
         platform/mac/coreaudio_device.mm
+        platform/mac/coreaudio_io_timing.mm
     )
     target_link_libraries(pulp-audio PRIVATE
         "-framework CoreAudio"
