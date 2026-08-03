@@ -31,11 +31,15 @@
 // author gave it. Walking that once and writing it down turns every module the
 // user actually owns into something we can wire exactly.
 //
-// So this module is a scanner, not an instrument: add it, press SCAN, and
-// every module currently in the rack is recorded to
-// `<Rack user dir>/forge-portmap.json`. It records only what is on screen,
-// which is the honest scope -- a module nobody has ever placed cannot be
-// mapped, and the fallback for those stays what it was.
+// So this module is a scanner, not an instrument: add it, and every module
+// currently in the rack is recorded to `<Rack user dir>/forge-portmap.json`,
+// followed once per session by every model that is installed but not placed.
+//
+// Both halves are needed. Placed modules are the authoritative measurement
+// and win where they overlap. But scanning ONLY what is on screen leaves a
+// gap that cannot be seen: an unmapped module still draws, just as a
+// faceplate with labels floating over nothing, so the map reads as complete
+// while a preview quietly invents every panel it was never told about.
 
 namespace {
 
@@ -71,6 +75,7 @@ struct CARTOGModule : rack::engine::Module {
 struct CARTOGWidget : rack::app::ModuleWidget {
     CARTOGModule* mod = nullptr;
     bool held = false;
+    bool swept_ = false;
 
     explicit CARTOGWidget(CARTOGModule* m) : mod(m) {
         setModule(m);
@@ -201,11 +206,230 @@ struct CARTOGWidget : rack::app::ModuleWidget {
     /// Runs on the UI thread from step(), which is the only place the scene
     /// may be touched -- doing this from process() would be both a data race
     /// and a real-time violation.
+    /// Path of the note naming the model currently being built.
+    std::string pending_path() const {
+        return rack::asset::user("forge-cartog-pending.txt");
+    }
+
+    /// Models that were mid-build when Rack last died, so they killed it.
+    ///
+    /// Reading this also clears it: a model gets one chance to be blamed, and
+    /// the quarantine is the accumulated verdict.
+    std::set<std::string> quarantined() const {
+        std::set<std::string> out;
+        const std::string qp = rack::asset::user("forge-cartog-skip.txt");
+        auto slurp = [](const std::string& p) {
+            std::string s;
+            if (FILE* f = std::fopen(p.c_str(), "rb")) {
+                char buf[4096];
+                std::size_t n;
+                while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+                    s.append(buf, n);
+                std::fclose(f);
+            }
+            return s;
+        };
+        auto lines = [&out](const std::string& s) {
+            std::string cur;
+            for (char c : s) {
+                if (c == '\n') {
+                    if (!cur.empty()) out.insert(cur);
+                    cur.clear();
+                } else {
+                    cur += c;
+                }
+            }
+            if (!cur.empty()) out.insert(cur);
+        };
+        lines(slurp(qp));
+        // Anything still named as pending never finished: it is the culprit.
+        const std::string culprit = slurp(pending_path());
+        if (!culprit.empty()) {
+            lines(culprit);
+            if (FILE* f = std::fopen(qp.c_str(), "w")) {
+                for (const std::string& k : out)
+                    std::fwrite((k + "\n").data(), 1, k.size() + 1, f);
+                std::fclose(f);
+            }
+            std::remove(pending_path().c_str());
+        }
+        return out;
+    }
+
+    void mark_pending(const std::string& key) const {
+        if (FILE* f = std::fopen(pending_path().c_str(), "w")) {
+            std::fwrite(key.data(), 1, key.size(), f);
+            std::fflush(f);                 // it must survive a hard crash
+            std::fclose(f);
+        }
+    }
+
+    void clear_pending() const { std::remove(pending_path().c_str()); }
+
+    /// One module's entry, written from a widget that has been laid out.
+    ///
+    /// Split out from the rack walk so one measurement serves both a
+    /// module the user placed and one built only to be measured.
+    void emit_module(rack::app::ModuleWidget* mw,
+                     rack::plugin::Model* model, std::string& out) {
+        out += "    {\n";
+        out += "      \"plugin\": \"" + esc(model->plugin->slug) + "\",\n";
+        out += "      \"model\": \"" + esc(model->slug) + "\",\n";
+        out += "      \"pluginVersion\": \"" + esc(model->plugin->version) + "\",\n";
+        // Which scanner measured this, so a later one can tell that an
+        // entry it merged forward records less than it would have. A map
+        // is merged, never rewritten, so entries outlive the scanner that
+        // made them: without this, a module measured before controls were
+        // recorded at all reports a matching plugin version and reads as
+        // faithful. Keep in step with PortMap::kScanVersion.
+        out += "      \"scan\": 3,\n";
+        // Panel size lets a preview lay modules out at true width without
+        // parsing anyone's artwork.
+        out += "      \"size\": [" +
+               num(finite(mw->box.size.x) ? mw->box.size.x : 0.0f) + ", " +
+               num(finite(mw->box.size.y) ? mw->box.size.y : 0.0f) + "],\n";
+
+        // Knobs, faders and switches, the same walk as the jacks.
+        //
+        // Recorded because a control's position exists ONLY here, exactly
+        // like a jack's: a plugin.json says nothing about it and the panel
+        // artwork usually does not draw it. Without this, a preview can
+        // place a vendor module's cables correctly and still show a bare
+        // faceplate with labels floating over nothing.
+        //
+        // The widget's own box size comes too. It is the size Rack DRAWS,
+        // which beats inferring a diameter from a control's declared kind
+        // -- vendors use sizes we have no table for, and a knob drawn at
+        // the wrong size is a picture that looks right and is wrong.
+        out += "      \"params\": [";
+        {
+            bool first = true;
+            for (rack::app::ParamWidget* pw : mw->getParams()) {
+                if (!pw) continue;
+                if (!first) out += ",";
+                first = false;
+                std::string name;
+                if (rack::engine::ParamQuantity* q = pw->getParamQuantity())
+                    name = q->getLabel();
+                // WHICH control, not just where. A fader, a switch and a
+                // knob occupy the same field in a manifest and look
+                // nothing alike, and guessing from the drawn aspect ratio
+                // gets switches wrong. Rack's own class hierarchy already
+                // answers this, so ask it.
+                const char* kind = "knob";
+                if (dynamic_cast<rack::app::SliderKnob*>(pw))      kind = "slider";
+                else if (dynamic_cast<rack::app::Knob*>(pw))       kind = "knob";
+                else if (dynamic_cast<rack::app::SvgButton*>(pw))  kind = "button";
+                else if (dynamic_cast<rack::app::Switch*>(pw))     kind = "switch";
+                else                                              kind = "other";
+                // Centre, not corner: a knob turns about its middle and
+                // box.pos is the widget's top-left.
+                const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
+                const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
+                if (!finite(cx) || !finite(cy) ||
+                    !finite(pw->box.size.x) || !finite(pw->box.size.y))
+                    continue;
+                out += "\n        {\"index\": " + std::to_string(pw->paramId) +
+                       ", \"name\": \"" + esc(name) + "\"" +
+                       ", \"x\": " + std::to_string(cx) +
+                       ", \"y\": " + std::to_string(cy) +
+                       ", \"w\": " + std::to_string(pw->box.size.x) +
+                       ", \"h\": " + std::to_string(pw->box.size.y) +
+                       ", \"kind\": \"" + kind + "\"}";
+            }
+            out += first ? "]" : "\n      ]";
+            out += ",\n";
+        }
+
+        for (int pass = 0; pass < 2; ++pass) {
+            const bool inputs = (pass == 0);
+            out += inputs ? "      \"inputs\": [" : "      \"outputs\": [";
+            std::vector<rack::app::PortWidget*> ports =
+                inputs ? mw->getInputs() : mw->getOutputs();
+            bool first = true;
+            for (rack::app::PortWidget* pw : ports) {
+                if (!pw) continue;
+                if (!first) out += ",";
+                first = false;
+                std::string name;
+                if (rack::engine::PortInfo* info = pw->getPortInfo())
+                    name = info->getName();
+                // Centre, not corner: a cable plugs into the middle of a
+                // jack, and box.pos is the widget's top-left.
+                const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
+                const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
+                if (!finite(cx) || !finite(cy)) continue;
+                out += "\n        {\"index\": " + std::to_string(pw->portId) +
+                       ", \"name\": \"" + esc(name) + "\"" +
+                       ", \"x\": " + std::to_string(cx) +
+                       ", \"y\": " + std::to_string(cy) + "}";
+            }
+            out += first ? "]" : "\n      ]";
+            out += inputs ? ",\n" : "\n";
+        }
+        // Lights and everything else on the face.
+        //
+        // ModuleWidget enumerates params and ports and nothing else, so an
+        // LED or a screen is reachable only by walking the widget tree.
+        // Both matter: a sequencer is mostly lights, and a scope is mostly
+        // screen, and a drawing that omits them shows a panel of knobs
+        // where the user sees a display.
+        //
+        // Anything not otherwise classified is recorded as a "display"
+        // with its bounds and its C++ type. We cannot know what a vendor's
+        // custom widget draws, but we can know that SOMETHING occupies
+        // that rectangle -- which is the difference between a faithful
+        // placeholder and a blank.
+        {
+            std::vector<std::string> lights, displays;
+            collect(mw, rack::math::Vec(0, 0), lights, displays);
+            out += ",\n      \"lights\": [";
+            for (std::size_t i = 0; i < lights.size(); ++i)
+                out += (i ? "," : "") + std::string("\n        ") + lights[i];
+            out += lights.empty() ? "]" : "\n      ]";
+            out += ",\n      \"displays\": [";
+            for (std::size_t i = 0; i < displays.size(); ++i)
+                out += (i ? "," : "") + std::string("\n        ") + displays[i];
+            out += displays.empty() ? "]" : "\n      ]";
+            out += "\n";
+        }
+        out += "    }";
+    }
+
+    /// Measure a model nobody has placed, by building one.
+    ///
+    /// The widget is asked for a real Module rather than the browser's
+    /// null one: with no module a ParamWidget has no ParamQuantity and a
+    /// PortWidget no PortInfo, so a null-module sweep records every
+    /// position and not one NAME -- and names are the whole vocabulary.
+    ///
+    /// The module is then detached before the widget goes. ModuleWidget's
+    /// destructor hands its module back to the ENGINE, and this one was
+    /// never given to the engine -- letting it run asserts inside
+    /// removeModule_NoLock and takes Rack down. Detaching means we own the
+    /// module outright and free it ourselves, and the engine is never
+    /// involved: nothing is added to the running graph, so no measured
+    /// module ever processes a sample.
+    bool emit_unplaced(rack::plugin::Model* model, std::string& out) {
+        rack::engine::Module* m = model->createModule();
+        rack::app::ModuleWidget* mw = model->createModuleWidget(m);
+        if (!mw) {
+            delete m;
+            return false;
+        }
+        emit_module(mw, model, out);
+        mw->module = nullptr;            // the engine never had it
+        delete mw;
+        delete m;
+        return true;
+    }
+
     void scan() {
         if (!APP || !APP->scene || !APP->scene->rack) return;
 
         std::string out = "{\n  \"modules\": [\n";
         bool first_mod = true;
+        std::set<std::string> seen;
 
         for (rack::app::ModuleWidget* mw : APP->scene->rack->getModules()) {
             if (!mw || !mw->module || !mw->module->model) continue;
@@ -214,129 +438,62 @@ struct CARTOGWidget : rack::app::ModuleWidget {
 
             if (!first_mod) out += ",\n";
             first_mod = false;
+            seen.insert(model->plugin->slug + "/" + model->slug);
+            emit_module(mw, model, out);
+        }
 
-            out += "    {\n";
-            out += "      \"plugin\": \"" + esc(model->plugin->slug) + "\",\n";
-            out += "      \"model\": \"" + esc(model->slug) + "\",\n";
-            out += "      \"pluginVersion\": \"" + esc(model->plugin->version) + "\",\n";
-            // Which scanner measured this, so a later one can tell that an
-            // entry it merged forward records less than it would have. A map
-            // is merged, never rewritten, so entries outlive the scanner that
-            // made them: without this, a module measured before controls were
-            // recorded at all reports a matching plugin version and reads as
-            // faithful. Keep in step with PortMap::kScanVersion.
-            out += "      \"scan\": 3,\n";
-            // Panel size lets a preview lay modules out at true width without
-            // parsing anyone's artwork.
-            out += "      \"size\": [" +
-                   num(finite(mw->box.size.x) ? mw->box.size.x : 0.0f) + ", " +
-                   num(finite(mw->box.size.y) ? mw->box.size.y : 0.0f) + "],\n";
-
-            // Knobs, faders and switches, the same walk as the jacks.
-            //
-            // Recorded because a control's position exists ONLY here, exactly
-            // like a jack's: a plugin.json says nothing about it and the panel
-            // artwork usually does not draw it. Without this, a preview can
-            // place a vendor module's cables correctly and still show a bare
-            // faceplate with labels floating over nothing.
-            //
-            // The widget's own box size comes too. It is the size Rack DRAWS,
-            // which beats inferring a diameter from a control's declared kind
-            // -- vendors use sizes we have no table for, and a knob drawn at
-            // the wrong size is a picture that looks right and is wrong.
-            out += "      \"params\": [";
-            {
-                bool first = true;
-                for (rack::app::ParamWidget* pw : mw->getParams()) {
-                    if (!pw) continue;
-                    if (!first) out += ",";
-                    first = false;
-                    std::string name;
-                    if (rack::engine::ParamQuantity* q = pw->getParamQuantity())
-                        name = q->getLabel();
-                    // WHICH control, not just where. A fader, a switch and a
-                    // knob occupy the same field in a manifest and look
-                    // nothing alike, and guessing from the drawn aspect ratio
-                    // gets switches wrong. Rack's own class hierarchy already
-                    // answers this, so ask it.
-                    const char* kind = "knob";
-                    if (dynamic_cast<rack::app::SliderKnob*>(pw))      kind = "slider";
-                    else if (dynamic_cast<rack::app::Knob*>(pw))       kind = "knob";
-                    else if (dynamic_cast<rack::app::SvgButton*>(pw))  kind = "button";
-                    else if (dynamic_cast<rack::app::Switch*>(pw))     kind = "switch";
-                    else                                              kind = "other";
-                    // Centre, not corner: a knob turns about its middle and
-                    // box.pos is the widget's top-left.
-                    const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
-                    const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
-                    if (!finite(cx) || !finite(cy) ||
-                        !finite(pw->box.size.x) || !finite(pw->box.size.y))
+        // Then every model that is installed but not on screen.
+        //
+        // Scanning only what was placed sounds like the honest scope and is
+        // actually a trap, because the gap it leaves is invisible: an
+        // unmapped module still draws, just as a faceplate with labels over
+        // nothing. Forge's own 30 modules sat unmapped for the whole life of
+        // this file -- CARTOG had recorded itself and nothing else of ours --
+        // while Fundamental read 39/39 purely because somebody had once
+        // opened a patch holding all of them. Nobody could see the
+        // difference, so nobody looked.
+        //
+        // A model does not need to be placed to be measured; it needs to
+        // exist. Build one, measure it, throw it away.
+        if (!swept_) {
+            swept_ = true;                  // one sweep per session, not per rescan
+            const std::set<std::string> bad = quarantined();
+            for (rack::plugin::Plugin* plug : rack::plugin::plugins) {
+                if (!plug) continue;
+                for (rack::plugin::Model* model : plug->models) {
+                    if (!model || !model->plugin) continue;
+                    const std::string key =
+                        model->plugin->slug + "/" + model->slug;
+                    if (seen.count(key)) continue;
+                    if (bad.count(key)) {
+                        WARN("forge: skipping %s, it crashed a previous scan",
+                             key.c_str());
                         continue;
-                    out += "\n        {\"index\": " + std::to_string(pw->paramId) +
-                           ", \"name\": \"" + esc(name) + "\"" +
-                           ", \"x\": " + std::to_string(cx) +
-                           ", \"y\": " + std::to_string(cy) +
-                           ", \"w\": " + std::to_string(pw->box.size.x) +
-                           ", \"h\": " + std::to_string(pw->box.size.y) +
-                           ", \"kind\": \"" + kind + "\"}";
+                    }
+                    seen.insert(key);
+                    // Name it on disk BEFORE building it. Constructing a
+                    // stranger's module runs their code, and a crash there
+                    // takes Rack with it -- no catch runs, so the only way to
+                    // learn which one did it is to have written it down
+                    // first. Next launch reads this and steps around it.
+                    mark_pending(key);
+                    std::string one;
+                    bool made = false;
+                    try {
+                        made = emit_unplaced(model, one);
+                    } catch (const std::exception& e) {
+                        WARN("forge: %s threw during scan: %s",
+                             key.c_str(), e.what());
+                    } catch (...) {
+                        WARN("forge: %s threw during scan", key.c_str());
+                    }
+                    clear_pending();
+                    if (!made || one.empty()) continue;
+                    if (!first_mod) out += ",\n";
+                    first_mod = false;
+                    out += one;
                 }
-                out += first ? "]" : "\n      ]";
-                out += ",\n";
             }
-
-            for (int pass = 0; pass < 2; ++pass) {
-                const bool inputs = (pass == 0);
-                out += inputs ? "      \"inputs\": [" : "      \"outputs\": [";
-                std::vector<rack::app::PortWidget*> ports =
-                    inputs ? mw->getInputs() : mw->getOutputs();
-                bool first = true;
-                for (rack::app::PortWidget* pw : ports) {
-                    if (!pw) continue;
-                    if (!first) out += ",";
-                    first = false;
-                    std::string name;
-                    if (rack::engine::PortInfo* info = pw->getPortInfo())
-                        name = info->getName();
-                    // Centre, not corner: a cable plugs into the middle of a
-                    // jack, and box.pos is the widget's top-left.
-                    const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
-                    const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
-                    if (!finite(cx) || !finite(cy)) continue;
-                    out += "\n        {\"index\": " + std::to_string(pw->portId) +
-                           ", \"name\": \"" + esc(name) + "\"" +
-                           ", \"x\": " + std::to_string(cx) +
-                           ", \"y\": " + std::to_string(cy) + "}";
-                }
-                out += first ? "]" : "\n      ]";
-                out += inputs ? ",\n" : "\n";
-            }
-            // Lights and everything else on the face.
-            //
-            // ModuleWidget enumerates params and ports and nothing else, so an
-            // LED or a screen is reachable only by walking the widget tree.
-            // Both matter: a sequencer is mostly lights, and a scope is mostly
-            // screen, and a drawing that omits them shows a panel of knobs
-            // where the user sees a display.
-            //
-            // Anything not otherwise classified is recorded as a "display"
-            // with its bounds and its C++ type. We cannot know what a vendor's
-            // custom widget draws, but we can know that SOMETHING occupies
-            // that rectangle -- which is the difference between a faithful
-            // placeholder and a blank.
-            {
-                std::vector<std::string> lights, displays;
-                collect(mw, rack::math::Vec(0, 0), lights, displays);
-                out += ",\n      \"lights\": [";
-                for (std::size_t i = 0; i < lights.size(); ++i)
-                    out += (i ? "," : "") + std::string("\n        ") + lights[i];
-                out += lights.empty() ? "]" : "\n      ]";
-                out += ",\n      \"displays\": [";
-                for (std::size_t i = 0; i < displays.size(); ++i)
-                    out += (i ? "," : "") + std::string("\n        ") + displays[i];
-                out += displays.empty() ? "]" : "\n      ]";
-                out += "\n";
-            }
-            out += "    }";
         }
         out += "\n  ]\n}\n";
 

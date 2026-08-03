@@ -67,15 +67,22 @@ quant : Fundamental/Quantizer
 vco   : ForgeModular/VCO
 out   : Core/AudioInterface2
 
-lfo.SQR >> seq.CLK
-seq.CV  >> quant.'1V/octave pitch' >> vco."V/OCT"
-vco.SAW >> out.'To "device output 1"', out.'To "device output 2"'
+lfo.Square >> seq.Clock
+seq.'Pitch CV (1V/oct)' >> quant.'1V/octave pitch' >> vco.'1V/oct pitch'
+vco.Sawtooth >> out.'To "device output 1"', out.'To "device output 2"'
 
 vco.'Pulse width' = 0.5
 ```
 
-Read aloud: "LFO square into seq clock. Seq CV into quantizer pitch into VCO
-volt-per-octave."
+Read aloud: "LFO square into seq clock. Seq pitch into quantizer pitch into
+VCO volt-per-octave."
+
+Those are the ports' real names, which is not a stylistic point. An earlier
+draft of this block said `lfo.SQR`, `seq.CV` and `vco."V/OCT"` — abbreviations
+that read like module panels and exist nowhere. It passed for as long as it
+did because the port map had no entry for these modules at all, so the checker
+had nothing to contradict; the moment the vocabulary became complete the
+example stopped parsing. Rule 2 below is what caught it.
 
 | Form | Means |
 |---|---|
@@ -90,8 +97,10 @@ volt-per-octave."
 
 Two ordering rules the renderer follows: **bill of materials, then wiring, then
 tuning** (values between the declarations and the cables buried the topology),
-and the shortest spelling that parses back — `#2` only when a name repeats, a
-chain port only when ambiguous.
+and the shortest spelling that parses back — an index suffix only where a name
+repeats on that module, a chain port only when ambiguous. Where a name does
+repeat, every port of that name is numbered (`TRIG#1` and `TRIG#2`, not bare
+`TRIG` and `TRIG#2`), so a pair reads as one control with two channels.
 
 ### Sigils
 

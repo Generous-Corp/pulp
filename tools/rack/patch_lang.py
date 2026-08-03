@@ -28,9 +28,9 @@ None of those are expressible here, so none of them can be wrong.
     vco   : ForgeModular/VCO
     out   : Core/AudioInterface2
 
-    lfo.SQR >> seq.CLK
-    seq.CV  >> quant.'1V/octave pitch' >> vco."V/OCT"
-    vco.SAW >> out.'To "device output 1"', out.'To "device output 2"'
+    lfo.Square >> seq.Clock
+    seq.'Pitch CV (1V/oct)' >> quant.'1V/octave pitch' >> vco.'1V/oct pitch'
+    vco.Sawtooth >> out.'To "device output 1"', out.'To "device output 2"'
 
     vco.'Pulse width' = 0.5
     EXAMPLE-END
@@ -91,10 +91,14 @@ class PatchLangError(Exception):
 def _ports(inv: dict, plugin: str, model: str) -> tuple:
     """(inputs, outputs) port NAMES for a module, or ([], []) if unknown.
 
-    Names come from the manifest for our own modules and from the CARTOG scan
-    for everyone else's. A module nobody has measured has no port names, and
-    that is reported rather than guessed: a chain that invents a port produces
-    a patch that loads and does nothing.
+    Names come from the CARTOG scan, for our own modules and everyone else's
+    alike -- one source, which is the point. A plugin.json carries no port
+    information at all, so anything else is a second-hand copy: the short
+    panel spellings this used to return for our own modules (SAW, SQR, IN)
+    were inferred, and disagreed with the names the modules actually declare
+    (Sawtooth, Square, Audio). A module nobody has measured has no port names,
+    and that is reported rather than guessed: a chain that invents a port
+    produces a patch that loads and does nothing.
     """
     entry = (inv.get(plugin, {}).get("modules", {}) or {}).get(model)
     if not entry:

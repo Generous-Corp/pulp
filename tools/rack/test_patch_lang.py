@@ -66,16 +66,22 @@ inv = P.inventory()
 
 # ---------------------------------------------------------------- the grammar
 
+# Port names here are the ones the modules DECLARE, read back from the port
+# map. They used to be panel shorthand -- `a.SAW`, `b.IN` -- which parsed only
+# because no Forge module had been measured, so the checker had no list to
+# contradict them. Every case in this file passed while the one thing it
+# claims to test, that a port name is checked against the real module, was
+# doing nothing for our own modules. Spell ports the way the module does.
 CASES = [
     ("a chain infers the middle port",
      "a : ForgeModular/VCO\nb : ForgeModular/VCA\nc : ForgeModular/FOURPOLE\n"
-     "a.SAW >> b.IN >> c.IN\n", 2),
+     "a.Sawtooth >> b.Audio >> c.'Audio in'\n", 2),
     ("a fan-out at the end of a chain",
      "a : ForgeModular/VCO\nb : ForgeModular/VCA\nc : ForgeModular/FOURPOLE\n"
-     "a.SAW >> b.IN, c.IN\n", 2),
+     "a.Sawtooth >> b.Audio, c.'Audio in'\n", 2),
     ("a comment is not part of the patch",
      "a : ForgeModular/VCO   # the oscillator\nb : ForgeModular/VCA\n"
-     "a.SAW >> b.IN   # audio\n", 1),
+     "a.Sawtooth >> b.Audio   # audio\n", 1),
 ]
 for name, text, want_cables in CASES:
     try:
@@ -94,12 +100,14 @@ BAD = [
     ("an unknown port is refused by name",
      "a : ForgeModular/VCO\nb : ForgeModular/VCA\na.VOTC >> b.IN\n", "VOTC"),
     ("an undeclared node is refused",
-     "a : ForgeModular/VCO\na.SAW >> nowhere.IN\n", "nowhere"),
+     "a : ForgeModular/VCO\na.Sawtooth >> nowhere.Audio\n", "nowhere"),
     ("an unknown module is refused",
      "a : ForgeModular/NoSuchThing\n", "NoSuchThing"),
     ("an ambiguous chain hop must be spelled out",
      "a : ForgeModular/VCO\nb : ForgeModular/VCO\nc : ForgeModular/VCA\n"
-     "a.SAW >> b.V/OCT >> c.IN\n", "outputs"),
+     "a.Sawtooth >> b.'1V/oct pitch' >> c.Audio\n", "outputs"),
+    ("panel shorthand is not a port name",
+     "a : ForgeModular/VCO\nb : ForgeModular/VCA\na.SAW >> b.Audio\n", "SAW"),
 ]
 for name, text, needle in BAD:
     try:
@@ -112,23 +120,43 @@ for name, text, needle in BAD:
             wrong(f"{name}: refused, but the message never says "
                   f"{needle!r}: {e}")
 
-# Repeated port names are real: a DUAL AD has two TRIG inputs, one per channel.
-# Resolving both to the first is not a naming nicety — it is a patch wired to
-# the wrong channel.
-i, o = L._ports(inv, "ForgeModular", "DUALAD")
-if i.count("TRIG") >= 2:
-    first = L._port_index(i, "TRIG")
-    second = L._port_index(i, "TRIG#2")
-    if first != second and second >= 0:
-        ok("TRIG and TRIG#2 are different inputs on a DUAL AD")
-    else:
-        wrong(f"TRIG#2 did not select the second input ({first} vs {second})")
-    if L.port_label(i, second) == "TRIG#2":
-        ok("and the renderer writes the suffix back")
-    else:
-        wrong(f"the renderer wrote {L.port_label(i, second)!r} for the second TRIG")
+# Repeated port names are real, and resolving both to the first is not a
+# naming nicety -- it is a patch wired to the wrong channel.
+#
+# This is checked against a FIXED port list rather than a module on this
+# machine. It used to read ForgeModular/DUALAD, which had two inputs both
+# called TRIG; once the modules were measured properly they came back as
+# "Channel A trigger" and "Channel B trigger", no module on this machine had
+# a repeated port name any more, and the test quietly took its "nothing to
+# check" branch and reported ok. The feature would have rotted untested
+# without a single failure. A test whose subject can vanish is not a test.
+DUPES = ["TRIG", "TIME", "TRIG", "TIME"]
+first = L._port_index(DUPES, "TRIG")
+second = L._port_index(DUPES, "TRIG#2")
+if first == 0 and second == 2:
+    ok("TRIG and TRIG#2 select the first and second inputs of that name")
 else:
-    ok("(this pack's DUAL AD has no repeated TRIG; nothing to check)")
+    wrong(f"TRIG#2 did not select the second input ({first} vs {second})")
+if L.port_label(DUPES, second) == "TRIG#2":
+    ok("and the renderer writes the suffix back")
+else:
+    wrong(f"the renderer wrote {L.port_label(DUPES, second)!r} for the second TRIG")
+# Both members of a repeated pair are numbered -- TRIG#1 and TRIG#2, not bare
+# TRIG and TRIG#2. Bare TRIG would be a legal shorter spelling, so this is a
+# choice: a numbered pair reads as one thing with two channels, where the bare
+# form reads as two unrelated ports. What must hold either way is that the
+# spelling written is the port meant, so that is what is asserted.
+if L.port_label(DUPES, first) == "TRIG#1":
+    ok("the first of a repeated name is numbered too, rather than left bare")
+else:
+    wrong(f"the renderer wrote {L.port_label(DUPES, first)!r} for the first TRIG")
+for _i in (0, 1, 2, 3):
+    if L._port_index(DUPES, L.port_label(DUPES, _i)) != _i:
+        wrong(f"port {_i} renders as {L.port_label(DUPES, _i)!r}, "
+              f"which reads back as {L._port_index(DUPES, L.port_label(DUPES, _i))}")
+        break
+else:
+    ok("every port of a repeated-name module renders to a label that reads back")
 
 # ------------------------------------------------------------- the round trip
 
