@@ -122,10 +122,13 @@ public:
         return reloader_ && reloader_->has_pending_reload();
     }
     bool theme_reload_enabled() const { return theme_reload_enabled_; }
+    /// Stable identity for this session object, including across in-place JS reloads.
+    std::uint64_t identity() const noexcept { return identity_; }
 
 private:
     View& root_;
     state::StateStore& store_;
+    const std::uint64_t identity_;
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
     std::vector<std::filesystem::path> asset_roots_;

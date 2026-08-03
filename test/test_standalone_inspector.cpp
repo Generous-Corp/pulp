@@ -257,6 +257,7 @@ public:
         reload_channels_ = std::make_shared<pulp::view::ValueChannelSet>();
         ++generation_;
     }
+    void advance_generation_without_replacing_editor() { ++generation_; }
     std::weak_ptr<pulp::view::ValueChannelSet> value_channel_lifetime() const { return reload_channels_; }
     std::size_t value_channel_visits = 0;
     mutable std::size_t scripted_ui_visits = 0;
@@ -557,6 +558,23 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     REQUIRE(records.size() == 1);
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
+    processor.advance_generation_without_replacing_editor();
+    runtime->pump();
+    {
+        std::ofstream source(script);
+        source << "console.warn('same-session-reload'); createLabel('v', 'same', '');";
+    }
+    std::string same_session_reload_error;
+    REQUIRE(processor.active_scripted_ui()->reload(&same_session_reload_error));
+    const auto same_session_console = request_with_dispatch(
+        client, dispatcher, "Console.getMessages", "{}");
+    REQUIRE_FALSE(same_session_console.is_error);
+    const auto same_session_console_json =
+        choc::json::parse(same_session_console.params_json);
+    REQUIRE(same_session_console_json.isObject());
+    REQUIRE(same_session_console_json["messages"].size() == 1);
+    REQUIRE(same_session_console_json["messages"][0]["message"].getString()
+            == "same-session-reload");
     const auto scripted_visits_before_request = processor.scripted_ui_visits;
     const auto runtime_capabilities = request_with_dispatch(
         client, dispatcher, "Runtime.getCapabilities", "{}");
@@ -659,7 +677,7 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     const auto reattached = choc::json::parse(reattached_json);
     REQUIRE(reattached["subscriptionId"].getString() == subscription_id);
     REQUIRE(reattached["reattached"].getBool());
-    REQUIRE(reattached["sourceGeneration"].getWithDefault<std::int64_t>(0) == 2);
+    REQUIRE(reattached["sourceGeneration"].getWithDefault<std::int64_t>(0) == 3);
     REQUIRE(reattached["channels"].size() == 1);
     REQUIRE(reattached["channels"][0]["name"].getString() == "before_reload");
     REQUIRE(reattached["channels"][0]["staleReason"].getString() == "unavailable_after_reattach");
@@ -694,7 +712,7 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     runtime->pump();
     runtime->pump();
     REQUIRE(processor.value_channel_visits == visits_before_empty + 1);
-    REQUIRE(runtime->telemetry_state_for_testing().source_generation == 3);
+    REQUIRE(runtime->telemetry_state_for_testing().source_generation == 4);
     const auto empty_catalog = request_with_dispatch(
         replacement_client, dispatcher, "State.getValueChannels", "{}");
     REQUIRE_FALSE(empty_catalog.is_error);

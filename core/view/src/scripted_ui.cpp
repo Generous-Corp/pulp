@@ -1,6 +1,7 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <mutex>
@@ -9,6 +10,8 @@
 namespace pulp::view {
 
 namespace {
+
+std::atomic<std::uint64_t> next_scripted_ui_session_identity{1};
 
 LogCallback default_log_callback() {
     return [](std::string_view level, std::string_view msg) {
@@ -34,6 +37,8 @@ std::optional<std::filesystem::file_time_type> safe_last_write_time(const std::f
 ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
     : root_(root)
     , store_(store)
+    , identity_(next_scripted_ui_session_identity.fetch_add(
+          1, std::memory_order_relaxed))
     , script_path_(std::move(options.script_path))
     , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
                                              : std::move(options.theme_path))

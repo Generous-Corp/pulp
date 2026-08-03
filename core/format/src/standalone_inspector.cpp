@@ -28,6 +28,7 @@
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -233,7 +234,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         if (window_.supports_compositor_capture())
             domains_.set_capture_source(this);
         domains_.set_state_inspector(&state_);
-        domains_.set_console_capture(&console_);
+        domains_.set_console_capture(console_.get());
         domains_.set_audio_inspector(&audio_);
         domains_.set_tweak_store(&tweaks_);
         domains_.set_test_input_source(this);
@@ -353,17 +354,16 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
         domains_.set_script_inspector(nullptr);
-        const auto generation = processor_.supports_editor_reload()
-            ? processor_.editor_reload_generation()
-            : 0;
-        bridge_.visit_scripted_ui([this, generation](view::ScriptedUiSession* current) {
-            if (current && log_subscription_ != 0 && log_subscription_generation_
-                && *log_subscription_generation_ == generation) {
+        log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel);
+        bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
+            if (current && log_subscription_ != 0 && log_subscription_session_identity_
+                && *log_subscription_session_identity_ == current->identity()) {
                 current->remove_log_callback(log_subscription_);
             }
         });
         log_subscription_ = 0;
         log_subscription_generation_.reset();
+        log_subscription_session_identity_.reset();
         if (overlay_)
             overlay_->set_tweak_store(nullptr);
     }
@@ -590,14 +590,41 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             return;
         }
 
-        // A replaced processor may already have destroyed the prior session.
-        // Its destruction removes the old callback; only borrow the replacement
-        // under its generation lease while registering the new callback.
-        log_subscription_ = 0;
         log_subscription_generation_ = generation;
-        bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
-            if (current)
-                log_subscription_ = current->add_log_callback(console_.callback());
+        const auto callback_epoch =
+            log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
+        bridge_.visit_scripted_ui([this, callback_epoch](view::ScriptedUiSession* current) {
+            if (!current) {
+                log_subscription_ = 0;
+                log_subscription_session_identity_.reset();
+                return;
+            }
+
+            // A generation may reload the same session in place. Retire its old
+            // token before replacing it. A different or temporarily unavailable
+            // session is covered by the epoch guard, so any retained observer is
+            // inert even when its session outlives this runtime.
+            if (log_subscription_ != 0 && log_subscription_session_identity_
+                && *log_subscription_session_identity_ == current->identity()) {
+                current->remove_log_callback(log_subscription_);
+            }
+
+            auto callback = console_->callback();
+            std::weak_ptr<inspect::ConsoleCapture> capture = console_;
+            auto epoch = log_callback_epoch_;
+            log_subscription_ = current->add_log_callback(
+                [capture = std::move(capture), epoch = std::move(epoch),
+                 callback_epoch, callback = std::move(callback)](
+                    std::string_view level, std::string_view message) {
+                    // A retained but no-longer-active session may outlive the
+                    // inspector runtime. Never let its observer dereference the
+                    // destroyed composition root.
+                    if (epoch->load(std::memory_order_acquire) == callback_epoch
+                        && capture.lock()) {
+                        callback(level, message);
+                    }
+                });
+            log_subscription_session_identity_ = current->identity();
         });
     }
 
@@ -634,7 +661,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::InspectorDiscoveryPublisher publisher_;
     inspect::DomainHandler domains_;
     inspect::StateInspector state_;
-    inspect::ConsoleCapture console_;
+    std::shared_ptr<inspect::ConsoleCapture> console_ =
+        std::make_shared<inspect::ConsoleCapture>();
+    std::shared_ptr<std::atomic<std::uint64_t>> log_callback_epoch_ =
+        std::make_shared<std::atomic<std::uint64_t>>(0);
     inspect::AudioInspector audio_;
     inspect::TweakStore tweaks_;
     inspect::ValueChannelTelemetryBroker telemetry_;
@@ -650,6 +680,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     std::shared_ptr<IndicatorState> indicator_ = std::make_shared<IndicatorState>();
     std::uint64_t log_subscription_ = 0;
     std::optional<std::uint64_t> log_subscription_generation_;
+    std::optional<std::uint64_t> log_subscription_session_identity_;
     std::optional<std::uint64_t> value_channel_generation_;
     std::optional<std::uint64_t> failed_value_channel_generation_;
     std::uint64_t value_channel_source_transitions_ = 0;
