@@ -25,6 +25,7 @@
     "browser_capture/interaction_plan_protocol.json",
     "browser_capture/lifecycle.mjs",
     "browser_capture/network_dependencies.mjs",
+    "browser_capture/platform_fonts.mjs",
     "browser_capture/renderers.mjs",
     "browser_capture/security.mjs",
     "browser_capture/semantics.mjs",
