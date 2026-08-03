@@ -971,10 +971,12 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_inspect_doctor",
         "pulp_inspect_dom",
         "pulp_inspect_evaluate",
+        "pulp_inspect_inject_midi",
         "pulp_inspect_params",
         "pulp_inspect_performance",
         "pulp_inspect_screenshot",
         "pulp_inspect_set_param",
+        "pulp_inspect_set_transport",
         "pulp_kit",
         "pulp_kit_apply",
         "pulp_kit_init",
@@ -1139,6 +1141,26 @@ TEST_CASE("pulp_inspect_set_param sends a typed payload through the shared clien
             R"("meta":{"session_id":"attacker","instance_id":"attacker","publication_id":"attacker"},"id":0,"value":1.0)")));
     require_contains(nested_selector, R"JSON("ok":true)JSON");
     CHECK(fixture.saw("State.setParameter", R"("id": 0)"));
+}
+
+TEST_CASE("Typed test-input MCP tools send bounded payloads through the shared client",
+          "[mcp][tools][inspect][test-input]") {
+    InspectorMcpFixture fixture;
+
+    const auto midi = handle_request(tool_call(
+        "73", "pulp_inspect_inject_midi",
+        fixture.exact_arguments(
+            R"("kind":"note_on","channel":1,"note":60,"velocity":100,"duration_ms":10)")));
+    require_contains(midi, R"JSON("structuredContent":{"ok":true)JSON");
+    CHECK(fixture.saw("Test.injectMidi", R"("kind": "note_on")"));
+    CHECK(fixture.saw("Test.injectMidi", R"("channel": 1)"));
+
+    const auto transport = handle_request(tool_call(
+        "74", "pulp_inspect_set_transport",
+        fixture.exact_arguments(R"("playing":false,"position_samples":0,"tempo_bpm":120)")));
+    require_contains(transport, R"JSON("structuredContent":{"ok":true)JSON");
+    CHECK(fixture.saw("Test.setTransport", R"("playing": false)"));
+    CHECK(fixture.saw("Test.setTransport", R"("position_samples": 0)"));
 }
 
 TEST_CASE("MCP inspector delegate preserves responses above the old 2 MiB ceiling",
@@ -2867,6 +2889,8 @@ TEST_CASE("MCP inspector registry derives methods, capabilities, and description
         {"pulp_inspect_params", methods::kStateGetParameters},
         {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
         {"pulp_inspect_set_param", methods::kStateSetParameter},
+        {"pulp_inspect_inject_midi", methods::kTestInjectMidi},
+        {"pulp_inspect_set_transport", methods::kTestSetTransport},
         {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
         {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
         {"pulp_inspect_performance", methods::kPerfGetMetrics},
@@ -2910,6 +2934,81 @@ TEST_CASE("MCP inspector registry derives methods, capabilities, and description
 
     auto unregistered = tools + R"({"name":"pulp_inspect_unregistered","description":""})";
     REQUIRE_FALSE(decorate_inspector_mcp_tool_descriptions(unregistered));
+}
+
+TEST_CASE("Typed test-input MCP schemas and parsers reject malformed or unowned fields",
+          "[mcp][tools][inspect][test-input][arguments]") {
+    const auto tools = tools_list_json();
+    require_contains(tools, R"JSON("name":"pulp_inspect_inject_midi")JSON");
+    require_contains(tools, R"JSON("name":"pulp_inspect_set_transport")JSON");
+    require_contains(tools, R"JSON("additionalProperties":false)JSON");
+    require_contains(tools, R"JSON("kind":{"type":"string","enum":["note_on","note_off"]})JSON");
+    require_contains(tools,
+                     R"JSON("duration_ms":{"type":"integer","minimum":1,"maximum":2000)JSON");
+    const auto tools_root = choc::json::parse(tools);
+    const auto listed = tools_root["tools"];
+    const auto requires_exact_selector = [](const auto& tool) {
+        const auto required = tool["inputSchema"]["required"];
+        const auto contains = [&](std::string_view name) {
+            for (std::uint32_t index = 0; index < required.size(); ++index) {
+                if (required[index].isString() && required[index].getString() == name)
+                    return true;
+            }
+            return false;
+        };
+        return contains("session_id") && contains("instance_id") && contains("publication_id");
+    };
+    bool midi_requires_selector = false;
+    bool transport_requires_selector = false;
+    for (std::uint32_t index = 0; index < listed.size(); ++index) {
+        const auto tool = listed[index];
+        if (tool["name"].getString() == "pulp_inspect_inject_midi")
+            midi_requires_selector = requires_exact_selector(tool);
+        if (tool["name"].getString() == "pulp_inspect_set_transport")
+            transport_requires_selector = requires_exact_selector(tool);
+    }
+    CHECK(midi_requires_selector);
+    CHECK(transport_requires_selector);
+
+    const auto selector =
+        R"JSON("session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c")JSON";
+    const auto missing_velocity = handle_request(tool_call(
+        "2565", "pulp_inspect_inject_midi",
+        std::string("{") + selector + R"JSON(,"kind":"note_on","channel":1,"note":60})JSON"));
+    require_contains(missing_velocity, "velocity is required for note_on");
+    require_contains(missing_velocity, R"JSON("code":"invalid_arguments")JSON");
+
+    const auto missing_duration = handle_request(
+        tool_call("25655", "pulp_inspect_inject_midi",
+                  std::string("{") + selector +
+                      R"JSON(,"kind":"note_on","channel":1,"note":60,"velocity":100})JSON"));
+    require_contains(missing_duration, "duration_ms is required for note_on");
+
+    const auto raw_status = handle_request(
+        tool_call("2566", "pulp_inspect_inject_midi",
+                  std::string("{") + selector +
+                      R"JSON(,"kind":"note_off","channel":1,"note":60,"status":128})JSON"));
+    require_contains(raw_status, "unknown test-input field: status");
+
+    const auto bad_channel = handle_request(tool_call(
+        "2567", "pulp_inspect_inject_midi",
+        std::string("{") + selector + R"JSON(,"kind":"note_off","channel":17,"note":60})JSON"));
+    require_contains(bad_channel, "channel is outside the supported range");
+
+    const auto empty_transport = handle_request(
+        tool_call("2568", "pulp_inspect_set_transport", std::string("{") + selector + "}"));
+    require_contains(empty_transport,
+                     "set transport requires playing, position_samples, or tempo_bpm");
+
+    const auto bad_tempo =
+        handle_request(tool_call("2569", "pulp_inspect_set_transport",
+                                 std::string("{") + selector + R"JSON(,"tempo_bpm":401})JSON"));
+    require_contains(bad_tempo, "tempo_bpm must be finite and from 20 to 400");
+
+    const auto script = handle_request(tool_call(
+        "2570", "pulp_inspect_set_transport",
+        std::string("{") + selector + R"JSON(,"playing":true,"expression":"process.exit()"})JSON"));
+    require_contains(script, "unknown test-input field: expression");
 }
 
 // Per-tool SDK feature detection (min_sdk_version).

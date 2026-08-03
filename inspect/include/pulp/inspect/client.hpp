@@ -2,11 +2,13 @@
 
 #include <pulp/inspect/discovery.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/test_input.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace pulp::inspect {
 
@@ -68,5 +70,21 @@ request_inspector(std::string method, std::string params_json = "{}",
                   InspectorClientTarget target = {},
                   std::chrono::milliseconds timeout = std::chrono::seconds(3),
                   const InspectorDiscoveryReader& discovery = InspectorDiscoveryReader{});
+
+/// Send one validated note event through the shared one-shot client. Note-on
+/// calls must provide a bounded hold duration; the helper sends the matching
+/// note-off before releasing its controller lease.
+InspectorClientResult
+inject_inspector_midi(const MidiTestInput& input, std::chrono::milliseconds hold_duration,
+                      InspectorClientTarget target = {},
+                      std::chrono::milliseconds timeout = std::chrono::seconds(3),
+                      const InspectorDiscoveryReader& discovery = InspectorDiscoveryReader{});
+
+/// Apply one validated standalone transport update through the shared one-shot client.
+InspectorClientResult
+set_inspector_transport(const StandaloneTransportTestInput& input,
+                        InspectorClientTarget target = {},
+                        std::chrono::milliseconds timeout = std::chrono::seconds(3),
+                        const InspectorDiscoveryReader& discovery = InspectorDiscoveryReader{});
 
 } // namespace pulp::inspect

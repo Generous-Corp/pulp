@@ -2114,6 +2114,61 @@
             "required": false
           },
           {
+            "name": "--id",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--value",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--normalized",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--kind",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--channel",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--note",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--velocity",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--duration-ms",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--playing",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--position-samples",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--tempo-bpm",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--json",
             "kind": "flag",
             "required": false
@@ -2137,6 +2192,21 @@
           },
           {
             "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "set-parameter",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "inject-midi",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "set-transport",
             "arguments": [],
             "subcommands": []
           }
@@ -4530,6 +4600,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "pulp_inspect_inject_midi",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_list",
         "disposition": "candidate-shared-later"
       },
@@ -4555,6 +4629,10 @@
       },
       {
         "name": "pulp_inspect_set_param",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_set_transport",
         "disposition": "candidate-shared-later"
       },
       {

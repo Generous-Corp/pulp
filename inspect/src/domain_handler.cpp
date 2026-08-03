@@ -77,6 +77,7 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "CSS")         return handle_css(req);
     if (domain == "Performance") return handle_performance(req);
     if (domain == "State")       return handle_state(req);
+    if (domain == "Test")        return handle_test(req);
     if (domain == "Console")     return handle_console(req);
     if (domain == "Runtime")     return handle_runtime(req);
     if (domain == "Audio")       return handle_audio(req);
@@ -86,6 +87,10 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "LiveConstant") return handle_live_constant(req);
 
     return make_error(req.id, "Unknown domain: " + domain);
+}
+
+InspectorMessage DomainHandler::handle_test(const InspectorMessage& req) {
+    return test_input_.handle(req);
 }
 
 // ── Motion domain ───────────────────────────────────────────────────────────

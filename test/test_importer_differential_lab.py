@@ -58,6 +58,7 @@ class DifferentialLabTests(unittest.TestCase):
         ]
         snapshot = {
             "strings": strings,
+            "computedStyleNames": ["display"],
             "documents": [{
                 "nodes": {
                     "parentIndex": [-1, 0, 1],

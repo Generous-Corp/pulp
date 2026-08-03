@@ -47,6 +47,26 @@ Structured errors such as `capability_unavailable`, `selection_failed`, and
 `mayHaveApplied` are evidence. Do not automatically retry a mutation reported
 with `mayHaveApplied:true`.
 
+When the selected standalone reports effective `test.input`, use the bounded
+typed controls without evaluation:
+
+```bash
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The MCP equivalents are `pulp_inspect_inject_midi` and
+`pulp_inspect_set_transport`. Only note-on/off and standalone
+play/position/tempo are in `test.input`; parameters stay under `state.write`,
+authoring controls stay under `authoring.tweaks`, and generic
+preset/filesystem operations remain unavailable. Outstanding injected notes
+are released on lease loss, disconnect, or teardown. A named `note_on` requires
+`--duration-ms 1..2000`; its matching note-off is sent on the same connection
+before that one-shot controller lease is released.
+
 Installed `pulp-mcp` exposes the same flow as `pulp_inspect_profiles`,
 `pulp_inspect_list`, `pulp_inspect_capabilities`, typed read/mutation tools, and
 `pulp_inspect_doctor`. MCP success payloads include the exact session identity;

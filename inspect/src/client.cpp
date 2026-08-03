@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -452,10 +453,13 @@ void InspectorClient::set_event_handler(EventHandler handler) {
     impl_->event_state->handler = std::move(handler);
 }
 
-InspectorClientResult request_inspector(std::string method, std::string params_json,
-                                        InspectorClientTarget target,
-                                        std::chrono::milliseconds timeout,
-                                        const InspectorDiscoveryReader& discovery) {
+namespace {
+
+template <typename Operation>
+InspectorClientResult run_inspector_operation(InspectorClientTarget target,
+                                              std::chrono::milliseconds timeout,
+                                              const InspectorDiscoveryReader& discovery,
+                                              bool needs_controller, Operation&& operation) {
     InspectorClientResult result;
     const auto deadline =
         std::chrono::steady_clock::now() + std::max(timeout, std::chrono::milliseconds(0));
@@ -511,12 +515,6 @@ InspectorClientResult request_inspector(std::string method, std::string params_j
         return result;
     }
 
-    const auto* descriptor = find_inspector_method(method);
-    const bool needs_controller = descriptor && descriptor->kind == InspectorMethodKind::Request &&
-                                  capability_requires_controller_lease(descriptor->capability) &&
-                                  method != methods::kSessionAcquireController &&
-                                  method != methods::kSessionRenewController &&
-                                  method != methods::kSessionReleaseController;
     if (needs_controller) {
         const auto lease_timeout = remaining();
         if (lease_timeout <= std::chrono::milliseconds(0)) {
@@ -532,13 +530,7 @@ InspectorClientResult request_inspector(std::string method, std::string params_j
         }
     }
 
-    const auto request_timeout = remaining();
-    if (request_timeout <= std::chrono::milliseconds(0)) {
-        result.response = make_error(0, "Inspector operation timed out", "request_timeout",
-                                     R"({"mayHaveApplied":false})");
-        return result;
-    }
-    result.response = client.request(std::move(method), std::move(params_json), request_timeout);
+    result.response = operation(client, remaining);
     if (needs_controller) {
         const auto release_timeout = remaining();
         if (release_timeout > std::chrono::milliseconds(0))
@@ -546,6 +538,111 @@ InspectorClientResult request_inspector(std::string method, std::string params_j
                                  release_timeout);
     }
     return result;
+}
+
+choc::value::Value midi_params(const MidiTestInput& input) {
+    auto params = choc::value::createObject("");
+    params.addMember("kind", choc::value::createString(
+                                 input.kind == MidiTestInputKind::NoteOn ? "note_on" : "note_off"));
+    params.addMember("channel",
+                     choc::value::createInt32(static_cast<std::int32_t>(input.channel) + 1));
+    params.addMember("note", choc::value::createInt32(input.note));
+    params.addMember("velocity", choc::value::createInt32(input.velocity));
+    return params;
+}
+
+} // namespace
+
+InspectorClientResult request_inspector(std::string method, std::string params_json,
+                                        InspectorClientTarget target,
+                                        std::chrono::milliseconds timeout,
+                                        const InspectorDiscoveryReader& discovery) {
+    const auto* descriptor = find_inspector_method(method);
+    const bool needs_controller = descriptor && descriptor->kind == InspectorMethodKind::Request &&
+                                  capability_requires_controller_lease(descriptor->capability) &&
+                                  method != methods::kSessionAcquireController &&
+                                  method != methods::kSessionRenewController &&
+                                  method != methods::kSessionReleaseController;
+    return run_inspector_operation(
+        std::move(target), timeout, discovery, needs_controller,
+        [method = std::move(method), params_json = std::move(params_json)](
+            InspectorClient& client, const auto& remaining) mutable {
+            const auto request_timeout = remaining();
+            if (request_timeout <= std::chrono::milliseconds(0))
+                return make_error(0, "Inspector operation timed out", "request_timeout",
+                                  R"({"mayHaveApplied":false})");
+            return client.request(std::move(method), std::move(params_json), request_timeout);
+        });
+}
+
+InspectorClientResult inject_inspector_midi(const MidiTestInput& input,
+                                            std::chrono::milliseconds hold_duration,
+                                            InspectorClientTarget target,
+                                            std::chrono::milliseconds timeout,
+                                            const InspectorDiscoveryReader& discovery) {
+    if ((input.kind != MidiTestInputKind::NoteOn && input.kind != MidiTestInputKind::NoteOff) ||
+        input.channel > 15 || input.note > 127 || input.velocity > 127 ||
+        (input.kind == MidiTestInputKind::NoteOn && (hold_duration < std::chrono::milliseconds(1) ||
+                                                     hold_duration > std::chrono::seconds(2))) ||
+        (input.kind == MidiTestInputKind::NoteOff &&
+         hold_duration != std::chrono::milliseconds(0))) {
+        InspectorClientResult result;
+        result.response = make_error(0, "Invalid bounded MIDI note input", "invalid_params");
+        return result;
+    }
+    return run_inspector_operation(
+        std::move(target), timeout, discovery, true,
+        [input, hold_duration](InspectorClient& client, const auto& remaining) {
+            auto request_timeout = remaining();
+            if (request_timeout <= std::chrono::milliseconds(0))
+                return make_error(0, "Inspector operation timed out", "request_timeout",
+                                  R"({"mayHaveApplied":false})");
+            auto response =
+                client.request(std::string(methods::kTestInjectMidi),
+                               choc::json::toString(midi_params(input), false), request_timeout);
+            if (response.is_error || input.kind == MidiTestInputKind::NoteOff)
+                return response;
+
+            if (remaining() <= hold_duration)
+                return make_error(0, "Inspector MIDI hold exceeded the operation timeout",
+                                  "request_timeout", R"({"mayHaveApplied":true})");
+            std::this_thread::sleep_for(hold_duration);
+
+            MidiTestInput note_off = input;
+            note_off.kind = MidiTestInputKind::NoteOff;
+            note_off.velocity = 0;
+            request_timeout = remaining();
+            if (request_timeout <= std::chrono::milliseconds(0))
+                return make_error(0, "Inspector MIDI hold exceeded the operation timeout",
+                                  "request_timeout", R"({"mayHaveApplied":true})");
+            return client.request(std::string(methods::kTestInjectMidi),
+                                  choc::json::toString(midi_params(note_off), false),
+                                  request_timeout);
+        });
+}
+
+InspectorClientResult set_inspector_transport(const StandaloneTransportTestInput& input,
+                                              InspectorClientTarget target,
+                                              std::chrono::milliseconds timeout,
+                                              const InspectorDiscoveryReader& discovery) {
+    if ((!input.playing && !input.position_samples && !input.tempo_bpm) ||
+        (input.position_samples && *input.position_samples < 0) ||
+        (input.tempo_bpm && (!std::isfinite(*input.tempo_bpm) || *input.tempo_bpm < 20.0 ||
+                             *input.tempo_bpm > 400.0))) {
+        InspectorClientResult result;
+        result.response = make_error(0, "Invalid standalone transport input", "invalid_params");
+        return result;
+    }
+    auto params = choc::value::createObject("");
+    if (input.playing)
+        params.addMember("playing", choc::value::createBool(*input.playing));
+    if (input.position_samples)
+        params.addMember("position_samples", choc::value::createInt64(*input.position_samples));
+    if (input.tempo_bpm)
+        params.addMember("tempo_bpm", choc::value::createFloat64(*input.tempo_bpm));
+    return request_inspector(std::string(methods::kTestSetTransport),
+                             choc::json::toString(params, false), std::move(target), timeout,
+                             discovery);
 }
 
 } // namespace pulp::inspect
