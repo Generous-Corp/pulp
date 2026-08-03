@@ -38,6 +38,7 @@ using Catch::Approx;
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/canvas/svg_dom_cache.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/view.hpp>
 
@@ -4087,6 +4088,76 @@ TEST_CASE("the Home guard reads nothing outside its own fixture", "[no-leak]") {
     const auto listings = std::distance(std::filesystem::directory_iterator(m),
                                         std::filesystem::directory_iterator{});
     CHECK(listings == 0);
+}
+
+TEST_CASE("a rack's panels are parsed once, not once per frame", "[perf]") {
+    // The defect this pins, measured on 2026-08-02: Forge Modular burned 62%
+    // of an M5 Max DISPLAYING a static 39-module patch, with the GPU at 7%.
+    // A `sample` of the running app put 993 of 1109 samples inside
+    // RackPreview::paint in draw_svg -> SvgDomCache::get_or_build -> the
+    // BUILDER closure, with the cache's own hash table showing up in `erase`.
+    //
+    // The cause was not the drawing. SvgDomCache defaults to 16 entries -- "a
+    // handful of frames' worth of distinct docs" -- and a rack asks for one
+    // document PER MODULE every frame. Working set 39, capacity 16: every
+    // lookup evicted the entry it was about to need, so the hit rate was zero
+    // and every panel was reparsed at up to 120Hz. That is the pathological
+    // shape of an LRU -- one entry over capacity does not cost a little more,
+    // it costs everything.
+    //
+    // So this asserts the property, not the number: repainting the same rack
+    // must not keep rebuilding. If someone lowers the capacity, or a future
+    // rack outgrows whatever RackPreview asks for, this fails loudly here
+    // rather than quietly as a hot laptop on somebody else's desk.
+    const auto patch = a_real_patch();
+    if (patch.empty()) {
+        WARN("no real patch on this machine to measure (skip, not a pass)");
+        return;
+    }
+    const auto loaded = forge_modular::load_patch(patch);
+    REQUIRE(loaded.ok());
+
+    // The preview is driven DIRECTLY rather than through the shell. The first
+    // draft rendered the whole editor and measured zero cache activity, because
+    // the editor came up on the composer and the rack was never painted -- a
+    // measurement of nothing, reported as a pass by a bound that zero satisfies.
+    // Painting the preview itself is what the number is about.
+    forge_modular::RackPreview preview;
+    const char* home = std::getenv("HOME");
+    preview.set_panel_directory(
+        (std::filesystem::path(home ? home : ".") / "Library" /
+         "Application Support" / "Forge Modular" / "examples" /
+         "forge-modular" / "res").string());
+    preview.set_rack(loaded.modules, loaded.connections);
+    INFO("rack: " << loaded.modules.size() << " modules, "
+                  << loaded.connections.size() << " cables");
+
+    auto& cache = pulp::canvas::SvgDomCache::instance();
+    const auto out = std::filesystem::temp_directory_path() / "fm-perf.png";
+
+    // One frame to warm: the first paint legitimately parses every panel.
+    REQUIRE(pulp::view::render_to_file(preview, 1280, 800, out.string(), 1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    // The warm frame must have actually drawn panels, or everything below is
+    // measuring an empty canvas.
+    REQUIRE(cache.stats().builds > 0);
+
+    // Then measure only the steady state.
+    cache.reset_stats();
+    constexpr int kFramesDrawn = 8;
+    for (int i = 0; i < kFramesDrawn; ++i)
+        REQUIRE(pulp::view::render_to_file(preview, 1280, 800, out.string(),
+                                           1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+
+    const auto s = cache.stats();
+    INFO("after " << kFramesDrawn << " warm frames: " << s.hits << " hits, "
+                  << s.builds << " builds, " << s.size << " live entries");
+    // A warm rack should rebuild essentially nothing. Before the fix this was
+    // one build per panel per frame; the bound is deliberately generous so it
+    // fails on thrash, not on a stray document.
+    CHECK(s.builds < 16);
+    CHECK(s.hits > s.builds);
 }
 
 TEST_CASE("a run that has printed nothing still shows a stage and a clock",

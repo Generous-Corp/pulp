@@ -6,6 +6,8 @@
 
 #include <forge/design_tokens.hpp>
 
+#include <pulp/canvas/svg_dom_cache.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -651,6 +653,36 @@ void RackPreview::set_rack(std::vector<RackModule> modules,
                            std::vector<Connection> connections) {
     modules_ = std::move(modules);
     connections_ = std::move(connections);
+
+    // The SVG cache must hold a WHOLE RACK, or it holds nothing useful.
+    //
+    // Its default capacity is 16 -- "a handful of frames' worth of distinct
+    // docs" -- which is right for a UI that draws a few icons and catastrophic
+    // for one that draws a panel per module. A 39-module patch asks for 39
+    // distinct documents EVERY FRAME, so a 16-entry LRU evicts all of them and
+    // reparses all of them, at up to 120Hz. Measured: 62% CPU on an M5 Max
+    // displaying a static patch, with 993 of 1109 samples inside
+    // RackPreview::paint sitting in draw_svg -> get_or_build -> the BUILDER,
+    // and the cache's own hash table showing up in `erase`.
+    //
+    // That is the pathological shape of an LRU: a working set one entry larger
+    // than capacity does not cost a little more, it costs everything, because
+    // every lookup evicts the entry it is about to need. So the cache is sized
+    // from the rack rather than left at a default that cannot know about it.
+    //
+    // Headroom above the module count because a panel is not the only document
+    // drawn -- vendor artwork, chrome and the same module at two sizes each
+    // take a slot -- and because a cache that is exactly the working set
+    // thrashes the moment anything else asks for one.
+    // Grown, never shrunk: the cache is global, and a small rack shown after a
+    // large one must not evict what the large one needs on the way back.
+    static std::size_t s_capacity = 0;
+    const std::size_t working_set = modules_.size() * 3 + 64;
+    if (working_set > s_capacity) {
+        s_capacity = working_set;
+        pulp::canvas::SvgDomCache::instance().set_capacity(s_capacity);
+    }
+
     request_repaint();
 }
 
