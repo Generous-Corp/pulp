@@ -806,6 +806,19 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
     // one — the same reason an unevaluable calc() refuses its gradient.
     std::vector<View::BackgroundGradient> layers;
     for (const auto& layer_css : split_background_layers(css)) {
+        // `none` is a LAYER, not a parse failure: it is the initial value of
+        // background-image, and Chrome's computed style spells a shorthand that
+        // set only a colour as a trailing `, none`. Refusing it dropped the
+        // whole stack, so a knob whose face is
+        // `radial-gradient(...), conic-gradient(...), none` painted flat — the
+        // conic machinery was never reached, which reads as missing support for
+        // a gradient type that is in fact implemented end to end.
+        const auto trimmed =
+            layer_css.substr(std::min(layer_css.find_first_not_of(" \t\r\n"),
+                                      layer_css.size()));
+        if (trimmed.compare(0, 4, "none") == 0 &&
+            trimmed.find_first_not_of(" \t\r\n", 4) == std::string::npos)
+            continue;
         View::BackgroundGradient layer;
         if (!parse_one_gradient(layer_css, color_of, v.local_bounds(), layer))
             return false;

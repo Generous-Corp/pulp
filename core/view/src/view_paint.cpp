@@ -634,6 +634,33 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     const float eff_bl = effective_corner_radius_bl(bounds_.width, bounds_.height);
     const float eff_br = effective_corner_radius_br(bounds_.width, bounds_.height);
 
+    // The background COLOUR goes down first, beneath every image layer.
+    //
+    // CSS paints background-color under the background-image stack, not
+    // instead of it. Painting the colour only when no gradient parsed let
+    // every translucent layer show the PARENT through: a dark deck carrying a
+    // 7%-alpha grid-line gradient rendered as the cream panel behind it, and
+    // the `screen` veneers stacked on that deck then blended against a cream
+    // backdrop instead of a dark one — so one condition here accounted for
+    // most of a panel's blend, fill and filter error at once.
+    //
+    // Order is the whole point: this must precede the stack below. Painting it
+    // afterwards covers the gradients with the flat colour, which turns a
+    // spoked tape reel into a solid disc — right pixels, wrong sequence, and it
+    // reads as missing conic support rather than as a paint-order bug.
+    if (has_bg_) {
+        canvas.set_fill_color(bg_color_);
+        if (use_per_corner) {
+            build_corner_path(bounds_.width, bounds_.height,
+                              eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.fill_current_path();
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+        } else {
+            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
+    }
+
     // Paint background gradient if set (CSS background: linear/radial/conic).
     // The canvas + Skia/CoreGraphics backends implement all three; the View
     // just dispatches on the stored type. cx/cy are box fractions; radial
@@ -704,20 +731,6 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
             canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
         }
         canvas.clear_fill_gradient();
-    }
-
-    // Paint background if set
-    if (has_bg_ && bg_gradients_.empty()) {
-        canvas.set_fill_color(bg_color_);
-        if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
-            canvas.fill_current_path();
-        } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-        } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
-        }
     }
 
     paint_border(canvas, use_per_corner, build_corner_path,
