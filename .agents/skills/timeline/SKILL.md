@@ -743,6 +743,40 @@ is a serialized schema surface; `decode_command` gates on exact version equality
 with no upgrade hook, so it has to arrive as optional fields at v1, never a
 version bump.
 
+### A whole-content note edit is affordable per gesture, not per frame
+
+`ReplaceNoteContent` carries both note arrays, so `DocumentSession` charges one
+edit `retained_size(forward) + retained_size(inverse)` — roughly `128 * N` bytes
+for an `N`-note clip against an 8 MiB `UndoLimits` default. That number is what
+makes "a note editor cannot use this command" look obvious, and it is only true
+for **one shape**: an open gesture group.
+
+`candidate.closed` is set for `Single`, `End` and `Cancel`, and the eviction loop
+in `document_session.cpp` advances only while the oldest group is `closed`. So:
+
+- A **`Single`-phase** edit is charged once, closes on admission, and is
+  immediately evictable. Any number of commit-on-release edits succeed; the only
+  cost is undo depth (`8 MiB / 128N` groups). A single edit larger than the whole
+  budget — past roughly 65k notes at the default — is still refused outright,
+  because nothing can be evicted to make room for it.
+- A **`Begin`/`Update`/.../`End`** drag coalesces every step into one group that
+  stays open, and an open group is not evictable by anything. The charge
+  accumulates per frame and the gesture dies partway through with
+  `ConflictCode::UndoFull` — an in-progress drag that stops responding.
+
+So a piano roll that commits on release persists through this command today; one
+that streams `Update` per frame needs granular note commands first. Test the
+distinction as a pair — the same command at the same size against the same
+budget, reaching opposite outcomes — since either case alone passes against a
+session with no budget at all
+(`test_timeline_undo.cpp`).
+
+Sizing a session's real ceiling, note that the **journal** binds before the undo
+stack: `JournalLimits` defaults to 16 MiB / 1024 transactions and has **no
+automatic eviction at all**, only an explicit `checkpoint()`. A test that means
+to exercise the undo budget must widen the journal explicitly or it will measure
+`JournalFull` instead.
+
 ### An identity rewrite must copy the source input, not re-enumerate it
 
 `remap_ids` is the copy / paste / import path: it rewrites every owned
