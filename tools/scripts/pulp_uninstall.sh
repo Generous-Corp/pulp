@@ -46,6 +46,10 @@ VERSION="$(sed -n 's/^version: //p' "$MANIFEST" | head -1)"
 allowed_root() {
   case "$1" in
     /Library/Audio/Plug-Ins/*) return 0;;
+    # The user-level plugin folder is where a development build installs, and
+    # every host scans it alongside /Library. It has to be removable or an
+    # "uninstalled" plugin keeps loading.
+    "$HOME"/Library/Audio/Plug-Ins/*) return 0;;
     /Applications/*) return 0;;
     "$HOME"/Library/Application\ Support/*) return 0;;
     *) return 1;;
@@ -69,6 +73,28 @@ done < "$MANIFEST"
 PRESENT=()
 for p in "${PATHS[@]:-}"; do [[ -n "$p" && -e "$p" ]] && PRESENT+=("$p"); done
 
+# Copies of the SAME bundles in the other standard plugin folder.
+#
+# The installer writes to /Library, but a development build writes to
+# ~/Library, and every host scans both. Leaving one behind means the DAW still
+# sees a plugin with that bundle identifier, so a "removed" plugin goes on
+# loading. Uninstall should mean uninstalled, so both are taken.
+#
+# The names come from the manifest, never from a wildcard, so this cannot reach
+# a plugin we did not install: "Forge FX.component" matches "Forge FX.component"
+# and nothing else. Anything not found is simply absent, which is a fine
+# outcome and not an error.
+for p in "${PATHS[@]:-}"; do
+  [[ -n "$p" ]] || continue
+  base="$(basename "$p")"; kind="$(basename "$(dirname "$p")")"
+  case "$p" in
+    /Library/Audio/Plug-Ins/*)   other="$HOME/Library/Audio/Plug-Ins/$kind/$base";;
+    "$HOME"/Library/Audio/Plug-Ins/*) other="/Library/Audio/Plug-Ins/$kind/$base";;
+    *) continue;;
+  esac
+  [[ -e "$other" ]] && allowed_root "$other" && PRESENT+=("$other")
+done
+
 echo "Uninstall $PRODUCT${VERSION:+ $VERSION}"
 echo
 if [[ "${#PRESENT[@]}" -eq 0 ]]; then
@@ -90,9 +116,15 @@ if [[ "$ASSUME_YES" != 1 ]]; then
   case "$reply" in [yY]*) ;; *) echo "Cancelled."; exit 0;; esac
 fi
 
-# Re-exec under sudo now that the user has seen the list and agreed. Passing
-# --yes forward so they are not asked twice for the same decision.
-if [[ "$(id -u)" != 0 ]]; then
+# Escalate only if something genuinely lives outside the user's own home.
+# Removing a development build from ~/Library needs no administrator, and
+# asking for a password that is not required teaches people to type it without
+# reading the prompt.
+NEEDS_ROOT=0
+for p in "${PRESENT[@]:-}"; do
+  case "$p" in "$HOME"/*) ;; *) NEEDS_ROOT=1;; esac
+done
+if [[ "$NEEDS_ROOT" == 1 && "$(id -u)" != 0 ]]; then
   echo "Administrator access is needed to remove files from /Library."
   exec sudo "$0" --manifest "$MANIFEST" --yes
 fi

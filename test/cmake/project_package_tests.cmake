@@ -123,3 +123,13 @@ add_test(NAME vst3-bundle-layout
 set_tests_properties(vst3-bundle-layout PROPERTIES
     LABELS "format;vst3;packaging"
     TIMEOUT 60)
+
+# Uninstaller contract. An uninstaller has two ways to be wrong and only one is
+# loud: removing too little leaves a plugin the host keeps loading, removing too
+# much deletes somebody else's work. Both are covered.
+add_test(NAME pulp-uninstaller-contract
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pulp_uninstall.py")
+set_tests_properties(pulp-uninstaller-contract PROPERTIES
+    LABELS "packaging;ship"
+    TIMEOUT 120)
