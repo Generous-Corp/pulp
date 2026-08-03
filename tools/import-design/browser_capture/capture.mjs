@@ -666,11 +666,41 @@ async function runCapture(options) {
       });
       finalExtent = await measureDocumentExtent(cdp);
       if (finalExtent.top < 0) {
-        const error = new Error(
-          `content still begins at y=${finalExtent.top}px after one bounded ` +
-          "viewport correction; pass an explicit --height");
-        error.code = "capture-negative-overflow";
-        throw error;
+        // The correction above re-centres CENTRED content by growing the
+        // viewport, which is why it is expressed as -2 * top. Content placed
+        // ABSOLUTELY above the origin does not move when the viewport grows, so
+        // it survives that correction unchanged — and `--height` is the same
+        // lever, so refusing with "pass an explicit --height" sent the caller
+        // round a loop that could not terminate.
+        //
+        // Agents write `top: -5px` constantly (a badge nudged over an edge, a
+        // ring inset), and refusing the whole design over a few pixels loses
+        // the entire panel. Translate instead: push the document down by the
+        // overhang so nothing sits above y=0. Relative geometry is untouched —
+        // every box moves by the same amount, so the DOM snapshot and the
+        // bitmap stay in the same coordinate space as each other.
+        const shift = Math.ceil(-finalExtent.top);
+        await cdp.call("Runtime.evaluate", {
+          expression:
+            `(() => { const s = document.createElement('style');` +
+            ` s.setAttribute('data-pulp-origin-shift', '${shift}');` +
+            ` s.textContent = 'body{margin-top:${shift}px !important}';` +
+            ` document.head.appendChild(s); return true; })()`,
+          returnByValue: true,
+        });
+        heightSettle = await waitForStable(cdp, {
+          networkIdle: () => pendingNetwork.size === 0,
+        });
+        finalExtent = await measureDocumentExtent(cdp);
+        if (finalExtent.top < 0) {
+          const error = new Error(
+            `content still begins at y=${finalExtent.top}px after a ` +
+            `${shift}px origin shift. Something re-anchors to the viewport ` +
+            "(position: fixed, or a negative margin on <html>), which a " +
+            "document-level shift cannot move.");
+          error.code = "capture-negative-overflow";
+          throw error;
+        }
       }
     }
     if (finalExtent.left < 0 || finalExtent.top < 0) {
