@@ -1313,6 +1313,39 @@ so a surviving disjunct cannot answer for the one you meant to disable; and
 A control that passes is either a blind test or a malformed mutation, and the two
 are indistinguishable until you read the mutated source.
 
+### A boundary test that never moves the boundary is satisfied by a constant
+
+`undo_gesture_budget`
+(`core/timeline_editor/include/pulp/timeline_editor/gesture_budget.hpp`) predicts
+how many steps one open gesture can commit, and the obvious way to test it is a
+self-controlling pair: size a session's budget for N steps, assert N commit and
+the N+1th comes back `ConflictCode::UndoFull`. Same command, same size, same
+budget, one variable, opposite outcomes — which is the right shape and is still
+not enough.
+
+**A prediction that ignores its inputs and returns the literal N passes that pair
+perfectly.** The budget was built from N, so a hardcoded N sits exactly on the
+boundary and both halves agree with it. Confirmed by mutation, not by argument:
+replacing the whole computation with `return 4` failed only the payload-growth
+case and passed both halves of the pair.
+
+The fix is to run the pair at **two** budget sizes (`test_timeline_gesture_budget.cpp`
+uses 4 and 7). A constant then fails at whichever one it is not. Generally: a pair
+pins a boundary, but only a boundary that **moves** pins the rule that places it —
+so any threshold test that exercises one threshold is satisfiable by that
+threshold as a literal. This applies well beyond this function: quota, limit and
+capacity assertions across `SessionLimits`, `JournalLimits` and `UndoLimits` all
+have the same shape.
+
+Two further traps this function's tests exist to avoid:
+
+- **Set `JournalLimits` wide, explicitly.** It binds the same gesture
+  independently, defaults to 16 MiB / 1024 transactions, and has **no automatic
+  eviction** — only `checkpoint()`. Left at its defaults it is what a test aiming
+  at the undo budget ends up measuring, and `JournalFull` is not `UndoFull`.
+- **Assert the conflict code, not just the failure.** A gesture stopped by a stale
+  revision or a malformed bracket also stops at the step you are pointing at.
+
 ## Schema codegen & drift gate
 
 ### Bumping a schema version touches two hand-written validators the codegen never reaches
