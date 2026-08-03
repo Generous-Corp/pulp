@@ -1811,6 +1811,19 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # session has no Homebrew on PATH. The hook dies naming node, which
         # looks nothing like "the PATH is short".
         import toolpaths
+        # Say that we are about to wait, before waiting.
+        #
+        # This is the longest step by far -- minutes, all of it network -- and
+        # patch.py printed NOTHING around it. `generate.py` prints "asking the
+        # model", the app runs `patch.py build`, and the stage card reads the
+        # log for exactly that phrase, so in patch mode the Thinking chip
+        # could never light no matter what else was fixed. A real run sat on a
+        # 0-byte log for seven minutes with a healthy model call in flight.
+        #
+        # flush=True because the transcript is redirected to a file, and a
+        # progress line that arrives when the work finishes is not progress.
+        print(f"  asking the model{'' if attempt == 0 else f' (retry {attempt})'}…",
+              flush=True)
         # --strict-mcp-config, with no --mcp-config: load NO MCP servers.
         #
         # Without it the generator inherits whatever MCP servers the person
