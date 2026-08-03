@@ -5,6 +5,8 @@
 
 #include "forge/module_summary.hpp"
 
+#include "forge/project_store.hpp"
+
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
 #include <forge/patch_loader.hpp>
@@ -803,6 +805,74 @@ void ForgeModularShell::begin_mention() {
     mentions_.handle_text(text, text.size());
 }
 
+void ForgeModularShell::save_project_for(const std::string& artifact) {
+    // Put a generated patch in "My projects", so it can be found again.
+    //
+    // Nothing did this. The shell wrote a .vcv to the patches directory and
+    // stopped, so a generation the user watched succeed became unreachable the
+    // moment they left the screen -- worse than a missing feature, because the
+    // work visibly existed a second ago. The module cards that WERE on the
+    // shelf came from Forge's own store, not ours.
+    //
+    // The .vcv is COPIED INTO the project's own directory rather than
+    // referenced from GeneratedSource. A .vcv is JSON, so it would physically
+    // fit in `pulpgraph_json` -- and something downstream would eventually try
+    // to build a signal graph out of it and fail a long way from here. A file
+    // beside the entry needs no new field and cannot be mistaken for DSP.
+    if (artifact.empty()) return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(artifact, ec)) return;
+
+    forge::GeneratedSource src;
+    src.valid = true;
+    // The title comes from the artifact's own stem, which the generator
+    // already derived from the prompt ("design-a-complete-performance-...").
+    // Read back as words so the shelf shows a name rather than a slug.
+    std::string title = fs::path(artifact).stem().string();
+    for (auto& ch : title) if (ch == '-' || ch == '_') ch = ' ';
+    while (!title.empty() && (title.back() == ' ' || std::isdigit(
+               static_cast<unsigned char>(title.back()))))
+        title.pop_back();
+    src.title = title.empty() ? std::string("Untitled patch") : title;
+    src.chat_history = last_request_;
+
+    forge::ProjectStore store;
+    std::string err;
+    const auto id = store.save(src, {}, err);
+    if (id.empty()) {
+        pulp::runtime::log_info("Forge Modular: could not save the project: {}",
+                                err);
+        return;
+    }
+    // Beside the entry, under a fixed name, so opening it is a lookup rather
+    // than a guess.
+    const auto dest = store.base() / id / "patch.vcv";
+    fs::copy_file(artifact, dest, fs::copy_options::overwrite_existing, ec);
+    if (ec)
+        pulp::runtime::log_info("Forge Modular: saved the project but not its "
+                                "patch: {}", ec.message());
+    else
+        pulp::runtime::log_info("Forge Modular: saved project {}", id);
+}
+
+bool ForgeModularShell::open_project_entry(const std::string& id,
+                                           std::string& err) {
+    // Ours carry a Rack patch beside the entry. The base would try to bake and
+    // install a signal graph that is not there, so it is not consulted.
+    namespace fs = std::filesystem;
+    forge::ProjectStore store;
+    const auto patch = store.base() / id / "patch.vcv";
+    std::error_code ec;
+    if (!fs::exists(patch, ec)) {
+        // Not one of ours: fall back, so a project made by another Forge shell
+        // still opens if it ever lands in this store.
+        return forge::ForgeShell::open_project_entry(id, err);
+    }
+    err = open_patch_file(patch.string());
+    return err.empty();
+}
+
 std::string ForgeModularShell::submit_own(const std::string& prompt) {
     // Every route into a build lands here -- the Build button, Enter in the
     // prompt, a follow-up in the transcript -- so none of them can reach
@@ -1371,6 +1441,7 @@ void ForgeModularShell::on_poll() {
                     const bool shown =
                         !artifact.empty() && open_patch_file(artifact).empty();
                     if (!shown) c->set_skeleton_caption("built");
+                    save_project_for(artifact);
                     // Only offer to open it if there is something to open.
                     c->narrate(artifact.empty()
                                    ? std::string("Built.")

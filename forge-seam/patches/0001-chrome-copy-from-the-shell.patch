@@ -361,7 +361,7 @@ index 27f98d0..cdecceb 100644
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..ff2b01a 100644
+index c8101e1..b96a247 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -420,7 +420,19 @@ index c8101e1..ff2b01a 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +392,86 @@ public:
+@@ -221,7 +270,10 @@ public:
+     // Open library entry `id`: load its source, re-bake + gate + install into
+     // the slot, restore its saved macro values. Non-destructive on failure
+     // (typed reason in `err`); a kind mismatch is refused.
+-    bool open_project_entry(const std::string& id, std::string& err);
++    // Virtual: a shell whose artifact is NOT a Pulp signal graph has to open
++    // its own. Forge Modular's projects carry a Rack .vcv beside the entry,
++    // which the base's load path cannot bake or install.
++    virtual bool open_project_entry(const std::string& id, std::string& err);
+ 
+     // Remove the persisted generated build (the chrome's delete path): drop the
+     // retained source and reinstall the default hand-fed build so audio keeps
+@@ -343,6 +395,86 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.

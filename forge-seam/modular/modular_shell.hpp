@@ -217,6 +217,21 @@ public:
     /// Re-probe for Rack and update the pill. Called from the poll, throttled;
     /// exposed so a test need not wait for a timer.
     void refresh_rack_presence();
+
+    /// Put a finished patch in "My projects" so it can be found again.
+    void save_project_for(const std::string& artifact);
+
+    /// The same save the build path runs, reachable by a test. Exposed so the
+    /// test drives the REAL code rather than a reimplementation of it.
+    void save_project_for_test(const std::string& artifact) {
+        save_project_for(artifact);
+    }
+
+    /// Open one of OUR projects: the entry carries a Rack patch beside it, not
+    /// a Pulp signal graph, so the base's bake-and-install path cannot load it.
+    /// Access is not widened -- the chrome calls this through ForgeShell, where
+    /// it is public, and virtual dispatch does not consult the override's.
+    bool open_project_entry(const std::string& id, std::string& err) override;
     /// Put the mention keys on the root the window actually dispatches to.
     void ensure_key_hook();
 

@@ -39,6 +39,7 @@ using Catch::Approx;
 #include <pulp/state/store.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/canvas/svg_dom_cache.hpp>
+#include "forge/project_store.hpp"
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/view.hpp>
 
@@ -4100,6 +4101,51 @@ TEST_CASE("the Home guard reads nothing outside its own fixture", "[no-leak]") {
     const auto listings = std::distance(std::filesystem::directory_iterator(m),
                                         std::filesystem::directory_iterator{});
     CHECK(listings == 0);
+}
+
+TEST_CASE("a finished patch lands in My projects and reopens", "[projects]") {
+    // Before this, the shell wrote a .vcv to the patches directory and stopped.
+    // A grep of the whole modular shell for ProjectStore returned ONE hit, and
+    // it was a comment. So a generation the user watched succeed became
+    // unreachable the moment they left the screen -- and the module cards that
+    // WERE on the shelf came from Forge's own store, not ours.
+    HermeticProjects isolated;
+    const auto patch = a_real_patch();
+    if (patch.empty()) {
+        WARN("no real patch on this machine (skip, not a pass)");
+        return;
+    }
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    forge::ProjectStore lib;
+    const auto before = lib.list().size();
+
+    shell.save_project_for_test(patch);
+
+    const auto after = lib.list();
+    INFO("entries: " << before << " -> " << after.size());
+    REQUIRE(after.size() == before + 1);
+    // A NAME, not a slug. The shelf is read by a person looking for the thing
+    // they asked for.
+    CHECK_FALSE(after.front().name.empty());
+    CHECK(after.front().name.find('-') == std::string::npos);
+
+    // And it reopens. This is the half that makes the entry worth having: the
+    // patch travels WITH the entry, so opening is a lookup rather than a guess
+    // at where the generator happened to write it.
+    std::string err;
+    INFO("open said: " << err);
+    CHECK(shell.open_project_entry(after.front().id, err));
+    CHECK(err.empty());
 }
 
 TEST_CASE("a rack's panels are parsed once, not once per frame", "[perf]") {
