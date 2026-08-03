@@ -925,9 +925,12 @@ uses, or the golden warms a cache the real jobs never touch.
   Because this is a required context, the workflow still starts on every PR;
   `webclap_relevance.py` only skips the expensive setup/build/proof steps for an
   unrelated diff. Relevance is evaluated with the classifier fetched from the
-  PR's base SHA, includes both names of renamed files, and fails closed at the
-  GitHub API's 3,000-file cap. Keep the workflow and classifier self-changes on
-  the unconditional full-proof path, and never expose `GH_TOKEN` to the
+  trusted base SHA and includes both names of renamed files. Pull requests use
+  the files API and fail closed at its 3,000-file cap; merge groups diff the
+  complete speculative queue head against `merge_group.base_sha`, so an
+  unrelated queued group can take the same fast path without dropping the
+  required context. A missing base, failed fetch/diff, or workflow/classifier
+  self-change still runs the full proof. Never expose `GH_TOKEN` to the
   PR-controlled checkout while resolving relevance.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
