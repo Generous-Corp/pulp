@@ -224,6 +224,11 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                     return inspect::InspectorTargetedEventResult::EventUnavailable;
                 return server_->send_to_client(client_id, event, loss_owner);
             });
+        telemetry_.set_event_retirement_sink(
+            [this](std::string_view client_id, std::string_view loss_owner) {
+                if (server_)
+                    server_->cancel_client_events(client_id, loss_owner);
+            });
         refresh_value_channel_sources(true);
         audio_.set_config(inspect::AudioConfig{app_.config().sample_rate, app_.config().buffer_size,
                                                app_.config().input_channels,
@@ -350,6 +355,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         sources_detached_ = true;
         telemetry_.clear_attachment();
         telemetry_.set_event_sink({});
+        telemetry_.set_event_retirement_sink({});
         state_.set_value_channels(
             std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
@@ -521,17 +527,16 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
     void refresh_value_channel_sources(bool force) {
-        const auto generation = processor_.supports_editor_reload()
-            ? processor_.editor_reload_generation()
-            : 0;
-        if (!force && value_channel_generation_
-            && *value_channel_generation_ == generation) {
-            return;
-        }
-
         bool attachment_ready = !telemetry_enabled_;
-        processor_.visit_value_channels([this, &attachment_ready, generation](
-                                            view::ValueChannelSet* channels) {
+        std::uint64_t source_identity = 0;
+        processor_.visit_value_channels([this, &attachment_ready, &source_identity,
+                                         force](view::ValueChannelSet* channels) {
+            source_identity = channels ? channels->generation_identity() : 0;
+            if (!force && value_channel_source_identity_
+                && *value_channel_source_identity_ == source_identity) {
+                attachment_ready = true;
+                return;
+            }
             if (!channels) {
                 state_.set_value_channels(
                     std::span<const view::ValueChannelInfo>{});
@@ -553,10 +558,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             // for its attachment. A reload generation may legitimately retain
             // the same ValueChannelSet object; constructing the replacement
             // argument first would then fail against our own old claim.
-            const bool first_attempt_for_generation =
-                !failed_value_channel_generation_
-                || *failed_value_channel_generation_ != generation;
-            if (first_attempt_for_generation) {
+            const bool first_attempt_for_source =
+                !failed_value_channel_source_identity_
+                || *failed_value_channel_source_identity_ != source_identity;
+            if (first_attempt_for_source) {
                 telemetry_.clear_attachment();
                 ++value_channel_source_transitions_;
             }
@@ -565,8 +570,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             attachment_ready = candidate.valid()
                 && telemetry_.replace_attachment(std::move(candidate));
             if (!attachment_ready) {
-                if (!failed_value_channel_generation_ ||
-                    *failed_value_channel_generation_ != generation) {
+                if (!failed_value_channel_source_identity_ ||
+                    *failed_value_channel_source_identity_ != source_identity) {
                     runtime::log_error(
                         "Standalone: could not claim value-channel telemetry reader");
                 }
@@ -574,10 +579,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         });
         refresh_scripted_sources();
         if (attachment_ready) {
-            value_channel_generation_ = generation;
-            failed_value_channel_generation_.reset();
+            value_channel_source_identity_ = source_identity;
+            failed_value_channel_source_identity_.reset();
         } else {
-            failed_value_channel_generation_ = generation;
+            failed_value_channel_source_identity_ = source_identity;
         }
     }
 
@@ -590,10 +595,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             return;
         }
 
-        log_subscription_generation_ = generation;
         const auto callback_epoch =
             log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
-        bridge_.visit_scripted_ui([this, callback_epoch](view::ScriptedUiSession* current) {
+        bridge_.visit_scripted_ui([this, callback_epoch, generation](
+                                      view::ScriptedUiSession* current) {
             if (!current) {
                 log_subscription_ = 0;
                 log_subscription_session_identity_.reset();
@@ -625,6 +630,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                     }
                 });
             log_subscription_session_identity_ = current->identity();
+            log_subscription_generation_ = generation;
         });
     }
 
@@ -681,8 +687,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     std::uint64_t log_subscription_ = 0;
     std::optional<std::uint64_t> log_subscription_generation_;
     std::optional<std::uint64_t> log_subscription_session_identity_;
-    std::optional<std::uint64_t> value_channel_generation_;
-    std::optional<std::uint64_t> failed_value_channel_generation_;
+    std::optional<std::uint64_t> value_channel_source_identity_;
+    std::optional<std::uint64_t> failed_value_channel_source_identity_;
     std::uint64_t value_channel_source_transitions_ = 0;
     std::uint64_t value_channel_attachment_attempts_ = 0;
     bool active_ = false;

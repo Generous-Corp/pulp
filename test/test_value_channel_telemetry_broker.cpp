@@ -150,7 +150,6 @@ TEST_CASE("event snapshots retain the newest bounded suffix and expose loss",
     config.max_events_per_channel = 2;
     ValueChannelTelemetryBroker broker(config);
     REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
-
     const std::array<pulp::view::ValueEvent, 3> first{{
         {.frame_index = 1, .value = 1.0f},
         {.frame_index = 2, .value = 2.0f},
@@ -259,6 +258,11 @@ TEST_CASE("telemetry subscriptions are contextual bounded and ID scoped",
     config.max_vector_values = 4;
     ValueChannelTelemetryBroker broker(config);
     REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
+    std::vector<std::pair<std::string, std::string>> retired;
+    broker.set_event_retirement_sink(
+        [&](std::string_view client, std::string_view owner) {
+            retired.emplace_back(client, owner);
+        });
 
     std::array<float, 8> samples{1, 2, 3, 4, 5, 6, 7, 8};
     vector->publish(samples.data(), static_cast<int>(samples.size()));
@@ -293,6 +297,8 @@ TEST_CASE("telemetry subscriptions are contextual bounded and ID scoped",
     const auto replacement_id = std::string(json(replaced)["subscriptionId"].getString());
     CHECK(replacement_id != first_id);
     CHECK(broker.subscription_count() == 1);
+    REQUIRE(retired.size() == 1);
+    CHECK((retired[0] == std::pair{std::string("client-a"), first_id}));
 
     auto mismatch = broker.handle(InspectorRequestContext{.client_id = "client-a"},
                                   request(4, pulp::inspect::methods::kTelemetryUnsubscribe,
@@ -307,6 +313,8 @@ TEST_CASE("telemetry subscriptions are contextual bounded and ID scoped",
     REQUIRE_FALSE(removed.is_error);
     CHECK(json(removed)["unsubscribed"].getWithDefault(false));
     CHECK(broker.subscription_count() == 0);
+    REQUIRE(retired.size() == 2);
+    CHECK((retired[1] == std::pair{std::string("client-a"), replacement_id}));
 
     auto bad_cap = broker.handle(InspectorRequestContext{.client_id = "client-a"},
                                  request(6, pulp::inspect::methods::kTelemetrySubscribe,

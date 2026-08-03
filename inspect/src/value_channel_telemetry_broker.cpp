@@ -548,6 +548,7 @@ struct ValueChannelTelemetryBroker::Impl {
     Config config;
     Clock clock;
     EventSink sink;
+    EventRetirementSink retirement_sink;
     view::ValueChannelTelemetryAttachment attachment;
     std::vector<ChannelCache> channels;
     std::unordered_map<std::string, std::size_t> channel_by_name;
@@ -570,6 +571,11 @@ ValueChannelTelemetryBroker::operator=(ValueChannelTelemetryBroker&&) noexcept =
 
 void ValueChannelTelemetryBroker::set_event_sink(EventSink sink) {
     impl_->sink = std::move(sink);
+}
+
+void ValueChannelTelemetryBroker::set_event_retirement_sink(
+    EventRetirementSink sink) {
+    impl_->retirement_sink = std::move(sink);
 }
 
 bool ValueChannelTelemetryBroker::replace_attachment(
@@ -644,8 +650,11 @@ InspectorMessage ValueChannelTelemetryBroker::handle(const InspectorRequestConte
             return make_error(request.id, "Telemetry unsubscribe exceeds the wire limit",
                               "telemetry_payload_too_large");
         }
-        if (removed)
+        if (removed) {
+            if (impl_->retirement_sink)
+                impl_->retirement_sink(client_id, found->second.id);
             impl_->subscriptions.erase(found);
+        }
         return response;
     }
     if (!impl_->attachment.valid()) {
@@ -721,6 +730,10 @@ InspectorMessage ValueChannelTelemetryBroker::handle(const InspectorRequestConte
     if (encode_message(response).size() > impl_->config.max_wire_bytes) {
         return make_error(request.id, "Telemetry subscription exceeds the wire limit",
                           "telemetry_payload_too_large");
+    }
+    if (const auto previous = impl_->subscriptions.find(client_id);
+        previous != impl_->subscriptions.end() && impl_->retirement_sink) {
+        impl_->retirement_sink(client_id, previous->second.id);
     }
     impl_->subscriptions.insert_or_assign(client_id, std::move(subscription));
     return response;
@@ -801,6 +814,8 @@ void ValueChannelTelemetryBroker::poll() {
         if ((wire_truncated && queued) || result == InspectorTargetedEventResult::ClientNotFound ||
             result == InspectorTargetedEventResult::ReliableOverflow ||
             result == InspectorTargetedEventResult::MessageTooLarge) {
+            if (impl_->retirement_sink)
+                impl_->retirement_sink(iterator->first, subscription.id);
             iterator = impl_->subscriptions.erase(iterator);
         } else {
             ++iterator;
@@ -809,7 +824,12 @@ void ValueChannelTelemetryBroker::poll() {
 }
 
 void ValueChannelTelemetryBroker::disconnect(std::string_view client_id) {
-    impl_->subscriptions.erase(std::string(client_id));
+    const auto found = impl_->subscriptions.find(std::string(client_id));
+    if (found == impl_->subscriptions.end())
+        return;
+    if (impl_->retirement_sink)
+        impl_->retirement_sink(found->first, found->second.id);
+    impl_->subscriptions.erase(found);
 }
 
 std::size_t ValueChannelTelemetryBroker::subscription_count() const noexcept {

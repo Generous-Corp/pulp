@@ -21,6 +21,8 @@ class ValueChannelTelemetryBroker {
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
     using EventSink = std::function<InspectorTargetedEventResult(
         std::string_view client_id, const InspectorMessage& event, std::string_view loss_owner)>;
+    using EventRetirementSink = std::function<void(
+        std::string_view client_id, std::string_view loss_owner)>;
 
     struct Config {
         double default_rate_hz = 15.0;
@@ -41,6 +43,7 @@ class ValueChannelTelemetryBroker {
     ValueChannelTelemetryBroker& operator=(const ValueChannelTelemetryBroker&) = delete;
 
     void set_event_sink(EventSink sink);
+    void set_event_retirement_sink(EventRetirementSink sink);
 
     /// Replace the sole-reader attachment. An invalid attachment explicitly
     /// clears the prior source and returns false. Subscriptions retain their

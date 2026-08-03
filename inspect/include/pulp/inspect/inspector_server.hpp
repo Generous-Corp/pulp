@@ -120,6 +120,10 @@ public:
         const InspectorMessage& event,
         std::string_view loss_owner = {});
 
+    /// Remove queued targeted events owned by one retired client stream.
+    std::size_t cancel_client_events(std::string_view client_id,
+                                     std::string_view loss_owner);
+
     /// Number of connected clients.
     int client_count() const;
 

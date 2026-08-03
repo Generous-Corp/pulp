@@ -497,6 +497,8 @@ public:
         std::string_view client_id,
         const InspectorMessage& event,
         std::string_view loss_owner);
+    std::size_t cancel_client_events(std::string_view client_id,
+                                     std::string_view loss_owner);
     int client_count();
     void on_message_received(const std::string& data,
                              events::InterprocessConnection* sender);
@@ -535,6 +537,11 @@ InspectorTargetedEventResult InspectorServer::send_to_client(
     const InspectorMessage& event,
     std::string_view loss_owner) {
     return impl_->send_to_client(client_id, event, loss_owner);
+}
+
+std::size_t InspectorServer::cancel_client_events(
+    std::string_view client_id, std::string_view loss_owner) {
+    return impl_->cancel_client_events(client_id, loss_owner);
 }
 
 int InspectorServer::client_count() const {
@@ -975,6 +982,24 @@ InspectorTargetedEventResult InspectorServer::Impl::send_to_client(
     if (overflowed)
         overflowed->disconnect();
     return result;
+}
+
+std::size_t InspectorServer::Impl::cancel_client_events(
+    std::string_view client_id, std::string_view loss_owner) {
+    if (client_id.empty() || loss_owner.empty())
+        return 0;
+    const auto generation = session_generation.load(std::memory_order_acquire);
+    std::lock_guard lock(clients_mutex);
+    if (session_generation.load(std::memory_order_acquire) != generation)
+        return 0;
+    for (const auto& [raw, client] : clients) {
+        (void)raw;
+        if (client->authenticated && client->generation == generation
+            && client->client_id == client_id) {
+            return client->outbound->cancel_targeted_owner(loss_owner);
+        }
+    }
+    return 0;
 }
 
 int InspectorServer::Impl::client_count() {

@@ -71,9 +71,11 @@ public:
         return EventQueuePushResult::Queued;
     }
 
-    std::optional<Value> take_front() {
+    std::optional<Value> take_front(std::string* owner = nullptr) {
         if (entries_.empty())
             return std::nullopt;
+        if (owner)
+            *owner = entries_.front().owner;
         auto value = std::move(entries_.front().value);
         entries_.pop_front();
         return value;
@@ -81,6 +83,11 @@ public:
 
     bool empty() const { return entries_.empty(); }
     std::size_t size() const { return entries_.size(); }
+    std::size_t erase_owner(std::string_view owner) {
+        const auto before = entries_.size();
+        std::erase_if(entries_, [&](const auto& entry) { return entry.owner == owner; });
+        return before - entries_.size();
+    }
     void clear() { entries_.clear(); }
 
 private:

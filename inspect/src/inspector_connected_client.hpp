@@ -76,6 +76,15 @@ public:
         return result;
     }
 
+    std::size_t cancel_targeted_owner(std::string_view owner) {
+        std::unique_lock lock(mutex_);
+        const auto removed = targeted_messages_.erase_owner(owner);
+        cv_.wait(lock, [this, owner] {
+            return stopping_ || active_targeted_owner_ != owner;
+        });
+        return removed;
+    }
+
     void request_stop() {
         {
             std::lock_guard lock(mutex_);
@@ -117,16 +126,19 @@ private:
             if (stopping_)
                 break;
             std::optional<std::string> message;
+            bool targeted = false;
             if (!messages_.empty() && !targeted_messages_.empty()) {
-                message = prefer_targeted
-                    ? targeted_messages_.take_front()
+                targeted = prefer_targeted;
+                message = targeted
+                    ? targeted_messages_.take_front(&active_targeted_owner_)
                     : messages_.take_front();
                 prefer_targeted = !prefer_targeted;
             } else if (!messages_.empty()) {
                 message = messages_.take_front();
                 prefer_targeted = true;
             } else {
-                message = targeted_messages_.take_front();
+                targeted = true;
+                message = targeted_messages_.take_front(&active_targeted_owner_);
                 prefer_targeted = false;
             }
             if (!message)
@@ -143,9 +155,15 @@ private:
                 stopping_ = true;
                 messages_.clear();
                 targeted_messages_.clear();
+                active_targeted_owner_.clear();
+                cv_.notify_all();
                 break;
             }
             lock.lock();
+            if (targeted) {
+                active_targeted_owner_.clear();
+                cv_.notify_all();
+            }
         }
     }
 
@@ -156,6 +174,7 @@ private:
     BoundedEventQueue<std::string> messages_;
     BoundedEventQueue<std::string> targeted_messages_;
     std::thread worker_;
+    std::string active_targeted_owner_;
     bool stopping_ = false;
 };
 
