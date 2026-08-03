@@ -103,7 +103,8 @@ def _run(script: str, env: dict[str, str]) -> tuple[int, dict[str, str], str]:
         full["GH_TOKEN"] = "x"
         full["GITHUB_SHA"] = "EVENT_MERGE"
         for key in ("DISPATCH_PR", "PR_BASE", "PR_SOURCE_HEAD", "MERGE_BASE",
-                    "MERGE_HEAD", "EVENT_BASE", "EVENT_HEAD", "EVENT_NUMBER"):
+                    "MERGE_HEAD", "EVENT_BASE", "EVENT_HEAD", "EVENT_NUMBER",
+                    "EVENT_STATE"):
             full[key] = ""
         full.update(env)
 
@@ -125,9 +126,20 @@ class TrustedGateResolve(unittest.TestCase):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request_target",
             "EVENT_BASE": "B", "EVENT_HEAD": "H", "EVENT_NUMBER": "7",
+            "EVENT_STATE": "open",
         })
         self.assertEqual(rc, 0)
         self.assertEqual(out, {"base_sha": "B", "head_sha": "H", "number": "7"})
+
+    def test_event_path_refuses_a_closed_pr_before_emitting_outputs(self):
+        rc, out, err = _run(self.script(), {
+            "GITHUB_EVENT_NAME": "pull_request_target",
+            "EVENT_BASE": "B", "EVENT_HEAD": "H", "EVENT_NUMBER": "7",
+            "EVENT_STATE": "closed",
+        })
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, {})
+        self.assertIn("closed", err)
 
     def test_dispatch_path_resolves_from_the_api(self):
         rc, out, _ = _run(self.script(), {
@@ -203,6 +215,36 @@ class DispatchIsDeclared(unittest.TestCase):
                 "wedged run can only be recovered by pushing a commit",
             )
             self.assertIn("pr_number", on["workflow_dispatch"]["inputs"])
+
+
+class TrustedGateScheduling(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            raise unittest.SkipTest("PyYAML not installed")
+        cls.workflow = yaml.safe_load(
+            (WORKFLOWS / "vellum-trusted-gate.yml").read_text()
+        )
+
+    def test_concurrency_deduplicates_one_pr_without_cancelling_active_gate(self):
+        concurrency = self.workflow["concurrency"]
+        self.assertEqual(
+            concurrency["group"],
+            "vellum-trusted-${{ github.event.pull_request.number || "
+            "inputs.pr_number || github.ref }}",
+        )
+        self.assertIs(concurrency["cancel-in-progress"], False)
+
+    def test_closed_target_event_is_filtered_before_any_step_runs(self):
+        condition = self.workflow["jobs"]["trusted-gate"]["if"]
+        self.assertIn("github.event.pull_request.state == 'open'", condition)
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+
+    def test_merge_group_job_remains_independent(self):
+        merge_job = self.workflow["jobs"]["trusted-merge-group"]
+        self.assertEqual(merge_job["if"], "github.event_name == 'merge_group'")
 
 
 if __name__ == "__main__":

@@ -586,3 +586,35 @@ TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
     auto args = assemble_launch_args(r);
     REQUIRE(args == std::vector<std::string>{"--standalone"});
 }
+
+TEST_CASE("pulp run parses Development Inspector launcher profiles",
+          "[cli][run][inspect]") {
+    auto develop = parse_run_options({"--inspect"});
+    REQUIRE(develop.error.empty());
+    REQUIRE(develop.inspector_profile == "develop");
+
+    auto observe = parse_run_options({"--inspect=observe"});
+    REQUIRE(observe.error.empty());
+    REQUIRE(observe.inspector_profile == "observe");
+
+    auto custom = parse_run_options({"--inspect=custom",
+                                     "--inspect-capability", "session.describe",
+                                     "--inspect-capability", "session.control",
+                                     "--inspect-capability=state.write"});
+    REQUIRE(custom.error.empty());
+    REQUIRE(custom.inspector_profile == "custom");
+    REQUIRE(custom.inspector_capabilities == std::vector<std::string>{
+        "session.describe", "session.control", "state.write"});
+
+    REQUIRE_FALSE(parse_run_options({"--inspect=invalid"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=develop",
+                                     "--inspect-capability", "session.describe"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
+                                     "--inspect-capability", "state.write"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect-capability="}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom", "--inspect-capability",
+                                     "state.write,session.control"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--inspect=custom",
+                                     "--inspect-capability=state.write,session.control"}).error.empty());
+}

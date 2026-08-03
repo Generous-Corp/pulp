@@ -110,6 +110,21 @@ def main() -> int:
     if "pulp_compat" not in names:
         return fail(f"tools/list response missing pulp_compat: {tools_list!r}")
 
+    timeline_names = {
+        "pulp_timeline_project_open", "pulp_timeline_command_apply", "pulp_timeline_diff",
+        "pulp_timeline_undo", "pulp_timeline_redo", "pulp_timeline_validate",
+        "pulp_timeline_explain", "pulp_timeline_render", "pulp_timeline_export",
+        "pulp_timeline_import",
+    }
+    advertised_timeline_names = timeline_names & names
+    if advertised_timeline_names and advertised_timeline_names != timeline_names:
+        return fail(
+            "tools/list exposed only part of the Timeline surface: "
+            f"{sorted(advertised_timeline_names)!r}"
+        )
+    if not advertised_timeline_names:
+        return 0
+
     # A handle from a terminated server must never alias the first session in
     # its replacement. These are two real OS processes, not two stores in one
     # test binary, so this pins the restart boundary clients actually cross.

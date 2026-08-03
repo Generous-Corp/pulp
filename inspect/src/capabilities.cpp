@@ -6,10 +6,11 @@
 namespace pulp::inspect {
 namespace {
 
-#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable) \
+#define PULP_INSPECT_CAPABILITY( \
+    symbol, id, risk, observe, develop, grantable, publication_bound) \
     InspectorCapabilityDescriptor{InspectorCapability::symbol, id, \
                                   InspectorCapabilityRisk::risk, observe, develop, \
-                                  grantable},
+                                  grantable, publication_bound},
 constexpr auto kCapabilities = std::to_array<InspectorCapabilityDescriptor>({
 #include <pulp/inspect/capability_definitions.inc>
 });
@@ -17,14 +18,16 @@ constexpr auto kCapabilities = std::to_array<InspectorCapabilityDescriptor>({
 
 #define PULP_IF_0(...)
 #define PULP_IF_1(...) __VA_ARGS__
-#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable) \
+#define PULP_INSPECT_CAPABILITY( \
+    symbol, id, risk, observe, develop, grantable, publication_bound) \
     PULP_IF_##observe(InspectorCapability::symbol,)
 constexpr auto kObserveCapabilities = std::to_array<InspectorCapability>({
 #include <pulp/inspect/capability_definitions.inc>
 });
 #undef PULP_INSPECT_CAPABILITY
 
-#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable) \
+#define PULP_INSPECT_CAPABILITY( \
+    symbol, id, risk, observe, develop, grantable, publication_bound) \
     PULP_IF_##develop(InspectorCapability::symbol,)
 constexpr auto kDevelopCapabilities = std::to_array<InspectorCapability>({
 #include <pulp/inspect/capability_definitions.inc>
@@ -154,6 +157,22 @@ bool capability_requires_controller_lease(InspectorCapability capability) {
     const auto risk = capability_risk(capability);
     return risk == InspectorCapabilityRisk::Control ||
            risk == InspectorCapabilityRisk::HighRisk;
+}
+
+bool capability_requires_publication_binding(
+    InspectorCapability capability) {
+    for (const auto& descriptor : kCapabilities) {
+        if (descriptor.capability == capability)
+            return descriptor.publication_bound;
+    }
+    return false;
+}
+
+bool inspector_event_is_lossy(std::string_view method) {
+    const auto* descriptor = find_inspector_method(method);
+    return descriptor &&
+           descriptor->kind == InspectorMethodKind::Event &&
+           descriptor->capability == InspectorCapability::TelemetryStream;
 }
 
 } // namespace pulp::inspect

@@ -14,13 +14,14 @@ printf '%s\n' "${RELEASE_BOT_SSH_SIGNING_KEY}" > "${key_path}"
 chmod 600 "${key_path}"
 
 ssh-keygen -y -f "${key_path}" > /dev/null
+ssh_program="$(command -v ssh-keygen)"
 
-git config --global gpg.format ssh
-git config --global --unset-all gpg.ssh.program || true
-git config --global user.signingkey "${key_path}"
-git config --global user.name "${RELEASE_BOT_NAME}"
-git config --global user.email "${RELEASE_BOT_EMAIL}"
-git config --global commit.gpgsign true
-git config --global tag.gpgSign true
+git config --local gpg.format ssh
+git config --local gpg.ssh.program "${ssh_program}"
+git config --local user.signingkey "${key_path}"
+git config --local user.name "${RELEASE_BOT_NAME}"
+git config --local user.email "${RELEASE_BOT_EMAIL}"
+git config --local commit.gpgsign true
+git config --local tag.gpgSign true
 
 echo "::notice::Configured SSH signing for ${RELEASE_BOT_NAME} <${RELEASE_BOT_EMAIL}>."

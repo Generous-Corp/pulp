@@ -120,6 +120,13 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"clip_path",
          {{"cpp", "swift"},
           "js+native lower it; cpp/swift deferred"}},
+        {"clip_rect",
+         {{"js", "swift"},
+          "cpp+native lower it to View::set_ancestor_clip_rect; the JS lane "
+          "needs a setClipRect bridge verb (and its generated typings + "
+          "web-compat mapping) before it can, and SwiftUI clip-shape mapping "
+          "is deferred. Both lanes degrade by NOT clipping, which draws too "
+          "much rather than losing a node"}},
         {"mask",
          {{"cpp", "swift", "native"}, "js-only; setMask bridge consumer, others deferred"}},
         {"mask_image",

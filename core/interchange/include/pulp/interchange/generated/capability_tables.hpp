@@ -124,6 +124,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
+        {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
         {ImportLevel::None, "", ""}, // sequence.section-role
         {ImportLevel::None, "", ""}, // context.chord-bass
         {ImportLevel::None, "", ""}, // context.chord-extension
@@ -183,6 +184,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
+        {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
         {ImportLevel::None, "", ""}, // sequence.section-role
         {ImportLevel::None, "", ""}, // context.chord-bass
         {ImportLevel::None, "", ""}, // context.chord-extension
@@ -245,6 +247,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"}, // clip.fade-shape
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"}, // clip.midi-expression-lane
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject arrangement markers carry a name and span but no typed structural role"}, // sequence.section-role
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries quality and root but no bass"}, // context.chord-bass
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the DAWproject chord representation carries no added scale degrees"}, // context.chord-extension
@@ -304,6 +307,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "tempo values are rounded to the nearest representable integer microseconds per quarter note"}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"}, // clip.fade-shape
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"}, // clip.midi-expression-lane
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer emits a region's name and span but not the part it names"}, // sequence.section-role
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-bass
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-extension

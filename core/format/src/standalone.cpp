@@ -22,19 +22,18 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <string_view>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
 
-// The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
-// compile flag (root CMake option, default ON for dev/examples builds;
-// release/standalone-ship builds set it OFF) so a shipped standalone app does
-// not expose the developer inspector to end users. It additionally requires
-// PULP_HAS_INSPECT (GPU + desktop, the link gate) and a non-Android platform.
-// PULP_STANDALONE_INSPECTOR folds all three into one condition used by every
-// inspector block below.
+// The root component gate defines PULP_ENABLE_INSPECTOR for this standalone
+// authoring target and links the visual overlay here, never through
+// pulp-format. PULP_HAS_INSPECT records that the desktop GPU overlay target
+// actually exists. PULP_STANDALONE_INSPECTOR folds those conditions with the
+// platform guard for every inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
 #endif
@@ -45,7 +44,7 @@
 #endif
 
 #if PULP_STANDALONE_INSPECTOR
-#include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/format/detail/standalone_inspector.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
@@ -61,6 +60,209 @@
 #include <pulp/runtime/trace_session.hpp>
 
 namespace pulp::format {
+
+detail::StandaloneTestInputResult detail::StandaloneTestInputHost::inject_note(
+    StandaloneTestMidiNote note) {
+    if (note.channel == 0 || note.channel > active_notes_.size() ||
+        note.note >= active_notes_.front().size() || note.velocity > 127) {
+        return StandaloneTestInputResult::InvalidArgument;
+    }
+    const QueuedNote queued{
+        .note = note,
+        .generation = midi_generation_.load(std::memory_order_acquire),
+    };
+    return midi_queue_.try_push(queued)
+        ? StandaloneTestInputResult::Applied
+        : StandaloneTestInputResult::QueueFull;
+}
+
+detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transport(
+    const StandaloneTestTransportUpdate& update) {
+    if (!update.playing && !update.position_samples && !update.tempo_bpm)
+        return StandaloneTestInputResult::InvalidArgument;
+    if (update.position_samples && *update.position_samples < 0)
+        return StandaloneTestInputResult::InvalidArgument;
+    if (update.tempo_bpm &&
+        (!std::isfinite(*update.tempo_bpm) ||
+         *update.tempo_bpm < kMinimumTempoBpm ||
+         *update.tempo_bpm > kMaximumTempoBpm)) {
+        return StandaloneTestInputResult::InvalidArgument;
+    }
+
+    if (update.playing)
+        control_transport_.playing = *update.playing;
+    if (update.tempo_bpm)
+        control_transport_.tempo_bpm = *update.tempo_bpm;
+    if (update.position_samples) {
+        control_transport_.position_samples = *update.position_samples;
+        ++control_transport_.position_revision;
+    }
+    transport_commands_.write(control_transport_);
+    return StandaloneTestInputResult::Applied;
+}
+
+void detail::StandaloneTestInputHost::release_test_input() noexcept {
+    midi_generation_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+detail::StandaloneTestTransportState
+detail::StandaloneTestInputHost::transport_snapshot() const noexcept {
+    return observed_transport_.read();
+}
+
+std::uint64_t
+detail::StandaloneTestInputHost::midi_overflow_count() const noexcept {
+    return midi_queue_.overflow_count();
+}
+
+void detail::StandaloneTestInputHost::prepare(bool playing,
+                                               double tempo_bpm) noexcept {
+    while (midi_queue_.try_pop()) {}
+    midi_queue_.reset_overflow_count();
+    const auto generation =
+        midi_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    audio_midi_generation_ = generation;
+    active_notes_ = {};
+    note_release_pending_ = false;
+
+    const auto previous = observed_transport_.read();
+    control_transport_.playing = playing;
+    control_transport_.tempo_bpm = tempo_bpm;
+    control_transport_.position_samples =
+        prepared_ ? previous.position_samples : 0;
+    ++control_transport_.position_revision;
+    transport_commands_.write(control_transport_);
+    audio_transport_ = {
+        .playing = playing,
+        .tempo_bpm = tempo_bpm,
+        .position_samples = control_transport_.position_samples,
+    };
+    audio_position_revision_ = control_transport_.position_revision;
+    observed_transport_.write(audio_transport_);
+    prepared_ = true;
+}
+
+bool detail::StandaloneTestInputHost::release_active_notes(
+    midi::MidiBuffer& out, int sample_offset) noexcept {
+    bool all_released = true;
+    for (std::size_t channel = 0; channel < active_notes_.size(); ++channel) {
+        for (std::size_t note = 0; note < active_notes_[channel].size(); ++note) {
+            if (!active_notes_[channel][note])
+                continue;
+            auto event = midi::MidiEvent::note_off(
+                static_cast<std::uint8_t>(channel),
+                static_cast<std::uint8_t>(note));
+            event.sample_offset = sample_offset;
+            if (out.add(event))
+                active_notes_[channel][note] = false;
+            else
+                all_released = false;
+        }
+    }
+    return all_released;
+}
+
+std::size_t detail::StandaloneTestInputHost::drain_midi_into(
+    midi::MidiBuffer& out, int block_size_samples) noexcept {
+    const int release_offset = std::max(0, block_size_samples - 1);
+    auto generation = midi_generation_.load(std::memory_order_acquire);
+    if (generation != audio_midi_generation_) {
+        audio_midi_generation_ = generation;
+        note_release_pending_ = true;
+    }
+    if (note_release_pending_) {
+        note_release_pending_ =
+            !release_active_notes(out, /*sample_offset=*/0);
+        if (note_release_pending_)
+            return 0;
+    }
+
+    std::size_t drained = 0;
+    while (auto queued = midi_queue_.try_pop()) {
+        generation = midi_generation_.load(std::memory_order_acquire);
+        if (generation != audio_midi_generation_) {
+            audio_midi_generation_ = generation;
+            note_release_pending_ = true;
+        }
+        if (note_release_pending_) {
+            note_release_pending_ =
+                !release_active_notes(out, release_offset);
+            if (note_release_pending_)
+                return drained;
+        }
+        if (queued->generation != audio_midi_generation_) {
+            // A controlled client releases its short-lived lease immediately
+            // after Test.injectMidi returns. If audio has not consumed that
+            // accepted note-on yet, preserve the truthful delivery contract as
+            // a bounded one-block pulse instead of silently discarding it.
+            // Stale note-offs are safe to drop because generation release
+            // already emitted note-offs for every note that reached DSP.
+            const auto& stale = queued->note;
+            if (stale.kind != StandaloneTestMidiKind::NoteOn ||
+                stale.velocity == 0) {
+                continue;
+            }
+            const auto channel =
+                static_cast<std::uint8_t>(stale.channel - 1);
+            auto note_on = midi::MidiEvent::note_on(
+                channel, stale.note, stale.velocity);
+            if (!out.add(note_on))
+                continue;
+            ++drained;
+            active_notes_[channel][stale.note] = true;
+            auto note_off = midi::MidiEvent::note_off(channel, stale.note);
+            note_off.sample_offset = release_offset;
+            if (out.add(note_off))
+                active_notes_[channel][stale.note] = false;
+            continue;
+        }
+
+        const auto& note = queued->note;
+        const auto channel = static_cast<std::uint8_t>(note.channel - 1);
+        auto event = note.kind == StandaloneTestMidiKind::NoteOn
+            ? midi::MidiEvent::note_on(channel, note.note, note.velocity)
+            : midi::MidiEvent::note_off(channel, note.note, note.velocity);
+        if (!out.add(event))
+            continue;
+        ++drained;
+        active_notes_[channel][note.note] =
+            note.kind == StandaloneTestMidiKind::NoteOn && note.velocity != 0;
+    }
+
+    generation = midi_generation_.load(std::memory_order_acquire);
+    if (generation != audio_midi_generation_) {
+        audio_midi_generation_ = generation;
+        note_release_pending_ = true;
+    }
+    if (note_release_pending_)
+        note_release_pending_ = !release_active_notes(out, release_offset);
+    return drained;
+}
+
+detail::StandaloneTestTransportState
+detail::StandaloneTestInputHost::begin_audio_block() noexcept {
+    const auto command = transport_commands_.read();
+    audio_transport_.playing = command.playing;
+    audio_transport_.tempo_bpm = command.tempo_bpm;
+    if (command.position_revision != audio_position_revision_) {
+        audio_transport_.position_samples = command.position_samples;
+        audio_position_revision_ = command.position_revision;
+    }
+    return audio_transport_;
+}
+
+void detail::StandaloneTestInputHost::end_audio_block(
+    int block_size_samples) noexcept {
+    if (audio_transport_.playing && block_size_samples > 0) {
+        const auto frames = static_cast<std::int64_t>(block_size_samples);
+        audio_transport_.position_samples =
+            audio_transport_.position_samples >
+                    std::numeric_limits<std::int64_t>::max() - frames
+                ? std::numeric_limits<std::int64_t>::max()
+                : audio_transport_.position_samples + frames;
+    }
+    observed_transport_.write(audio_transport_);
+}
 
 namespace {
 
@@ -127,6 +329,7 @@ void StandaloneApp::prepare_render_state() {
     midi_out_.reserve(detail::kStandaloneMidiBufferEventCapacity);
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
+    test_input_host_.prepare(config_.transport_playing, config_.tempo_bpm);
 
     // Pre-allocate test signal buffer and pointer arrays (no audio-thread allocation)
     test_signal_.set_sample_rate(config_.sample_rate);
@@ -213,6 +416,7 @@ void StandaloneApp::render_audio_block(
     const audio::BufferView<const float>& input,
     audio::BufferView<float>& output,
     const audio::CallbackContext& ctx) {
+        const auto transport = test_input_host_.begin_audio_block();
         // Hard guard: the processor and all scratch buffers were prepared for at
         // most `max_callback_block_` frames (see start()). A block beyond that —
         // which would indicate a backend not honoring MaximumFramesPerSlice —
@@ -236,10 +440,7 @@ void StandaloneApp::render_audio_block(
             // The normal path advances by ctx.buffer_size after process();
             // skipping it here would lag transport position (and the MIDI
             // timeline derived from it) by exactly the silenced frames.
-            if (config_.transport_playing) {
-                transport_position_samples_.fetch_add(
-                    ctx.buffer_size, std::memory_order_relaxed);
-            }
+            test_input_host_.end_audio_block(ctx.buffer_size);
             return;
         }
 
@@ -253,14 +454,14 @@ void StandaloneApp::render_audio_block(
         midi_in.clear_sysex();
         midi_out.clear();
         midi_out.clear_sysex();
+        test_input_host_.drain_midi_into(midi_in, ctx.buffer_size);
         detail::drain_standalone_midi_input(hardware_midi_queue_, midi_in);
 
         // Drain UI-thread MIDI into this block at the correct sample offsets.
         // The standalone host treats its own audio clock as the master
         // timeline: block_start_seconds is
         // `transport_position_samples / sample_rate`.
-        const int64_t block_start_samples =
-            transport_position_samples_.load(std::memory_order_relaxed);
+        const int64_t block_start_samples = transport.position_samples;
         const double block_start_seconds =
             ctx.sample_rate > 0.0
                 ? static_cast<double>(block_start_samples) / ctx.sample_rate
@@ -291,31 +492,6 @@ void StandaloneApp::render_audio_block(
             }
         };
 #endif
-
-        if (test_signal_.is_active() && config_.route_test_signal_to_output) {
-            const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
-            for (size_t c = 0; c < out_ch; ++c)
-                direct_output_ptrs_[c] = output.channel_ptr(c);
-            test_signal_.fill(direct_output_ptrs_.data(),
-                              static_cast<int>(out_ch),
-                              ctx.buffer_size);
-            for (size_t c = 0; c < out_ch && c < output_meter_ptrs_.size(); ++c)
-                output_meter_ptrs_[c] = output.channel_ptr(c);
-            if (out_ch > 0) {
-                output_meter_bridge_.analyze_and_push(
-                    output_meter_ptrs_.data(),
-                    static_cast<int>(out_ch),
-                    ctx.buffer_size);
-            }
-#if PULP_ENABLE_AUDIO_PROBES
-            analyze_output_probe();
-#endif
-            if (config_.transport_playing) {
-                transport_position_samples_.fetch_add(
-                    ctx.buffer_size, std::memory_order_relaxed);
-            }
-            return;
-        }
 
         // Determine actual input: test signal overrides hardware input
         const audio::BufferView<const float>* actual_input = &input;
@@ -363,23 +539,23 @@ void StandaloneApp::render_audio_block(
         proc_ctx.process_mode = ProcessMode::Realtime;
         proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
-        proc_ctx.is_playing = config_.transport_playing;
+        proc_ctx.is_playing = transport.playing;
         proc_ctx.is_recording = config_.transport_recording;
-        proc_ctx.tempo_bpm = config_.tempo_bpm;
+        proc_ctx.tempo_bpm = transport.tempo_bpm;
         proc_ctx.time_sig_numerator = config_.time_sig_numerator;
         proc_ctx.time_sig_denominator = config_.time_sig_denominator;
         proc_ctx.transport_validity.set(TransportField::SamplePosition);
         proc_ctx.transport_validity.set(TransportField::Playing);
         proc_ctx.transport_validity.set(TransportField::Recording);
         proc_ctx.transport_validity.set(TransportField::Looping);
-        if (config_.tempo_bpm > 0.0) {
+        if (transport.tempo_bpm > 0.0) {
             proc_ctx.transport_validity.set(TransportField::Tempo);
         }
         if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
             proc_ctx.transport_validity.set(TransportField::TimeSignature);
         }
-        if (config_.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
-            const double seconds_per_beat = 60.0 / config_.tempo_bpm;
+        if (transport.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
+            const double seconds_per_beat = 60.0 / transport.tempo_bpm;
             const double samples_per_beat = seconds_per_beat * ctx.sample_rate;
             if (samples_per_beat > 0.0) {
                 proc_ctx.position_beats =
@@ -418,6 +594,19 @@ void StandaloneApp::render_audio_block(
             processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
         }
 
+        // Direct test-signal routing owns the final device output, but it must
+        // not bypass Processor::process(): accepted inspector MIDI and transport
+        // still reach the normal processor path before the deterministic signal
+        // replaces the rendered samples.
+        if (test_signal_.is_active() && config_.route_test_signal_to_output) {
+            const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
+            for (size_t c = 0; c < out_ch; ++c)
+                direct_output_ptrs_[c] = output.channel_ptr(c);
+            test_signal_.fill(direct_output_ptrs_.data(),
+                              static_cast<int>(out_ch),
+                              ctx.buffer_size);
+        }
+
         const size_t out_ch = std::min(output.num_channels(), output_meter_ptrs_.size());
         for (size_t c = 0; c < out_ch; ++c)
             output_meter_ptrs_[c] = output.channel_ptr(c);
@@ -440,10 +629,7 @@ void StandaloneApp::render_audio_block(
         // Advance the rolling sample clock so the next block reads a
         // monotonic timeline. Done after process() so the in-block
         // transport state is consistent with what the plugin saw.
-        if (config_.transport_playing) {
-            transport_position_samples_.fetch_add(
-                ctx.buffer_size, std::memory_order_relaxed);
-        }
+        test_input_host_.end_audio_block(ctx.buffer_size);
 }
 
 bool StandaloneApp::start() {
@@ -619,6 +805,14 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     command_registry_.reset();
 
     const auto effective_config = detail::standalone_config_from_environment(config_);
+#if !PULP_STANDALONE_INSPECTOR
+    if (!effective_config.inspector_profile.empty()
+        && effective_config.inspector_profile != "off") {
+        runtime::log_error(
+            "Standalone: Development Inspector requested but this build has inspector support disabled");
+        return false;
+    }
+#endif
 #if !PULP_ENABLE_AUDIO_PROBES
     if (detail::standalone_probe_json_requested_but_disabled(effective_config)) {
         runtime::log_error(
@@ -766,21 +960,37 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
     auto* window_raw = window.get();
-    window->set_close_callback([this, window_raw, bridge_raw]() {
+    std::function<void()> close_editor = [this, window_raw, bridge_raw]() {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
         if (window_raw && bridge_raw)
             detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
-    });
+    };
 
 #if PULP_STANDALONE_INSPECTOR
-    // Create inspector overlay — activated via Cmd+I / Ctrl+I
-    auto* inspector_host = &window_root;
-    auto inspector = std::make_unique<inspect::InspectorOverlay>(*inspector_host);
-    auto* inspector_ptr = inspector.get();
-    inspect::install_inspector_hooks(*inspector);
+    std::unique_ptr<detail::StandaloneInspectorRuntime> inspector_runtime;
+    if (!detail::StandaloneInspectorRuntime::profile_is_off(
+            effective_config.inspector_profile)) {
+        inspector_runtime = detail::StandaloneInspectorRuntime::create(
+            *this, *processor_, *bridge, window_root, *window,
+            effective_config.inspector_profile,
+            effective_config.inspector_capabilities);
+        if (!inspector_runtime) {
+            runtime::log_error(
+                "Standalone: requested Development Inspector profile could not start");
+            detail::retire_standalone_editor(*window, *bridge);
+            stop();
+            return false;
+        }
+        window->set_close_callback(
+            inspector_runtime->wrap_close(std::move(close_editor)));
+    } else {
+        window->set_close_callback(std::move(close_editor));
+    }
+#else
+    window->set_close_callback(std::move(close_editor));
 #endif
 
 #if PULP_ENABLE_AUDIO_PROBES
@@ -819,26 +1029,26 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
 #if PULP_STANDALONE_INSPECTOR
-    pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
-        if (settings_ptr) settings_ptr->poll();
-        if (inspector_ptr->is_active()) {
-            // Enqueue on the window root's own queue (S11): paint_overlays
-            // drains the painting root's queue, and inspector_host IS that
-            // root, so the inspector overlay paints exactly once.
-            inspector_host->interaction().overlay_queue.push_back({
-                [inspector_ptr](canvas::Canvas& canvas) {
-                    inspector_ptr->paint(canvas);
-                },
-                inspector_host
-            });
-        }
-    };
-    window->set_idle_callback(pre_screenshot_idle);
+    if (inspector_runtime) {
+        auto* inspector_runtime_ptr = inspector_runtime.get();
+        pre_screenshot_idle = [settings_ptr, inspector_runtime_ptr] {
+            if (settings_ptr) settings_ptr->poll();
+            inspector_runtime_ptr->pump();
+        };
+        window->set_idle_callback(pre_screenshot_idle);
 
-    // Enable inspector by default when PULP_INSPECTOR env var is set
-    if (runtime::get_env("PULP_INSPECTOR")) {
-        inspector_ptr->set_active(true);
-        runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
+        // Enable inspector by default when PULP_INSPECTOR env var is set.
+        if (runtime::get_env("PULP_INSPECTOR")) {
+            inspector_runtime->set_overlay_active(true);
+            runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
+        }
+    } else {
+        pre_screenshot_idle = detail::make_standalone_idle_callback(
+            {},
+            settings_ptr
+                ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
+                : std::function<void()>{});
+        window->set_idle_callback(pre_screenshot_idle);
     }
 #else
     pre_screenshot_idle = detail::make_standalone_idle_callback(
@@ -1066,8 +1276,20 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // already fired bridge->close(), but application-quit paths can return
     // from the event loop without going through that callback. Close here
     // while the processor is still alive; the call is idempotent.
+#if PULP_STANDALONE_INSPECTOR
+    if (inspector_runtime) {
+        // Application quit can leave the event loop without invoking the window's
+        // close callback. Begin the same fence-gated retirement used by ordinary
+        // window close, then keep the platform's main-thread dispatcher alive until
+        // the accepted operation unwinds and the borrowed state is detached.
+        window->run_event_loop_until([&] {
+            inspector_runtime->stop();
+            return inspector_runtime->try_finish_retirement();
+        });
+        return !inspector_runtime->startup_failed();
+    }
+#endif
     window->run_event_loop();
-
     // Application quit can leave the event loop without invoking the window's
     // close callback. Remove this owner's entry before the bridge/window or
     // processor is torn down; removal is harmless on platforms where no

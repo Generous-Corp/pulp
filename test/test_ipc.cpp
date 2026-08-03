@@ -3,6 +3,7 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <process.h>
@@ -142,6 +144,65 @@ TEST_CASE("IPC message framing", "[events][ipc]") {
     InterprocessConnection conn;
     REQUIRE_FALSE(conn.send_message("test message"));
     REQUIRE_FALSE(conn.send_message(std::string_view("binary data")));
+}
+
+TEST_CASE("IPC framing ceiling stays within socket transfer count range",
+          "[events][ipc][socket][bounds]") {
+    InterprocessConnection connection;
+    connection.set_max_message_bytes(
+        std::numeric_limits<std::size_t>::max());
+    CHECK(connection.max_message_bytes() ==
+          static_cast<std::size_t>(std::numeric_limits<int>::max()));
+
+    CapturingServer server;
+    server.set_max_message_bytes(std::numeric_limits<std::size_t>::max());
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port),
+                           IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return static_cast<bool>(server.accepted);
+        }));
+        CHECK(server.accepted->max_message_bytes() ==
+              static_cast<std::size_t>(std::numeric_limits<int>::max()));
+    }
+}
+
+TEST_CASE("IPC framing ceilings reject oversized writes and reach accepted clients",
+          "[events][ipc][socket][bounds]") {
+    CapturingServer server;
+    server.set_max_message_bytes(8);
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(8);
+    REQUIRE(client.max_message_bytes() == 8);
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port),
+                           IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return static_cast<bool>(server.accepted);
+        }));
+        REQUIRE(server.accepted->max_message_bytes() == 8);
+    }
+
+    CHECK_FALSE(client.send_message("123456789"));
+    CHECK(client.send_message("12345678"));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.text_messages == 1;
+        }));
+        CHECK(server.last_text == "12345678");
+    }
+    client.disconnect();
+    server.stop();
 }
 
 TEST_CASE("IPC connection state", "[events][ipc]") {
@@ -1208,6 +1269,90 @@ TEST_CASE("IPC message callback may destroy its own connection",
     server.stop();
 }
 
+TEST_CASE("IPC read callback destruction coordinates with external disconnect",
+          "[events][ipc][socket][crash][owner-lifetime][concurrency]") {
+    InterprocessConnectionServer server;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::unique_ptr<InterprocessConnection> accepted;
+    bool ready = false;
+    bool callback_entered = false;
+    bool release_callback = false;
+    bool destroyed = false;
+
+    server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> conn) {
+        conn->set_on_message([&](const void*, size_t) {
+            {
+                std::unique_lock lock(mutex);
+                callback_entered = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return release_callback; });
+            }
+            accepted.reset();
+            {
+                std::lock_guard lock(mutex);
+                destroyed = true;
+            }
+            cv.notify_all();
+        });
+        {
+            std::lock_guard lock(mutex);
+            accepted = std::move(conn);
+            ready = true;
+        }
+        cv.notify_all();
+    };
+
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+    InterprocessConnection client;
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*port),
+        IpcTransport::Socket));
+    InterprocessConnection* raw = nullptr;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return ready;
+        }));
+        raw = accepted.get();
+    }
+
+    REQUIRE(client.send_message("destroy-during-external-disconnect"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return callback_entered;
+        }));
+    }
+
+    std::atomic<bool> disconnect_returned{false};
+    std::thread disconnect_thread([&] {
+        raw->disconnect();
+        disconnect_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_FALSE(disconnect_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        release_callback = true;
+    }
+    cv.notify_all();
+    disconnect_thread.join();
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return destroyed;
+        }));
+        CHECK_FALSE(accepted);
+    }
+    CHECK(disconnect_returned.load(std::memory_order_acquire));
+
+    client.disconnect();
+    server.stop();
+}
+
 TEST_CASE("IPC socket server virtual callback accepts empty frames",
           "[events][ipc][socket][issue-642]") {
     CapturingServer server;
@@ -1275,6 +1420,252 @@ TEST_CASE("IPC socket server receives binary payload frames",
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC socket write timeout closes a partially written frame",
+          "[events][ipc][socket][regression]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket && !release_peer.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(50));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool first_send = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        first_send = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+    const bool second_send = client.send_message("must-not-follow-partial-frame");
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE_FALSE(first_send);
+    REQUIRE_FALSE(client.is_connected());
+    REQUIRE_FALSE(second_send);
+    REQUIRE(send_duration < std::chrono::seconds(2));
+}
+
+TEST_CASE("IPC socket write timeout bounds the complete frame",
+          "[events][ipc][socket][regression]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::atomic<std::size_t> drained_bytes{0};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        while (socket && !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const auto received = socket->receive(buffer.data(), buffer.size());
+            if (received <= 0)
+                break;
+            drained_bytes.fetch_add(static_cast<std::size_t>(received),
+                                    std::memory_order_relaxed);
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(60));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool sent = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        sent = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) > 0);
+    REQUIRE_FALSE(sent);
+    REQUIRE_FALSE(client.is_connected());
+    // Keep enough scheduler headroom for heavily loaded CI while still
+    // distinguishing the 60 ms whole-frame deadline from the multi-second
+    // transfer a per-write timeout would permit.
+    REQUIRE(send_duration < std::chrono::seconds(2));
+}
+
+TEST_CASE("IPC socket write timeout includes writer admission",
+          "[events][ipc][socket][regression][concurrency]") {
+    constexpr auto timeout = std::chrono::milliseconds(500);
+    constexpr auto writer_hold = std::chrono::milliseconds(200);
+    constexpr auto scheduler_headroom = std::chrono::milliseconds(150);
+    constexpr std::size_t payload_size = 32u * 1024u * 1024u;
+
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> second_started{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket &&
+               !second_started.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        std::this_thread::sleep_for(writer_hold);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        std::size_t remaining = payload_size + 4;
+        while (socket && remaining > 0) {
+            const auto received =
+                socket->receive(buffer.data(),
+                                std::min(buffer.size(), remaining));
+            if (received <= 0)
+                break;
+            remaining -= static_cast<std::size_t>(received);
+        }
+        while (socket &&
+               !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(payload_size);
+    client.set_write_timeout(timeout);
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::yield();
+    }
+
+    const std::vector<std::uint8_t> payload(payload_size, 0x5a);
+    bool first_sent = false;
+    std::thread first([&] {
+        first_sent = client.send_message(payload.data(), payload.size());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    second_started.store(true, std::memory_order_release);
+    const auto started = std::chrono::steady_clock::now();
+    const bool second_sent =
+        client.send_message(payload.data(), payload.size());
+    const auto duration = std::chrono::steady_clock::now() - started;
+
+    first.join();
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable())
+        peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(first_sent);
+    REQUIRE_FALSE(second_sent);
+    // A fresh timeout after writer admission would take at least the hold plus
+    // the configured timeout. Keep the ceiling below that regression while
+    // allowing loaded CI hosts enough scheduling headroom around the deadline.
+    REQUIRE(duration < timeout + scheduler_headroom);
+}
+
+TEST_CASE("IPC timeout disconnect serializes with explicit teardown",
+          "[events][ipc][socket][regression][concurrency]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket && !release_peer.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(30));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    std::thread teardown([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        client.disconnect();
+    });
+    const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+    const bool sent = client.send_message(payload.data(), payload.size());
+    teardown.join();
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable())
+        peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    CHECK_FALSE(sent);
+    CHECK_FALSE(client.is_connected());
+}
+
 TEST_CASE("IPC socket server observes client disconnect",
           "[events][ipc][socket]") {
     CapturingServer server;
@@ -1331,4 +1722,577 @@ TEST_CASE("IPC socket client reports disconnect callback once",
     if (server.accepted) server.accepted->disconnect();
     server.stop();
     REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC concurrent disconnect also tears down a callback reconnect",
+          "[events][ipc][socket][lifecycle][reentrant]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    InterprocessConnection client;
+    std::mutex callback_mutex;
+    std::condition_variable callback_cv;
+    bool callback_entered = false;
+    bool release_callback = false;
+    bool reconnected = false;
+    int callback_count = 0;
+    client.set_on_disconnected([&] {
+        {
+            std::unique_lock lock(callback_mutex);
+            ++callback_count;
+            if (callback_count != 1)
+                return;
+            callback_entered = true;
+            callback_cv.notify_all();
+            callback_cv.wait(lock, [&] { return release_callback; });
+        }
+        reconnected = client.connect(
+            "127.0.0.1:" + std::to_string(*second_port),
+            IpcTransport::Socket);
+    });
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+
+    std::thread first_disconnect([&] { client.disconnect(); });
+    {
+        std::unique_lock lock(callback_mutex);
+        REQUIRE(callback_cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return callback_entered;
+        }));
+    }
+
+    std::thread waiting_disconnect([&] { client.disconnect(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    {
+        std::lock_guard lock(callback_mutex);
+        release_callback = true;
+    }
+    callback_cv.notify_all();
+    first_disconnect.join();
+    waiting_disconnect.join();
+
+    CHECK(reconnected);
+    CHECK(callback_count == 2);
+    CHECK_FALSE(client.is_connected());
+    CHECK(client.state() == IpcState::Disconnected);
+
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC disconnect callback reconnect starts the replacement reader",
+          "[events][ipc][socket][lifecycle][reentrant]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    InterprocessConnection client;
+    std::mutex message_mutex;
+    std::condition_variable message_cv;
+    std::string received;
+    int callback_count = 0;
+    bool reconnected = false;
+    client.set_on_text_message([&](std::string_view message) {
+        std::lock_guard lock(message_mutex);
+        received.assign(message);
+        message_cv.notify_all();
+    });
+    client.set_on_disconnected([&] {
+        ++callback_count;
+        if (callback_count == 1) {
+            reconnected = client.connect(
+                "127.0.0.1:" + std::to_string(*second_port),
+                IpcTransport::Socket);
+        }
+    });
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+
+    client.disconnect();
+    REQUIRE(reconnected);
+    REQUIRE(client.is_connected());
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return second_server.accepted != nullptr; }));
+        REQUIRE(second_server.accepted->send_message("replacement"));
+    }
+    {
+        std::unique_lock lock(message_mutex);
+        CHECK(message_cv.wait_for(
+            lock, std::chrono::milliseconds(250),
+            [&] { return received == "replacement"; }));
+    }
+
+    client.disconnect();
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC message callback reconnect retires the original reader",
+          "[events][ipc][socket][lifecycle][reentrant][generation]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    struct ObservingConnection final : InterprocessConnection {
+        std::function<void(std::string_view)> on_virtual_text;
+
+        void message_received(std::string_view message) override {
+            if (on_virtual_text)
+                on_virtual_text(message);
+        }
+    } client;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool reconnected = false;
+    std::vector<std::string> text_messages;
+    std::vector<std::string> virtual_text_messages;
+    client.set_on_message([&](const void* data, std::size_t size) {
+        const std::string_view message(static_cast<const char*>(data), size);
+        if (message != "switch")
+            return;
+        const auto connected =
+            client.connect("127.0.0.1:" + std::to_string(*second_port), IpcTransport::Socket);
+        {
+            std::lock_guard lock(mutex);
+            reconnected = connected;
+        }
+        cv.notify_all();
+    });
+    client.set_on_text_message([&](std::string_view message) {
+        {
+            std::lock_guard lock(mutex);
+            text_messages.emplace_back(message);
+        }
+        cv.notify_all();
+    });
+    client.on_virtual_text = [&](std::string_view message) {
+        {
+            std::lock_guard lock(mutex);
+            virtual_text_messages.emplace_back(message);
+        }
+        cv.notify_all();
+    };
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*first_port), IpcTransport::Socket));
+    {
+        std::unique_lock lock(first_server.mutex);
+        REQUIRE(first_server.cv.wait_for(lock, std::chrono::seconds(2),
+                                         [&] { return first_server.accepted != nullptr; }));
+        REQUIRE(first_server.accepted->send_message("switch"));
+    }
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return reconnected; }));
+        CHECK(text_messages.empty());
+        CHECK(virtual_text_messages.empty());
+    }
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(lock, std::chrono::seconds(2),
+                                          [&] { return second_server.accepted != nullptr; }));
+        REQUIRE(second_server.accepted->send_message("replacement"));
+    }
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return text_messages.size() == 1 && virtual_text_messages.size() == 1;
+        }));
+        CHECK(text_messages.front() == "replacement");
+        CHECK(virtual_text_messages.front() == "replacement");
+    }
+
+    client.disconnect();
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC connected callback reconnect starts only the replacement reader",
+          "[events][ipc][socket][lifecycle][reentrant][generation]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    InterprocessConnection client;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::vector<std::string> received;
+    int connected_count = 0;
+    bool reconnected = false;
+    client.set_on_text_message([&](std::string_view message) {
+        {
+            std::lock_guard lock(mutex);
+            received.emplace_back(message);
+        }
+        cv.notify_all();
+    });
+    client.set_on_connected([&] {
+        if (++connected_count != 1)
+            return;
+        reconnected =
+            client.connect("127.0.0.1:" + std::to_string(*second_port), IpcTransport::Socket);
+        if (!reconnected)
+            return;
+        {
+            std::unique_lock lock(second_server.mutex);
+            if (!second_server.cv.wait_for(lock, std::chrono::seconds(2),
+                                           [&] { return second_server.accepted != nullptr; })) {
+                return;
+            }
+            if (!second_server.accepted->send_message("during-callback"))
+                return;
+        }
+        std::unique_lock lock(mutex);
+        (void)cv.wait_for(lock, std::chrono::seconds(2), [&] { return received.size() == 1; });
+    });
+
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*first_port), IpcTransport::Socket));
+    REQUIRE(reconnected);
+    REQUIRE(connected_count == 2);
+    {
+        std::lock_guard lock(mutex);
+        REQUIRE(received == std::vector<std::string>{"during-callback"});
+    }
+
+    constexpr int kFollowupMessages = 64;
+    for (int index = 0; index < kFollowupMessages; ++index) {
+        REQUIRE(second_server.accepted->send_message("replacement-" + std::to_string(index)));
+    }
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return received.size() == static_cast<std::size_t>(kFollowupMessages + 1);
+        }));
+        for (int index = 0; index < kFollowupMessages; ++index) {
+            INFO("index=" << index);
+            CHECK(received[static_cast<std::size_t>(index + 1)] ==
+                  "replacement-" + std::to_string(index));
+        }
+    }
+
+    client.disconnect();
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC virtual connected callback fences stale lambda dispatch",
+          "[events][ipc][socket][lifecycle][reentrant][generation]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    struct ReconnectingConnection final : InterprocessConnection {
+        std::string replacement_endpoint;
+        int virtual_connected_count = 0;
+        bool reconnected = false;
+
+        void connection_made() override {
+            if (++virtual_connected_count == 1) {
+                reconnected = connect(replacement_endpoint, IpcTransport::Socket);
+            }
+        }
+    } client;
+    client.replacement_endpoint = "127.0.0.1:" + std::to_string(*second_port);
+    int lambda_connected_count = 0;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::string received;
+    client.set_on_connected([&] { ++lambda_connected_count; });
+    client.set_on_text_message([&](std::string_view message) {
+        {
+            std::lock_guard lock(mutex);
+            received.assign(message);
+        }
+        cv.notify_all();
+    });
+
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*first_port), IpcTransport::Socket));
+    REQUIRE(client.reconnected);
+    REQUIRE(client.virtual_connected_count == 2);
+    REQUIRE(lambda_connected_count == 1);
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(lock, std::chrono::seconds(2),
+                                          [&] { return second_server.accepted != nullptr; }));
+        REQUIRE(second_server.accepted->send_message("replacement"));
+    }
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(
+            cv.wait_for(lock, std::chrono::seconds(2), [&] { return received == "replacement"; }));
+    }
+
+    client.disconnect();
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC EOF reconnect teardown waits for the replacement reader",
+          "[events][ipc][socket][lifecycle][reentrant][owner-lifetime]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    auto client = std::make_unique<InterprocessConnection>();
+    std::mutex mutex;
+    std::condition_variable cv;
+    int disconnect_count = 0;
+    bool reconnected = false;
+    bool replacement_callback_entered = false;
+    bool release_replacement_callback = false;
+    bool destructor_started = false;
+    bool destructor_finished = false;
+
+    client->set_on_disconnected([&] {
+        bool reconnect = false;
+        {
+            std::lock_guard lock(mutex);
+            ++disconnect_count;
+            reconnect = disconnect_count == 1;
+        }
+        if (reconnect) {
+            const auto connected = client->connect(
+                "127.0.0.1:" + std::to_string(*second_port),
+                IpcTransport::Socket);
+            {
+                std::lock_guard lock(mutex);
+                reconnected = connected;
+            }
+            cv.notify_all();
+        }
+    });
+    client->set_on_text_message([&](std::string_view message) {
+        if (message != "hold-replacement") return;
+        std::unique_lock lock(mutex);
+        replacement_callback_entered = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release_replacement_callback; });
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+    {
+        std::unique_lock lock(first_server.mutex);
+        REQUIRE(first_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return first_server.accepted != nullptr; }));
+    }
+    first_server.accepted->disconnect();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return reconnected;
+        }));
+    }
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return second_server.accepted != nullptr; }));
+    }
+    REQUIRE(second_server.accepted->send_message("hold-replacement"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return replacement_callback_entered;
+        }));
+    }
+
+    std::thread destroyer([&] {
+        {
+            std::lock_guard lock(mutex);
+            destructor_started = true;
+        }
+        cv.notify_all();
+        client.reset();
+        {
+            std::lock_guard lock(mutex);
+            destructor_finished = true;
+        }
+        cv.notify_all();
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return destructor_started;
+        }));
+        CHECK_FALSE(cv.wait_for(
+            lock, std::chrono::milliseconds(100),
+            [&] { return destructor_finished; }));
+        release_replacement_callback = true;
+    }
+    cv.notify_all();
+    destroyer.join();
+    CHECK(destructor_finished);
+
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
+TEST_CASE("IPC disconnect callback may destroy its own connection",
+          "[events][ipc][socket][owner-lifetime][lifecycle]") {
+    CapturingServer server;
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    auto client = std::make_unique<InterprocessConnection>();
+    bool destroyed = false;
+    client->set_on_disconnected([&] {
+        client.reset();
+        destroyed = true;
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    client->disconnect();
+    CHECK(destroyed);
+    CHECK_FALSE(client);
+
+    if (server.accepted)
+        server.accepted->disconnect();
+    server.stop();
+}
+
+TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
+          "[events][ipc][socket][owner-lifetime][lifecycle]") {
+    CapturingServer server;
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    std::mutex callback_mutex;
+    std::condition_variable callback_cv;
+    bool callback_entered = false;
+    bool release_callback = false;
+
+    auto client = std::make_unique<InterprocessConnection>();
+    client->set_on_disconnected([&] {
+        std::unique_lock lock(callback_mutex);
+        callback_entered = true;
+        callback_cv.notify_all();
+        callback_cv.wait(lock, [&] { return release_callback; });
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    auto* raw_client = client.get();
+    std::thread disconnect_thread([&] { raw_client->disconnect(); });
+    bool entered = false;
+    {
+        std::unique_lock lock(callback_mutex);
+        entered = callback_cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return callback_entered; });
+    }
+    if (!entered) {
+        {
+            std::lock_guard lock(callback_mutex);
+            release_callback = true;
+        }
+        callback_cv.notify_all();
+        disconnect_thread.join();
+        if (server.accepted) server.accepted->disconnect();
+        server.stop();
+    }
+    REQUIRE(entered);
+
+    std::atomic<bool> destruction_started{false};
+    std::atomic<bool> destruction_finished{false};
+    std::thread destroy_thread(
+        [owned = std::move(client), &destruction_started,
+         &destruction_finished]() mutable {
+            destruction_started.store(true, std::memory_order_release);
+            owned.reset();
+            destruction_finished.store(true, std::memory_order_release);
+        });
+    const auto destruction_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!destruction_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < destruction_start_deadline) {
+        std::this_thread::yield();
+    }
+    const bool started =
+        destruction_started.load(std::memory_order_acquire);
+    if (!started) {
+        {
+            std::lock_guard lock(callback_mutex);
+            release_callback = true;
+        }
+        callback_cv.notify_all();
+        disconnect_thread.join();
+        destroy_thread.join();
+        if (server.accepted) server.accepted->disconnect();
+        server.stop();
+    }
+    REQUIRE(started);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_FALSE(destruction_finished.load(std::memory_order_acquire));
+
+    {
+        std::lock_guard lock(callback_mutex);
+        release_callback = true;
+    }
+    callback_cv.notify_all();
+
+    disconnect_thread.join();
+    destroy_thread.join();
+    CHECK(destruction_finished.load(std::memory_order_acquire));
+
+    if (server.accepted) server.accepted->disconnect();
+    server.stop();
 }

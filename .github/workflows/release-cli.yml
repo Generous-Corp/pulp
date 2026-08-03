@@ -66,7 +66,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Resolve the macOS runner for the darwin-arm64 matrix legs.
+  # Resolve the macOS runners for both Darwin matrix legs.
   #
   # Priority (first set wins):
   #   1. PULP_RELEASE_MACOS_RUNS_ON_JSON — dedicated release-cli override
@@ -95,7 +95,11 @@ jobs:
     # and re-dispatches forever. This is the SAFE place to put it: job names are a
     # separate API field, unlike `run-name` (see the warning at the top of the file).
     name: Resolve macOS runner — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-    runs-on: ubuntu-latest
+    # This is trusted release control-plane work: the workflow is reachable only
+    # from a version-tag push or a maintainer dispatch, never pull_request or
+    # merge_group. Reuse the existing MacPro Linux/X64 pool when configured, but
+    # preserve ubuntu-latest as the zero-configuration rollback.
+    runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       # Kept for the Namespace-profile step below, which still asks "did the macOS
       # leg resolve to a Namespace runner?".
@@ -153,6 +157,7 @@ jobs:
 
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.repository.default_branch }}
           lfs: false
 
       - id: resolve
@@ -162,7 +167,10 @@ jobs:
           # variable is a complete revert. That fluidity is the point: routing a
           # release leg on or off the local pool must never need a code change.
           DARWIN_ARM64: ${{ vars.PULP_RELEASE_DARWIN_ARM64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
-          DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
+          # darwin-x64 is cross-compiled on ARM and is safe on the same
+          # dedicated release Tart pool as darwin-arm64. Keep the old
+          # Intel-specific variable as a lower-priority compatibility fallback.
+          DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
           LINUX_X64: ${{ vars.PULP_RELEASE_LINUX_X64_RUNS_ON_JSON }}
           LINUX_ARM64: ${{ vars.PULP_RELEASE_LINUX_ARM64_RUNS_ON_JSON }}
           WINDOWS_X64: ${{ vars.PULP_RELEASE_WINDOWS_X64_RUNS_ON_JSON }}
@@ -190,9 +198,11 @@ jobs:
           # runner, NOT the flaky native `macos-15-intel` image (which CPU-pegs
           # and never shipped an artifact — see nightly-intel.yml, whose Job B
           # universal cross-check exists precisely because the native Job A is
-          # unreliable). The `macos-15-xcompile` sentinel routes to the pinned
-          # hosted arm64 pool via PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON below
-          # (default `["macos-15"]`) — deliberately NOT `resolve-macos-runner`,
+          # unreliable). The `macos-15-xcompile` sentinel routes through the
+          # resolver map to the dedicated `pulp-build-vm-release` Tart pool,
+          # falling back to the legacy Intel selector and then `macos-15` only
+          # when the release-pool variables are unset. It never targets native
+          # Intel hardware; the Mac Mini remains an advisory/nightly canary.
           # to keep Intel work off the self-hosted Studios that back the
           # required `macos` gate. The x86_64 slice is produced by
           # `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) plus
@@ -523,6 +533,22 @@ jobs:
             ln -s ../../tools/import-design "$compat_dir/tools/import-design"
             cp tools/scripts/release_product_matrix.json \
               "$compat_dir/release_product_matrix.json"
+            authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+            curl -fsSL \
+              "https://raw.githubusercontent.com/${repo}/main/tools/scripts/release_product_matrix.json" \
+              -o "$authoritative_matrix"
+            python3 - "$compat_dir/release_product_matrix.json" \
+              "$authoritative_matrix" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          selected_path = Path(sys.argv[1])
+          selected = json.loads(selected_path.read_text(encoding="utf-8"))
+          authoritative = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
+          selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
+          PY
             echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
@@ -664,6 +690,8 @@ jobs:
         # tools/deps/manifest.json). darwin-arm64, linux-x64, and linux-arm64
         # all have published assets today; windows-* continues to build
         # without Skia until its assets ship.
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
@@ -682,6 +710,10 @@ jobs:
             unset SKIA_DIR
             EXTRA_ARCH="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin"
           fi
+          INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
+            INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
+          fi
           # No explicit CMAKE_OSX_DEPLOYMENT_TARGET here: tools/cmake/PulpMinOs.cmake
           # is included BEFORE project() and force-sets the floor to the max of every
           # linked dependency's minimum per tools/deps/min_os.json (macOS 13.4, driven
@@ -693,7 +725,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_ENABLE_INSPECTOR=OFF \
+            $INSPECTOR \
             $REQUIRE_GPU \
             $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
@@ -861,6 +893,8 @@ jobs:
         # the SDK lib must contain the Skia path for platforms where it's
         # supposed to. Both linux-x64 and linux-arm64 have published
         # skia-builder assets and so must trip the gate.
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
           case "${{ matrix.platform }}" in
@@ -868,11 +902,15 @@ jobs:
               REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
               ;;
           esac
+          INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
+          if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
+            INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
+          fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
-            -DPULP_ENABLE_INSPECTOR=OFF \
+            $INSPECTOR \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
@@ -1667,6 +1705,7 @@ jobs:
               authoritative_path.read_text(encoding="utf-8")
           )
           selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
+          selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",
               encoding="utf-8",

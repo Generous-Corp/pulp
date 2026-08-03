@@ -596,7 +596,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .allow_browser_network = request.allow_browser_network,
          .dry_run = request.dry_run,
          .supports_faithful_capture =
-             request.supports_faithful_capture},
+             request.supports_faithful_capture,
+         .native_panel_lowering = request.native_panel_lowering},
         content);
 
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;

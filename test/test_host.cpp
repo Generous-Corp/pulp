@@ -581,6 +581,8 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
 
 #include <pulp/host/graph_serializer.hpp>
 
+#include "support/thread_progress.hpp"
+
 TEST_CASE("GraphSerializer round-trips topology + connections + layout",
           "[host][serializer]") {
     SignalGraph g1;
@@ -1021,8 +1023,14 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][iss
     // graph.process() at least once. Both barriers run before mutation so
     // the test cannot pass or fail without exercising the snapshot-publish
     // path under contention.
-    started.wait();
-    first_block.wait();
+    // Bounded: `future::wait()` has no timeout, so if a genuine regression means
+    // the audio thread never reaches graph.process(), this barrier hangs the
+    // suite instead of failing it — on a runner that is a job timeout with no
+    // useful output, strictly worse than the flake the barrier was added to fix.
+    // A CHECK here reports the barrier itself, and the assertions after the join
+    // then report the zero counters as the failure they are.
+    CHECK(started.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+    CHECK(first_block.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
 
     // Hammer the graph with mutation cycles from the "UI" thread.
     const int cycles = 200;
