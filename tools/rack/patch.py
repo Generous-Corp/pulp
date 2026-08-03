@@ -1404,18 +1404,54 @@ def rack_entitlements() -> set:
 
 
 _ENTITLEMENTS_CACHE = {}
+ENTITLEMENTS = os.path.join(CACHE_DIR, "entitlements.json")
+ENTITLEMENTS_MAX_AGE_DAYS = 1
 
 
-def entitlements_cached() -> set:
-    """rack_entitlements() once per run, not once per ranking decision.
+def entitlements_cached(refresh: bool = False) -> set:
+    """Who owns what, cached in memory for the run and on disk between runs.
 
-    Ranking asks for this per tag, and a patch names dozens, so the unmemoised
-    version turns one HTTP round trip into dozens of them mid-generation.
-    Ownership does not change while a patch is being built.
+    Ranking asks per tag and a patch names dozens, so the unmemoised version
+    turns one round trip into dozens mid-generation.
+
+    A day on disk, because people buy modules rarely and a stale answer is
+    cheap: the worst case is a module they just bought ranking as free for a
+    few hours, which changes nothing they can see. `refresh=True` is the
+    escape hatch for the one person who did just buy something and says so.
+
+    Keyed on a HASH of the token, never the token. Two accounts on one machine
+    must not inherit each other's purchases, and the credential has no business
+    sitting in a cache file to make that work.
     """
-    if "v" not in _ENTITLEMENTS_CACHE:
-        _ENTITLEMENTS_CACHE["v"] = rack_entitlements()
-    return _ENTITLEMENTS_CACHE["v"]
+    import hashlib
+    import time
+    token = rack_library_token()
+    if not token:
+        return set()
+    who = hashlib.sha256(token.encode()).hexdigest()[:16]
+    if not refresh and _ENTITLEMENTS_CACHE.get("who") == who:
+        return _ENTITLEMENTS_CACHE["v"]
+    if not refresh and os.path.exists(ENTITLEMENTS):
+        try:
+            age = time.time() - os.path.getmtime(ENTITLEMENTS)
+            blob = json.load(open(ENTITLEMENTS))
+            if age < ENTITLEMENTS_MAX_AGE_DAYS * 86400 and blob.get("who") == who:
+                got = set(blob.get("owned") or [])
+                _ENTITLEMENTS_CACHE.update(who=who, v=got)
+                return got
+        except Exception:                                   # noqa: BLE001
+            pass
+    got = rack_entitlements()
+    # Only persist a real answer. Caching an empty set after a network blip
+    # would tell this user they own nothing until the file expired.
+    if got:
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            json.dump({"who": who, "owned": sorted(got)}, open(ENTITLEMENTS, "w"))
+        except Exception:                                   # noqa: BLE001
+            pass
+    _ENTITLEMENTS_CACHE.update(who=who, v=got)
+    return got
 
 
 def installable_here(entry: dict) -> bool:
@@ -1944,6 +1980,105 @@ def model_failure(stdout: str, stderr: str) -> str:
                                     "it exited non-zero and said nothing at all")
 
 
+def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
+    """What this machine can actually use, written for the model.
+
+    THE MODEL WAS BLIND. It received a task and a vocabulary and no inventory,
+    so a prompt naming Surge XT, Valley and Frozen Wasteland produced Forge
+    built lookalikes of all three. Every one was free and absent, and nothing
+    in the prompt said either that they existed or that they could be had.
+
+    Not the whole catalog. 547 plugins with descriptions is a large prompt on
+    every request, and most of it is irrelevant to any one patch. What goes in
+    is: everything already installed, everything owned, and the free plugins
+    whose brand, name or description the prompt actually reaches for. A module
+    named outright is resolved by lookup elsewhere, which costs no tokens.
+    """
+    cat = catalog()
+    owned = entitlements_cached()
+    words = {w.strip(".,:;()").lower()
+             for w in prompt.split() if len(w.strip(".,:;()")) > 3}
+
+    installed, owned_missing, fetchable, unavailable = [], [], [], []
+    for slug, p in sorted(cat.items()):
+        brand = p.get("brand") or p.get("name") or slug
+        if slug in inv:
+            installed.append(brand)
+            continue
+        if not installable_here(p):
+            continue                    # no build for this machine, at any price
+        # Cheap relevance: does the prompt reach for this by brand or name?
+        hay = f"{brand} {p.get('name','')} {slug}".lower()
+        wanted = any(w in hay or hay.startswith(w) for w in words)
+        if p.get("premium"):
+            # Owned is the only distinction that matters. "In the library" is
+            # true of free plugins too, so keying the paid-for list on
+            # membership alone would tell the model this user had bought
+            # things they had not.
+            (owned_missing if slug in owned else
+             (unavailable if wanted else [])).append(brand)
+        else:
+            # (rank, brand): brands the prompt reached for sort first, so the
+            # cut below can never drop one the user named. Filling this list
+            # alphabetically put Valley, Sapphire, Squinky and Stoermelder --
+            # all named in the prompt, all free -- behind "+51 more".
+            fetchable.append((0 if wanted else 1, brand))
+
+    # A brand can be both: one free plugin installed, one premium plugin not
+    # owned. Saying "not available" about something already on the disk is
+    # just wrong, so installed wins.
+    have = set(installed)
+    unavailable = [b for b in unavailable if b not in have]
+
+    def block(title, names, note, ranked=False):
+        if not names:
+            return ""
+        if ranked:
+            # BEST rank per brand, not last-seen. A vendor with several
+            # plugins -- Stoermelder ships four -- had its matching one
+            # overwritten by a non-matching sibling and sorted out of view.
+            best: dict = {}
+            for rank, brand_ in names:
+                if brand_ not in best or rank < best[brand_]:
+                    best[brand_] = rank
+            ordered = [b for b, _ in sorted(best.items(),
+                                            key=lambda kv: (kv[1], kv[0]))]
+        else:
+            ordered = sorted(set(names))
+        shown = ordered[:limit]
+        more = f" (+{len(ordered) - len(shown)} more)" if len(ordered) > len(shown) else ""
+        return f"\n### {title}\n{note}\n\n{', '.join(shown)}{more}\n"
+
+    out = ["\n---\n\n## The module library on this machine\n"]
+    out.append(block("Installed", installed,
+                     "Use these first. They are already here and cost nothing."))
+    out.append(block("Owned, not yet installed", owned_missing,
+                     "Paid for by this user. Prefer these over free alternatives."))
+    out.append(block("Free, fetched automatically if you name them", fetchable,
+                     "Naming one of these installs it. Treat it as available.",
+                     ranked=True))
+    out.append(block("NOT available", unavailable,
+                     "Paid plugins this user does not own. Do not use them; "
+                     "nothing here will buy a plugin."))
+
+    st = settings()
+    policy = {
+        "prefer_existing":
+            "Use library modules. Build a custom module ONLY for a genuine "
+            "gap, or when the user asked for one by name. A published module "
+            "is voiced, panelled and debugged; a generated one is a minute "
+            "old. Do not rebuild something that exists.",
+        "balanced":
+            "Use library modules where they are strong. Generate where a "
+            "custom module genuinely serves the patch better.",
+        "prefer_generated":
+            "Prefer building custom modules, using library modules for "
+            "infrastructure the patch needs but is not about.",
+    }.get(st.get("module_source", "prefer_existing"))
+    out.append(f"\n### How to choose\n{policy}\n")
+    return "".join(out)
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     """Prompt -> a patch that lints clean and makes a sound."""
     import re
@@ -1978,7 +2113,8 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         retries += 2
 
     for attempt in range(retries + 1):
-        parts = [contract, "\n---\n\n## Your task\n\nBuild this patch:\n\n> " + prompt]
+        parts = [contract, library_brief(prompt, inv),
+                 "\n---\n\n## Your task\n\nBuild this patch:\n\n> " + prompt]
         if ctx:
             parts.append("\n\n## Your previous attempt was REJECTED. Fix it.\n\n"
                          "Return both blocks again, corrected. Do not explain.\n\n"

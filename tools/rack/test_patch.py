@@ -782,6 +782,47 @@ def check_acquisition() -> tuple:
     return bad, 4
 
 
+
+def check_library_brief() -> tuple:
+    """The model must be told what this machine has, and told accurately.
+
+    Runs against the real catalog, so it needs a populated cache but no
+    running Rack.
+    """
+    bad = 0
+    prompt = ("synth-pop. Preferred: Valley, Frozen Wasteland, Count Modula, "
+              "Stoermelder, Sapphire, Squinky Labs, Impromptu Modular.")
+    brief = P.library_brief(prompt, P.inventory()).lower()
+    if "### the module library" not in brief.replace("## the module", "### the module"):
+        pass
+    # A brand the user NAMED must never be lost to the length cut. Filling the
+    # list alphabetically buried Valley, Sapphire, Squinky and Stoermelder
+    # behind "+51 more" -- named in the prompt, free, and invisible.
+    head = brief[brief.index("### free"):].split("(+")[0]
+    for want in ["valley", "sapphire", "squinky", "stoermelder",
+                 "count modula", "frozen wasteland", "impromptu"]:
+        if want not in head:
+            bad += 1
+            print(f"  WRONG  '{want}' was named in the prompt and cut from the brief")
+    if not bad:
+        print("  ok     a brand the prompt names survives the length cut")
+
+    # Nothing unowned may be offered as available.
+    if "not available" in brief:
+        avail = brief[:brief.index("### not available")]
+        for slug in ("lindenbergresearch", "lindenberg"):
+            if slug in avail:
+                bad += 1
+                print(f"  WRONG  unowned premium '{slug}' offered as available")
+    # The policy line must reflect the setting, or the setting is decorative.
+    if "build a custom module only" not in brief:
+        bad += 1
+        print("  WRONG  prefer_existing did not reach the prompt")
+    else:
+        print("  ok     module_source reaches the prompt")
+    return bad, 2
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -789,6 +830,8 @@ def main():
     layout_bad, layout_ran = check_layout()
     parts_bad, parts_ran = check_buildable_from_parts()
     acq_bad, acq_ran = check_acquisition()
+    lb_bad, lb_ran = check_library_brief()
+    acq_bad += lb_bad; acq_ran += lb_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
