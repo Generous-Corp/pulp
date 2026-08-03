@@ -64,12 +64,19 @@ import sys
 from typing import Any
 
 THRESHOLD_MINUTES = 45
+MERGE_QUEUE_THRESHOLD_MINUTES = 30
 
 # Fallback only. The workflow reads the live required-check set from branch
 # protection; this list is what we assume when that read is unavailable (the
 # default GITHUB_TOKEN cannot always see protection rules). Kept in sync with
 # the documented required set for the `main` branch.
-DEFAULT_REQUIRED_CHECKS = ["macos", "Enforce version & skill sync"]
+DEFAULT_REQUIRED_CHECKS = [
+    "macos",
+    "Enforce version & skill sync",
+    "Build + prove + (owner-gated) deploy",
+    "Vellum trusted freeze",
+    "Vellum freeze",
+]
 
 # A CheckRun conclusion that satisfies a required-status-check gate. SKIPPED and
 # NEUTRAL count as green to branch protection, so they count here too.
@@ -192,31 +199,54 @@ def analyze(
     return findings, stuck_now
 
 
-# --------------------------------------------------------------------------
-# FUTURE / TODO — merge-queue stall predicate (DO NOT IMPLEMENT YET)
-# --------------------------------------------------------------------------
-def merge_queue_stall_todo(snapshot: dict[str, Any], now: dt.datetime) -> list[dict[str, Any]]:
-    """STUB — enable ONLY after the GitHub merge queue is turned on for `main`.
+def analyze_merge_queue(
+    snapshot: dict[str, Any],
+    now: dt.datetime,
+    threshold_minutes: float = MERGE_QUEUE_THRESHOLD_MINUTES,
+) -> list[dict[str, Any]]:
+    """Detect an enqueued head whose merge group has stopped making progress.
 
-    The predicate above catches a wedged AUTO-MERGER (Shipyard's queue-tick held
-    in reap-only mode): green PRs that stay green and unmerged. Once merges route
-    through a GitHub *merge queue* instead, a different wedge becomes possible —
-    the queue itself stalls: entries are enqueued but the queue stops forming the
-    `merge_group` batches that actually test-and-merge them. That shape is
-    invisible to the predicate above, because an enqueued PR's own
-    mergeStateStatus is no longer CLEAN/BEHIND while it waits in the queue.
-
-    Second condition to add THEN (not now — the queue is not live):
-
-        merge queue depth > 0  AND  no `merge_group` check run has STARTED in the
-        last 30 minutes
-
-    i.e. work is enqueued but the queue has formed no batch in a full sweep-plus
-    window. Data source: the merge-queue GraphQL fields (`MergeQueue.entries`,
-    their `enqueuedAt`) plus `merge_group`-triggered check runs on the base
-    branch. Until the queue is enabled this returns nothing and is never called.
+    A non-empty queue is healthy while its current merge group is young. It is
+    stalled when the head has waited past the threshold and no merge-group run
+    has started within that same window. This is deliberately a one-sweep
+    alarm: the age window already supplies the anti-flap observation period.
     """
-    return []  # intentionally inert until the merge queue is enabled
+    queue = snapshot.get("merge_queue") or {}
+    if int(queue.get("depth") or 0) <= 0:
+        return []
+    head = queue.get("head") or {}
+    enqueued_at = head.get("enqueued_at")
+    if not enqueued_at:
+        return []
+    age = _minutes_between(now, parse_ts(enqueued_at))
+    if age < threshold_minutes:
+        return []
+
+    last_started_text = queue.get("last_merge_group_started_at")
+    minutes_since_batch: float | None = None
+    if last_started_text:
+        minutes_since_batch = _minutes_between(now, parse_ts(last_started_text))
+        if minutes_since_batch < threshold_minutes:
+            return []
+
+    return [
+        {
+            "level": "queue_alarm",
+            "number": head.get("number"),
+            "title": head.get("title", ""),
+            "url": head.get("url", ""),
+            "queue_state": head.get("state", "UNKNOWN"),
+            "queue_depth": int(queue.get("depth") or 0),
+            "queue_minutes": round(age, 1),
+            "last_merge_group_started_at": last_started_text,
+            "minutes_since_batch": (
+                round(minutes_since_batch, 1)
+                if minutes_since_batch is not None
+                else None
+            ),
+            "blocking_checks": head.get("blocking_checks") or [],
+        }
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -267,6 +297,80 @@ query($owner:String!, $name:String!, $cursor:String) {
                     }
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+_MERGE_QUEUE_QUERY = """
+query($owner:String!, $name:String!, $branch:String!) {
+  repository(owner:$owner, name:$name) {
+    mergeQueue(branch:$branch) {
+      configuration { maximumEntriesToBuild }
+      entries(first:20) {
+        totalCount
+        nodes {
+          position
+          enqueuedAt
+          state
+          pullRequest { number title url }
+          headCommit {
+            oid
+            statusCheckRollup {
+              contexts(first:100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    completedAt
+                    detailsUrl
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    createdAt
+                    targetUrl
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+_COMMIT_ROLLUP_QUERY = """
+query($owner:String!, $name:String!, $oid:GitObjectID!) {
+  repository(owner:$owner, name:$name) {
+    object(oid:$oid) {
+      ... on Commit {
+        oid
+        statusCheckRollup {
+          contexts(first:100) {
+            nodes {
+              __typename
+              ... on CheckRun {
+                name
+                status
+                conclusion
+                completedAt
+                detailsUrl
+              }
+              ... on StatusContext {
+                context
+                state
+                createdAt
+                targetUrl
               }
             }
           }
@@ -343,6 +447,173 @@ def resolve_required_checks(repo: str, base: str) -> tuple[list[str], str]:
     return list(DEFAULT_REQUIRED_CHECKS), "default"
 
 
+def _blocking_contexts(commit: dict[str, Any], required: set[str]) -> list[dict[str, Any]]:
+    """Return non-green required contexts from a merge-group head commit."""
+    rollup = (commit or {}).get("statusCheckRollup") or {}
+    contexts = (rollup.get("contexts") or {}).get("nodes", []) or []
+    by_name: dict[str, dict[str, Any]] = {}
+    for context in contexts:
+        if context.get("__typename") == "CheckRun":
+            name = context.get("name")
+            green = (
+                context.get("status") == "COMPLETED"
+                and context.get("conclusion") in GREEN_CONCLUSIONS
+            )
+            state = (
+                context.get("conclusion")
+                if context.get("status") == "COMPLETED"
+                else context.get("status")
+            ) or "UNKNOWN"
+            url = context.get("detailsUrl") or ""
+        elif context.get("__typename") == "StatusContext":
+            name = context.get("context")
+            green = context.get("state") == "SUCCESS"
+            state = context.get("state") or "UNKNOWN"
+            url = context.get("targetUrl") or ""
+        else:
+            continue
+        if name in required and not green:
+            by_name[name] = {"name": name, "state": state, "url": url}
+        elif name in required and green:
+            by_name.pop(name, None)
+    for name in required:
+        if name not in by_name and not any(
+            (c.get("name") == name or c.get("context") == name)
+            for c in contexts
+        ):
+            by_name[name] = {"name": name, "state": "MISSING", "url": ""}
+    return [by_name[name] for name in sorted(by_name)]
+
+
+def _commit_rollup(repo: str, sha: str) -> dict[str, Any]:
+    """Read checks from the synthetic merge-group commit identified by a run."""
+    owner, _, name = repo.partition("/")
+    raw = _gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_COMMIT_ROLLUP_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+            "-f",
+            f"oid={sha}",
+        ]
+    )
+    payload = json.loads(raw)
+    if payload.get("errors"):
+        raise KeyError(f"GraphQL commit rollup failed: {payload['errors']!r}")
+    return (
+        payload
+        .get("data", {})
+        .get("repository", {})
+        .get("object", {})
+        or {}
+    )
+
+
+def collect_merge_queue(repo: str, base: str, required: list[str]) -> dict[str, Any]:
+    """Collect queue depth/head plus the last merge-group run start time."""
+    owner, _, name = repo.partition("/")
+    result: dict[str, Any] = {"depth": 0, "head": None}
+    raw = _gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_MERGE_QUEUE_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+            "-f",
+            f"branch={base}",
+        ]
+    )
+    payload = json.loads(raw)
+    if payload.get("errors"):
+        raise KeyError(f"GraphQL merge queue query failed: {payload['errors']!r}")
+    queue = payload.get("data", {}).get("repository", {}).get("mergeQueue")
+    if not queue:
+        return result
+    entries = queue.get("entries") or {}
+    result["depth"] = int(entries.get("totalCount") or 0)
+    nodes = entries.get("nodes") or []
+    maximum_entries_to_build = max(
+        1,
+        int((queue.get("configuration") or {}).get("maximumEntriesToBuild") or 1),
+    )
+    result["maximum_entries_to_build"] = maximum_entries_to_build
+    if nodes:
+        node = nodes[0]
+        pull = node.get("pullRequest") or {}
+        result["head"] = {
+            "number": pull.get("number"),
+            "title": pull.get("title", ""),
+            "url": pull.get("url", ""),
+            "position": node.get("position"),
+            "state": node.get("state"),
+            "enqueued_at": node.get("enqueuedAt"),
+            "queue_head_sha": (node.get("headCommit") or {}).get("oid"),
+            "merge_group_sha": None,
+            "blocking_checks": [],
+        }
+
+    runs = json.loads(
+        _gh(
+            [
+                "api",
+                f"/repos/{repo}/actions/runs?event=merge_group&per_page=100",
+            ]
+        )
+    ).get("workflow_runs", [])
+    queue_ref_prefix = f"gh-readonly-queue/{base}/"
+    if result.get("head"):
+        number = result["head"].get("number")
+        build_window_numbers = {
+            (node.get("pullRequest") or {}).get("number")
+            for node in nodes[:maximum_entries_to_build]
+        }
+        build_window_runs = [
+            run
+            for run in runs
+            if any(
+                str(run.get("head_branch") or "").startswith(
+                    f"{queue_ref_prefix}pr-{candidate}-"
+                )
+                for candidate in build_window_numbers
+                if candidate is not None
+            )
+            and run.get("created_at")
+        ]
+        if build_window_runs:
+            result["last_merge_group_started_at"] = max(
+                run["created_at"] for run in build_window_runs
+            )
+        head_runs = [
+            run
+            for run in runs
+            if str(run.get("head_branch") or "").startswith(
+                f"{queue_ref_prefix}pr-{number}-"
+            )
+            and run.get("head_sha")
+        ]
+        if head_runs:
+            latest = max(
+                head_runs,
+                key=lambda run: run.get("created_at") or "",
+            )
+            merge_group_sha = latest["head_sha"]
+            commit = _commit_rollup(repo, merge_group_sha)
+            result["head"]["merge_group_sha"] = merge_group_sha
+            result["head"]["blocking_checks"] = _blocking_contexts(
+                commit, set(required)
+            )
+    return result
+
+
 def collect_snapshot(repo: str, base: str, now: dt.datetime) -> dict[str, Any]:
     """Collect all open PRs' merge state via one paginated GraphQL query.
 
@@ -362,6 +633,13 @@ def collect_snapshot(repo: str, base: str, now: dt.datetime) -> dict[str, Any]:
         "open_prs": [],
         "errors": [],
     }
+
+    try:
+        snapshot["merge_queue"] = collect_merge_queue(repo, base, required)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as exc:
+        snapshot["errors"].append(
+            {"stage": "merge-queue", "error": str(exc)[:200]}
+        )
 
     cursor: str | None = None
     for _ in range(50):  # hard page cap; 50 * 50 = 2500 open PRs
@@ -383,6 +661,14 @@ def collect_snapshot(repo: str, base: str, now: dt.datetime) -> dict[str, Any]:
             data = json.loads(_gh(args))
         except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
             snapshot["errors"].append({"stage": "graphql", "error": str(exc)[:200]})
+            break
+        if data.get("errors"):
+            snapshot["errors"].append(
+                {
+                    "stage": "graphql",
+                    "error": f"GraphQL PR query failed: {data['errors']!r}"[:200],
+                }
+            )
             break
 
         prs = (
@@ -425,39 +711,61 @@ def render_body(
     now: dt.datetime,
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
+    queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
     lines: list[str] = []
     lines.append(
         "_Auto-generated by `.github/workflows/merge-stall-check.yml` on "
         f"{now.strftime('%Y-%m-%d %H:%M UTC')}._"
     )
     lines.append("")
-    lines.append(
-        f"**{len(alarms)} PR(s) have been merge-ready for more than "
-        f"{threshold_minutes:g} minutes across two consecutive sweeps, and are "
-        "still unmerged.** Every required check is green, GitHub's merge verdict "
-        "is CLEAN or BEHIND, and auto-merge is enabled — the only thing left to "
-        "act is whatever presses the merge button. Nothing is queued waiting on a "
-        "runner (that is a different watchdog). This is the signature of a wedged "
-        "auto-merger: green in, nothing out."
-    )
-    lines.append("")
-    lines.append("### Merge-ready but not merging")
-    lines.append("")
-    for f in alarms:
+    if queue_alarms:
+        lines.append("**The GitHub merge queue is not advancing.**")
+        lines.append("")
+        for f in queue_alarms:
+            lines.append(
+                f"- **[#{f['number']}]({f['url']})** is queue head in "
+                f"`{f['queue_state']}` for {f['queue_minutes']:g} min; "
+                f"queue depth is **{f['queue_depth']}**."
+            )
+            if f.get("last_merge_group_started_at"):
+                lines.append(
+                    "  - Last merge-group batch started "
+                    f"{f['minutes_since_batch']:g} min ago "
+                    f"({f['last_merge_group_started_at']})."
+                )
+            else:
+                lines.append("  - No merge-group run was found.")
+            blockers = f.get("blocking_checks") or []
+            if blockers:
+                rendered = ", ".join(
+                    f"[{b['name']}]({b['url']}) `{b['state']}`"
+                    if b.get("url")
+                    else f"{b['name']} `{b['state']}`"
+                    for b in blockers
+                )
+                lines.append(f"  - Required blockers: {rendered}")
+        lines.append("")
+    if alarms:
         lines.append(
-            f"- **[#{f['number']}]({f['url']})** — {f['merge_state_status']}, "
-            f"merge-ready {f['ready_minutes']:g} min (green since {f['green_since']})"
+            f"**{len(alarms)} PR(s) have been merge-ready for more than "
+            f"{threshold_minutes:g} minutes across two consecutive sweeps, and "
+            "are still unmerged.**"
         )
-        title = f.get("title")
-        if title:
-            lines.append(f"  - {title}")
+        lines.append("")
+        lines.append("### Merge-ready but not merging")
+        lines.append("")
+        for f in alarms:
+            lines.append(
+                f"- **[#{f['number']}]({f['url']})** — {f['merge_state_status']}, "
+                f"merge-ready {f['ready_minutes']:g} min (green since {f['green_since']})"
+            )
+            title = f.get("title")
+            if title:
+                lines.append(f"  - {title}")
     lines.append("")
     lines.append("### Where to look")
     lines.append("")
-    lines.append(
-        "Required checks green + nothing queued + nothing merging points at the "
-        "MERGER, not the runners. Cheapest first:"
-    )
+    lines.append("Start with the queue head's required blockers, then runner routing and capacity.")
     lines.append("")
     lines.append(
         "- Shipyard's per-host queue-tick stuck in reap-only mode "
@@ -486,6 +794,7 @@ def render_summary(
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
     pendings = [f for f in findings if f["level"] == "pending"]
+    queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
     lines = ["## Merge-stall watchdog", ""]
     if errors:
         lines.append(
@@ -506,14 +815,21 @@ def render_summary(
         f"- **{len(pendings)}** pending (qualified this sweep only — promoted next "
         "sweep if it persists)"
     )
+    lines.append(f"- **{len(queue_alarms)}** stalled merge queue")
     lines.append("")
     lines.append("| level | PR | merge state | ready (min) |")
     lines.append("| --- | --- | --- | --- |")
     for f in findings:
-        lines.append(
-            f"| {f['level']} | #{f['number']} | {f['merge_state_status']} | "
-            f"{f['ready_minutes']:g} |"
-        )
+        if f["level"] == "queue_alarm":
+            lines.append(
+                f"| queue alarm | #{f['number']} | {f['queue_state']} | "
+                f"{f['queue_minutes']:g} |"
+            )
+        else:
+            lines.append(
+                f"| {f['level']} | #{f['number']} | {f['merge_state_status']} | "
+                f"{f['ready_minutes']:g} |"
+            )
     return "\n".join(lines)
 
 
@@ -524,6 +840,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--snapshot", default="", help="read a recorded snapshot instead of the API")
     ap.add_argument("--prev-state", default="", help="previous-tick stuck-PR state file")
     ap.add_argument("--threshold-minutes", type=float, default=THRESHOLD_MINUTES)
+    ap.add_argument(
+        "--queue-threshold-minutes",
+        type=float,
+        default=MERGE_QUEUE_THRESHOLD_MINUTES,
+    )
     ap.add_argument("--findings-out", default="findings.json")
     ap.add_argument("--snapshot-out", default="")
     ap.add_argument("--state-out", default="state.json")
@@ -552,18 +873,32 @@ def main(argv: list[str] | None = None) -> int:
             prev_stuck = []
 
     findings, stuck_now = analyze(snapshot, prev_stuck, now, args.threshold_minutes)
+    findings.extend(
+        analyze_merge_queue(snapshot, now, args.queue_threshold_minutes)
+    )
     alarms = [f for f in findings if f["level"] == "alarm"]
+    queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
+    # An incomplete observation must never erase the prior sweep's memory.
+    # Keep any newly observed stuck PRs too, but only a complete sweep may
+    # remove a PR from the persisted two-sweep set.
+    persisted_stuck = (
+        sorted(set(prev_stuck) | set(stuck_now))
+        if snapshot.get("errors")
+        else stuck_now
+    )
 
     with open(args.findings_out, "w", encoding="utf-8") as fh:
         json.dump(findings, fh, indent=2)
     with open(args.state_out, "w", encoding="utf-8") as fh:
         json.dump(
-            {"generated_at": now.isoformat(), "stuck_prs": stuck_now}, fh, indent=2
+            {"generated_at": now.isoformat(), "stuck_prs": persisted_stuck},
+            fh,
+            indent=2,
         )
     if args.snapshot_out:
         with open(args.snapshot_out, "w", encoding="utf-8") as fh:
             json.dump(snapshot, fh, indent=2)
-    if alarms:
+    if alarms or queue_alarms:
         with open(args.body_out, "w", encoding="utf-8") as fh:
             fh.write(render_body(findings, args.threshold_minutes, now))
 
@@ -581,7 +916,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Exit 0 regardless of findings: the workflow decides what to do with them.
     # A watchdog that reddens its own run gets ignored.
-    print(f"alarm_count={len(alarms)}")
+    print(f"alarm_count={len(alarms) + len(queue_alarms)}")
     return 0
 
 

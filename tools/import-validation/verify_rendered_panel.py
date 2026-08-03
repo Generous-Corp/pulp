@@ -108,16 +108,14 @@ def assert_renderer_can_execute(binary: Path, artifact: Path) -> None:
     how old the binary is but whether it implements what this artifact calls.
     """
     try:
-        table = subprocess.run(["strings", str(binary)], capture_output=True,
-                               text=True, timeout=120).stdout
-    except (OSError, subprocess.SubprocessError):
-        print("note: could not read the renderer's symbols; skipping the "
-              "capability preflight", file=sys.stderr)
-        return
-    present = set(table.splitlines())
+        image = binary.read_bytes()
+        source = artifact.read_text(errors="replace")
+    except OSError as exc:
+        fail(EX_HARNESS, f"could not inspect renderer capabilities: {exc}")
     used = {name for name in REQUIRED_RUNTIME_API
-            if re.search(rf"\b{name}\s*\(", artifact.read_text(errors="replace"))}
-    missing = sorted(name for name in used if name not in present)
+            if re.search(rf"\b{name}\s*\(", source)}
+    binary_strings = set(re.split(rb"[^\x20-\x7e]+", image))
+    missing = sorted(name for name in used if name.encode() not in binary_strings)
     if missing:
         fail(EX_HARNESS,
              f"renderer cannot execute this artifact — missing runtime API: "
@@ -303,6 +301,7 @@ def main() -> int:
     print(f"artifact={artifact}\nreference={reference} ({ref_w}x{ref_h})\n"
           f"canvas={width}x{height} scale={scale:g} backend={args.backend}")
 
+    assert_renderer_can_execute(binary, artifact)
     render(binary, artifact, rendered, width, height, scale, args.backend)
     require_file(rendered, "rendered output")
 

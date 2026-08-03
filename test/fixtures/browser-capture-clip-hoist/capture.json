@@ -1,0 +1,117 @@
+{
+  "schema": "pulp-browser-capture-v1",
+  "version": 1,
+  "provenance": {
+    "capture_method": "chromium-cdp",
+    "browser": {
+      "product": "Chrome",
+      "version": "150.0.7871.187",
+      "protocol_version": "1.3",
+      "build_hash": "@30f6543ae91e6a860e73b76e3216b663b050f4e5",
+      "origin": "system"
+    },
+    "source": {
+      "entry": "h.html",
+      "sha256": "ae58aa61e65d710aff38c5265ea6b7c0ce6489aca9b6d95518a85e2e990f8868"
+    },
+    "viewport": {
+      "initial": {
+        "width": 400,
+        "height": 400
+      },
+      "resolved": {
+        "width": 400,
+        "height": 400
+      },
+      "document": {
+        "width": 400,
+        "height": 400,
+        "primary_surface": {
+          "left": 0,
+          "top": 0,
+          "width": 400,
+          "height": 400
+        }
+      },
+      "device_scale_factor": 2
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "light",
+    "reduced_motion": false,
+    "settle": {
+      "rounds": 15,
+      "stable_rounds": 13,
+      "elapsed_ms": 1361
+    },
+    "network": {
+      "external_allowed": false,
+      "allowed_origins": [],
+      "external_resources": [],
+      "blocked_requests": []
+    },
+    "health": {
+      "status": "healthy",
+      "layout_count": 6,
+      "visible_elements": 3,
+      "visible_text_characters": 0,
+      "painted_surfaces": 1,
+      "runtime_exceptions": [],
+      "log_errors": [],
+      "failed_responses": []
+    },
+    "readiness": {
+      "contract": "",
+      "awaited": false
+    },
+    "renderer_hooks": []
+  },
+  "documents": [
+    {
+      "id": "document:0",
+      "url": "pulp-capture:///h.html",
+      "node_count": 16,
+      "layout_count": 6,
+      "paint_order": true,
+      "snapshot_asset": "dom-snapshot.json"
+    }
+  ],
+  "assets": [
+    {
+      "id": "reference:browser",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser.png",
+      "sha256": "e01f151c11cb72301926c533ece4ca2264f5067ee7868d8a0cc5a0e5ed2afb43",
+      "width_px": 800,
+      "height_px": 800
+    }
+  ],
+  "semantics": {
+    "schema": "pulp-browser-semantics-v1",
+    "report": "semantic-report.json",
+    "candidate_count": 0,
+    "resolved_count": 0,
+    "unresolved_count": 0
+  },
+  "tokens": {
+    "schema": "pulp-browser-tokens-v1",
+    "report": "tokens.json",
+    "color_count": 0,
+    "dimension_count": 0,
+    "string_count": 0
+  },
+  "states": [
+    {
+      "name": "default",
+      "reference_asset_id": "reference:browser"
+    }
+  ],
+  "reference": {
+    "asset_id": "reference:browser",
+    "path": "browser.png",
+    "logical_width": 400,
+    "logical_height": 400,
+    "device_scale_factor": 2
+  }
+}

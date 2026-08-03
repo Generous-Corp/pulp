@@ -93,6 +93,11 @@ bool HotReloader::poll_reload() {
     return true;
 }
 
+bool HotReloader::has_pending_reload() const {
+    std::lock_guard lock(pending_mutex_);
+    return has_pending_;
+}
+
 #if !TARGET_OS_IPHONE
 void HotReloader::on_file_changed(const choc::file::Watcher::Event& event) {
     // Only react to .js file modifications

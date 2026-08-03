@@ -927,6 +927,20 @@ command begins with a quoted path, wrap the ENTIRE command in one extra pair of
 double quotes (`command = "\"" + command + "\"";`) so `cmd` strips exactly that
 pair and runs the remainder verbatim.
 
+**Binary-command delegation must bypass `cmd.exe` on Windows (2026-08-02):**
+`delegate_to_build_binary` forwards user-controlled arguments, including URLs
+and design data whose `%`, `&`, `|`, or literal quotes must survive byte-for-byte.
+The outer-quote workaround above fixes `cmd /c`'s leading-quote rule, but it does
+not stop percent expansion or make CRT quoting safe from shell metacharacters.
+Launch the resolved helper with `CreateProcess` and the existing CRT-correct
+`shell_quote` output as its command line. Preserve transparent delegation by
+duplicating each valid parent standard handle as inheritable; substitute an
+inheritable `NUL` handle independently for a missing stdin, stdout, or stderr.
+Do not replace this with `runtime::run_process`: that helper captures unbounded
+output until the child exits, regressing streaming and parent memory use. The
+shell-out coverage pins both the release-smoke `import-design --help` invocation
+and a literal `%PULP_DELEGATE_EXPAND%` argument so a return to `cmd.exe` fails.
+
 ### A CLI subcommand that renders shells out to `pulp-screenshot`
 
 `pulp design gallery` renders each tagged card by spawning the sibling

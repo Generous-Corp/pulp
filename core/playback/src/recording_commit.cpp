@@ -110,8 +110,7 @@ seal_recording_take(const audio::BufferView<const float>& audio,
     asset.sample_rate = request.sample_rate;
     asset.content_hash = *hash;
     asset.storage_policy = timeline::AssetStoragePolicy::Embedded;
-    asset.locators.push_back(
-        {timeline::AssetLocatorKind::PackageRelative, "media/" + hash_hex + ".wav"});
+    asset.locators.push_back({timeline::AssetLocatorKind::PackageRelative, "media/" + hash_hex});
 
     auto take = timeline::Take::create(request.take_id, {request.asset_id, {}, audio.num_samples()},
                                        request.placement_start, request.sample_rate);

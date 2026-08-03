@@ -654,6 +654,90 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     CHECK(border.a > 0.0f);
 }
 
+TEST_CASE("baked native materializer accepts the oklab colours Chromium serializes",
+          "[view][import][native-materializer][color]") {
+    // A captured design does not reach the materializer in the syntax it was
+    // authored in: Chromium serializes lab/lch/oklab/oklch/color-mix and any
+    // wide-gamut literal into `oklab()` or `oklch()`. The colour allowlist knew
+    // only `rgb`/`hsl`, so those values were not parsed and never applied — the
+    // view kept its DEFAULT colour, which is a silent loss rather than a visibly
+    // wrong one. A real capture's accent label rendered in the inherited colour.
+    //
+    // Asserted on text, border and background together for the same reason the
+    // rgba() case above does: the allowlist is one gate in front of seven paint
+    // sites, so a single-site check passes throughout the bug.
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "DRIVE";
+    ir.root.stable_anchor_id = "label";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 20.0f;
+    // Chromium paints these exact strings as rgb(6, 8, 9), rgb(142, 255, 157)
+    // and rgb(192, 255, 198); the values below are read off its own render.
+    ir.root.style.background_color = "oklab(0.152 0 -0.005)";
+    ir.root.style.color = "oklab(0.913804 -0.143517 0.0939829)";
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "oklch(0.7 0.2 145)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    const auto text = root->inheritable_text_color();
+    REQUIRE(text.has_value());
+    CHECK(text->r == Catch::Approx(142.0f / 255.0f).margin(0.01f));
+    CHECK(text->g == Catch::Approx(255.0f / 255.0f).margin(0.01f));
+    CHECK(text->b == Catch::Approx(157.0f / 255.0f).margin(0.01f));
+
+    const auto border = root->border_color();
+    CHECK(border.r == Catch::Approx(48.0f / 255.0f).margin(0.01f));
+    CHECK(border.g == Catch::Approx(189.0f / 255.0f).margin(0.01f));
+    CHECK(border.a > 0.0f);
+
+    // The background must be the design's near-black, not the parser's
+    // opaque-white fallback for a token it does not know. Without this the case
+    // passes when every value above resolves to white.
+    CHECK(root->background_color().r < 0.2f);
+    CHECK(root->background_color().g < 0.2f);
+    CHECK(root->background_color().b < 0.2f);
+}
+
+TEST_CASE("baked native materializer carries a resolved clip rectangle to the view",
+          "[view][import][native-materializer][clip-model]") {
+    // The importer resolves a node's real CSS clip chain to one rectangle in
+    // the node's own space. It reaches the renderer through this slot and NOT
+    // through `overflow`, because `overflow` clips whatever the node's children
+    // turn out to be — DOM parentage — and that is the chain CSS does not use.
+    // Two nodes, so the child proves the clip is per-node rather than something
+    // the parent's rectangle happened to cover.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 200.0f;
+    ir.root.style.clip_rect = IRStyle::ClipRect{5.0f, 5.0f, 90.0f, 90.0f};
+
+    IRNode child;
+    child.type = "frame";
+    child.stable_anchor_id = "escapee";
+    child.style.position = "absolute";
+    child.style.left = 10.0f;
+    child.style.top = 10.0f;
+    child.style.width = 50.0f;
+    child.style.height = 50.0f;
+    ir.root.children.push_back(std::move(child));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->ancestor_clip_rect().has_value());
+    CHECK(root->ancestor_clip_rect()->x == 5.0f);
+    CHECK(root->ancestor_clip_rect()->width == 90.0f);
+
+    // A node with no resolved clip gets none — it is not inherited from the
+    // parent's rectangle, which is the whole reason the slot is per-node.
+    REQUIRE(root->child_count() == 1);
+    CHECK_FALSE(root->child_at(0)->ancestor_clip_rect().has_value());
+}
+
 TEST_CASE("baked native materializer applies the SVG fill rule to the path widget",
           "[view][import][native-materializer][fill-rule]") {
     // The winding rule decides which regions of a multi-subpath path are

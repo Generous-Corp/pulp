@@ -14,13 +14,19 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/service.hpp>
+#include <pulp/inspect/protocol.hpp>
 #include <pulp/platform/child_process.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include "pulp_mcp_version.h"
 #include "mcp_json.hpp"
@@ -28,7 +34,9 @@
 #include "mcp_server.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 #include "timeline_mcp_tools.h"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -90,7 +98,9 @@ using pulp_mcp::handle_kit_verify;
 using pulp_mcp::handle_minos;
 using pulp_mcp::handle_status;
 using pulp_mcp::handle_test;
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
+#endif
 using pulp_mcp::handle_validate;
 using pulp_mcp::resolve_inspect_cli_binary;
 using pulp_mcp::shell_quote;
@@ -118,7 +128,11 @@ InspectorCommandResult run_inspector_command(
     const auto cli = resolve_inspect_cli_binary(root);
     pulp::platform::ProcessOptions options;
     options.working_directory = root.string();
-    options.max_output_bytes = 2u * 1024u * 1024u;
+    // The inspector wire permits a 16 MiB capture response. Leave room for
+    // the CLI's trailing newline and any bounded diagnostic framing so MCP
+    // does not silently turn a valid screenshot into truncated JSON.
+    options.max_output_bytes =
+        pulp::inspect::kInspectorExtendedMessageBytes + 64u * 1024u;
     std::vector<std::string> arguments{"inspect"};
     if (!session_id.empty() && !instance_id.empty()) {
         arguments.insert(arguments.end(),
@@ -167,10 +181,271 @@ struct InspectorSelectionFields {
     }
 };
 
-InspectorSelectionFields inspector_selection_fields(const std::string& args_json) {
-    return {!extract_raw(args_json, "session_id").empty(),
-            !extract_raw(args_json, "instance_id").empty(),
-            !extract_raw(args_json, "publication_id").empty()};
+struct InspectorToolArguments {
+    choc::value::Value arguments;
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+    InspectorSelectionFields selection_fields;
+};
+
+struct InspectorSetParamArguments {
+    std::uint32_t id = 0;
+    double value = 0.0;
+    bool normalized = false;
+};
+
+bool strict_json_lexemes(std::string_view json) {
+    const auto is_hex = [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+               (c >= 'A' && c <= 'F');
+    };
+    const auto is_delimiter = [](char c) {
+        return c == ',' || c == ']' || c == '}' || c == ' ' || c == '\t' ||
+               c == '\r' || c == '\n';
+    };
+
+    bool in_string = false;
+    for (std::size_t i = 0; i < json.size(); ++i) {
+        const auto c = json[i];
+        if (in_string) {
+            if (static_cast<unsigned char>(c) < 0x20)
+                return false;
+            if (c == '"') {
+                in_string = false;
+            } else if (c == '\\') {
+                if (++i >= json.size())
+                    return false;
+                const auto escaped = json[i];
+                if (escaped == 'u') {
+                    if (i + 4 >= json.size())
+                        return false;
+                    for (int digit = 0; digit < 4; ++digit)
+                        if (!is_hex(json[++i]))
+                            return false;
+                } else if (std::string_view("\"\\/bfnrt").find(escaped) ==
+                           std::string_view::npos) {
+                    return false;
+                }
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+        if (c == '+')
+            return false;
+        if (c != '-' && (c < '0' || c > '9'))
+            continue;
+
+        std::size_t end = i;
+        if (json[end] == '-' && (++end >= json.size() || json[end] < '0' || json[end] > '9'))
+            return false;
+        if (json[end] == '0') {
+            ++end;
+            if (end < json.size() && json[end] >= '0' && json[end] <= '9')
+                return false;
+        } else {
+            while (end < json.size() && json[end] >= '0' && json[end] <= '9')
+                ++end;
+        }
+        if (end < json.size() && json[end] == '.') {
+            ++end;
+            const auto fraction_start = end;
+            while (end < json.size() && json[end] >= '0' && json[end] <= '9')
+                ++end;
+            if (end == fraction_start)
+                return false;
+        }
+        if (end < json.size() && (json[end] == 'e' || json[end] == 'E')) {
+            ++end;
+            if (end < json.size() && (json[end] == '+' || json[end] == '-'))
+                ++end;
+            const auto exponent_start = end;
+            while (end < json.size() && json[end] >= '0' && json[end] <= '9')
+                ++end;
+            if (end == exponent_start)
+                return false;
+        }
+        if (end < json.size() && !is_delimiter(json[end]))
+            return false;
+        i = end - 1;
+    }
+    return !in_string;
+}
+
+bool has_one_complete_root_object(std::string_view json) {
+    std::size_t start = 0;
+    while (start < json.size() && std::isspace(static_cast<unsigned char>(json[start])))
+        ++start;
+    if (start == json.size() || json[start] != '{')
+        return false;
+
+    std::vector<char> delimiters;
+    bool in_string = false;
+    bool escaped = false;
+    std::size_t end = start;
+    for (; end < json.size(); ++end) {
+        const auto c = json[end];
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '{' || c == '[') {
+            delimiters.push_back(c);
+        } else if (c == '}' || c == ']') {
+            if (delimiters.empty() ||
+                (c == '}' && delimiters.back() != '{') ||
+                (c == ']' && delimiters.back() != '['))
+                return false;
+            delimiters.pop_back();
+            if (delimiters.empty()) {
+                ++end;
+                break;
+            }
+        }
+    }
+    if (in_string || !delimiters.empty())
+        return false;
+    while (end < json.size() && std::isspace(static_cast<unsigned char>(json[end])))
+        ++end;
+    return end == json.size();
+}
+
+bool has_unique_object_members(const choc::value::ValueView& object) {
+    if (!object.isObject())
+        return false;
+    std::unordered_set<std::string> names;
+    for (std::uint32_t i = 0; i < object.size(); ++i) {
+        const auto member = object.getObjectMemberAt(i);
+        if (!names.emplace(member.name).second)
+            return false;
+    }
+    return true;
+}
+
+std::optional<InspectorToolArguments> parse_inspector_tool_arguments(
+    const choc::value::ValueView& request,
+    std::string_view expected_name,
+    std::string& error) {
+    try {
+        if (!has_unique_object_members(request) ||
+            !request.hasObjectMember("params") || !request["params"].isObject()) {
+            error = "Error: malformed MCP tool request";
+            return std::nullopt;
+        }
+        const auto params = request["params"];
+        if (!has_unique_object_members(params) || !params.hasObjectMember("name") ||
+            !params["name"].isString() ||
+            params["name"].getString() != expected_name ||
+            (params.hasObjectMember("arguments") && !params["arguments"].isObject())) {
+            error = "Error: malformed MCP inspector tool request";
+            return std::nullopt;
+        }
+        const auto arguments = params.hasObjectMember("arguments")
+            ? choc::value::Value(params["arguments"])
+            : choc::value::createObject("");
+        if (!has_unique_object_members(arguments)) {
+            error = "Error: inspector tool arguments must not contain duplicate fields";
+            return std::nullopt;
+        }
+
+        InspectorToolArguments parsed;
+        parsed.arguments = choc::value::Value(arguments);
+        const auto read_selector = [&](std::string_view name, std::string& value,
+                                       bool& present) {
+            present = arguments.hasObjectMember(std::string(name));
+            if (!present)
+                return true;
+            const auto member = arguments[std::string(name)];
+            if (!member.isString())
+                return false;
+            value = std::string(member.getString());
+            return true;
+        };
+        if (!read_selector("session_id", parsed.session_id,
+                           parsed.selection_fields.session_id) ||
+            !read_selector("instance_id", parsed.instance_id,
+                           parsed.selection_fields.instance_id) ||
+            !read_selector("publication_id", parsed.publication_id,
+                           parsed.selection_fields.publication_id) ||
+            (parsed.selection_fields.any() &&
+             (!parsed.selection_fields.all() ||
+              !valid_inspector_identity(parsed.session_id) ||
+              !valid_inspector_identity(parsed.instance_id) ||
+              !valid_inspector_identity(parsed.publication_id)))) {
+            error = "Error: session_id, instance_id, and publication_id "
+                    "must be supplied together as exact safe identities";
+            return std::nullopt;
+        }
+
+        return parsed;
+    } catch (...) {
+        error = "Error: malformed JSON in inspector tool request";
+        return std::nullopt;
+    }
+}
+
+std::optional<InspectorSetParamArguments> parse_inspector_set_param_arguments(
+    const InspectorToolArguments& tool,
+    std::string& error) {
+    const auto& arguments = tool.arguments;
+    if (!arguments.hasObjectMember("id") || !arguments["id"].isInt()) {
+        error = "Error: id must be an integer from 0 through 4294967295";
+        return std::nullopt;
+    }
+    const auto raw_id = arguments["id"].getInt64();
+    if (raw_id < 0 || static_cast<std::uint64_t>(raw_id) >
+                          std::numeric_limits<std::uint32_t>::max()) {
+        error = "Error: id must be an integer from 0 through 4294967295";
+        return std::nullopt;
+    }
+    if (!arguments.hasObjectMember("value") ||
+        (!arguments["value"].isInt() && !arguments["value"].isFloat())) {
+        error = "Error: value must be a finite number";
+        return std::nullopt;
+    }
+
+    InspectorSetParamArguments parsed;
+    parsed.id = static_cast<std::uint32_t>(raw_id);
+    parsed.value = arguments["value"].getWithDefault(0.0);
+    if (!std::isfinite(parsed.value)) {
+        error = "Error: value must be a finite number";
+        return std::nullopt;
+    }
+    if (arguments.hasObjectMember("normalized")) {
+        if (!arguments["normalized"].isBool()) {
+            error = "Error: normalized must be a boolean";
+            return std::nullopt;
+        }
+        parsed.normalized = arguments["normalized"].getWithDefault(false);
+    }
+    return parsed;
+}
+
+std::string inspector_argument_string(const InspectorToolArguments& tool,
+                                      std::string_view name) {
+    const auto key = std::string(name);
+    if (!tool.arguments.hasObjectMember(key) || !tool.arguments[key].isString())
+        return {};
+    return std::string(tool.arguments[key].getString());
+}
+
+std::string inspector_argument_json(const InspectorToolArguments& tool,
+                                    std::string_view name) {
+    const auto key = std::string(name);
+    if (!tool.arguments.hasObjectMember(key))
+        return {};
+    return choc::json::toString(tool.arguments[key], false);
 }
 
 bool has_inspector_selection(const std::string& session_id, const std::string& instance_id,
@@ -245,8 +520,10 @@ std::string pulp_mcp::server::tools_list_json() {
     std::string out;
     out.reserve(32 * 1024);
     out += R"JSON({"tools":[)JSON";
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
     out += pulp_mcp::kTimelineMcpToolsArray;
     out += ",";
+#endif
     out += R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out += R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -288,21 +565,21 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_docs_check","description":"Validate docs consistency against the codebase","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_dom","description":"Experimental source-checkout client for DOM.getDocument. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_dom","description":"Experimental source-checkout DOM.getDocument client for an explicitly activated GPU desktop standalone from `pulp run --inspect`, or an explicit custom host. Optional exact identity fields provide exact multi-session selection.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_params","description":"Experimental source-checkout client for State.getParameters. Requires a custom host/test fixture that explicitly constructs an inspector endpoint; normal Pulp and installed-user launches do not.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_params","description":"Experimental source-checkout State.getParameters client for an explicitly activated GPU desktop standalone from `pulp run --inspect`, or an explicit custom host.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_value_channels","description":"Experimental source-checkout client for the value-channel catalog. Requires a custom inspector fixture; normal launches provide no endpoint and live telemetry is not wired.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_value_channels","description":"Experimental source-checkout value-channel catalog client for an explicitly activated GPU desktop standalone from `pulp run --inspect`, or an explicit custom host. Independent live telemetry is not wired.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_set_param","description":"Experimental source-checkout State.setParameter client for custom fixtures only. Normal launches provide no endpoint; the authenticated CLI path acquires a same-connection controller lease before mutation.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_set_param","description":"Experimental source-checkout State.setParameter client for an explicitly activated standalone whose profile grants session.control and state.write, or a similarly capable custom host. The authenticated CLI path acquires a same-connection controller lease before mutation.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_screenshot","description":"Experimental source-checkout client requiring a custom inspector fixture. Live host capture is unavailable; use pulp_validate screenshot=true or pulp run --headless --screenshot today.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_screenshot","description":"Experimental source-checkout whole-window capture client for an explicitly activated GPU desktop standalone whose selected host supports compositor capture, or an explicit custom host. Capture.screenshotNode remains unavailable.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_evaluate","description":"Experimental source-checkout Runtime.evaluate client for a custom fixture only. Normal launches provide no endpoint; high-risk evaluation also requires explicit host wiring and enablement.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_evaluate","description":"Experimental source-checkout Runtime.evaluate client for an explicit custom host only. Standalone profiles do not grant runtime.eval; high-risk evaluation requires separate host wiring and enablement.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_performance","description":"Experimental source-checkout Performance.getMetrics client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_performance","description":"Experimental source-checkout Performance.getMetrics client for an explicitly activated standalone or explicit custom host. Individual metrics report unavailable when the selected session has no corresponding render source.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_inspect_audio","description":"Experimental source-checkout Audio.getConfig client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
+        R"JSON({"name":"pulp_inspect_audio","description":"Experimental source-checkout Audio.getConfig client for an explicitly activated standalone from `pulp run --inspect`, or an explicit custom host.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_start_trace","description":"Experimental source-checkout custom-fixture client for Motion.startTrace; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns trace_id plus the exact session_id, instance_id, and non-reusable publication_id required for follow-up mutations.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_stop_trace","description":"Experimental source-checkout custom-fixture client for Motion.stopTrace; normal Pulp launches provide no endpoint. Releases a fixture-owned trace on the exact publication selected by start.","inputSchema":{"type":"object","required":["trace_id","session_id","instance_id","publication_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
@@ -353,9 +630,23 @@ std::string pulp_mcp::server::handle_request(const std::string& json) {
 }
 
 static std::string handle_request_raw(const std::string& json) {
-    auto method = extract_string(json, "method");
-    auto id = extract_raw(json, "id");
-    if (id.empty()) id = "null";
+    choc::value::Value request;
+    try {
+        if (!strict_json_lexemes(json) || !has_one_complete_root_object(json))
+            return json_error("null", -32700, "Parse error");
+        request = choc::json::parse(json);
+    } catch (...) {
+        return json_error("null", -32700, "Parse error");
+    }
+    if (!has_unique_object_members(request))
+        return json_error("null", -32600, "Invalid Request");
+
+    std::string method;
+    if (request.hasObjectMember("method") && request["method"].isString())
+        method = std::string(request["method"].getString());
+    std::string id = "null";
+    if (request.hasObjectMember("id"))
+        id = choc::json::toString(request["id"], false);
 
     if (method == "initialize") {
         // serverInfo.version tracks the SDK/CLI release. It is wired to
@@ -378,38 +669,18 @@ static std::string handle_request_raw(const std::string& json) {
     }
 
     if (method == "tools/call") {
-        auto name = extract_string(json, "name");
-        // Extract the arguments sub-object (simplified)
-        auto args_pos = json.find("\"arguments\"");
+        if (!request.hasObjectMember("params") || !request["params"].isObject() ||
+            !has_unique_object_members(request["params"]))
+            return json_error(id, -32602, "Invalid tools/call params");
+        const auto params = request["params"];
+        if (!params.hasObjectMember("name") || !params["name"].isString())
+            return json_error(id, -32602, "Invalid tools/call name");
+        const auto name = std::string(params["name"].getString());
         std::string args_json = "{}";
-        if (args_pos != std::string::npos) {
-            auto brace = json.find('{', args_pos);
-            if (brace != std::string::npos) {
-                int depth = 1;
-                bool in_string = false;
-                bool escaped = false;
-                auto end = brace + 1;
-                while (end < json.size() && depth > 0) {
-                    const char current = json[end];
-                    if (in_string) {
-                        if (escaped) {
-                            escaped = false;
-                        } else if (current == '\\') {
-                            escaped = true;
-                        } else if (current == '"') {
-                            in_string = false;
-                        }
-                    } else if (current == '"') {
-                        in_string = true;
-                    } else if (current == '{') {
-                        ++depth;
-                    } else if (current == '}') {
-                        --depth;
-                    }
-                    ++end;
-                }
-                args_json = json.substr(brace, end - brace);
-            }
+        if (params.hasObjectMember("arguments")) {
+            if (!params["arguments"].isObject())
+                return json_error(id, -32602, "Invalid tools/call arguments");
+            args_json = choc::json::toString(params["arguments"], false);
         }
 
         // Per-tool feature detection. If the tool declares a min_sdk floor
@@ -437,6 +708,34 @@ static std::string handle_request_raw(const std::string& json) {
 
         std::string result;
         const auto* inspector_tool = find_inspector_mcp_tool(name);
+        std::optional<InspectorToolArguments> inspector_arguments;
+        if (inspector_tool != nullptr) {
+            std::string parse_error;
+            inspector_arguments =
+                parse_inspector_tool_arguments(request, name, parse_error);
+            if (!inspector_arguments && find_project_root().empty()) {
+                return json_result(
+                    id,
+                    "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}");
+            }
+            if (!inspector_arguments)
+                return json_result(id, inspector_error_payload(parse_error));
+            const bool discovers_and_pins_publication =
+                name == "pulp_motion_start_trace" || name == "pulp_trace_start";
+            if (!discovers_and_pins_publication &&
+                !inspector_arguments->selection_fields.all()) {
+                if (find_project_root().empty()) {
+                    return json_result(
+                        id,
+                        "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}");
+                }
+                return json_result(
+                    id,
+                    inspector_error_payload(
+                        "Error: session_id, instance_id, and publication_id "
+                        "are required to select one exact inspector publication"));
+            }
+        }
         if (name == "pulp_compat")         result = handle_compat();
         else if (name == "pulp_build")          result = handle_build(args_json);
         else if (name == "pulp_test")      result = handle_test(args_json);
@@ -473,7 +772,9 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_plugin_inspect") result = handle_audio_plugin_inspect(args_json);
         else if (name == "pulp_audio_render")         result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")        result = handle_audio_compare(args_json);
+#if PULP_MCP_ENABLE_TIMELINE_TOOLS
         else if (auto timeline = handle_timeline_tool(name, args_json)) result = std::move(*timeline);
+#endif
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();
@@ -558,9 +859,11 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
-                const auto view_name = extract_string(args_json, "view_name");
-                const auto metrics = extract_raw(args_json, "metrics");
-                const auto fps = extract_raw(args_json, "fps");
+                const auto view_name =
+                    inspector_argument_string(*inspector_arguments, "view_name");
+                const auto metrics =
+                    inspector_argument_json(*inspector_arguments, "metrics");
+                const auto fps = inspector_argument_json(*inspector_arguments, "fps");
                 inspector_params =
                     "{\"view_name\":" + json_string(view_name) +
                     ",\"metrics\":" +
@@ -569,12 +872,13 @@ static std::string handle_request_raw(const std::string& json) {
                     inspector_params += ",\"fps\":" + fps;
                 inspector_params += "}";
             } else if (name == "pulp_motion_stop_trace") {
-                auto trace_id_raw = extract_raw(args_json, "trace_id");
+                auto trace_id_raw =
+                    inspector_argument_json(*inspector_arguments, "trace_id");
                 if (trace_id_raw.empty()) trace_id_raw = "0";
                 inspector_params =
                     std::string("{\"trace_id\":") + trace_id_raw + "}";
             } else if (name == "pulp_motion_scrub_to") {
-                auto frame_raw = extract_raw(args_json, "frame");
+                auto frame_raw = inspector_argument_json(*inspector_arguments, "frame");
                 if (frame_raw.empty()) frame_raw = "0";
                 inspector_params =
                     std::string("{\"frame\":") + frame_raw + "}";
@@ -584,11 +888,10 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto session_id = extract_string(args_json, "session_id");
-                auto instance_id = extract_string(args_json, "instance_id");
-                auto publication_id =
-                    extract_string(args_json, "publication_id");
-                const auto selection_fields = inspector_selection_fields(args_json);
+                auto session_id = inspector_arguments->session_id;
+                auto instance_id = inspector_arguments->instance_id;
+                auto publication_id = inspector_arguments->publication_id;
+                const auto selection_fields = inspector_arguments->selection_fields;
                 if (selection_fields.any() &&
                     (!selection_fields.all() ||
                      !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
@@ -652,8 +955,10 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
-                const auto categories = extract_raw(args_json, "categories");
-                const auto ring_mb = extract_raw(args_json, "ring_mb");
+                const auto categories =
+                    inspector_argument_json(*inspector_arguments, "categories");
+                const auto ring_mb =
+                    inspector_argument_json(*inspector_arguments, "ring_mb");
                 inspector_params = "{";
                 if (!categories.empty())
                     inspector_params += "\"categories\":" + categories;
@@ -664,9 +969,11 @@ static std::string handle_request_raw(const std::string& json) {
                 }
                 inspector_params += "}";
             } else if (name == "pulp_trace_query") {
-                const auto sql = extract_string(args_json, "sql");
-                const auto preset = extract_string(args_json, "preset");
-                const auto format = extract_string(args_json, "format");
+                const auto sql = inspector_argument_string(*inspector_arguments, "sql");
+                const auto preset =
+                    inspector_argument_string(*inspector_arguments, "preset");
+                const auto format =
+                    inspector_argument_string(*inspector_arguments, "format");
                 inspector_params = "{";
                 if (!sql.empty())
                     inspector_params += "\"sql\":" + json_string(sql);
@@ -684,18 +991,18 @@ static std::string handle_request_raw(const std::string& json) {
             } else if (name == "pulp_trace_explain") {
                 inspector_params =
                     "{\"question\":" +
-                    json_string(extract_string(args_json, "question")) + "}";
+                    json_string(inspector_argument_string(
+                        *inspector_arguments, "question")) + "}";
             }
 
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto session_id = extract_string(args_json, "session_id");
-                auto instance_id = extract_string(args_json, "instance_id");
-                auto publication_id =
-                    extract_string(args_json, "publication_id");
-                const auto selection_fields = inspector_selection_fields(args_json);
+                auto session_id = inspector_arguments->session_id;
+                auto instance_id = inspector_arguments->instance_id;
+                auto publication_id = inspector_arguments->publication_id;
+                const auto selection_fields = inspector_arguments->selection_fields;
                 if (selection_fields.any() &&
                     (!selection_fields.all() ||
                      !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
@@ -760,26 +1067,21 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                int pid = extract_int(args_json, "id", -1);
-                double value = extract_double(args_json, "value", 0.0);
-                bool normalized = extract_bool(args_json, "normalized", false);
-                std::string params_json = std::string("{\"id\":") + std::to_string(pid) +
-                    ",\"value\":" + std::to_string(value) +
-                    ",\"normalized\":" + (normalized ? "true" : "false") + "}";
-                const auto session_id = extract_string(args_json, "session_id");
-                const auto instance_id = extract_string(args_json, "instance_id");
-                const auto publication_id = extract_string(args_json, "publication_id");
-                const auto selection_fields = inspector_selection_fields(args_json);
-                if (selection_fields.any() &&
-                    (!selection_fields.all() ||
-                     !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {
-                    result = inspector_error_payload(
-                        "Error: session_id, instance_id, and publication_id "
-                        "must be supplied together as exact safe identities");
+                std::string parse_error;
+                const auto parsed =
+                    parse_inspector_set_param_arguments(*inspector_arguments, parse_error);
+                if (!parsed) {
+                    result = inspector_error_payload(parse_error);
                 } else {
+                    std::string params_json =
+                        std::string("{\"id\":") + std::to_string(parsed->id) +
+                        ",\"value\":" + std::to_string(parsed->value) +
+                        ",\"normalized\":" + (parsed->normalized ? "true" : "false") + "}";
                     auto command =
                         run_inspector_command(root, std::string(inspector_tool->method),
-                                              params_json, session_id, instance_id, publication_id);
+                                              params_json, inspector_arguments->session_id,
+                                              inspector_arguments->instance_id,
+                                              inspector_arguments->publication_id);
                     result = inspector_tool_payload(std::move(command));
                 }
             }
@@ -790,7 +1092,8 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_method(inspector_tool->method);
             std::string inspector_params = "{}";
             if (name == "pulp_inspect_evaluate") {
-                auto expr = extract_string(args_json, "expression");
+                auto expr =
+                    inspector_argument_string(*inspector_arguments, "expression");
                 if (!expr.empty()) {
                     auto params_json = std::string("{\"expression\":") + json_string(expr) + "}";
                     inspector_params = params_json;
@@ -801,10 +1104,10 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                const auto session_id = extract_string(args_json, "session_id");
-                const auto instance_id = extract_string(args_json, "instance_id");
-                const auto publication_id = extract_string(args_json, "publication_id");
-                const auto selection_fields = inspector_selection_fields(args_json);
+                const auto& session_id = inspector_arguments->session_id;
+                const auto& instance_id = inspector_arguments->instance_id;
+                const auto& publication_id = inspector_arguments->publication_id;
+                const auto selection_fields = inspector_arguments->selection_fields;
                 if (selection_fields.any() &&
                     (!selection_fields.all() ||
                      !valid_exact_inspector_selection(session_id, instance_id, publication_id))) {

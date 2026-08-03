@@ -62,6 +62,13 @@ pulp_add_test_suite(pulp-test-playback-production
 # link is the test's alone — it stands where a front-end stands, above both
 # rungs, and is exactly what neither pulp::timeline-editor nor pulp::timeline
 # is allowed to name.
+# The track channel stands beside the clip one rather than inside it, so the two
+# are proven by separate suites: a link list naming only the editor rung and the
+# document model is what shows an arranger needs no view layer to rearrange
+# tracks, unlike the clip parity fixture below.
+pulp_add_test_suite(pulp-test-timeline-track-edit-intents
+    SOURCES test_timeline_track_edit_intents.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-edit-intents
     SOURCES test_timeline_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline pulp::view)
@@ -245,9 +252,11 @@ pulp_add_test_suite(pulp-test-timeline-journal
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-agent
-    SOURCES test_timeline_agent.cpp
-    LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    pulp_add_test_suite(pulp-test-timeline-agent
+        SOURCES test_timeline_agent.cpp
+        LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that
 # only resolves context a renderer declared.
@@ -574,5 +583,10 @@ endif()
 # Engine-side half of the reference-clock sync soak, owned by this subsystem.
 include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
 
+# Durable project packages sit immediately above the timeline model and keep
+# their crash-recovery fixtures with the owning timeline test manifest.
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    include("${CMAKE_CURRENT_LIST_DIR}/project_package_tests.cmake")
+endif()
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")

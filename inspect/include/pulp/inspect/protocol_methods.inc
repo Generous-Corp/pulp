@@ -13,6 +13,7 @@ PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", Sess
 PULP_INSPECT_METHOD(kInspectorEnable, "Inspector.enable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorDisable, "Inspector.disable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorGetInfo, "Inspector.getInfo", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kInspectorGetAgentContext, "Inspector.getAgentContext", SessionDescribe, Request)
 PULP_INSPECT_METHOD(kInspectorApplyTweak, "Inspector.applyTweak", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorListTweaks, "Inspector.listTweaks", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorClearTweaks, "Inspector.clearTweaks", AuthoringTweaks, Request)

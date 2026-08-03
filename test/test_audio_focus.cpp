@@ -7,6 +7,8 @@
 
 #include <pulp/audio/audio_focus.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -246,9 +248,10 @@ TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
             samples.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    while (!reader_started.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
-    }
+    // Bounded: an unbounded spin here hangs the suite if the reader thread never
+    // starts, where the REQUIRE below reports that as the failure it is.
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return reader_started.load(std::memory_order_acquire); }));
     std::thread writer([&] {
         for (int i = 0; i < 10'000; ++i) {
             AudioFocusRegistry::instance().publish(
