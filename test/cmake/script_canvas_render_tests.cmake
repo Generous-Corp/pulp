@@ -25,8 +25,7 @@ pulp_add_test_suite(pulp-test-script SOURCES test_script_engine.cpp LIBRARIES pu
 
 # Scripted UI hot reload/theme reload tests
 add_executable(pulp-test-scripted-ui
-    test_scripted_ui.cpp
-    test_scripted_ui_runtime_eval.cpp)
+    test_scripted_ui.cpp)
 target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view Catch2::Catch2WithMain)
 if(TARGET pulp-render)
     target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::render)
@@ -34,6 +33,18 @@ endif()
 # `slow`: ScriptedUiSession reload tests sleep on file-watcher
 # debounce + filesystem mtime; ~0.5-1 sec each. Excluded from fast-CI.
 catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
+
+# Runtime-evaluation tests do not use the file watcher or its debounce sleeps.
+# Keep them in the normal-speed coverage lane so the capability, timeout, realm
+# replacement, and teardown paths are exercised by the diff-coverage gate.
+add_executable(pulp-test-scripted-ui-runtime-eval
+    test_scripted_ui_runtime_eval.cpp)
+target_link_libraries(pulp-test-scripted-ui-runtime-eval
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+if(TARGET pulp-render)
+    target_link_libraries(pulp-test-scripted-ui-runtime-eval PRIVATE pulp::render)
+endif()
+catch_discover_tests(pulp-test-scripted-ui-runtime-eval)
 
 # JS engine abstraction tests (shared across all backends)
 pulp_add_test_suite(pulp-test-js-engine LIBRARIES pulp::view)
