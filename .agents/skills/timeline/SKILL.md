@@ -341,6 +341,11 @@ artifact is needed. Never modify canonical project JSON text directly.
   a field it ignores lets a retry apply one payload and report another's
   outcome) and `retained_size()` (it falls through to `sizeof(T)`, so a field it
   forgets is under-counted rather than refused).
+- **A brand-new command type is a different case: register it at version 1 with
+  every field required.** Nothing has ever written an envelope naming it, so
+  there is no older meaning to preserve and an omitted field is a malformed
+  payload rather than a legacy spelling. The exact-equality gate still applies to
+  it from then on, which is what pins it at 1 for good.
 - `schema_release.hpp` records exact shipped structural type/version sets,
   including `v0.736.0` (Track v1), `v0.744.0` (Track v2), `v0.748.0`
   (Track v3), and `v0.750.0` (Track v4, before SequenceRef content and sequence
@@ -611,7 +616,7 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
-  `ReplaceNoteContent`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
+  `ReplaceNoteContent`, `SetNoteEvents`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
   `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
   `RemoveMarker`, `InsertRegion`, `RemoveRegion`, `SetChordScaleLane`,
@@ -733,15 +738,34 @@ nested clip trimmed to its audible window filters modifiers to the retained
 notes and refuses a clip with lanes outright — trimming has no defined answer
 for a point that sits before the retained window yet still sounds inside it).
 
-**Known limit worth knowing before you file it as a bug:** `ReplaceNoteContent`
-transports note arrays only. Preserve-and-prune therefore makes the command's
-inverse exact for every edit that keeps its notes, but *not* for one that
-removes a modifier-bearing note — undo restores the note and its identity while
-its modifier stays dropped. Lanes are unaffected: they never leave the clip.
-Closing the modifier gap means carrying modifiers in the command payload, which
-is a serialized schema surface; `decode_command` gates on exact version equality
-with no upgrade hook, so it has to arrive as optional fields at v1, never a
-version bump.
+`ReplaceNoteContent` carries the modifiers as well as the notes, in optional
+`expected_modifiers` / `replacement_modifiers` arrays. An authoring caller leaves
+both empty and the reducer derives the surviving set from the clip; a
+reducer-built inverse fills them in, which is what makes undo exact for an edit
+that *removes* a modifier-bearing note — the dropped modifier is gone from the
+content the inverse reduces against, so no filter over live state can recover it.
+Lanes need no such treatment: they never leave the clip.
+
+### Choosing between the two note-set commands
+
+`SetNoteEvents` and `ReplaceNoteContent` both rewrite note values, and the
+difference is what each one gates on.
+
+- **`SetNoteEvents` names a subset and cannot change the note set.**
+  `replacement[i]` must name the same note as `expected[i]`, so the reduction
+  allocates no identity and tombstones none. Reach for it for any edit that moves,
+  resizes, or retunes notes that already exist — a drag, a nudge, a velocity
+  sweep. It carries only the notes under the gesture, so its journal cost tracks
+  the selection rather than the clip.
+- **`ReplaceNoteContent` gates on the clip's entire current note array** and is
+  the only one of the two that can add or remove a note. Its `expected` is
+  rejected unless it equals the whole note set, so a one-note edit in a
+  10,000-note clip still costs 10,000 notes twice over.
+
+Both emit exactly one command per transaction regardless of how many notes they
+touch. `JournalLimits::max_commands` is a **count** ceiling, so a per-note command
+shape would exhaust it far sooner than the byte ceiling it would relieve — which
+is why neither of these is singular.
 
 ### A whole-content note edit is affordable per gesture, not per frame
 
@@ -1288,6 +1312,39 @@ so a surviving disjunct cannot answer for the one you meant to disable; and
 **assert every disjunct separately**, so the two halves fail at different lines.
 A control that passes is either a blind test or a malformed mutation, and the two
 are indistinguishable until you read the mutated source.
+
+### A boundary test that never moves the boundary is satisfied by a constant
+
+`undo_gesture_budget`
+(`core/timeline_editor/include/pulp/timeline_editor/gesture_budget.hpp`) predicts
+how many steps one open gesture can commit, and the obvious way to test it is a
+self-controlling pair: size a session's budget for N steps, assert N commit and
+the N+1th comes back `ConflictCode::UndoFull`. Same command, same size, same
+budget, one variable, opposite outcomes — which is the right shape and is still
+not enough.
+
+**A prediction that ignores its inputs and returns the literal N passes that pair
+perfectly.** The budget was built from N, so a hardcoded N sits exactly on the
+boundary and both halves agree with it. Confirmed by mutation, not by argument:
+replacing the whole computation with `return 4` failed only the payload-growth
+case and passed both halves of the pair.
+
+The fix is to run the pair at **two** budget sizes (`test_timeline_gesture_budget.cpp`
+uses 4 and 7). A constant then fails at whichever one it is not. Generally: a pair
+pins a boundary, but only a boundary that **moves** pins the rule that places it —
+so any threshold test that exercises one threshold is satisfiable by that
+threshold as a literal. This applies well beyond this function: quota, limit and
+capacity assertions across `SessionLimits`, `JournalLimits` and `UndoLimits` all
+have the same shape.
+
+Two further traps this function's tests exist to avoid:
+
+- **Set `JournalLimits` wide, explicitly.** It binds the same gesture
+  independently, defaults to 16 MiB / 1024 transactions, and has **no automatic
+  eviction** — only `checkpoint()`. Left at its defaults it is what a test aiming
+  at the undo budget ends up measuring, and `JournalFull` is not `UndoFull`.
+- **Assert the conflict code, not just the failure.** A gesture stopped by a stale
+  revision or a malformed bracket also stops at the step you are pointing at.
 
 ## Schema codegen & drift gate
 
