@@ -989,17 +989,24 @@ std::size_t InspectorServer::Impl::cancel_client_events(
     if (client_id.empty() || loss_owner.empty())
         return 0;
     const auto generation = session_generation.load(std::memory_order_acquire);
-    std::lock_guard lock(clients_mutex);
-    if (session_generation.load(std::memory_order_acquire) != generation)
-        return 0;
-    for (const auto& [raw, client] : clients) {
-        (void)raw;
-        if (client->authenticated && client->generation == generation
-            && client->client_id == client_id) {
-            return client->outbound->cancel_targeted_owner(loss_owner);
+    std::shared_ptr<detail::InspectorOutboundClient> outbound;
+    {
+        std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) != generation)
+            return 0;
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated && client->generation == generation
+                && client->client_id == client_id) {
+                outbound = client->outbound;
+                break;
+            }
         }
     }
-    return 0;
+    // The outbound cancellation barrier may wait for an active send. Never
+    // retain clients_mutex across that wait: a failed send synchronously enters
+    // the disconnect callback and needs the same registry lock.
+    return outbound ? outbound->cancel_targeted_owner(loss_owner) : 0;
 }
 
 int InspectorServer::Impl::client_count() {
