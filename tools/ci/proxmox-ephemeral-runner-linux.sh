@@ -22,7 +22,7 @@
 #
 set -uo pipefail
 
-GOLDEN=9004
+GOLDEN=9005
 CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/102
 CLONE_MAX=202
 GUEST_IPV4_PREFIX=192.168.86
@@ -170,6 +170,18 @@ for _ in $(seq 1 20); do
 done
 
 # ── register ephemeral ───────────────────────────────────────────────────────
+# Preamble/alias jobs use the GitHub CLI with the per-job GITHUB_TOKEN that
+# Actions injects. With token variables cleared, --show-token exposes every
+# credential the CLI can resolve from its config or credential store. Refuse a
+# clone if the executable is missing or any persistent token is resolvable.
+ssh -o BatchMode=yes "ci@$GUEST_IP" '
+    command -v gh >/dev/null &&
+    ! env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+        -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST \
+        gh auth status --show-token 2>&1 \
+        | grep -Eq "^[[:space:]-]*Token:"
+' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
+
 # A registration token is minted per job and is single-use by design, which is
 # what makes --ephemeral viable: the runner takes exactly one job, deregisters
 # itself, and the clone is destroyed under it.
