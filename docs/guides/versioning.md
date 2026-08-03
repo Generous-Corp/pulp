@@ -421,7 +421,18 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.80.2 — the merge queue made it load-bearing
+### Why the pin sits at v0.81.2 — fleet health and the merge queue are load-bearing
+
+v0.81.2 preserves the v0.81.0 fleet-health surface, keeps v0.81.1's valid shell
+tag extraction, and fully qualifies the release bot's branch push refspec so a
+detached tag checkout can publish its queue-bound PR branch from the dedicated
+mutation authority. v0.81.0 makes `runner fleet-status` account for the full registered-runner
+inventory and configured expected metal hosts, including machines that have not
+registered yet. It also fails visibly when Tart disk headroom falls below its
+admission floor, ccache exceeds its configured maximum, or a merge-group Linux
+job remains on `ubuntu-latest` while compatible self-hosted capacity is idle.
+Pulp relies on these checks for the MacPro Linux pool and unfinished Mac Mini
+Intel lane, so expected-host config must not land ahead of this pin.
 
 The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
 **Shipyard's post-tag hook could no longer push.**
@@ -464,3 +475,15 @@ it in a comment that goes stale — which is exactly what happened here.
 Keep the three in step — the pin, the installed binary on every fleet Mac, and
 `push_mode` — because a host still on an older Shipyard silently ignores
 `push_mode` and reverts to a direct push that the ruleset then rejects.
+
+v0.80.3 fixes the local queue scheduler so a worker slot is refilled as
+soon as its target finishes rather than only after the entire dispatched batch.
+That is a throughput dependency for Pulp's shared Macs, not a cosmetic upgrade.
+The same release expands Shipyard's own version trigger to root-level
+`src/*.rs`; without it, the scheduler fix could merge without creating the CLI
+release referenced by this pin.
+
+v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
+preserving any explicitly configured SSH identity or proxy command. Without it,
+a successful local proof can still end in an expired SSH connection and waste
+the entire validation cycle.
