@@ -19,6 +19,7 @@ name: Workflow lint
 on:
   pull_request:
     paths:
+      - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
@@ -47,6 +48,7 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -54,6 +56,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
@@ -82,6 +85,7 @@ on:
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
       - 'tools/scripts/test_ci_throughput_workflows.py'
+      - 'tools/scripts/test_workflow_lint.py'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
@@ -165,6 +169,12 @@ jobs:
           python3 tools/scripts/test_example_validation_paths.py
           python3 tools/scripts/test_ci_throughput_workflows.py
           python3 tools/scripts/test_codecov_upload_contract.py
+
+      - name: Workflow lint regression contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/test_workflow_lint.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:

@@ -213,8 +213,9 @@ the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The scrip
 down here, since re-baking a warmer golden mints a new id.
 
 **Golden + disposable clone.** The golden carries the dependency set, prebuilt
-Skia (`external/skia-build/.../libskia.a`), a warm ccache, and the shared
-FetchContent **source** cache that `setup.sh` consults via
+Skia (`external/skia-build/.../libskia.a`), a warm ccache, the uncredentialed
+`gh` executable used by preamble/alias jobs, and the shared FetchContent
+**source** cache that `setup.sh` consults via
 `PULP_SHARED_FETCHCONTENT_SOURCE_DIR`. That last one is not optional: with it
 empty, every job re-clones three.js (~2.2 GB of history) before it can compile.
 Each job gets a
@@ -256,6 +257,9 @@ waiting.
 Registration uses a fine-grained PAT at
 `/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
 `Administration: read/write`, minting a single-use registration token per job.
+That host credential never enters a guest. Jobs that call `gh` authenticate with
+the short-lived `GITHUB_TOKEN` injected by Actions; the golden must not contain a
+persistent `gh` login in any supported config or credential store.
 ## Routing the Linux advisory lanes to macpro
 
 Three advisory Linux lanes can run on the self-hosted x86_64 host instead of
@@ -392,7 +396,7 @@ investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
 The `shipyard metrics` commands require a Shipyard build that includes the
-metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.80.2`, which
+metrics subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.2`, which
 provides it, so no separate binary is needed.
 
 ```bash

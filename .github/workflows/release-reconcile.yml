@@ -24,10 +24,12 @@ name: Release reconciler
 #     matter how long it has been running. Slow is not broken.
 #   - A tag younger than GRACE_MINUTES is left alone even if no run is visible
 #     yet, to cover the gap between the tag push and the run appearing.
-#   - Anything else — no release, or a draft left behind by a finalizer that died
-#     — is re-dispatched, up to MAX_ATTEMPTS times.
-#   - A tag that exhausts MAX_ATTEMPTS is a real, human-shaped problem (a broken
-#     build, not a flake). It gets ONE issue, updated in place, never duplicated.
+#   - A completed terminal result opens the circuit and is reported. SDK tags are
+#     immutable, so retrying a real validation failure only repeats runner load.
+#   - No release run, or a run interrupted by cancellation/staleness, is
+#     re-dispatched up to MAX_ATTEMPTS times.
+#   - An interrupted tag that exhausts MAX_ATTEMPTS is a real, human-shaped
+#     problem. It gets ONE issue, updated in place, never duplicated.
 
 on:
   schedule:
@@ -61,8 +63,8 @@ jobs:
       GRACE_MINUTES: '45'
       # Look-back for reconciliation. Older tags are history, not incidents.
       MAX_AGE_HOURS: '72'
-      # Re-dispatch budget per tag. A genuine build break will burn through these
-      # and then correctly escalate to a human instead of looping forever.
+      # Re-dispatch budget per tag for interrupted runs only. A genuine build
+      # failure opens the circuit immediately and never consumes this budget.
       MAX_ATTEMPTS: '3'
       # Only releases at or above this version are held to the current asset
       # contract (13 assets + SHA256SUMS). Earlier releases legitimately predate
