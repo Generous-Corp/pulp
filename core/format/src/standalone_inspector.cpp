@@ -832,17 +832,6 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
             "Standalone: Development Inspector requires deferred window close support");
         return nullptr;
     }
-    // Processor-level editor replacement needs every borrowed inspector source
-    // to detach before the swap and reattach to the new processor lifetime.
-    // Fail closed unless both operations are available; publishing through a
-    // partially detached scripted bridge would expose stale sources.
-    if (processor.supports_editor_reload()) {
-        runtime::log_error(
-            "Standalone: Development Inspector does not support processors "
-            "that replace the editor at runtime");
-        return nullptr;
-    }
-
     std::vector<inspect::InspectorCapability> custom;
     if (*parsed_profile == inspect::InspectorProfile::Custom) {
         bool has_session_control = false;
