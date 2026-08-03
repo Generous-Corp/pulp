@@ -237,6 +237,10 @@ struct LoweredNode {
     /// run a sibling of the box it belongs inside. -1 for every other node.
     int owner_slot = -1;
     std::vector<int> children;    ///< slots, already in Chrome's paint order
+    /// Whether this node puts anything on the canvas. Settled BEFORE the tree
+    /// is materialized, because materializing MOVES `node` into its parent and
+    /// a moved-from style would answer "paints nothing" for every node.
+    bool paints_ink = false;
 };
 
 /// Whether a computed `transform` leaves the element's painted shape equal to
@@ -1146,6 +1150,22 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         slots[i].node.style.clip_rect = rect;
     }
 
+    // Whether each node puts anything on the canvas, settled while `node` is
+    // still readable. A node that draws no ink cannot occlude what it is
+    // reordered above — a bare positioning `div` overlapping a painted sibling
+    // is an empty rectangle in front of it, not a fidelity loss.
+    for (auto& slot : slots) {
+        const auto& s = slot.node.style;
+        slot.paints_ink =
+            (s.background_color && *s.background_color != "transparent" &&
+             *s.background_color != "rgba(0, 0, 0, 0)") ||
+            (s.background_image && *s.background_image != "none") ||
+            !s.box_shadow.empty() ||
+            (s.border_width && *s.border_width > 0.0f) ||
+            !slot.node.text_content.empty() || slot.node.type == "image" ||
+            slot.node.type == "vector" || slot.node.type == "text";
+    }
+
     // Children in slot order, which IS Chrome's paint order among siblings.
     std::vector<int> root_slots;
     for (size_t i = 0; i < slots.size(); ++i) {
@@ -1309,14 +1329,27 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // "nesting cost no fidelity" is a number rather than an assurance.
     for (size_t a = 0; a < composed_order.size(); ++a) {
         const auto& first = slots[static_cast<size_t>(composed_order[a])];
+        // `first` is the node that ends up ON TOP of a node Chrome painted
+        // later. If it paints nothing, there is nothing to be on top with.
+        // Read from the slot, never from `first.node` — materializing has
+        // already moved that out.
+        if (!first.paints_ink) continue;
         for (size_t b = a + 1; b < composed_order.size(); ++b) {
             const auto& second = slots[static_cast<size_t>(composed_order[b])];
             if (first.paint_order <= second.paint_order) continue;
             if (!boxes_overlap(first.box, second.box)) continue;
             ++counts.overlapping_reorders;
-            counts.overlapping_reorder_pairs.push_back(
-                first.node.stable_anchor_id.value_or("<unanchored>") + "<" +
-                second.node.stable_anchor_id.value_or("<unanchored>"));
+            // Anchor first, name second, paint order last: an anchor that is
+            // absent OR empty still has to name something a reader can find.
+            const auto label = [](const LoweredNode& slot) {
+                const auto& id = slot.node.stable_anchor_id;
+                if (id && !id->empty()) return *id;
+                if (!slot.node.name.empty())
+                    return slot.node.name + "#" + std::to_string(slot.paint_order);
+                return "paint#" + std::to_string(slot.paint_order);
+            };
+            counts.overlapping_reorder_pairs.push_back(label(first) + "<" +
+                                                       label(second));
         }
     }
     return counts;
