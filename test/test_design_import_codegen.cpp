@@ -1732,6 +1732,59 @@ TEST_CASE("generate_pulp_js escapes text containing newlines / quotes / backslas
     }
 }
 
+TEST_CASE("bridge_native_js derives widget keys from the design's palette",
+          "[view][import]") {
+    // A design states `css/accent`; a Knob resolves `knob.arc`. The native
+    // materializer bridges the two, so the emitted artifact has to as well —
+    // otherwise the panel keeps the design's palette everywhere the DESIGN
+    // paints and every CONTROL falls back to Pulp's built-in default, which
+    // reads as a design bug and still scores a pass on similarity.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.tokens.colors["css/accent"] = "#C4622A";
+    ir.tokens.colors["css/line-strong"] = "#DCD0B6";
+    ir.tokens.colors["css/text-strong"] = "#2A2418";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    // The colour a Knob, a Slider and a Meter each actually resolve.
+    CHECK(js.find("setColorToken('knob.arc', '#c4622a')") != std::string::npos);
+    CHECK(js.find("setColorToken('slider.fill', '#c4622a')") !=
+          std::string::npos);
+    CHECK(js.find("setColorToken('knob.arc.bg', '#dcd0b6')") !=
+          std::string::npos);
+    CHECK(js.find("setColorToken('knob.thumb', '#2a2418')") !=
+          std::string::npos);
+    // The design's own names survive alongside the derived ones.
+    CHECK(js.find("setColorToken('css/accent', '#C4622A')") !=
+          std::string::npos);
+}
+
+TEST_CASE("bridge_native_js keeps a widget key the design states itself",
+          "[view][import]") {
+    // The specific instruction must not lose to the general one: a design that
+    // names knob.arc has already answered, and re-deriving it from `accent`
+    // would overwrite a deliberate choice with a guess.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.tokens.colors["css/accent"] = "#C4622A";
+    ir.tokens.colors["knob.arc"] = "#00FF00";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setColorToken('knob.arc', '#00FF00')") != std::string::npos);
+    CHECK(js.find("setColorToken('knob.arc', '#c4622a')") == std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;

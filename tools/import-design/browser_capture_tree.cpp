@@ -1312,8 +1312,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         for (size_t b = a + 1; b < composed_order.size(); ++b) {
             const auto& second = slots[static_cast<size_t>(composed_order[b])];
             if (first.paint_order <= second.paint_order) continue;
-            if (boxes_overlap(first.box, second.box))
-                ++counts.overlapping_reorders;
+            if (!boxes_overlap(first.box, second.box)) continue;
+            ++counts.overlapping_reorders;
+            counts.overlapping_reorder_pairs.push_back(
+                first.node.stable_anchor_id.value_or("<unanchored>") + "<" +
+                second.node.stable_anchor_id.value_or("<unanchored>"));
         }
     }
     return counts;

@@ -12,6 +12,7 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/design_fidelity.hpp>
+#include <pulp/view/design_tokens.hpp>
 #include <pulp/view/input_events.hpp>
 
 #include "design_import_internal.hpp"
@@ -2470,6 +2471,26 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
                 ss << "setColorToken('" << name << "', '" << value << "');\n";
             for (auto& [name, value] : ir.tokens.dimensions)
                 ss << "setDimensionToken('" << name << "', " << value << ");\n";
+
+            // The design states `css/accent`; a Knob resolves `knob.arc`. The
+            // native materializer bridges the two through ir_tokens_to_theme,
+            // but `setColorToken` stores the name it is given and derives
+            // nothing — so without this the emitted panel keeps the design's
+            // palette for everything the design draws and paints every CONTROL
+            // in Pulp's built-in default. That reads as a design bug (blue
+            // knobs on a cream faceplate) and scores as a pass on similarity.
+            // Derived through the same function the native path calls, so the
+            // two lanes cannot answer this differently.
+            const Theme derived = ir_tokens_to_theme(ir.tokens);
+            const IRTokens widget_tokens = theme_to_ir_tokens(derived);
+            bool wrote_widget_token = false;
+            for (auto& [name, value] : widget_tokens.colors) {
+                if (ir.tokens.colors.count(name) != 0) continue;
+                if (!wrote_widget_token && opts.include_comments)
+                    ss << "// Widget keys derived from the design's palette\n";
+                wrote_widget_token = true;
+                ss << "setColorToken('" << name << "', '" << value << "');\n";
+            }
         } else {
             for (auto& [name, value] : ir.tokens.colors)
                 ss << "theme.colors[\"" << name << "\"] = '" << value << "';\n";

@@ -963,6 +963,17 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_nodes_hoisted", tree.hoisted_escapes);
         record_if("native_nodes_overlapping_reorders",
                   tree.overlapping_reorders);
+        // The count says a panel can paint wrong; the pairs say where. Without
+        // them the only way to find an inversion is to diff two renders by eye.
+        if (!tree.overlapping_reorder_pairs.empty()) {
+            std::string joined;
+            for (const auto& pair : tree.overlapping_reorder_pairs) {
+                if (!joined.empty()) joined += ",";
+                joined += pair;
+            }
+            ir.root.attributes["native_nodes_overlapping_reorder_pairs"] =
+                joined;
+        }
         // The nested tree clips by DOM parentage while CSS clips along the
         // containing-block chain, so both of these are known limitations of the
         // opt-in native path rather than transient regressions. Reported so the

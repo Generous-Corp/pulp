@@ -6,6 +6,7 @@
 #include <pulp/view/design_ir.hpp>
 
 #include <string>
+#include <vector>
 
 namespace pulp::import_design {
 
@@ -103,6 +104,11 @@ struct PaintedTreeCounts {
     /// disjoint boxes freely — that is unobservable — so this is the honest
     /// measure of whether nesting cost any fidelity. Zero is the claim.
     int overlapping_reorders = 0;
+    /// Which pairs inverted, as `over<under` anchor ids, in composed order.
+    /// A count says a panel can paint wrong; only the pair says where, and the
+    /// pairing has to be captured here because the audit runs after the nodes
+    /// have been moved into the emitted tree and can no longer be written to.
+    std::vector<std::string> overlapping_reorder_pairs;
     /// Nodes whose type lengths were multiplied by the scale their box already
     /// carried from an ancestor `transform`. Chrome scales glyphs along with
     /// the box; the snapshot reports the box post-transform and `font-size`
