@@ -105,8 +105,17 @@ xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " 
 CHOICES=""; DEFS=""; REFS=""; APP_LINES=""
 # A choice with a real payload. $1=unique choice-id  $2=title  $3=desc  $4=pkgfile
 add_ref() {
-  local title desc; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
-  DEFS="$DEFS<choice id=\"$1\" title=\"$title\" description=\"$desc\"><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
+  local title desc lock; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
+  # $5="required" locks the choice ON and greys it out.
+  #
+  # The app is not one option among four. It carries the Rack plug-in, the
+  # uninstaller and the first-run SDK fetch, so deselecting it leaves the
+  # plug-in formats with nothing to generate patches, no way to remove the
+  # software, and no route to a compiler. An installer that can reach a state
+  # like that and then complain is worse than one that cannot reach it.
+  lock=""
+  [ "${5:-}" = "required" ] && lock=' enabled="false" selected="true"'
+  DEFS="$DEFS<choice id=\"$1\" title=\"$title\" description=\"$desc\"$lock><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
   REFS="$REFS<pkg-ref id=\"com.pulp.$NAME.$1.pkg\" version=\"$VERSION\">$4</pkg-ref>"
 }
 # Plugin bundles are grouped by plugin name so the installer can nest formats
@@ -165,7 +174,7 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   f="$(basename "$p").pkg"
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
-  add_ref "$id" "$t" "$t" "$f"
+  add_ref "$id" "$t" "Required. Includes the Rack plug-in and uninstaller." "$f" required
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
 done
 
@@ -182,18 +191,36 @@ for ((i=0; i<${#C_TITLE[@]}; i++)); do
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # content sits at the top level
 done
 
+# A consent pane, when the caller supplies one.
+#
+# Apple's own agree-to-install screen: the user reads it and clicks Agree
+# before anything is written. That is where consent belongs -- they are already
+# deciding to install, and it is the only moment a person reliably reads.
+# Forge Modular uses it to say that the VCV Rack SDK is VCV's, is GPLv3, and is
+# downloaded from them rather than shipped by us.
+LICENSE_ARGS=()
+if [ -n "${PKG_LICENSE_FILE:-}" ] && [ -f "$PKG_LICENSE_FILE" ]; then
+  mkdir -p "$STAGE/resources"
+  cp "$PKG_LICENSE_FILE" "$STAGE/resources/license.txt"
+  LICENSE_LINE='<license file="license.txt"/>'
+  LICENSE_ARGS=(--resources "$STAGE/resources")
+else
+  LICENSE_LINE=""
+fi
+
 cat > "$STAGE/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
   <title>$NAME $VERSION</title><organization>com.pulp</organization>
   <options customize="always" require-scripts="false" hostArchitectures="arm64"/>
+  $LICENSE_LINE
   <choices-outline>$CHOICES</choices-outline>
   $DEFS
   $REFS
 </installer-gui-script>
 XML
 PKG="$OUT/$NAME-$VERSION.pkg"
-productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" --sign "$INST_ID" "$PKG" >/dev/null
+productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" "${LICENSE_ARGS[@]}" --sign "$INST_ID" "$PKG" >/dev/null
 if [[ "$NOTARIZE" == 1 ]]; then
   if [[ -x "$CLI" ]]; then
     # In-tree / top-level builds: the C++ CLI is built and drives notarize+staple.

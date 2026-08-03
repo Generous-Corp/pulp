@@ -130,4 +130,8 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
 # made it reject the whole invocation.
 [[ $DO_NOTARIZE -eq 1 ]] || ARGS+=(--no-notarize)
 
+# The consent pane. Apple shows it before anything is written, which is where
+# the Rack SDK / GPLv3 note belongs -- the moment the user is deciding.
+export PKG_LICENSE_FILE="${PKG_LICENSE_FILE:-$REPO/examples/forge-modular/LICENSE-INSTALLER.txt}"
+
 exec "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
