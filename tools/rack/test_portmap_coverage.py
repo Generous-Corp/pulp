@@ -148,8 +148,82 @@ with tempfile.TemporaryDirectory() as tmp:
     else:
         wrong("a map missing a module was accepted — the check cannot say no")
 
+# ------------------------------- our own manifests must match our own modules
+#
+# The codegen writes a per-module manifest beside the panel artwork, and the
+# preview fell back to it for our own modules. It disagreed with the modules
+# it describes: MIX declared 2 params against the built module's 6, SIXMIX
+# declared 1 against 7. A six-channel mixer drew one knob and no channel
+# strip, which reads as a rendering bug and is two copies of one fact.
+#
+# The preview now prefers the measurement, so this is no longer load-bearing
+# for drawing -- but a manifest that lies is still a manifest that lies, and
+# it is the fallback on any machine that has never scanned.
+
+MODULES_DIR = os.environ.get("MODULES_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "examples", "forge-modular", "modules")
+
+
+def check_manifests(portmap_path, modules_dir, label):
+    got = {}
+    if os.path.exists(portmap_path):
+        doc = json.load(open(portmap_path))
+        mods = doc.get("modules")
+        mods = list(mods.values()) if isinstance(mods, dict) else (mods or [])
+        for m in mods:
+            if m.get("plugin") == "ForgeModular":
+                got[m["model"]] = len(m.get("params") or [])
+    if not got:
+        print(f"  SKIP   {label}: nothing measured to compare against "
+              f"(this is a skip, not a pass)")
+        return
+    disagree = []
+    compared = 0
+    for f in sorted(glob.glob(os.path.join(modules_dir, "*.json"))):
+        slug = os.path.basename(f)[:-5]
+        if slug.startswith("_"):
+            continue
+        try:
+            doc = json.load(open(f))
+        except Exception:                                   # noqa: BLE001
+            continue
+        # Repeated controls live in `param_array` as one entry with a count
+        # and a grid, NOT as N entries in `params`. Counting only `params`
+        # says a six-channel mixer has one knob -- which is how the preview
+        # came to draw it that way, and how the first version of this check
+        # blamed the manifest for something it recorded correctly.
+        declared = sum(
+            len(m.get("params") or []) +
+            sum(int(a.get("count", 0)) for a in (m.get("param_array") or []))
+            for m in doc.get("modules", []))
+        measured = got.get(slug.upper())
+        if measured is None:
+            continue
+        compared += 1
+        if declared != measured:
+            disagree.append((slug.upper(), declared, measured))
+    # Report what was actually COMPARED, not how much data was available. The
+    # first version of this printed len(got) -- the size of the port map -- and
+    # said "30 compared" while a wrong path had globbed zero manifests and the
+    # loop had never run once. A count that is not the loop's count will
+    # cheerfully describe work that did not happen.
+    if not compared:
+        wrong(f"{label}: no manifests found under {modules_dir} — "
+              f"nothing was compared")
+        return
+    if disagree:
+        for slug, d, m in disagree:
+            wrong(f"{label}: {slug} manifest declares {d} params, "
+                  f"the built module has {m}")
+    else:
+        ok(f"{label}: every module manifest agrees with the built module "
+           f"({compared} compared)")
+
+
 # ------------------------------------------------------------- this machine
 print()
+check_manifests(PORTMAP, MODULES_DIR, "manifests")
 result = check(PORTMAP, PLUGINS, "installed")
 if result is None:
     pass

@@ -297,32 +297,66 @@ RackPreview::module_knobs(const std::string& model) const {
             ss << f.rdbuf();
             try {
                 const auto doc = choc::json::parse(ss.str());
+                // Diameters as components.py draws them. A kind we do not
+                // know is skipped rather than guessed: a switch or a slider
+                // drawn as a knob is wrong in a way a reader cannot see.
+                const auto diameter = [](const std::string& kind) {
+                    if (kind == "KnobLarge") return 18.3f;
+                    if (kind == "Knob")      return 12.2f;
+                    if (kind == "KnobSmall") return 8.64f;
+                    if (kind == "Trimpot")   return 5.76f;
+                    return 0.0f;
+                };
                 if (doc.hasObjectMember("modules")) {
                     const auto mods = doc["modules"];
                     for (uint32_t i = 0; i < mods.size(); ++i) {
                         const auto m = mods[i];
-                        if (!m.hasObjectMember("params")) continue;
-                        const auto ps = m["params"];
-                        for (uint32_t j = 0; j < ps.size(); ++j) {
-                            const auto q = ps[j];
-                            const auto kind =
-                                q["kind"].getWithDefault<std::string>("Knob");
-                            // Diameters as components.py draws them. A kind we
-                            // do not know is skipped rather than guessed: a
-                            // switch or a slider drawn as a knob is wrong in a
-                            // way a reader cannot see.
-                            float d = 0.0f;
-                            if (kind == "KnobLarge")      d = 18.3f;
-                            else if (kind == "Knob")      d = 12.2f;
-                            else if (kind == "KnobSmall") d = 8.64f;
-                            else if (kind == "Trimpot")   d = 5.76f;
+                        if (m.hasObjectMember("params")) {
+                            const auto ps = m["params"];
+                            for (uint32_t j = 0; j < ps.size(); ++j) {
+                                const auto q = ps[j];
+                                const float d = diameter(
+                                    q["kind"].getWithDefault<std::string>("Knob"));
+                                if (d <= 0.0f) continue;
+                                out.push_back({
+                                    static_cast<float>(
+                                        q["x_mm"].getWithDefault<double>(0.0)),
+                                    static_cast<float>(
+                                        q["y_mm"].getWithDefault<double>(0.0)),
+                                    d});
+                            }
+                        }
+                        // Repeated controls are ONE entry with a count and a
+                        // grid, not N entries in `params`. Reading only
+                        // `params` is why the six-channel mixer drew a single
+                        // knob -- its master -- and no channel strip at all:
+                        // the manifest recorded all seven, and six of them
+                        // were in a shape this never looked at.
+                        if (!m.hasObjectMember("param_array")) continue;
+                        const auto as = m["param_array"];
+                        for (uint32_t a = 0; a < as.size(); ++a) {
+                            const auto arr = as[a];
+                            const auto count =
+                                arr["count"].getWithDefault<int64_t>(0);
+                            if (count <= 0 || !arr.hasObjectMember("grid"))
+                                continue;
+                            float d = 12.2f;
+                            if (arr.hasObjectMember("template"))
+                                d = diameter(arr["template"]["kind"]
+                                                 .getWithDefault<std::string>("Knob"));
                             if (d <= 0.0f) continue;
-                            out.push_back({
-                                static_cast<float>(
-                                    q["x_mm"].getWithDefault<double>(0.0)),
-                                static_cast<float>(
-                                    q["y_mm"].getWithDefault<double>(0.0)),
-                                d});
+                            const auto g = arr["grid"];
+                            const auto cols =
+                                std::max<int64_t>(1, g["cols"].getWithDefault<int64_t>(1));
+                            const auto x0 = g["x0_mm"].getWithDefault<double>(0.0);
+                            const auto y0 = g["y0_mm"].getWithDefault<double>(0.0);
+                            const auto dx = g["dx_mm"].getWithDefault<double>(0.0);
+                            const auto dy = g["dy_mm"].getWithDefault<double>(0.0);
+                            for (int64_t n = 0; n < count; ++n)
+                                out.push_back({
+                                    static_cast<float>(x0 + (n % cols) * dx),
+                                    static_cast<float>(y0 + (n / cols) * dy),
+                                    d});
                         }
                     }
                 }
@@ -458,19 +492,25 @@ void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel
                              const RackModule& mod, float scale) const {
     static const std::string kOurs = "ForgeModular";
 
-    // Two sources, and the difference is where the truth lives.
+    // What CARTOG measured inside Rack, for every module including ours.
     //
-    // OURS come from the manifest their panel was emitted from: always
-    // present, never needs a scan, exact by construction.
+    // Ours used to be read from the manifest their panel was emitted from
+    // instead, on the reasoning that it is always present and exact by
+    // construction. It was present and it was not exact. MIX declared two
+    // params against the six the built module has; SIXMIX declared one
+    // against seven, so the six-channel mixer drew a single knob and its
+    // channel strip was simply absent. Nobody could see it, because a panel
+    // missing controls looks like a panel.
     //
-    // ANYBODY ELSE'S come from what CARTOG measured inside Rack, because a
-    // vendor's control positions exist only in their compiled widget code. A
-    // module nobody has scanned has no entry, and then nothing is drawn --
-    // a plain face, rather than a confident guess at somebody else's panel.
+    // That is the same defect as a mixer reporting one input to the
+    // generator: a second copy of something, disagreeing with the first. The
+    // measurement is taken from the running module and cannot disagree with
+    // it, so it wins here as it does everywhere else.
+    //
+    // The manifest stays as the fallback below, for a machine that has never
+    // run a scan -- there, an approximate panel beats an empty one.
     std::vector<KnobSpec> knobs;
-    if (mod.brand == kOurs) {
-        knobs = module_knobs(mod.name);
-    } else if (const auto* m = PortMap::shared().find(mod.brand, mod.name)) {
+    if (const auto* m = PortMap::shared().find(mod.brand, mod.name)) {
         // Rack's units are the layout's units -- a panel is 380 of them tall
         // and one HP is 15 wide -- so these arrive ready to use. The recorded
         // size is what Rack DRAWS, which is why a fader comes out a fader
@@ -490,6 +530,9 @@ void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel
             knobs.push_back({p.x, p.y, std::min(p.w, p.h), /*already_points=*/true});
         }
     }
+    // Only ours have a manifest to fall back to; a vendor module nobody has
+    // scanned still draws a plain face rather than a guess at their panel.
+    if (knobs.empty() && mod.brand == kOurs) knobs = module_knobs(mod.name);
     if (knobs.empty()) return;
 
     // A panel is 380 unscaled points tall and PANEL_H_MM millimetres, which is
