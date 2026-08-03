@@ -169,13 +169,30 @@ TEST_CASE("A late engine interrupt is cleared before the next evaluation",
           "[view][script][inspector][interrupt]") {
     ScriptEngine engine;
     engine.request_interrupt();
-    engine.clear_pending_interrupt();
+    REQUIRE(engine.clear_pending_interrupt());
+    REQUIRE_FALSE(engine.clear_pending_interrupt());
 
     const auto value = engine.evaluate(
         "let total = 0;"
         "for (let i = 0; i < 100000; ++i) total += i;"
         "total");
     REQUIRE(value.getWithDefault<std::int64_t>(0) == 4999950000);
+}
+
+TEST_CASE("Interrupt after evaluation completion reports no abort",
+          "[view][script][inspector][interrupt]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    const auto completed = bridge.evaluate("6 * 7");
+    REQUIRE(completed.ok);
+    REQUIRE(completed.json == "42");
+    REQUIRE_FALSE(bridge.interrupt());
+
+    const auto next = bridge.evaluate("7 * 7");
+    REQUIRE(next.ok);
+    REQUIRE(next.json == "49");
 }
 
 TEST_CASE("Owner-thread evaluate is single-flight and explicitly interruptible",

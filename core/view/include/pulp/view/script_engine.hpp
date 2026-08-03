@@ -78,7 +78,9 @@ public:
     void request_interrupt();
 
     // [engine thread] Consume a late interrupt after evaluation quiesces.
-    void clear_pending_interrupt();
+    // Returns true when the request was still pending rather than consumed by
+    // the evaluation.
+    bool clear_pending_interrupt();
 
     // Check if the engine is valid
     explicit operator bool() const;

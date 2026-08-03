@@ -182,7 +182,9 @@ public:
     // Consume an interrupt that arrived after the backend's final check. Called
     // on the engine thread after evaluation quiesces so a persistent cancel
     // flag cannot abort the next otherwise-unrelated evaluation.
-    virtual void clear_pending_interrupt() {}
+    // Returns true when a still-pending flag was cleared, proving that the
+    // completed evaluation did not consume the interrupt request.
+    virtual bool clear_pending_interrupt() { return true; }
 
     // ── Forward-compatibility capability flags (HostObject / TypedArray / Promise) ──
     // These are defined now so all backends can be designed with them in mind.

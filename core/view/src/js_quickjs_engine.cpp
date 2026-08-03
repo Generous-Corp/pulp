@@ -466,8 +466,8 @@ public:
     // because supports_interrupt() already advertises the capability.
     bool supports_interrupt() const override { return true; }
     void request_interrupt() override { context_.cancel(); }
-    void clear_pending_interrupt() override {
-        backend_->shouldCancel.store(false, std::memory_order_release);
+    bool clear_pending_interrupt() override {
+        return backend_->shouldCancel.exchange(false, std::memory_order_acq_rel);
     }
 
     // Expose the underlying CHOC context for WidgetBridge backward compatibility

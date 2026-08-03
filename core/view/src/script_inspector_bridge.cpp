@@ -196,6 +196,12 @@ bool ScriptInspectorBridge::interrupt() {
     }
     if (!running_ || !running_->can_interrupt)
         return false;
+    // A re-entrant call from an engine native callback cannot wait for the
+    // surrounding evaluation to acknowledge cancellation without deadlocking
+    // that same thread. The inspector server invokes this from its reader
+    // thread; fail honestly for unsupported owner-thread re-entry.
+    if (have_engine_thread_ && std::this_thread::get_id() == engine_thread_)
+        return false;
     auto request = running_;
     if (!request->interrupt_window_open)
         return false;
@@ -203,7 +209,11 @@ bool ScriptInspectorBridge::interrupt() {
     request->interrupt_requested = true;
     auto* engine = request->engine;
     engine->request_interrupt();
-    return true;
+    // A request is only reported as interrupted if the backend consumes it.
+    // Wait for the engine thread to distinguish that from an interrupt which
+    // arrived after evaluation's final check and was merely cleared.
+    request->cv.wait(lock, [&] { return request->evaluation_finished; });
+    return request->interrupt_consumed;
 }
 
 bool ScriptInspectorBridge::pump() {
@@ -255,12 +265,15 @@ ScriptInspectorBridge::EvalResult ScriptInspectorBridge::run_claimed_request(
         interrupt_was_issued = !req->interrupt_window_open;
         req->interrupt_window_open = false;
     }
+    bool interrupt_was_late = false;
     if (interrupt_was_issued && engine)
-        engine->clear_pending_interrupt();
+        interrupt_was_late = engine->clear_pending_interrupt();
 
     std::function<std::string(EvaluationDeadline)> reset;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        req->interrupt_consumed =
+            req->interrupt_requested && !interrupt_was_late;
         req->evaluation_finished = true;
         reset_in_progress_ = true;
         reset_thread_ = std::this_thread::get_id();
@@ -291,7 +304,7 @@ ScriptInspectorBridge::EvalResult ScriptInspectorBridge::run_claimed_request(
         } else if (!reset_error.empty()) {
             result = EvalResult{};
             result.error = "evaluated realm reset failed: " + reset_error;
-        } else if (req->interrupt_requested) {
+        } else if (req->interrupt_consumed) {
             result = EvalResult{};
             result.error = "evaluation interrupted";
         }

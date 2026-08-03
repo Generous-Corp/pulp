@@ -84,8 +84,8 @@ void ScriptEngine::request_interrupt() {
     if (engine_) engine_->request_interrupt();
 }
 
-void ScriptEngine::clear_pending_interrupt() {
-    if (engine_) engine_->clear_pending_interrupt();
+bool ScriptEngine::clear_pending_interrupt() {
+    return engine_ ? engine_->clear_pending_interrupt() : true;
 }
 
 ScriptEngine::operator bool() const {

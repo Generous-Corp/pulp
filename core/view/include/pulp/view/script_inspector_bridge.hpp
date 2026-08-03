@@ -111,6 +111,7 @@ private:
         bool timeout_requested = false;
         bool detach_requested = false;
         bool interrupt_requested = false;
+        bool interrupt_consumed = false;
         bool evaluation_finished = false;
         EvaluationDeadline deadline{};
         ScriptEngine* engine = nullptr;
