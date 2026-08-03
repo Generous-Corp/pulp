@@ -36,7 +36,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "inspect/include/pulp/inspect/discovery_publisher.hpp":
                 "class InspectorDiscoveryPublisher {};\n",
             "tools/mcp/pulp_mcp.cpp":
-                '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
+                '"name":"pulp_inspect_dom","description":"Installed in-process client"\n'
+                '"name":"pulp_motion_snapshot","description":"Experimental source-checkout client"\n',
         }
         canonical_contracts = (
             TEST_REQUIRED_CLAIMS,
@@ -237,6 +238,31 @@ class InspectorTruthCheckTests(unittest.TestCase):
         self.assertIn("A normal `pulp run`", errors)
         self.assertIn("Requires a custom host/test fixture", errors)
         self.assertIn("source-checkout-only", errors)
+
+    def test_requires_installed_inspector_and_source_checkout_motion_paths(
+        self,
+    ) -> None:
+        root = self.make_root()
+        (root / "tools/mcp/pulp_mcp.cpp").write_text(
+            '"name":"pulp_inspect_dom","description":"Experimental '
+            'source-checkout client"\n'
+            '"name":"pulp_inspect_params","description":"Authenticated client"\n'
+            '"name":"pulp_motion_snapshot","description":"In-process client"\n',
+            encoding="utf-8",
+        )
+        errors = " ".join(self.check_root(root))
+        self.assertIn(
+            "pulp_inspect_dom retains a source-checkout-only client path",
+            errors,
+        )
+        self.assertIn(
+            "pulp_inspect_params must disclose its installed in-process client path",
+            errors,
+        )
+        self.assertIn(
+            "pulp_motion_snapshot must disclose its source-checkout-only client path",
+            errors,
+        )
 
     def test_rejects_obsolete_unauthenticated_transport_claims(self) -> None:
         root = self.make_root()
