@@ -472,8 +472,14 @@ export function sanitizeSnapshot(value, privatePrefix) {
     // (`oklab(L a b / .34)`) and a box-shadow layer's colour. Matching zero
     // trailing characters rewrote that separator to "<local-path>" and made
     // every translucent computed colour unparseable downstream.
+    //
+    // Requires a SECOND segment for the same reason. This runs over captured
+    // text as well as diagnostics, and "/16" is panel copy on any arpeggiator
+    // or delay, not a filename. A path worth hiding has a parent — "/Users/x",
+    // "/workspace/y" — so the inner slash is what distinguishes a leaked path
+    // from a musical note division.
     sanitized = sanitized.replace(
-      /(?<![\w:/.-])\/(?!\/)[^\s"'<>;,)]+/gu, "<local-path>");
+      /(?<![\w:/.-])\/(?!\/)[^\s"'<>;,)]*\/[^\s"'<>;,)]*/gu, "<local-path>");
     sanitized = sanitized.replace(
       /\b[A-Za-z]:\\[^\s"'<>]*/gu, "<local-path>");
     captureUrls.forEach((url, index) => {

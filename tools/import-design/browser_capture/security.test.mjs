@@ -227,6 +227,28 @@ test("path redaction keeps the CSS alpha separator intact", () => {
   assert.deepEqual(sanitizeSnapshot(snapshot, "").strings, snapshot.strings);
 });
 
+test("path redaction leaves panel text that starts with a slash alone", () => {
+  // Note-division labels are ordinary panel copy: every arpeggiator, delay and
+  // LFO writes "/16". Redacting them replaced the user's own text with
+  // "<local-path>", which no validator can see because the panel still renders
+  // and the string is still a string.
+  //
+  // A leading slash does not name a file. A path has segments, so requiring a
+  // second one separates "/16" from "/Users/someone/panel.html" without asking
+  // the sanitizer to know which field it is looking at.
+  const snapshot = {
+    strings: [
+      "/16",
+      "/8",
+      "1/16",
+      "OF 16",
+      "SYNC /4",
+      "rate: /32 dotted",
+    ],
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, "").strings, snapshot.strings);
+});
+
 test("path redaction still removes real local paths", () => {
   const snapshot = {
     strings: [
