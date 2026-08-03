@@ -189,24 +189,26 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
-# Installed Creative Timeline Engine consumer. The fixture requests the three
-# public engine components plus the optional DAWproject importer, builds and
-# runs outside the source tree, and audits both target closures for forbidden
-# UI/GPU/host baggage.
-add_test(NAME cmake-timeline-sdk-consumer
-    COMMAND ${CMAKE_COMMAND}
-        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
-        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-        "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
-        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
-        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
-        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
-        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
-set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
-    LABELS "cmake;sdk;timeline;slow"
-    TIMEOUT 180)
+# Installed Creative Timeline Engine consumer. The fixture requests the
+# optional project-package component, so a package-stripped SDK correctly omits
+# this consumer while the compile-out gate proves that requesting the missing
+# component fails.
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    add_test(NAME cmake-timeline-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
+    set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;timeline;slow"
+        TIMEOUT 180)
+endif()
 
 # Installed inspector component consumer. This compiles the public headers,
 # links every optional CPU inspector archive through find_package(Pulp), and
@@ -386,11 +388,15 @@ if(UNIX)
     set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
 endif()
 if(Python3_Interpreter_FOUND)
-    add_test(NAME pulp-mcp-binary-smoke
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
-                $<TARGET_FILE:pulp-mcp>)
-    set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    # tools/mcp is added after test/, so TARGET is necessarily false here even
+    # in the normal build. Mirror its platform/top-level admission instead.
+    if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME pulp-mcp-binary-smoke
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.py
+                    $<TARGET_FILE:pulp-mcp>)
+        set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 90)
+    endif()
     # Visual-fidelity diff harness unit + integration tests (PIL-based). The
     # tool (tools/import-design/fidelity_diff.py) measures how close an
     # imported + rendered design is to its captured Figma references. The
@@ -637,8 +643,14 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
 # reached this point is already its verdict — and a verdict is worth nothing
 # without evidence the checker can still say no. The selftest configures fixture
 # projects with known graphs and asserts both the verdict and the reason given;
-# --mutate then weakens the checker itself nine ways and requires each weakening
-# to be caught, so a green run cannot be the walk failing to arrive.
+# --mutate then weakens the checker itself eleven ways and requires each
+# weakening to be caught, so a green run cannot be the walk failing to arrive.
+#
+# What this selftest does NOT cover is the configuration axis: it configures its
+# own fixture projects, so it stays green on a desktop tree while the real gate
+# is failing under a narrower configure (iOS, or PULP_ENABLE_GPU=OFF) that
+# reaches fewer modules than a debt list was recorded against. Reading a green
+# selftest as "the link floor is healthy everywhere" is the mistake it invites.
 #
 # Note what the configure-time verdict does and does not cover: the assertion on
 # a plugin lives in that plugin's CMakeLists, so it is evaluated only where

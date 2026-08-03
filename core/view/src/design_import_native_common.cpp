@@ -1230,9 +1230,17 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 // A helper rather than six more fallbacks, because the bug is that the
 // knowledge lived at a call site: the eighth paint site added later would have
 // repeated it.
+// The allowlist is what decides whether a colour reaches the paint site at all,
+// so a function missing from it is a colour silently NOT applied — the view
+// keeps its default and nothing reports a loss. `oklab()` / `oklch()` are the
+// forms Chromium serializes every modern colour syntax into, so a captured
+// design's text and fills arrive in them; without these two entries a bright
+// accent label rendered in the default text colour.
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
-    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 || value == "transparent")
+    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 ||
+        value.rfind("oklab", 0) == 0 || value.rfind("oklch", 0) == 0 ||
+        value == "transparent")
         return parse_css_color(value);
     return std::nullopt;
 }
@@ -1341,6 +1349,21 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
+    // The clip an importer resolved for THIS node along CSS's containing-block
+    // chain, in the node's own coordinate space. Applied to the node's own ink
+    // only — its children carry their own — so a node that escapes an
+    // `overflow: hidden` box it is nested inside is not clipped by being there,
+    // and a node moved to a new parent keeps the clip its old one gave it.
+    // Absent on every source that does not resolve a clip chain, which is why
+    // native and authored trees are unaffected.
+    if (style.clip_rect) {
+        view.set_ancestor_clip_rect(Rect{style.clip_rect->x, style.clip_rect->y,
+                                         style.clip_rect->width,
+                                         style.clip_rect->height});
+        view.set_ancestor_clip_radii(
+            style.clip_rect->radius_tl, style.clip_rect->radius_tr,
+            style.clip_rect->radius_br, style.clip_rect->radius_bl);
+    }
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) {
             view.set_overflow(*overflow);
@@ -1495,14 +1518,14 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
 // sprite disc is a body too.
 bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (attr(node, "asset_path")) return false;  // captured art owns its skin
-    // A control lowered from a browser capture carries no body of its own: its
-    // body is the captured bitmap it sits on. It fails the has_body test below
-    // for the very reason it most needs this skin — without it the widget paints
-    // an opaque default body straight over the design it was placed on.
-    const bool body_is_the_capture = attr(node, "designed_body").value_or("") == "capture";
+    // A control whose body is drawn by the layer beneath it — the capture
+    // bitmap (`capture`) or a lowered native node (`underlay`) — has none of
+    // its own, so without this skin it paints an opaque default body over the
+    // design; the bitmap's EXISTENCE used to be what enforced that.
+    const auto body = attr(node, "designed_body").value_or("");
     const bool has_body = node.style.background_gradient || node.style.background_color ||
                           node.style.border_width || !node.style.box_shadow.empty();
-    if (!has_body && !body_is_the_capture) return false;
+    if (!has_body && body != "capture" && body != "underlay") return false;
 
     // Colours come from the DESIGN's tokens when the importer carried them.
     // A default-constructed skin has a hardcoded teal accent, which is how a

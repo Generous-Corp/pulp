@@ -411,6 +411,30 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("maxWidth", s.max_width);
     set_opt_float("maxHeight", s.max_height);
 
+    // clip_rect {x,y,width,height} — the clip an importer resolved along CSS's
+    // containing-block chain, in the node's own coordinate space. A zero-area
+    // rectangle is a real answer (the node is clipped away entirely), so
+    // presence is the test, not size.
+    if (auto k = resolve_key("clipRect")) {
+        auto cr = obj[k->c_str()];
+        if (cr.isObject()) {
+            IRStyle::ClipRect out{};
+            auto crf = [&](const char* m, float& f) {
+                if (cr.hasObjectMember(m))
+                    f = static_cast<float>(cr[m].getWithDefault<double>(0));
+            };
+            crf("x", out.x); crf("y", out.y);
+            crf("width", out.width); crf("height", out.height);
+            // Radii are optional and default to zero, so a document written
+            // before the clip carried a curve still parses as a square clip.
+            crf("radiusTopLeft", out.radius_tl);
+            crf("radiusTopRight", out.radius_tr);
+            crf("radiusBottomRight", out.radius_br);
+            crf("radiusBottomLeft", out.radius_bl);
+            s.clip_rect = out;
+        }
+    }
+
     // render_bounds {w,h,dx,dy} — the asset's true visual extent when it bleeds
     // past the layout box (figma-plugin). Without this the silver-knob graphic
     // (210px wide) gets squashed into its 62px layout box.
@@ -1861,6 +1885,26 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "whiteSpace", s.white_space);
     write_string_member(out, first, "textOverflow", s.text_overflow);
     write_string_member(out, first, "overflow", s.overflow);
+    // The importer-resolved clip chain, in the node's own coordinate space.
+    // Written as well as read: a field the C++ produces and the round-trip
+    // drops is how an imported panel silently goes back to clipping by
+    // parentage after one save/load.
+    if (s.clip_rect) {
+        write_key(out, first, "clipRect");
+        out << "{\"x\":" << s.clip_rect->x << ",\"y\":" << s.clip_rect->y
+            << ",\"width\":" << s.clip_rect->width
+            << ",\"height\":" << s.clip_rect->height;
+        // Written only when the clip actually curves, so a square clip
+        // serializes exactly as it did before it could carry a radius.
+        if (s.clip_rect->radius_tl != 0 || s.clip_rect->radius_tr != 0 ||
+            s.clip_rect->radius_br != 0 || s.clip_rect->radius_bl != 0) {
+            out << ",\"radiusTopLeft\":" << s.clip_rect->radius_tl
+                << ",\"radiusTopRight\":" << s.clip_rect->radius_tr
+                << ",\"radiusBottomRight\":" << s.clip_rect->radius_br
+                << ",\"radiusBottomLeft\":" << s.clip_rect->radius_bl;
+        }
+        out << '}';
+    }
     write_string_member(out, first, "cursor", s.cursor);
     write_string_member(out, first, "position", s.position);
     write_float_member(out, first, "top", s.top);

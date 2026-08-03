@@ -18,10 +18,17 @@ PROFILE = "official-release"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 PLATFORM_RE = re.compile(r"(?:darwin|linux|windows)-(?:arm64|x64)")
+INSPECTOR_SDK_FLOOR = (0, 772, 0)
 
 
 class ProvenanceError(RuntimeError):
     pass
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    if not VERSION_RE.fullmatch(value):
+        raise ProvenanceError(f"invalid SDK version: {value!r}")
+    return tuple(int(part) for part in value.split("."))  # type: ignore[return-value]
 
 
 def _read_text(path: Path) -> str:
@@ -95,17 +102,11 @@ def build_release_marker(
 
     audio_probes = _cache_bool(build_dir, "PULP_ENABLE_AUDIO_PROBES")
     inspector = _cache_bool(build_dir, "PULP_ENABLE_INSPECTOR")
-    if audio_probes or inspector:
-        enabled = [
-            name
-            for name, value in (
-                ("audio_probes", audio_probes),
-                ("inspector", inspector),
-            )
-            if value
-        ]
+    expected_inspector = _version_tuple(version) >= INSPECTOR_SDK_FLOOR
+    if audio_probes or inspector != expected_inspector:
         raise ProvenanceError(
-            f"release SDK enables development-only feature(s): {', '.join(enabled)}"
+            "official release SDK feature contract requires "
+            f"audio_probes=OFF and inspector={'ON' if expected_inspector else 'OFF'}"
         )
 
     return {
@@ -121,7 +122,7 @@ def build_release_marker(
         "build_type": build_type,
         "features": {
             "audio_probes": False,
-            "inspector": False,
+            "inspector": expected_inspector,
         },
     }
 
@@ -181,7 +182,11 @@ def verify_release_marker(
         raise ProvenanceError(
             f"{path}: platform is {marker.get('platform')!r}, expected {expected_platform!r}"
         )
-    if marker.get("features") != {"audio_probes": False, "inspector": False}:
+    expected_features = {
+        "audio_probes": False,
+        "inspector": _version_tuple(version) >= INSPECTOR_SDK_FLOOR,
+    }
+    if marker.get("features") != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
     if _read_text(prefix / "version.txt") != version:
         raise ProvenanceError(f"{path}: marker version does not match selected SDK prefix")

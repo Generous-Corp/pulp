@@ -25,7 +25,7 @@ For the end-to-end release pipeline that turns a merged PR into a published GitH
 
 **There is no Intel/universal gate on the release path.** A `universal-arch-gate` job used to build PulpGain universal and run dual-arch `auval` on every tag. It was removed: it is redundant with `nightly-intel.yml`'s `universal-crosscheck` (same check) and `intel-portability.yml` (Intel at PR time), and — worse — it pinned itself to the GitHub-hosted `macos-15` pool for ~2h per tag, which is the SAME scarce pool the release's own required `darwin-x64` legs need. At ~14 tags/day it queued ~28 macOS-hours/day of hosted work ahead of the leg that actually gates publication, while the self-hosted Studios sat idle. Never put an advisory check in front of the release on a pool the release itself competes for. (Universal-build gotcha worth keeping: a raw lipo'd wgpu dylib fails `codesign --verify` and the arm64 slice is SIGKILL'd at load — always re-sign after lipo.) See `docs/guides/intel-support.md`.
 
-**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI), and route through `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), NOT `resolve-macos-runner` (keeps Intel off the Studios). The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
+**Intel-Mac release slice — CROSS-COMPILED on Apple Silicon, required.** The `darwin-x64` build+smoke rows (`os: macos-15-xcompile`) cross-compile the x86_64 CLI+SDK on the healthy arm64 runner via `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) + `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` (Rust CLI). They prefer the per-leg override, then `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the dedicated `pulp-build-vm-release` Tart pool), then the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, and finally hosted `macos-15`. The native GitHub-hosted `macos-15-intel` image is deliberately avoided: it CPU-pegs on a full CLI+SDK build (observed: 71-min build cancelled at a 75-min cap, every run) and its timeout **cancellation** (not a clean failure) makes `build-cli`'s aggregate `cancelled` and skips `release` — the earlier native leg never shipped an artifact for this reason. The native Mac Mini remains a separate advisory/nightly portability canary. The pair is REQUIRED (`release-publish.yml` lists it unconditionally). Two leg-specific gotchas: (a) the arm64 runner's bootstrap prefetches arm64 Skia, so the leg `rm -rf external/skia-build/build` before the x86_64 Skia fetch and asserts `lipo -archs libskia.a == x86_64`; (b) `rustup target add x86_64-apple-darwin` is required (the toolchain pins the channel but no targets). **Load-bearing CI gotchas that caused a multi-hour release stall:**
 - `continue-on-error` on a matrix leg masks a clean **failure** (leg finishes non-zero) but NOT a **cancellation** (timeout / stuck-queued / run-cancel). A cancelled advisory leg still turns the aggregate `cancelled`. If you ever reintroduce an advisory leg, wrap its long steps in a shell `timeout` so they exit non-zero (clean fail) *before* the job `timeout-minutes` cancels them.
 - The `release` job's `if:` uses `always() && needs.build-cli.result == 'success' && needs.smoke-cli.result == 'success' && needs.universal-arch-gate.result == 'success'` (NOT the implicit `success()` over all needs). `always()` forces evaluation even if a needed job failed, so nothing silently skips publish; the explicit `== 'success'` checks are what enforce the requirement. All three are now required (the universal-arch-gate was re-required once its shell-bug false failure was fixed). A genuine build/smoke/gate failure blocks publish.
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
@@ -891,8 +891,12 @@ This applies to both `.github/workflows/release-cli.yml` and the local
 helper `tools/scripts/release-cli-local.sh`. If one changes without the
 other, GitHub releases and local release drills diverge.
 
-Release/SDK builds also pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and
-standalone artifacts do not ship the dev audio-probe surface. Keep
+Release/SDK builds pass `-DPULP_ENABLE_AUDIO_PROBES=OFF` so SDK and standalone
+artifacts do not ship the dev audio-probe surface. Starting at the product
+matrix's `inspector_sdk_floor`, they also pass `-DPULP_ENABLE_INSPECTOR=ON`
+because the matrix promises the optional inspector SDK archive family; older
+marker-era backfills keep it OFF. That build-time component does not enable
+runtime inspector endpoints; those remain off by default. Keep
 `.github/workflows/release-cli.yml`, `.github/workflows/sign-and-release.yml`,
 and `tools/scripts/release-cli-local.sh` in sync when changing release
 configure flags.
@@ -900,11 +904,13 @@ configure flags.
 Starting at `tools/scripts/release_product_matrix.json`'s
 `sdk_provenance_floor`, the SDK tarballs also require
 `sdk-provenance.json`: a positive `official-release` marker bound to the exact
-release tag commit and archive platform, with a clean Release source and both
-audio probes and the inspector disabled. `release-cli.yml` stamps the selected
-install prefix, and its downloaded-asset finalizer re-verifies the exact tag
-SHA/platform before publication. Marker-era manual backfills must build the tag
-itself; `source_ref` substitution is reserved for pre-marker history.
+release tag commit and archive platform, with a clean Release source, audio
+probes disabled, and the inspector SDK component set according to
+`inspector_sdk_floor`. `release-cli.yml`
+stamps the selected install prefix, and its downloaded-asset finalizer
+re-verifies the exact tag SHA/platform before publication. Marker-era manual
+backfills must build the tag itself; `source_ref` substitution is reserved for
+pre-marker history.
 
 ### Shipyard pin drift between local tooling and tag sync
 
@@ -1324,6 +1330,15 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 
 **Fluidity invariant:** every variable unset == today's GitHub-hosted routing. If the
 local pool is down, `github <leg>` is a full revert in one command.
+
+The lightweight resolver jobs for `release-cli.yml` and
+`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
+without moving artifact builds or publication there. Their selector priority is
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
+to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
+pinned to the repository default branch; never expose the persistent pool to
+`pull_request` or `merge_group` code through this fallback.
 
 Facts worth keeping (measured):
 

@@ -108,6 +108,74 @@ canvas::Color parse_css_color(const std::string& str) {
         c.a = std::clamp(vals[3], 0.0f, 1.0f);
         return c;
     }
+
+    if (str.compare(0, 6, "oklab(") == 0 || str.compare(0, 6, "oklch(") == 0) {
+        // Chrome serializes every modern colour function as oklab()/oklch(),
+        // so a design authored in ANY wide-gamut syntax arrives here. Falling
+        // through to the opaque-white default painted a dark panel white while
+        // looking like a deliberate colour, and a gradient stop that lands on
+        // white is indistinguishable downstream from one the design asked for.
+        const bool polar = str[3] == 'c';
+        auto inner = str.substr(6);
+        inner = inner.substr(0, inner.find(')'));
+        // `L a b / alpha`, with `,` accepted for the legacy comma form.
+        for (auto& ch : inner)
+            if (ch == ',') ch = ' ';
+        float vals[3] = {0.0f, 0.0f, 0.0f};
+        float alpha = 1.0f;
+        int n = 0;
+        bool after_slash = false;
+        std::istringstream ss(inner);
+        std::string tok;
+        // a/b and chroma are given either as numbers or as a percentage of the
+        // reference range: +/-0.4 for a/b, 0..0.4 for chroma. Lightness is a
+        // percentage of 1.0. Hue is an angle.
+        const float pct_base[3] = {1.0f, 0.4f, polar ? 0.4f : 0.4f};
+        while (ss >> tok) {
+            if (tok == "/") { after_slash = true; continue; }
+            if (tok == "none") tok = "0";
+            float scale = 1.0f;
+            if (!tok.empty() && tok.back() == '%') {
+                tok.pop_back();
+                scale = after_slash ? 0.01f
+                                    : pct_base[n < 3 ? n : 2] * 0.01f;
+            } else if (tok.size() > 3 &&
+                       tok.compare(tok.size() - 3, 3, "deg") == 0) {
+                tok.erase(tok.size() - 3);
+            }
+            float v = 0.0f;
+            try { v = std::stof(tok) * scale; } catch (...) { v = 0.0f; }
+            if (after_slash) { alpha = v; break; }
+            if (n < 3) vals[n++] = v;
+        }
+        float L = vals[0], a = vals[1], b = vals[2];
+        if (polar) {
+            const float hr = b * 3.14159265f / 180.0f;
+            const float chroma = a;
+            a = chroma * std::cos(hr);
+            b = chroma * std::sin(hr);
+        }
+        // Oklab -> LMS' -> LMS -> linear sRGB (Ottosson's matrices).
+        const float lp = L + 0.3963377774f * a + 0.2158037573f * b;
+        const float mp = L - 0.1055613458f * a - 0.0638541728f * b;
+        const float sp = L - 0.0894841775f * a - 1.2914855480f * b;
+        const float l = lp * lp * lp, m = mp * mp * mp, s = sp * sp * sp;
+        const float lin[3] = {
+            4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
+            -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
+            -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s};
+        const auto encode = [](float v) {
+            v = std::clamp(v, 0.0f, 1.0f);
+            v = v <= 0.0031308f ? 12.92f * v
+                                : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+        c.r = encode(lin[0]);
+        c.g = encode(lin[1]);
+        c.b = encode(lin[2]);
+        c.a = std::clamp(alpha, 0.0f, 1.0f);
+        return c;
+    }
     return c;
 }
 
@@ -371,6 +439,57 @@ void parse_at_center(const std::string& seg, float& cx, float& cy) {
     if (is >> b) cy = axis_frac(b, cy);
 }
 
+// An explicit radial ending-shape size: one or two `<length>` / `<percentage>`
+// terms at the head of the prefix, as in `90% 70% at 50% 30%` or `120px`.
+// A percentage resolves against the box's width (x) or height (y); a length is
+// absolute, so the two are kept in separate slots and summed at paint.
+//
+// Returns false — leaving every out-param untouched — for a prefix that names a
+// sizing KEYWORD or only a position, which is the common case and must fall
+// through to the keyword branch rather than be read as a zero-size ellipse.
+// One value means a circle, per css-images-3.
+bool parse_radial_extent(const std::string& seg,
+                         float& rx_frac, float& ry_frac,
+                         float& rx_px, float& ry_px, bool& circle) {
+    std::istringstream is(seg);
+    std::string tok;
+    float frac[2] = {0.0f, 0.0f};
+    float px[2] = {0.0f, 0.0f};
+    int n = 0;
+    while (n < 2 && (is >> tok)) {
+        if (tok == "circle" || tok == "ellipse") continue;  // shape, not size
+        if (tok == "at") break;
+        const bool pct = tok.back() == '%';
+        std::size_t unit = tok.size();
+        if (pct) {
+            unit -= 1;
+        } else if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "px") == 0) {
+            unit -= 2;
+        } else {
+            return false;  // a keyword, or a unit this does not read
+        }
+        float v = 0.0f;
+        try { v = std::stof(tok.substr(0, unit)); } catch (...) { return false; }
+        if (pct) frac[n] = v / 100.0f; else px[n] = v;
+        ++n;
+    }
+    if (n == 0) return false;
+    rx_frac = frac[0];
+    rx_px = px[0];
+    if (n == 1) {
+        // A single value is a circle radius: the same distance on both axes,
+        // so it stays in the x slot and the y slot mirrors it. Marking it a
+        // circle keeps the ellipse squash out of the shader.
+        circle = true;
+        ry_frac = frac[0];
+        ry_px = px[0];
+    } else {
+        ry_frac = frac[1];
+        ry_px = px[1];
+    }
+    return true;
+}
+
 // CSS <angle> -> radians (deg default; rad/turn/grad honored).
 float parse_angle(const std::string& t) {
     size_t i = 0;
@@ -413,15 +532,75 @@ bool parse_one_gradient(const std::string& gradient,
         return std::sqrt(dx * dx + dy * dy);
     };
 
-    // Simple parser for "linear-gradient(to right, color1, color2, ...)"
+    // linear-gradient([<angle> | to <side-or-corner>,] stop, stop, ...)
     if (gradient.substr(0, 16) == "linear-gradient(") {
         auto inner = gradient.substr(16, gradient.size() - 17);
         float x0 = 0, y0 = 0, x1 = 0, y1 = 1;  // default: to bottom
         size_t color_start = 0;
-        if (inner.substr(0, 8) == "to right") { x0=0; y0=0; x1=1; y1=0; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 9) == "to bottom") { x0=0; y0=0; x1=0; y1=1; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 7) == "to left") { x0=1; y0=0; x1=0; y1=0; color_start = inner.find(',') + 1; }
-        else if (inner.substr(0, 6) == "to top") { x0=0; y0=1; x1=0; y1=0; color_start = inner.find(',') + 1; }
+        const size_t prefix_end = top_level_comma(inner);
+        std::string seg = prefix_end == std::string::npos
+                              ? std::string()
+                              : inner.substr(0, prefix_end);
+        while (!seg.empty() && seg.back() == ' ') seg.pop_back();
+        while (!seg.empty() && seg.front() == ' ') seg.erase(0, 1);
+
+        // CSS angles run clockwise from "to top". An angle used to fall through
+        // to the stop list, where the colour parser read `150deg` as a colour it
+        // did not know and returned opaque WHITE -- so an angled gradient gained
+        // a spurious white first stop AND silently reverted to "to bottom".
+        std::optional<float> radians;
+        float corner_x = 0.0f, corner_y = 0.0f;
+        const bool is_angle = !seg.empty() &&
+                              (std::isdigit(static_cast<unsigned char>(seg[0])) ||
+                               seg[0] == '-' || seg[0] == '+' || seg[0] == '.');
+        if (is_angle) {
+            radians = parse_angle(seg);
+        } else if (seg.rfind("to ", 0) == 0) {
+            const bool to_top = seg.find("top") != std::string::npos;
+            const bool to_bottom = seg.find("bottom") != std::string::npos;
+            const bool to_left = seg.find("left") != std::string::npos;
+            const bool to_right = seg.find("right") != std::string::npos;
+            const bool corner = (to_top || to_bottom) && (to_left || to_right);
+            if (corner) {
+                // A corner gradient's line is perpendicular to the OTHER
+                // diagonal, so its end colour lands exactly on the named
+                // corner. That makes the angle depend on the box's aspect
+                // ratio, which is why it cannot be one of the four fixed
+                // vectors -- `to bottom right` used to match the `to bottom`
+                // prefix test and paint straight down. The corner is recorded
+                // and the angle computed at paint, because the box is not
+                // sized yet when the importer applies style.
+                corner_x = to_right ? 1.0f : -1.0f;
+                corner_y = to_bottom ? 1.0f : -1.0f;
+                const float w = box_known ? box.width : 1.0f;
+                const float h = box_known ? box.height : 1.0f;
+                const float corner_angle = std::atan2(h, w);
+                const float pi = 3.14159265f;
+                if (to_top && to_right)         radians = corner_angle;
+                else if (to_bottom && to_right) radians = pi - corner_angle;
+                else if (to_bottom && to_left)  radians = pi + corner_angle;
+                else                            radians = -corner_angle;
+            } else if (to_right)  { x0=0; y0=0; x1=1; y1=0; color_start = prefix_end + 1; }
+            else if (to_bottom)   { x0=0; y0=0; x1=0; y1=1; color_start = prefix_end + 1; }
+            else if (to_left)     { x0=1; y0=0; x1=0; y1=0; color_start = prefix_end + 1; }
+            else if (to_top)      { x0=0; y0=1; x1=0; y1=0; color_start = prefix_end + 1; }
+        }
+        if (radians) {
+            // The line runs through the centre; its length is the projection of
+            // the box onto it, so the first and last stops sit on the corners.
+            // Endpoints are stored per-axis as box fractions, which is how the
+            // painter maps them back.
+            const float w = box_known ? box.width : 1.0f;
+            const float h = box_known ? box.height : 1.0f;
+            const float dx = std::sin(*radians);
+            const float dy = -std::cos(*radians);
+            const float length = std::fabs(w * dx) + std::fabs(h * dy);
+            x0 = (w * 0.5f - dx * length * 0.5f) / w;
+            y0 = (h * 0.5f - dy * length * 0.5f) / h;
+            x1 = (w * 0.5f + dx * length * 0.5f) / w;
+            y1 = (h * 0.5f + dy * length * 0.5f) / h;
+            color_start = prefix_end + 1;
+        }
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
@@ -431,47 +610,94 @@ bool parse_one_gradient(const std::string& gradient,
         if (!colors.empty()) {
             out = {}; out.type = 1;
             out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
+            // The endpoints above are the best this box can give; when the
+            // direction depends on the box, hand the painter the CSS intent so
+            // it can redo the arithmetic once the view is laid out. Without
+            // this every angled gradient resolves against a 1:1 box and points
+            // the wrong way on any box that is not square.
+            if (corner_x != 0.0f) {
+                out.linear_from = View::BackgroundGradient::LinearFrom::corner;
+                out.corner_x = corner_x;
+                out.corner_y = corner_y;
+            } else if (radians) {
+                out.linear_from = View::BackgroundGradient::LinearFrom::angle;
+                out.linear_angle = *radians;
+            }
             out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
         return false;
     }
 
-    // radial-gradient([<shape>] [at <pos>],] stop, stop, ...). Sizing keywords
-    // are best-effort (radius approximated as a fraction of max(w,h)).
+    // radial-gradient([<shape> || <size>] [at <pos>],] stop, stop, ...).
+    //
+    // The size is the whole point: a radial's ending shape is measured from ITS
+    // OWN centre out to a side or corner of the box, so an off-centre `at`
+    // changes every radius, and a two-value size (`90% 70%`) is an ellipse with
+    // one radius per axis. None of that is expressible as a single fraction of
+    // the box's larger side, which is what this used to hand the painter — so
+    // the geometry is recorded here and resolved against the laid-out box in
+    // View::resolve_radial.
     if (gradient.substr(0, 16) == "radial-gradient(") {
         std::string inner = gradient.substr(16, gradient.size() - 17);
         float cx = 0.5f, cy = 0.5f;
-        float radius_frac = 0.7071f;  // ~farthest-corner of a square box (default)
+        using Radial = View::BackgroundGradient::RadialSize;
+        // CSS defaults: farthest-corner, and ellipse unless `circle` is named
+        // or the size is a single length.
+        Radial size = Radial::farthest_corner;
+        bool circle = false;
+        float rx_frac = 0.0f, ry_frac = 0.0f, rx_px = 0.0f, ry_px = 0.0f;
         size_t color_start = 0;
         size_t fc = top_level_comma(inner);
         if (fc != std::string::npos) {
             std::string seg = inner.substr(0, fc);
-            if (seg.find("at ") != std::string::npos ||
+            const bool has_explicit_size =
+                !seg.empty() && parse_radial_extent(seg, rx_frac, ry_frac,
+                                                    rx_px, ry_px, circle);
+            if (has_explicit_size || seg.find("at ") != std::string::npos ||
                 seg.rfind("circle", 0) == 0 || seg.rfind("ellipse", 0) == 0 ||
                 seg.rfind("closest", 0) == 0 || seg.rfind("farthest", 0) == 0) {
                 parse_at_center(seg, cx, cy);
-                if (seg.find("closest-side") != std::string::npos)        radius_frac = 0.5f;
-                else if (seg.find("closest-corner") != std::string::npos) radius_frac = 0.6f;
-                else if (seg.find("farthest-side") != std::string::npos)  radius_frac = 0.6f;
-                else if (seg.find("farthest-corner") != std::string::npos) radius_frac = 0.7071f;
+                if (seg.rfind("circle", 0) == 0 ||
+                    seg.find(" circle") != std::string::npos) circle = true;
+                if (has_explicit_size) {
+                    size = Radial::explicit_radii;
+                } else if (seg.find("closest-side") != std::string::npos) {
+                    size = Radial::closest_side;
+                } else if (seg.find("closest-corner") != std::string::npos) {
+                    size = Radial::closest_corner;
+                } else if (seg.find("farthest-side") != std::string::npos) {
+                    size = Radial::farthest_side;
+                } else {
+                    size = Radial::farthest_corner;
+                }
                 color_start = fc + 1;
             }
         }
+
+        View::BackgroundGradient geom;
+        geom.x0 = cx; geom.y0 = cy;
+        geom.radial_size = size;
+        geom.radial_circle = circle;
+        geom.radial_rx = rx_frac; geom.radial_ry = ry_frac;
+        geom.radial_rx_px = rx_px; geom.radial_ry_px = ry_px;
+
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        // A radial stop position measures along the RADIUS, which the renderer
-        // takes as radius_frac of the box's larger side.
+        // A radial stop position measures along the gradient's horizontal
+        // radius, so a calc() `px` term needs that radius — which needs the
+        // box, and is refused rather than guessed when there is none.
         const std::optional<float> radius_px =
-            box_known ? std::optional<float>(radius_frac *
-                                             std::max(box.width, box.height))
-                      : std::nullopt;
+            box_known
+                ? std::optional<float>(
+                      View::resolve_radial(geom, box.width, box.height).rx)
+                : std::nullopt;
         if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
                          /*angular=*/false, radius_px))
             return false;
         if (!colors.empty()) {
-            out = {}; out.type = 2;
-            out.x0 = cx; out.y0 = cy; out.radius = radius_frac;
+            out = std::move(geom);
+            out.type = 2;
             out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }

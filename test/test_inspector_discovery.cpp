@@ -27,25 +27,24 @@
 #endif
 
 using namespace std::chrono_literals;
+using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::InspectorDiscoveryPublisher;
 using pulp::inspect::InspectorDiscoveryReader;
 using pulp::inspect::InspectorDiscoveryRecord;
 using pulp::inspect::InspectorProfile;
-using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::select_inspector_session;
 
 namespace {
 
 class TemporaryDirectory {
-public:
+  public:
     TemporaryDirectory() {
         const auto secret = generate_inspector_secret();
         REQUIRE(secret.has_value());
         std::string suffix;
         for (std::size_t index = 0; index < 8; ++index)
             suffix += "0123456789abcdef"[(*secret)[index] & 0xf];
-        path = std::filesystem::temp_directory_path() /
-               ("pulp-inspector-discovery-test-" + suffix);
+        path = std::filesystem::temp_directory_path() / ("pulp-inspector-discovery-test-" + suffix);
     }
 
     ~TemporaryDirectory() {
@@ -74,27 +73,20 @@ bool add_allow_acl(const std::filesystem::path& path, bool inherited) {
     acl_t acl = ::acl_init(1);
     acl_entry_t entry = nullptr;
     uuid_t group{};
-    bool succeeded =
-        acl &&
-        ::acl_create_entry(&acl, &entry) == 0 &&
-        ::mbr_gid_to_uuid(::getegid(), group) == 0 &&
-        ::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0 &&
-        ::acl_set_qualifier(entry, group) == 0;
+    bool succeeded = acl && ::acl_create_entry(&acl, &entry) == 0 &&
+                     ::mbr_gid_to_uuid(::getegid(), group) == 0 &&
+                     ::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0 &&
+                     ::acl_set_qualifier(entry, group) == 0;
     acl_permset_t permissions = nullptr;
-    succeeded =
-        succeeded &&
-        ::acl_get_permset(entry, &permissions) == 0 &&
-        ::acl_add_perm(permissions, ACL_READ_DATA) == 0;
+    succeeded = succeeded && ::acl_get_permset(entry, &permissions) == 0 &&
+                ::acl_add_perm(permissions, ACL_READ_DATA) == 0;
     if (succeeded && inherited) {
         acl_flagset_t flags = nullptr;
-        succeeded =
-            ::acl_get_flagset_np(entry, &flags) == 0 &&
-            ::acl_add_flag_np(flags, ACL_ENTRY_FILE_INHERIT) == 0 &&
-            ::acl_add_flag_np(flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0;
+        succeeded = ::acl_get_flagset_np(entry, &flags) == 0 &&
+                    ::acl_add_flag_np(flags, ACL_ENTRY_FILE_INHERIT) == 0 &&
+                    ::acl_add_flag_np(flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0;
     }
-    succeeded =
-        succeeded &&
-        ::acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED) == 0;
+    succeeded = succeeded && ::acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED) == 0;
     if (acl)
         ::acl_free(acl);
     ::close(descriptor);
@@ -120,7 +112,9 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
           "[inspect][discovery]") {
     TemporaryDirectory temporary;
     InspectorDiscoveryReader reader(temporary.path);
-    CHECK(reader.list().empty());
+    std::string diagnostic;
+    CHECK(reader.list(&diagnostic).empty());
+    CHECK(diagnostic.empty());
     CHECK_FALSE(std::filesystem::exists(temporary.path));
 
     const auto token = generate_inspector_secret();
@@ -134,7 +128,7 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
     CHECK(std::filesystem::exists(publisher.record()->credential_path));
 
 #ifndef _WIN32
-    struct stat info {};
+    struct stat info{};
     REQUIRE(::stat(publisher.record()->credential_path.c_str(), &info) == 0);
     CHECK((info.st_mode & 077) == 0);
 #endif
@@ -146,25 +140,22 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
 
     publisher.remove();
     CHECK(reader.list().empty());
-    CHECK_FALSE(std::filesystem::exists(
-        temporary.path / "11-session-one-instance-1.token"));
+    CHECK_FALSE(std::filesystem::exists(temporary.path / "11-session-one-instance-1.token"));
 }
 
 #ifdef _WIN32
 TEST_CASE("discovery publication preserves Unicode runtime paths on Windows",
           "[inspect][discovery][windows][unicode]") {
     TemporaryDirectory temporary;
-    const auto runtime =
-        temporary.path / std::filesystem::path(L"missing-parent-\u03a9") /
-        std::filesystem::path(L"nested-\u65e5\u672c") /
-        std::filesystem::path(L"runtime-\u03a9-\u65e5\u672c");
+    const auto runtime = temporary.path / std::filesystem::path(L"missing-parent-\u03a9") /
+                         std::filesystem::path(L"nested-\u65e5\u672c") /
+                         std::filesystem::path(L"runtime-\u03a9-\u65e5\u672c");
     REQUIRE_FALSE(std::filesystem::exists(runtime.parent_path()));
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
 
     InspectorDiscoveryPublisher publisher(runtime);
-    REQUIRE(publisher.publish(
-        fixture_record("unicode-runtime"), *token, 5s));
+    REQUIRE(publisher.publish(fixture_record("unicode-runtime"), *token, 5s));
     InspectorDiscoveryReader reader(runtime);
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
@@ -182,23 +173,20 @@ TEST_CASE("discovery rejects records and credentials above their fixed bounds",
     auto oversized = fixture_record("oversized-publication");
     oversized.plugin_id = std::string(2000, 'x');
     CHECK_FALSE(publisher.publish(oversized, *token, 5s));
-    REQUIRE(publisher.publish(
-        fixture_record("bounded-input"), *token, 5s));
+    REQUIRE(publisher.publish(fixture_record("bounded-input"), *token, 5s));
     InspectorDiscoveryReader reader(temporary.path);
     REQUIRE(reader.list().size() == 1);
 
     {
-        std::ofstream record(publisher.record()->record_path,
-                             std::ios::binary | std::ios::trunc);
+        std::ofstream record(publisher.record()->record_path, std::ios::binary | std::ios::trunc);
         record << std::string(1025, 'x');
     }
     CHECK(reader.list().empty());
 
     REQUIRE(publisher.refresh(5s));
     {
-        std::ofstream credential(
-            publisher.record()->credential_path,
-            std::ios::binary | std::ios::app);
+        std::ofstream credential(publisher.record()->credential_path,
+                                 std::ios::binary | std::ios::app);
         credential << '0';
     }
     CHECK(reader.list().empty());
@@ -228,17 +216,13 @@ TEST_CASE("discovery rejects expiration arithmetic overflow",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(temporary.path);
-    CHECK_FALSE(publisher.publish(
-        fixture_record("overflow-publication"), *token,
-        std::chrono::milliseconds::max()));
+    CHECK_FALSE(publisher.publish(fixture_record("overflow-publication"), *token,
+                                  std::chrono::milliseconds::max()));
     CHECK_FALSE(publisher.record().has_value());
 
-    REQUIRE(publisher.publish(
-        fixture_record("bounded-publication"), *token, 5s));
-    const auto original_expiry =
-        publisher.record()->expires_at_unix_ms;
-    CHECK_FALSE(
-        publisher.refresh(std::chrono::milliseconds::max()));
+    REQUIRE(publisher.publish(fixture_record("bounded-publication"), *token, 5s));
+    const auto original_expiry = publisher.record()->expires_at_unix_ms;
+    CHECK_FALSE(publisher.refresh(std::chrono::milliseconds::max()));
     REQUIRE(publisher.record().has_value());
     CHECK(publisher.record()->expires_at_unix_ms == original_expiry);
 }
@@ -261,19 +245,14 @@ TEST_CASE("discovery accepts only complete nonzero loopback ports",
         CHECK_FALSE(publisher.publish(record, *token, 5s));
     }
 
-    REQUIRE(publisher.publish(
-        fixture_record("decoded-endpoint"), *token, 5s));
-    std::ifstream input(publisher.record()->record_path,
-                        std::ios::binary);
-    std::string json((std::istreambuf_iterator<char>(input)),
-                     std::istreambuf_iterator<char>());
+    REQUIRE(publisher.publish(fixture_record("decoded-endpoint"), *token, 5s));
+    std::ifstream input(publisher.record()->record_path, std::ios::binary);
+    std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     const auto endpoint = json.find("127.0.0.1:32123");
     REQUIRE(endpoint != std::string::npos);
-    json.replace(endpoint, std::string("127.0.0.1:32123").size(),
-                 "127.0.0.1:0");
+    json.replace(endpoint, std::string("127.0.0.1:32123").size(), "127.0.0.1:0");
     {
-        std::ofstream output(publisher.record()->record_path,
-                             std::ios::binary | std::ios::trunc);
+        std::ofstream output(publisher.record()->record_path, std::ios::binary | std::ios::trunc);
         output << json;
     }
     InspectorDiscoveryReader reader(temporary.path);
@@ -301,11 +280,11 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     const auto records = reader.list();
     REQUIRE(records.size() == 2);
     std::string selection_error;
-    CHECK_FALSE(select_inspector_session(
-        records, "shared-session", {}, {}, &selection_error).has_value());
+    CHECK_FALSE(
+        select_inspector_session(records, "shared-session", {}, {}, &selection_error).has_value());
     CHECK(selection_error.find("Multiple") != std::string::npos);
-    const auto selected = select_inspector_session(
-        records, "shared-session", "instance-b", {}, &selection_error);
+    const auto selected =
+        select_inspector_session(records, "shared-session", "instance-b", {}, &selection_error);
     REQUIRE(selected.has_value());
     CHECK(selected->instance_id == "instance-b");
     CHECK(records[0].record_path != records[1].record_path);
@@ -350,23 +329,14 @@ TEST_CASE("discovery publication generation cannot rebind a stale selector",
     REQUIRE(publisher.publish(record, *second_token, 5s));
     const auto current_records = reader.list();
     REQUIRE(current_records.size() == 1);
-    REQUIRE(current_records.front().publication_id !=
-            stale_record.publication_id);
+    REQUIRE(current_records.front().publication_id != stale_record.publication_id);
 
     std::string selection_error;
-    CHECK_FALSE(select_inspector_session(
-        current_records,
-        record.session_id,
-        record.instance_id,
-        stale_record.publication_id,
-        &selection_error));
+    CHECK_FALSE(select_inspector_session(current_records, record.session_id, record.instance_id,
+                                         stale_record.publication_id, &selection_error));
     CHECK(selection_error.find("No live") != std::string::npos);
-    REQUIRE(select_inspector_session(
-        current_records,
-        record.session_id,
-        record.instance_id,
-        current_records.front().publication_id,
-        &selection_error));
+    REQUIRE(select_inspector_session(current_records, record.session_id, record.instance_id,
+                                     current_records.front().publication_id, &selection_error));
     CHECK_FALSE(reader.read_credential(stale_record).has_value());
     CHECK(reader.read_credential(current_records.front()) == second_token);
 }
@@ -419,8 +389,7 @@ TEST_CASE("stale ownership reclamation has exactly one concurrent winner",
         const auto token = generate_inspector_secret();
         REQUIRE(token.has_value());
         tokens.push_back(*token);
-        publishers.push_back(
-            std::make_unique<InspectorDiscoveryPublisher>(temporary.path));
+        publishers.push_back(std::make_unique<InspectorDiscoveryPublisher>(temporary.path));
     }
 
     std::atomic<std::size_t> ready{0};
@@ -433,8 +402,7 @@ TEST_CASE("stale ownership reclamation has exactly one concurrent winner",
             ready.fetch_add(1, std::memory_order_release);
             while (!start.load(std::memory_order_acquire))
                 std::this_thread::yield();
-            published[index] =
-                publishers[index]->publish(record, tokens[index], 5s) ? 1 : 0;
+            published[index] = publishers[index]->publish(record, tokens[index], 5s) ? 1 : 0;
         });
     }
     while (ready.load(std::memory_order_acquire) != contender_count)
@@ -444,9 +412,8 @@ TEST_CASE("stale ownership reclamation has exactly one concurrent winner",
         contender.join();
 
     REQUIRE(std::count(published.begin(), published.end(), 1) == 1);
-    const auto winner = static_cast<std::size_t>(
-        std::find(published.begin(), published.end(), 1) -
-        published.begin());
+    const auto winner = static_cast<std::size_t>(std::find(published.begin(), published.end(), 1) -
+                                                 published.begin());
     InspectorDiscoveryReader reader(temporary.path);
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
@@ -464,14 +431,12 @@ TEST_CASE("discovery rejects a stale record after process id reuse",
     REQUIRE(publisher.record().has_value());
 
     std::ifstream input(publisher.record()->record_path, std::ios::binary);
-    std::string json((std::istreambuf_iterator<char>(input)),
-                     std::istreambuf_iterator<char>());
+    std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     const auto start = publisher.record()->process_start_id;
     const auto position = json.find(start);
     REQUIRE(position != std::string::npos);
     json.replace(position, start.size(), start + "-reused");
-    std::ofstream output(publisher.record()->record_path,
-                         std::ios::binary | std::ios::trunc);
+    std::ofstream output(publisher.record()->record_path, std::ios::binary | std::ios::trunc);
     REQUIRE(static_cast<bool>(output << json));
     output.close();
 
@@ -494,8 +459,7 @@ TEST_CASE("discovery rejects pre-existing extended ACLs on macOS",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(temporary.path);
-    CHECK_FALSE(publisher.publish(
-        fixture_record("acl-runtime"), *token, 5s));
+    CHECK_FALSE(publisher.publish(fixture_record("acl-runtime"), *token, 5s));
     CHECK(has_extended_acl(temporary.path));
 }
 
@@ -510,14 +474,12 @@ TEST_CASE("discovery strips inherited ACLs from newly created objects on macOS",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(runtime);
-    REQUIRE(publisher.publish(
-        fixture_record("inherited-acl"), *token, 5s));
+    REQUIRE(publisher.publish(fixture_record("inherited-acl"), *token, 5s));
     REQUIRE(publisher.record().has_value());
     CHECK_FALSE(has_extended_acl(runtime));
     CHECK_FALSE(has_extended_acl(publisher.record()->record_path));
     CHECK_FALSE(has_extended_acl(publisher.record()->credential_path));
-    CHECK_FALSE(has_extended_acl(
-        runtime / "13-inherited-acl-instance-1.lock"));
+    CHECK_FALSE(has_extended_acl(runtime / "13-inherited-acl-instance-1.lock"));
 
     REQUIRE(add_allow_acl(publisher.record()->credential_path, false));
     InspectorDiscoveryReader reader(runtime);
@@ -545,12 +507,9 @@ TEST_CASE("discovery rejects a zombie publisher on macOS",
     int child_info_bytes = 0;
     for (int attempt = 0; attempt < 100 && !observed_exited_child; ++attempt) {
         child_info_bytes =
-            proc_pidinfo(child.pid, PROC_PIDTBSDINFO, 0, &child_info,
-                         sizeof(child_info));
-        observed_exited_child =
-            child_info_bytes == 0 ||
-            (child_info_bytes == sizeof(child_info) &&
-             child_info.pbi_status == SZOMB);
+            proc_pidinfo(child.pid, PROC_PIDTBSDINFO, 0, &child_info, sizeof(child_info));
+        observed_exited_child = child_info_bytes == 0 || (child_info_bytes == sizeof(child_info) &&
+                                                          child_info.pbi_status == SZOMB);
         if (!observed_exited_child)
             std::this_thread::sleep_for(1ms);
     }
@@ -564,8 +523,7 @@ TEST_CASE("discovery rejects a zombie publisher on macOS",
     REQUIRE(publisher.record().has_value());
 
     std::ifstream input(publisher.record()->record_path, std::ios::binary);
-    std::string json((std::istreambuf_iterator<char>(input)),
-                     std::istreambuf_iterator<char>());
+    std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     const auto current_pid = std::to_string(publisher.record()->process_id);
     const auto pid_key = json.find("\"pid\"");
     REQUIRE(pid_key != std::string::npos);
@@ -575,15 +533,14 @@ TEST_CASE("discovery rejects a zombie publisher on macOS",
 
     const auto current_start = publisher.record()->process_start_id;
     const auto zombie_start = child_info_bytes == sizeof(child_info)
-        ? std::to_string(child_info.pbi_start_tvsec) + ":" +
-              std::to_string(child_info.pbi_start_tvusec)
-        : "0:0";
+                                  ? std::to_string(child_info.pbi_start_tvsec) + ":" +
+                                        std::to_string(child_info.pbi_start_tvusec)
+                                  : "0:0";
     const auto start_position = json.find(current_start);
     REQUIRE(start_position != std::string::npos);
     json.replace(start_position, current_start.size(), zombie_start);
 
-    std::ofstream output(publisher.record()->record_path,
-                         std::ios::binary | std::ios::trunc);
+    std::ofstream output(publisher.record()->record_path, std::ios::binary | std::ios::trunc);
     REQUIRE(static_cast<bool>(output << json));
     output.close();
 
@@ -600,9 +557,11 @@ TEST_CASE("discovery reader does not harden an insecure runtime directory",
     REQUIRE(::chmod(temporary.path.c_str(), 0755) == 0);
 
     InspectorDiscoveryReader reader(temporary.path);
-    CHECK(reader.list().empty());
+    std::string diagnostic;
+    CHECK(reader.list(&diagnostic).empty());
+    CHECK(diagnostic == "runtime directory is not an owner-private directory");
 
-    struct stat info {};
+    struct stat info{};
     REQUIRE(::stat(temporary.path.c_str(), &info) == 0);
     CHECK((info.st_mode & 077) == 055);
 }
@@ -619,10 +578,9 @@ TEST_CASE("discovery publisher rejects a runtime symlink without chmod",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(runtime);
-    CHECK_FALSE(publisher.publish(
-        fixture_record("symlink-runtime"), *token, 5s));
+    CHECK_FALSE(publisher.publish(fixture_record("symlink-runtime"), *token, 5s));
 
-    struct stat info {};
+    struct stat info{};
     REQUIRE(::stat(target.c_str(), &info) == 0);
     CHECK((info.st_mode & 077) == 055);
 }
@@ -636,10 +594,9 @@ TEST_CASE("discovery publisher does not chmod an existing runtime directory",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(temporary.path);
-    CHECK_FALSE(publisher.publish(
-        fixture_record("insecure-runtime"), *token, 5s));
+    CHECK_FALSE(publisher.publish(fixture_record("insecure-runtime"), *token, 5s));
 
-    struct stat info {};
+    struct stat info{};
     REQUIRE(::stat(temporary.path.c_str(), &info) == 0);
     CHECK((info.st_mode & 077) == 055);
 }
@@ -664,11 +621,9 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
     auto records = reader.list();
     REQUIRE(records.size() == 2);
     std::string error;
-    CHECK_FALSE(
-        select_inspector_session(records, "", {}, {}, &error).has_value());
+    CHECK_FALSE(select_inspector_session(records, "", {}, {}, &error).has_value());
     CHECK(error.find("Multiple") != std::string::npos);
-    REQUIRE(select_inspector_session(
-        records, "second", {}, {}, &error).has_value());
+    REQUIRE(select_inspector_session(records, "second", {}, {}, &error).has_value());
 
 #ifndef _WIN32
     REQUIRE(::chmod(first.record()->credential_path.c_str(), 0644) == 0);
@@ -680,15 +635,13 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
 #endif
 
     {
-        std::ofstream corrupt(first.record()->credential_path,
-                              std::ios::binary | std::ios::trunc);
+        std::ofstream corrupt(first.record()->credential_path, std::ios::binary | std::ios::trunc);
         corrupt << "not-a-credential";
     }
     records = reader.list();
     REQUIRE(records.size() == 1);
     CHECK(records.front().session_id == "second");
-    REQUIRE(
-        select_inspector_session(records, "", {}, {}, &error).has_value());
+    REQUIRE(select_inspector_session(records, "", {}, {}, &error).has_value());
 
     std::filesystem::remove(first.record()->credential_path);
     records = reader.list();

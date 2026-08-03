@@ -217,6 +217,38 @@ Facts worth knowing before touching any of it:
 - **The rows are addressed by layout node; the semantic report is addressed by
   `backend_node_id`.** The join is three hops: backend id → node index
   (`nodes.backendNodeId`) → layout index (`layout.nodeIndex`) → style row.
+- **The list is sized for drawing a whole panel, not for describing a control.**
+  A property the capture does not collect is one no consumer can ever draw — the
+  box arrives with that appearance defaulted, which renders as a plausible wrong
+  picture rather than an error. Collecting one costs a string per node;
+  re-capturing a corpus to add one later costs every design. So when in doubt,
+  collect it. Two properties earn specific mention: without `background-size`
+  the standard CSS grid idiom (a hard-stop gradient, tiled) lowers to a single
+  1 px line instead of eight columns, and reading only `border-top-style` makes
+  a dashed *left* border vanish — hence all four `border-*-style` are collected.
+- **A node can own more than one layout entry.** A box that also lays out an
+  inline text box contributes two entries with the same `nodeIndex`; a
+  `::before` with generated content is the everyday case. Take the **first**
+  entry — the node's own box — so the choice is defined rather than
+  last-write-wins.
+- **Element index N in the page is not element index N in the snapshot.** The
+  page walk is `document.querySelectorAll('*')`; the snapshot also emits
+  pseudo-element boxes (`::before` / `::after`) and shadow-tree content as
+  `nodeType === 1`. Counting those re-points every control after the first
+  `::before` at the node *before* its own — which still resolves and still looks
+  like data. `snapshotElementNodes()` in `semantics.mjs` is the one place that
+  correspondence is computed; every per-candidate snapshot value
+  (`backend_node_id`, `paint_order`) goes through it, and a candidate whose tag
+  disagrees with the node it landed on raises `capture-node-alignment-mismatch`
+  rather than shipping a neighbour's data.
+- **Paint order is consumed, never re-derived.** `includePaintOrder: true` makes
+  Chromium answer "what paints on top of what" directly, and each candidate
+  carries that integer as `paint_order`. Do not sort by `z-index` instead:
+  opacity, transforms, filters and `will-change` all create stacking contexts,
+  so a `z-index` sort agrees on simple pages and diverges silently on exactly
+  the layered panels this exists for. A laid-out document that arrives without
+  `paintOrders` raises `capture-paint-order-missing` — a tree of nulls would
+  read as "this page has no layering".
 - **A control's own node usually carries only its label's styling.** The
   gradient, radius, and shadow stack that make it look like a knob sit on an
   inner face element. Resolve through the candidate's `paint_bounds` — match it
@@ -242,6 +274,99 @@ Facts worth knowing before touching any of it:
 - **Do not carry a border colour without a border width.** Computed style
   reports `border-*-color` on every element whether or not one is drawn, so an
   ungated mapping paints borders the design never had.
+
+**Whole-tree lowering (`native_panel_lowering`, opt-in) draws the panel from
+its nodes instead of photographing it.** `browser_capture_tree.cpp` lowers every
+painted node in the snapshot into a tree under the IR root. Two invariants that
+are routinely confused, and the confusion is expensive:
+
+- **"Yoga must not re-solve" is the invariant.** It is satisfied by every node
+  being `position: absolute` with Chrome's own solved width/height/offsets.
+  Yoga takes an absolutely positioned child out of flow, so nesting adds offset
+  arithmetic and no flex resolution — a Yoga-vs-Blink divergence stays
+  impossible however deep the tree goes.
+- **"The tree must be flat" is NOT that invariant, and flattening costs the
+  editing surface.** A design gets edited section by section, which means an
+  agent has to be able to name a section and get its contents with it. Flat, two
+  `div.face` nodes are indistinguishable and there is no group to grab. So DOM
+  parentage, ids and class-derived names are preserved, and a child's box is
+  stored RELATIVE to its parent — which is what makes "move a container and its
+  children follow" true by construction rather than by special case. Composing
+  the offsets back down a chain returns Chrome's absolute box exactly; Blink's
+  1/64 px values survive binary32 unrounded, so the tests assert them with no
+  tolerance.
+
+Ordering follows Chrome's paint model, which is itself hierarchical: siblings
+are emitted in `paint_order` and carry it as `z-index`, so order lives inside
+its stacking context rather than in one global sequence. Two consequences worth
+knowing before you touch that file:
+
+- **A node that paints BEFORE its own DOM parent is hoisted, and flagged.** A
+  nested painter always draws a parent's box before anything inside it, so a
+  negative-`z-index` child (or a descendant that escaped to an outer stacking
+  context) cannot be expressed in place. It is regrafted onto the nearest
+  ancestor that works and carries `paint_order_hoisted` + `hoisted_from`; the
+  root counts them in `native_nodes_hoisted`. Never reorder one silently. On a
+  real panel this is a handful of backdrop divs, not a rarity.
+- **Re-expressing one flat order as a hierarchy can reorder interleaved
+  subtrees — `native_nodes_overlapping_reorders` is the honest measure of
+  whether it mattered.** Reordering disjoint boxes is invisible to the painter's
+  algorithm; reordering overlapping ones is a real regression. Only the
+  overlapping half is counted, and the count is recorded only when non-zero.
+- **`native_tree_root_children` / `native_tree_depth` are the shape.** A depth
+  of 1 means the lowering reflattened and every per-node count still looks
+  right, so check the shape, not only the census.
+- **Clipping travels with the node, NOT with its place in the tree — never put
+  `overflow` back on a lowered node.** A tree that carries `overflow` clips by
+  DOM parentage, because a renderer applies it to whatever the node's children
+  turn out to be. CSS clips along the containing-block chain, and the two
+  disagree in both directions: an absolutely positioned node whose containing
+  block sits above an `overflow: hidden` ancestor escapes that clip in Chrome
+  (nested under it, where the boxes do not intersect, the node disappears
+  entirely), and a hoisted node regrafted past the ancestor that clipped it
+  paints outside the box that contained it. No re-parenting fixes both. So
+  lowering resolves each node's real clip chain — `overflow` along the
+  containing-block chain, taken against each clipper's PADDING box — intersects
+  it to one rectangle, and stores it on the node in the node's own space
+  (`IRStyle::clip_rect`, `clipRect` in the IR JSON). `overflow` is dropped from
+  every lowered node; the rectangle is the only authority.
+  - **It is applied to the node's own ink, never inherited.** The engine slot is
+    `View::set_ancestor_clip_rect`, and `paint_content` releases it before the
+    children, each of which carries its own. That asymmetry is load-bearing: a
+    child can legitimately need a WIDER clip than its parent (it escapes a
+    clipper the parent is inside), and an inherited clip is an intersection and
+    cannot widen. Merging it into `overflow` re-creates the original defect.
+  - **`native_nodes_clip_over_applied` / `native_nodes_clip_lost` are now the
+    audit, and both should be absent.** They are computed off the emitted tree —
+    each node's stored rectangle composed with whatever its emitted ancestors
+    clip — against the CSS chain resolved independently, so a rectangle written
+    in the wrong space, dropped, or re-inherited from a parent's `overflow`
+    shows up as a number. A non-zero value is ink the panel draws wrongly.
+  - **The panel frame's crop is not a disagreement.** The root's own `overflow`
+    is on both sides of the audit: a node the frame cuts is out of frame, not
+    mis-clipped, and counting it would fire on `<html>` for every cropped
+    capture.
+  - **Known limits of one rectangle.** A `clip-path` ancestor clips to a shape
+    the rectangle cannot carry, so those nodes are counted in
+    `native_nodes_clip_lost` and carry `clip_inexpressible="clip-path"` — they
+    draw too much, not too little. A clipper's `border-radius` is likewise not
+    carried, so a rounded clipper under-clips at its corners; the audit compares
+    axis-aligned rectangles and cannot see that, deliberately — counting every
+    rounded card would bury the defects it exists to find. A rotated clipper
+    cannot arise at all: a
+    rotated element is `element_capture_fallback` and its whole subtree pools
+    into it.
+  - **JS and Swift codegen do not lower it yet** (allowlisted in
+    `test_design_import_parity.cpp`); the JS lane needs a `setClipRect` bridge
+    verb first. Both degrade by not clipping — too much ink, never a lost node.
+- **Anchors are DOM paths, not capture positions.** `stable_anchor_id` is
+  `capture:tag#id-or-.class[ordinal]/…`, with ordinals counted over ALL
+  same-signature siblings in the document rather than over the painted ones, so
+  hiding a sibling does not move the anchor. Keying on a layout index instead
+  identifies a node within one capture — the one job an anchor does not have,
+  since the tweaks layer replays edits ACROSS captures. A hoisted node keeps its
+  DOM anchor: hoisting is a rendering accommodation, not a claim about
+  structure.
 
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
@@ -4018,6 +4143,13 @@ capture backdrop out from under its controls, and errs in *both* directions —
 from the same tree as the importer (a stale one no-ops the artifact's token
 calls and scores near zero, looking exactly like a broken design).
 
+The verifier checks runtime calls used by the artifact against complete string
+table entries in `pulp-screenshot` before rendering. A missing capability, an
+unreadable binary, or an unreadable artifact exits with harness error 7; it is
+not a panel-regression score. Rebuild `pulp-screenshot` from the importer's tree
+and rerun. Partial names such as `setColorTokenLegacy` deliberately do not prove
+that the renderer implements `setColorToken`.
+
 Its similarity is blind to palette regressions — an artifact whose tokens never
 reach the widget theme keys renders blue knobs on a cream faceplate and still
 scores **0.940**. The `--tokens` foreign-colour check is the only thing that
@@ -4879,6 +5011,34 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **A per-node clip RECTANGLE cannot carry a rounded clipper, and the node that
+  renders wrong is not the node that owns the radius.** Lowering flattens the
+  tree and gives each node its own resolved clip, deliberately dropping
+  `overflow` — correct, because CSS clips along the containing-block chain while
+  a view tree clips by parentage. But CSS confines overflow to the clipper's
+  **rounded padding box**, so a card with `border-radius` + `overflow: hidden`
+  cuts its children to that curve. With a bare rectangle the card's own border
+  curves while the child inside it paints a square corner, and the whole card
+  reads as unrounded.
+
+  This resists the obvious search. The radius is present and correct at every
+  layer you would check — captured by Chrome, carried in the IR, consumed by the
+  materializer, handled by `paint_background_and_border` — because the element
+  that *paints the wrong pixels* (the child) is not the element that *owns the
+  radius* (the card). **When ink is wrong, identify the node that painted those
+  pixels before auditing the node whose property looks missing.** A fast way to
+  settle it: rewrite every radius in the IR to something huge and re-render. A
+  node that does not move is not reading the field you are inspecting.
+
+  `IRStyle::ClipRect` carries four radii; a corner keeps its curve only while
+  that corner is still the rounded clipper's own, since a corner cut away by a
+  second, tighter clipper is square. Note also that a node sitting fully inside
+  the clip *rectangle* can still be cut by the *curve*, so any "this clip is a
+  no-op, skip it" shortcut has to test corner intrusion as well as containment.
+
+  The area metric is blind to this: forge moved 0.0522 → 0.0520 for a change
+  that visibly corrected every card corner. Judge it on a magnified crop.
+
 - **A slow `pulp-import-design` run is usually the scratch sweep, not the
   import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
   removes stale scratch siblings before every run by walking the temp root, so
@@ -5311,3 +5471,161 @@ Two rules when working on it:
   Node.js installations it checked (with versions) or, when there were none, the
   locations it searched. Listing the *browsers* it probed — the pre-fix
   behaviour — tells the user nothing about a missing Node.js.
+
+## A modern colour syntax that fails to parse paints WHITE, not nothing
+
+`parse_css_color` used to fall through to opaque white on `oklab()` / `oklch()`.
+That is worse than it sounds, because **Chromium's `getComputedStyle` serializes
+*every* modern colour syntax into those two** — `color-mix()`, relative colour,
+wide-gamut literals all arrive as `oklab(...)`. A dark faceplate therefore
+rendered as a white panel, and the first native render of a real capture came out
+white with stock widget art on top.
+
+Three separate places had to agree, and only one of them was visible:
+
+- `parse_css_color` — returned white instead of failing.
+- `linear-gradient(` — knew only the four `to <side>` keywords, so an angle was
+  handed to the colour parser and became that same white **first stop**, *and*
+  the direction silently reverted to `to bottom`. Note `to bottom right` matched
+  the `to bottom` prefix test, so even keyword handling was wrong.
+- The materializer's colour allowlist — knew only `rgb`/`hsl`, so `oklab()` text
+  and border colours were **never applied at all**. A silent loss, not a wrong
+  colour: the view simply kept its default.
+
+**How to test a colour path here.** Assert against **pixels read off Chrome's own
+render of that exact string**, never against hand-computed expectations — a
+fixture you derived from the same matrices as the code agrees with it by
+construction. On an out-of-gamut `oklch` the hand-written expectation was simply
+wrong and Chrome settled it.
+
+**Gradient geometry cannot be resolved when the CSS is parsed.** The importer
+runs its whole style pass *before* Yoga sizes anything, so
+`apply_css_background_gradient` sees a degenerate 1x1 box. Every box-dependent
+number therefore has to travel as CSS *intent* on `View::BackgroundGradient` and
+be resolved in `View::paint_background_and_border` against real `bounds_`:
+
+- a linear `<angle>`'s endpoints (the line's length is the box's projection onto
+  it, so the aspect ratio is in the answer);
+- a `to <corner>` keyword's angle, which is itself a function of the aspect;
+- a radial's radii, which are percentages of width and height *independently*.
+
+`View::resolve_radial` is the single place that turns a radial's CSS sizing into
+pixels, shared by the painter, the parser's calc()-stop resolution, and the
+tests, so the three cannot drift.
+
+**Three things about radial gradients that are easy to get wrong:**
+
+- **The default shape is an ELLIPSE, not a circle**, and a two-value size
+  (`90% 70%`) can only be an ellipse. Skia has no elliptical gradient — put the
+  y-squash in a **local matrix on the shader** (`set_fill_gradient_radial_-
+  elliptical`), never on the canvas: a background gradient is routinely filled
+  through a rounded-rect or per-corner path, and a canvas scale would stretch
+  those corners with it.
+- **The corner keywords are not the corner distance.** For an ellipse the spec
+  takes the matching `-side` aspect and scales it until it passes through the
+  corner, which works out to exactly `sqrt(2)` per axis — noticeably larger.
+- **`to bottom right` is `atan2(HEIGHT, width)`, not `atan2(width, height)`.**
+  The gradient line is perpendicular to the *other* diagonal `(w, -h)`, whose
+  perpendicular is `(h, w)`. The transposed form is a plausible-looking
+  expression that is only correct on a square box; on 160x100 it misses Chrome's
+  boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
+
+**A geometry fixture MUST be non-square and off-centre.** The pre-existing test
+for radial sizing asserted `closest-side → 0.5` and `farthest-corner → 0.7071`
+on a **200x200 box with the gradient at 50% 50%** — and on a square, centred box
+those wrong constants give exactly the right answer. The test could not have
+failed for the defect it was named after. The same trap makes a 45° angle its
+own reflection and an ellipse a circle. Use a box like 160x100 with the centre
+at something like `20% 20%`, and the wrong model and the correct one stop
+agreeing. This generalises past gradients: **any test whose subject is
+arithmetic over a box needs a fixture where the plausible-but-wrong formula
+gives a different answer**, or it is only asserting that two expressions
+coincide on the one input you chose.
+
+**Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
+premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
+fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
+the colour toward **black** as the alpha falls instead of just fading. Opaque
+gradients are bit-identical either way, which is why every existing gradient test
+passed over it. It only shows on a stop with alpha < 1, and that is exactly the
+form real panels use for a soft screen-sized wash. `skia_gradient_compat.hpp`
+now routes all four makers through `css_interpolation()`.
+
+**Symptom to recognise:** a wash that is present, correctly positioned, and
+*too weak and too grey* — the tint reads roughly a third of Chrome's over most
+of its area while matching near the hot centre. Compute the expected delta both
+ways (`α·(C−B)` vs `α·(lerp(C,black,f)−B)`) at one off-centre pixel; the two
+predictions differ by ~3x and pick the answer immediately.
+
+## Scoring a native panel — the instrument lies in two specific ways
+
+`tools/import-validation/score_native_panel.py` renders the emitted artifact and
+attributes failing pixels to nodes. Two traps are baked into the *metric*, not
+the code, and both were found by measuring rather than reasoning:
+
+- **A blank render scores well against a dark design.** SPECTR's render was empty
+  (max channel 10) and scored **12.45% failing**, because black "matches" a
+  mostly-black reference — while rendering it *correctly* raised the number to
+  ~11% with text failure going 49%→69%. **Area-weighted failing fraction is not a
+  fidelity measure without a companion coverage statistic.**
+- **Per-node scores are not usable yet.** worst-node reads 1.0000 and ~0% of
+  ink-bearing nodes pass on every real design. Quote the area-weighted number and
+  say the per-node gate is not live.
+
+**Its feature classifier lied about `background-blend-mode`, and the shape of
+that lie generalises.** `background-blend-mode` carries **one value per
+background layer**, so a node with two background layers and no blending at all
+computes to the string `"normal, normal"` — which is not `"normal"`. Comparing
+the whole computed value against the keyword classified every multi-layer
+background as a blend. That mislabelled *the single largest node on the panel* on
+three of four designs, and it read as "59-70% of failing area is
+`background-blend-mode`" when the corpus contains **zero** non-normal
+`background-blend-mode` anywhere; the node was two ordinary radial gradients.
+**Any CSS property that takes a comma-separated list per background layer or per
+transition needs its value split before a keyword comparison** — `background-*`,
+`transition-*`, `animation-*`, `mask-*` are all like this. A grep-shaped check
+over a computed style is not a check.
+
+**Always report a coverage statistic beside the failing fraction.** Take the
+reference's modal colour, call pixels beyond a threshold from it "ink", and
+report both `covered = |render ink ∩ ref ink| / |ref ink|` and
+`inkRatio = |render ink| / |ref ink|`. **Both, not one:** a solid-black render
+against SPECTR scores `covered = 1.00` (black is far from the modal colour
+everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
+blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
+
+**Two ways a background-build waiter lies, and both look like a result.**
+Measurement work runs long builds, so agents wrap them in wait loops. Two
+failure modes have each burned a session here:
+
+- **`pgrep -f "cmake --build ..."` matches ANOTHER agent's build in another
+  worktree.** Several worktrees share this machine and every one of them runs a
+  byte-identical command line, so `until ! pgrep -f …` either blocks on someone
+  else's build or — if your pattern does not match your own invocation — exits
+  instantly and reports "finished" before yours started. Match on something
+  unique to your run (a marker file the command writes on exit, or the build
+  log's own last line), never on the shared command line. A wait loop can also
+  match ITSELF: the shell running `pgrep -f "ctest …"` has that string in its
+  own argv, so the loop never ends.
+- **A pipeline ending in `grep -c` reports failure on a zero count.** `grep`
+  exits 1 when it finds nothing, so `… ; grep -cE " error:" build.log` makes a
+  perfectly clean build's task exit 1 and read as "build failed". Put the grep
+  anywhere but last, or `|| true` it.
+
+In both cases the honest move is the same: **read the build log's own tail
+rather than trusting the wrapper's verdict.**
+
+**Prove the bitmap is absent by substitution, not by scanning.** A static scan
+shows no node *references* the capture; it cannot show no pixel *comes from* it.
+Replace `browser.png` with solid magenta at identical dimensions, re-lower,
+re-render, and require the composite to be **byte-identical**. Note the envelope
+still validates the PNG's hash in native mode, so the file must exist even though
+nothing draws it.
+
+**τ must come from a control that contains native rasterisation.** The calibration
+control is an identity blit and measures exactly zero noise; carrying that `0.0`
+into native scoring guarantees failure. Measured properly: flat axis-aligned
+fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome and
+Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
+cannot be given a τ yet because its gradients are still measuring the defect
+above rather than noise.

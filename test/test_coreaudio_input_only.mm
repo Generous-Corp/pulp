@@ -31,6 +31,13 @@
 
 #include <pulp/audio/device.hpp>
 
+// The platform header, for `clamped_input_frames`. Not on the public include
+// path — it is an implementation detail — so the test target adds the
+// directory explicitly. Reaching for the real declaration rather than
+// restating the rule is the point: a test with its own copy of a clamp passes
+// while the clamp is missing from the code.
+#include "coreaudio_device.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -358,4 +365,84 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
         CHECK(obs.input_channels >= 1);
         CHECK(obs.input_frames > 0);
     }
+}
+
+// ── the input buffer must never be told it is bigger than it is ─────────────
+//
+// AddressSanitizer, running the standalone on a MacBook Pro:
+//
+//   ERROR: AddressSanitizer: heap-buffer-overflow
+//   WRITE of size 1880 ... thread T15
+//     #0 memcpy
+//     #4 AudioUnitRender
+//     #5 pulp::audio::mac::CoreAudioDevice::render_callback
+//
+// The callback declared `inNumberFrames * sizeof(float)` of space to
+// AudioUnitRender and requested that many frames, while the storage is
+// allocated once for the configured block size. A device asking for more —
+// 470 frames, a laptop's non-power-of-two default — had CoreAudio memcpy past
+// the end of the heap buffer, ON THE AUDIO THREAD. Nothing crashed there: the
+// process aborted later, in whatever unrelated code allocated next, which is
+// why the same fault presented as three different bugs in CoreText,
+// CFPreferences and CoreGraphics.
+//
+// Needs no hardware, deliberately. The bug is arithmetic, so the guard against
+// it must run everywhere, not behind the opt-in that gates the device-opening
+// sections above.
+TEST_CASE("CoreAudio never requests more input frames than it allocated",
+          "[audio][coreaudio][rt-safety]") {
+    using pulp::audio::mac::clamped_input_frames;
+
+    // The exact numbers from the sanitizer report.
+    CHECK(clamped_input_frames(470, 235) == 235);
+    // The ordinary case is untouched — a clamp that always clamped would make
+    // every device deliver short input.
+    CHECK(clamped_input_frames(256, 512) == 256);
+    CHECK(clamped_input_frames(512, 512) == 512);
+    // Degenerate capacities must not underflow into an enormous request.
+    CHECK(clamped_input_frames(64, 0) == 0);
+    CHECK(clamped_input_frames(0, 512) == 0);
+
+    // The property, stated over a range rather than at a few points: the
+    // result is never larger than the capacity, and never larger than what was
+    // asked for.
+    for (UInt32 cap : {0u, 1u, 64u, 235u, 512u, 4096u}) {
+        for (UInt32 req : {0u, 1u, 63u, 470u, 512u, 8192u}) {
+            const UInt32 got = clamped_input_frames(req, cap);
+            CHECK(got <= cap);
+            CHECK(got <= req);
+        }
+    }
+}
+
+// The assertion that carries the weight: the CALLBACK must use the clamp.
+//
+// The check above is arithmetic and would keep passing if the render callback
+// went back to requesting `inNumberFrames` directly — which is precisely the
+// bug. A clamp nobody calls is not a fix. Reading the source is a blunt
+// instrument, but it is the only way to assert the call site from a test that
+// cannot drive a live AudioUnit, and it fails loudly if the callback is
+// rewritten without it.
+TEST_CASE("the render callback asks AudioUnitRender for the clamped count",
+          "[audio][coreaudio][rt-safety]") {
+    NSString* path = [NSString stringWithUTF8String:
+                      PULP_COREAUDIO_DEVICE_SOURCE];
+    NSError* err = nil;
+    NSString* src = [NSString stringWithContentsOfFile:path
+                                              encoding:NSUTF8StringEncoding
+                                                 error:&err];
+    REQUIRE(src != nil);
+    const std::string s([src UTF8String]);
+
+    // The clamp is computed …
+    REQUIRE(s.find("clamped_input_frames(inNumberFrames") != std::string::npos);
+
+    // … and the render request uses it. `AudioUnitRender(... , 1, in_frames,`
+    // — bus 1 is the input bus, and the frame count immediately follows it.
+    const auto call = s.find("AudioUnitRender(");
+    REQUIRE(call != std::string::npos);
+    const auto tail = s.substr(call, 400);
+    INFO("AudioUnitRender call site:\n" << tail.substr(0, 300));
+    CHECK(tail.find("in_frames") != std::string::npos);
+    CHECK(tail.find("inNumberFrames") == std::string::npos);
 }

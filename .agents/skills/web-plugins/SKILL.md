@@ -179,6 +179,15 @@ Consequences for anything on the web lane that publishes program state:
   the `AudioContext` survives — the new Worker republishes generation 1, and a
   consumer comparing generations alone refuses every publish from then on and
   renders a stale program with no diagnostic to distinguish it from silence.
+- **Decide a lane `Unchanged` on its `instance_token` too, not on
+  `(lane_id, generation)`.** The epoch separates producers; it does not separate
+  two programs from one producer, and that is the common case — a worklet's
+  Worker recompiling. `generation` is supplied by the caller rather than minted
+  per compile, so everything else about the lane can be identical. Each
+  `ProgramWireAutomationLaneRecord` carries the producer's own token for exactly
+  this; compare it for equality only, and only against a token from the same
+  `producer_epoch`. Keeping cursor state on a lane whose token moved renders the
+  stale curve with nothing malformed for the decoder to reject.
 
 ## Capability tiers are shared with mobile — do not mint a browser-local enum
 
@@ -441,6 +450,22 @@ per-ABI entry point for it.** Go through the plugin's own state:
   so one edit to that function covers the native target, both web lanes, and the
   no-exceptions proof together. Hand-editing any of the four consumer lists for a
   timeline unit is not just unnecessary, it is wrong.
+
+- **This skill owns the engines' web-ABI source closure, not the engines.**
+  `skill_path_map.json` maps `web-plugins` to
+  `core/timeline/PulpTimelineSources.cmake`,
+  `core/playback/PulpPlaybackSources.cmake`, `PulpWam.cmake` (which carries the
+  literal `core/timebase/src` list) and `PulpWclap.cmake` — the surfaces that
+  decide what the browser lanes compile. It does **not** claim
+  `core/timebase/**`, `core/timeline/**`, or `core/playback/**` wholesale.
+  Adding or splitting an engine TU still lands on this skill, because it edits
+  one of those lists; editing an existing engine TU does not, because nothing
+  here goes stale. Whole-subsystem claims made the gate fire on every engine
+  edit, which trains reflexive `Skill-Update: skip` trailers — and that reflex
+  is how a genuinely missed skill update gets waved through. `web-timeline-
+  source-closure` (a ctest, not this gate) is what proves the closure itself.
+  `tools/scripts/test_skill_sync.py::RealSkillPathMapOwnershipTests` asserts
+  the boundary from both sides, so widening it back fails a test.
 
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,

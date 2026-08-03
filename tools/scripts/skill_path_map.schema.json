@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/danielraffel/pulp/tools/scripts/skill_path_map.schema.json",
+  "title": "Pulp skill_path_map.json",
+  "description": "Skill name -> ownership globs, consumed by skill_sync_check.py. Validated for real by skill_path_map_lint.py (via json_schema_lite.py) on every gates.sh / pre-push / CI run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skills"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "./skill_path_map.schema.json",
+      "description": "Relative pointer to this file. The lint asserts the referenced file exists, so a dangling pointer is an error rather than decoration."
+    },
+    "_comment": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "integer", "const": 1 },
+    "skills": {
+      "type": "object",
+      "description": "One entry per directory under .agents/skills/. skill_sync_check.self_check enforces the two-way correspondence.",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+        "description": "Skill directory name: lowercase kebab-case, matching the .agents/skills/ subdirectory."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "A skill's ownership entry. Always an object — a bare array here parses to zero patterns under load_skill_map(), which is a silent no-op entry.",
+        "additionalProperties": false,
+        "required": ["paths"],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "uniqueItems": true,
+            "description": "Repo-relative gitignore-style globs (see gate_common.glob_to_regex). An empty array is allowed only with a _doc.empty-ok annotation.",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!\\./)(?!.*(?:\\\\|/{2,}|\\s|/$))(?!(?:.*/)?\\.\\.(?:/|$)).+$",
+              "description": "Anchored at the repo root: no leading '/' or './', no backslashes, no whitespace, no '..' segment, no doubled or trailing slash. A leading dot is fine — .github/ and .agents/ are real ownership surfaces."
+            }
+          },
+          "_doc": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "description": "Annotations that unlock a lint rule. Each value must state why, not that.",
+            "properties": {
+              "empty-ok": {
+                "type": "string",
+                "minLength": 40,
+                "description": "Why this entry's patterns legitimately match no tracked file (developer-supplied external SDK, or a process skill that owns no source path)."
+              },
+              "scope": {
+                "type": "string",
+                "minLength": 40,
+                "description": "Why this skill co-claims an entire subsystem directory that another skill also claims."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <thread>
 #include <utility>
 
 namespace pulp::inspect {
@@ -54,6 +55,37 @@ std::optional<InspectorMessage> validate_request_shape(
                           "invalid_request");
     }
     return std::nullopt;
+}
+
+void deliver_scope_ends(
+    const InspectorSessionInfo& info,
+    std::vector<InspectorControllerLease::EndedScope> ended,
+    const InspectorSession::ControllerScopeEndHandler& handler) {
+    if (!handler)
+        return;
+    for (auto& event : ended) {
+        try {
+            handler({info.session_id, info.instance_id, std::move(event.owner),
+                     event.reason});
+        } catch (...) {
+            // Cleanup notification must not unwind a transport thread or the
+            // idle-expiry worker. Host callbacks own their error reporting.
+        }
+    }
+}
+
+void append_audit(const std::shared_ptr<InspectorAuditLog>& audit_log,
+                  const InspectorSessionInfo& info,
+                  std::string_view client_id,
+                  const InspectorMessage& request,
+                  InspectorCapability capability,
+                  InspectorAuditOutcome outcome,
+                  std::string error_code = {}) {
+    if (!audit_log)
+        return;
+    audit_log->append({0, request.id, info.session_id, info.instance_id,
+                       std::string(client_id), request.method, capability,
+                       outcome, std::move(error_code)});
 }
 
 } // namespace
@@ -145,9 +177,9 @@ void InspectorControllerLease::expire_if_needed() {
             // Expiry fences admission immediately. Keep the identity only so
             // the operations admitted before expiry can drain safely.
             release_pending_ = true;
+            pending_reason_ = TestInputReleaseReason::ControllerExpired;
         } else {
-            owner_.clear();
-            release_pending_ = false;
+            finish_scope(TestInputReleaseReason::ControllerExpired);
         }
     }
 }
@@ -178,20 +210,28 @@ ControllerLeaseResult InspectorControllerLease::renew(
 }
 
 bool InspectorControllerLease::release(std::string_view owner) {
+    return release_with_reason(owner,
+                               TestInputReleaseReason::ControllerReleased);
+}
+
+bool InspectorControllerLease::release_with_reason(
+    std::string_view owner,
+    TestInputReleaseReason reason) {
     expire_if_needed();
     if (owner.empty() || owner_ != owner)
         return false;
     if (active_operations_ != 0) {
         release_pending_ = true;
+        pending_reason_ = reason;
         return true;
     }
-    owner_.clear();
-    release_pending_ = false;
+    finish_scope(reason);
     return true;
 }
 
 void InspectorControllerLease::disconnect(std::string_view owner) {
-    (void)release(owner);
+    (void)release_with_reason(owner,
+                              TestInputReleaseReason::ClientDisconnected);
 }
 
 bool InspectorControllerLease::owns(std::string_view owner) {
@@ -230,18 +270,98 @@ void InspectorControllerLease::end_operation(std::string_view owner) {
     --active_operations_;
     if (active_operations_ == 0 &&
         (release_pending_ || clock_() >= expires_at_)) {
-        owner_.clear();
-        release_pending_ = false;
+        finish_scope(release_pending_
+                         ? pending_reason_
+                         : TestInputReleaseReason::ControllerExpired);
     }
+}
+
+void InspectorControllerLease::terminate() {
+    expire_if_needed();
+    if (owner_.empty())
+        return;
+    if (active_operations_ != 0) {
+        release_pending_ = true;
+        pending_reason_ = TestInputReleaseReason::SessionTeardown;
+        return;
+    }
+    finish_scope(TestInputReleaseReason::SessionTeardown);
+}
+
+std::vector<InspectorControllerLease::EndedScope>
+InspectorControllerLease::take_ended_scopes() {
+    auto ended = std::move(ended_scopes_);
+    ended_scopes_.clear();
+    return ended;
+}
+
+void InspectorControllerLease::finish_scope(TestInputReleaseReason reason) {
+    if (!owner_.empty())
+        ended_scopes_.push_back({owner_, reason});
+    owner_.clear();
+    release_pending_ = false;
+    pending_reason_ = TestInputReleaseReason::ControllerReleased;
 }
 
 class InspectorSession::State {
 public:
-    State(RequestHandler request_handler,
+    State(InspectorSessionInfo session_info,
+          RequestHandler request_handler,
           std::chrono::milliseconds lease_ttl,
           InspectorControllerLease::Clock clock)
-        : handler(std::move(request_handler)),
-          lease(lease_ttl, std::move(clock)) {}
+        : info(std::move(session_info)),
+          handler(std::move(request_handler)),
+          lease(lease_ttl, std::move(clock)),
+          expiry_thread([this] {
+              std::unique_lock lock(mutex);
+              while (!expiry_stop_requested) {
+                  const auto wait = lease.owner().has_value()
+                      ? std::max(lease.remaining(),
+                                 std::chrono::milliseconds(1))
+                      : std::chrono::seconds(1);
+                  auto ended = lease.take_ended_scopes();
+                  auto callback = controller_scope_end_handler;
+                  if (!ended.empty()) {
+                      lock.unlock();
+                      deliver_scope_ends(info, std::move(ended), callback);
+                      lock.lock();
+                      continue;
+                  }
+                  expiry_cv.wait_for(lock, wait);
+              }
+              auto keep_alive = std::move(expiry_keep_alive);
+              lock.unlock();
+              (void)keep_alive;
+          }) {}
+
+    ~State() {
+        request_expiry_stop();
+        join_expiry();
+    }
+
+    void request_expiry_stop() {
+        {
+            std::lock_guard lock(mutex);
+            expiry_stop_requested = true;
+        }
+        expiry_cv.notify_all();
+    }
+
+    bool on_expiry_thread() const {
+        return expiry_thread.joinable() &&
+               expiry_thread.get_id() == std::this_thread::get_id();
+    }
+
+    void join_expiry() {
+        if (expiry_thread.joinable() && !on_expiry_thread())
+            expiry_thread.join();
+    }
+
+    void retain_until_expiry_exit(std::shared_ptr<State> state) {
+        std::lock_guard lock(mutex);
+        expiry_keep_alive = std::move(state);
+        expiry_thread.detach();
+    }
 
     bool begin_dispatch() {
         const auto caller = std::this_thread::get_id();
@@ -277,16 +397,23 @@ public:
         dispatch_cv.notify_all();
     }
 
+    InspectorSessionInfo info;
     RequestHandler handler;
     InspectorControllerLease lease;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
+    ControllerScopeEndHandler controller_scope_end_handler;
+    std::shared_ptr<InspectorAuditLog> audit_log;
     std::mutex mutex;
+    std::condition_variable expiry_cv;
     std::mutex dispatch_mutex;
     std::condition_variable dispatch_cv;
     bool dispatch_accepting = true;
     bool dispatch_active = false;
     std::thread::id dispatch_owner;
     std::size_t dispatch_recursion = 0;
+    std::shared_ptr<State> expiry_keep_alive;
+    bool expiry_stop_requested = false;
+    std::thread expiry_thread;
 };
 
 InspectorSession::InspectorSession(InspectorSessionInfo info,
@@ -297,65 +424,144 @@ InspectorSession::InspectorSession(InspectorSessionInfo info,
     : info_(std::move(info)),
       policy_(std::move(policy)),
       state_(std::make_shared<State>(
-          std::move(handler), lease_ttl, std::move(clock))) {}
+          info_, std::move(handler), lease_ttl, std::move(clock))) {}
+
+InspectorSession::~InspectorSession() {
+    auto state = std::move(state_);
+    if (!state)
+        return;
+
+    ControllerScopeEndHandler handler;
+    std::vector<InspectorControllerLease::EndedScope> ended;
+    {
+        std::lock_guard lock(state->mutex);
+        state->lease.terminate();
+        ended = state->lease.take_ended_scopes();
+        handler = state->controller_scope_end_handler;
+    }
+    state->request_expiry_stop();
+
+    if (state->on_expiry_thread()) {
+        // The expiry callback is allowed to destroy its owning session. Keep
+        // State alive until the worker exits, and detach its thread object so
+        // final destruction at the end of the worker cannot self-join.
+        deliver_scope_ends(info_, std::move(ended), handler);
+        auto* raw_state = state.get();
+        raw_state->retain_until_expiry_exit(std::move(state));
+        return;
+    }
+
+    state->join_expiry();
+    deliver_scope_ends(info_, std::move(ended), handler);
+}
 
 InspectorMessage InspectorSession::handle(std::string_view client_id,
                                           const InspectorMessage& request) {
     const auto state = state_;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
+    std::shared_ptr<InspectorAuditLog> audit_log;
+    ControllerScopeEndHandler scope_end_handler;
+    std::vector<InspectorControllerLease::EndedScope> ended_scopes;
+    std::optional<InspectorMessage> immediate_response;
+    InspectorCapability capability = InspectorCapability::Unavailable;
     bool controller_operation = false;
     {
         std::lock_guard lock(state->mutex);
         if (auto invalid = validate_request_shape(request))
             return std::move(*invalid);
-        if (request.method.rfind("Session.", 0) == 0)
-            return handle_session_method(client_id, request);
-
-        const auto* method = find_inspector_method(request.method);
-        const bool requires_controller =
-            method &&
-            capability_requires_controller_lease(method->capability);
-        if (auto denied =
-                policy_.authorize(request, state->lease.owns(client_id))) {
-            return std::move(*denied);
-        }
-        if (requires_controller) {
-            if (!state->lease.begin_operation(client_id)) {
-                return make_error(request.id,
-                                  "A controller lease is required",
-                                  "controller_lease_required");
+        audit_log = state->audit_log;
+        scope_end_handler = state->controller_scope_end_handler;
+        if (request.method.rfind("Session.", 0) == 0) {
+            immediate_response = handle_session_method(client_id, request);
+            ended_scopes = state->lease.take_ended_scopes();
+        } else {
+            const auto* method = find_inspector_method(request.method);
+            const bool requires_controller =
+                method && capability_requires_controller_lease(method->capability);
+            if (method)
+                capability = method->capability;
+            const bool owns_controller = state->lease.owns(client_id);
+            ended_scopes = state->lease.take_ended_scopes();
+            if (auto denied = policy_.authorize(request, owns_controller)) {
+                immediate_response = std::move(*denied);
+            } else if (requires_controller && !state->lease.begin_operation(client_id)) {
+                immediate_response = make_error(request.id, "A controller lease is required",
+                                                "controller_lease_required");
+            } else {
+                controller_operation = requires_controller;
+                main_thread_rpc = state->main_thread_rpc;
             }
-            controller_operation = true;
         }
-        main_thread_rpc = state->main_thread_rpc;
     }
+    state->expiry_cv.notify_all();
+    deliver_scope_ends(info_, std::move(ended_scopes), scope_end_handler);
+    if (immediate_response) {
+        if (capability_requires_controller_lease(capability)) {
+            append_audit(audit_log, info_, client_id, request, capability,
+                         InspectorAuditOutcome::Denied, immediate_response->error_code);
+        }
+        return std::move(*immediate_response);
+    }
+
     const auto owned_client_id = std::string(client_id);
-    const auto finish_controller_operation =
-        [state, owned_client_id, controller_operation] {
+    const auto owned_info = info_;
+    const auto finish_controller_operation = [state, owned_client_id, owned_info,
+                                              controller_operation] {
         if (!controller_operation)
             return;
-        std::lock_guard lock(state->mutex);
-        state->lease.end_operation(owned_client_id);
+        ControllerScopeEndHandler handler;
+        std::vector<InspectorControllerLease::EndedScope> ended;
+        {
+            std::lock_guard lock(state->mutex);
+            state->lease.end_operation(owned_client_id);
+            ended = state->lease.take_ended_scopes();
+            handler = state->controller_scope_end_handler;
+        }
+        deliver_scope_ends(owned_info, std::move(ended), handler);
     };
     if (!state->handler) {
         finish_controller_operation();
-        return make_error(request.id,
-                          "No inspector dispatch handler is attached",
-                          "dispatch_unavailable");
+        auto response = make_error(request.id, "No inspector dispatch handler is attached",
+                                   "dispatch_unavailable");
+        if (controller_operation) {
+            append_audit(audit_log, info_, client_id, request, capability,
+                         InspectorAuditOutcome::Rejected, response.error_code);
+        }
+        return response;
     }
     const auto owned_request = request;
-    auto operation = [state, owned_request] {
+    auto operation = [state, owned_request, owned_client_id, owned_info, audit_log, capability,
+                      controller_operation] {
+        InspectorMessage response;
         if (!state->begin_dispatch()) {
-            return make_error(
-                owned_request.id,
-                "Inspector dispatch was cancelled during teardown",
-                "dispatch_cancelled");
+            response =
+                make_error(owned_request.id, "Inspector dispatch was cancelled during teardown",
+                           "dispatch_cancelled");
+        } else {
+            struct DispatchGuard {
+                std::shared_ptr<State> state;
+                ~DispatchGuard() {
+                    state->end_dispatch();
+                }
+            } guard{state};
+            try {
+                response = state->handler(owned_request);
+            } catch (const std::exception& error) {
+                response = make_error(owned_request.id,
+                                      std::string("Inspector dispatch failed: ") + error.what(),
+                                      "dispatch_failed");
+            } catch (...) {
+                response =
+                    make_error(owned_request.id, "Inspector dispatch failed", "dispatch_failed");
+            }
         }
-        struct DispatchGuard {
-            std::shared_ptr<State> state;
-            ~DispatchGuard() { state->end_dispatch(); }
-        } guard{state};
-        return state->handler(owned_request);
+        if (controller_operation) {
+            append_audit(audit_log, owned_info, owned_client_id, owned_request, capability,
+                         response.is_error ? InspectorAuditOutcome::Rejected
+                                           : InspectorAuditOutcome::Applied,
+                         response.error_code);
+        }
+        return response;
     };
 
     if (!main_thread_rpc) {
@@ -363,21 +569,17 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
             try {
                 return operation();
             } catch (const std::exception& error) {
-                return make_error(
-                    request.id,
-                    std::string("Inspector dispatch failed: ") + error.what(),
-                    "dispatch_failed");
-            } catch (...) {
                 return make_error(request.id,
-                                  "Inspector dispatch failed",
+                                  std::string("Inspector dispatch failed: ") + error.what(),
                                   "dispatch_failed");
+            } catch (...) {
+                return make_error(request.id, "Inspector dispatch failed", "dispatch_failed");
             }
         }();
         finish_controller_operation();
         return response;
     }
-    return main_thread_rpc->call(
-        request.id, std::move(operation), finish_controller_operation);
+    return main_thread_rpc->call(request.id, std::move(operation), finish_controller_operation);
 }
 
 void InspectorSession::suspend_dispatches() {
@@ -387,6 +589,16 @@ void InspectorSession::suspend_dispatches() {
         state->dispatch_accepting = false;
     }
     state->dispatch_cv.notify_all();
+
+    ControllerScopeEndHandler handler;
+    std::vector<InspectorControllerLease::EndedScope> ended;
+    {
+        std::lock_guard lock(state->mutex);
+        state->lease.terminate();
+        ended = state->lease.take_ended_scopes();
+        handler = state->controller_scope_end_handler;
+    }
+    deliver_scope_ends(info_, std::move(ended), handler);
 }
 
 void InspectorSession::resume_dispatches() {
@@ -398,15 +610,40 @@ void InspectorSession::resume_dispatches() {
     state->dispatch_cv.notify_all();
 }
 
+bool InspectorSession::dispatches_accepting() const {
+    const auto state = state_;
+    std::lock_guard lock(state->dispatch_mutex);
+    return state->dispatch_accepting;
+}
+
 void InspectorSession::set_main_thread_rpc(
     std::shared_ptr<InspectorMainThreadRpc> rpc) {
     std::lock_guard lock(state_->mutex);
     state_->main_thread_rpc = std::move(rpc);
 }
 
-void InspectorSession::disconnect(std::string_view client_id) {
+void InspectorSession::set_controller_scope_end_handler(
+    ControllerScopeEndHandler handler) {
     std::lock_guard lock(state_->mutex);
-    state_->lease.disconnect(client_id);
+    state_->controller_scope_end_handler = std::move(handler);
+}
+
+void InspectorSession::set_audit_log(
+    std::shared_ptr<InspectorAuditLog> audit_log) {
+    std::lock_guard lock(state_->mutex);
+    state_->audit_log = std::move(audit_log);
+}
+
+void InspectorSession::disconnect(std::string_view client_id) {
+    ControllerScopeEndHandler handler;
+    std::vector<InspectorControllerLease::EndedScope> ended;
+    {
+        std::lock_guard lock(state_->mutex);
+        state_->lease.disconnect(client_id);
+        ended = state_->lease.take_ended_scopes();
+        handler = state_->controller_scope_end_handler;
+    }
+    deliver_scope_ends(info_, std::move(ended), handler);
 }
 
 InspectorMessage InspectorSession::handle_session_method(

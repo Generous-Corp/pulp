@@ -167,7 +167,7 @@ def member_payload(name: str, platform: str = "linux-x64") -> bytes:
                     "source_git_dirty": False,
                     "platform": platform,
                     "build_type": "Release",
-                    "features": {"audio_probes": False, "inspector": False},
+                    "features": {"audio_probes": False, "inspector": True},
                 }
             )
             + "\n"
@@ -534,7 +534,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             def unsafe_payload(name: str, platform: str = "linux-x64") -> bytes:
                 if name == "pulp-sdk/sdk-provenance.json":
                     marker = json.loads(original_payload(name, platform))
-                    marker["features"]["inspector"] = True
+                    marker["features"]["inspector"] = False
                     return json.dumps(marker).encode()
                 return original_payload(name, platform)
 
@@ -618,9 +618,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             path = Path(td) / "historical-matrix.json"
             document = json.loads(rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8"))
             del document["sdk_provenance_floor"]
+            del document["inspector_sdk_floor"]
             path.write_text(json.dumps(document), encoding="utf-8")
             historical = rac.ProductMatrix.load(path)
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
+            self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertNotIn(
                 "pulp-sdk/sdk-provenance.json",
                 rac.required_sdk_members("linux-x64", historical, "0.763.0"),

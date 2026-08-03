@@ -17,6 +17,9 @@
 //!   arg + `PULP_FRAMES=<n>` when not the default of 1.
 //! - `--watch` — re-launch the binary on source changes. Consumed by
 //!   the CLI; NOT forwarded.
+//! - `--inspect[=<profile>]` / `--inspect-capability <id>` — activate the
+//!   Development Inspector in a GPU-enabled desktop build. Forwarded through
+//!   `PULP_INSPECT_PROFILE` / `PULP_INSPECT_CAPABILITIES`.
 //! - `--audio-inspector` — forwarded as `--audio-inspector` and
 //!   `PULP_AUDIO_INSPECTOR=1`.
 //! - `--audio-probe-json <path>` — implies `--headless`, forwarded as
@@ -33,6 +36,8 @@
 //! Anything else that begins with `-` and isn't recognized becomes
 //! `user_pass_through` (legacy permissive behavior matching the C++
 //! parser).
+
+use super::run_inspector;
 
 /// Parsed result of a `pulp-rs run` invocation. Mirrors C++
 /// `pulp_cli::ParseRunResult` field-for-field.
@@ -55,6 +60,10 @@ pub struct RunOptions {
     pub frames: i32,
     /// `--watch` — re-launch on source change.
     pub watch: bool,
+    /// Development Inspector launcher profile; empty means off.
+    pub inspector_profile: String,
+    /// Capability ids selected by `--inspect=custom`.
+    pub inspector_capabilities: Vec<String>,
     /// `--audio-inspector` — open the live Audio Inspector window.
     pub audio_inspector: bool,
     /// `--audio-probe-json <path>` — live probe one-shot JSON.
@@ -205,6 +214,17 @@ pub fn parse_run_options(args: &[String]) -> RunOptions {
             r.watch = true;
             i += 1;
             continue;
+        }
+        match run_inspector::parse_arg(args, i, &mut r) {
+            Ok(Some(next)) => {
+                i = next;
+                continue;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                r.error = error;
+                return r;
+            }
         }
         if a == "--audio-inspector" {
             r.audio_inspector = true;
@@ -403,6 +423,9 @@ pub fn parse_run_options(args: &[String]) -> RunOptions {
     if audio_capture_frames_option_seen && r.audio_capture_wav_path.is_empty() {
         r.error = "--audio-capture-frames requires --audio-capture-wav".to_owned();
     }
+    if let Err(error) = run_inspector::validate(&r) {
+        r.error = error;
+    }
 
     r
 }
@@ -473,6 +496,7 @@ pub fn assemble_launch_env(opts: &RunOptions) -> Vec<(String, String)> {
     if opts.frames != 1 {
         out.push(("PULP_FRAMES".to_owned(), opts.frames.to_string()));
     }
+    run_inspector::append_launch_env(opts, &mut out);
     if opts.audio_inspector {
         out.push(("PULP_AUDIO_INSPECTOR".to_owned(), "1".to_owned()));
     }
@@ -1020,4 +1044,5 @@ mod tests {
             ]
         );
     }
+
 }

@@ -2,7 +2,8 @@ add_library(pulp-inspect-protocol
     src/authentication.cpp
     src/capabilities.cpp
     src/protocol.cpp
-    src/session.cpp)
+    src/session.cpp
+    src/test_input.cpp)
 add_library(pulp::inspect-protocol ALIAS pulp-inspect-protocol)
 
 target_include_directories(pulp-inspect-protocol

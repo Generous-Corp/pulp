@@ -1,10 +1,10 @@
 # Scripted-UI runtime inspector
 
 Pulp contains reusable scripted-UI inspector components for QuickJS,
-JavaScriptCore, and V8. A custom host can attach those components to the
-experimental protocol. Normal standalone and plugin-format launches do not
-construct an inspector server, so this is not currently a shipped live-plugin
-workflow. The surface is a **runtime inspector / debug console**, not a step
+JavaScriptCore, and V8. A standalone launched with an explicit Development
+Inspector profile attaches those components to its authenticated local session.
+Inspector-off standalones and every normal plugin-format launch construct no
+endpoint. The surface is a **runtime inspector / debug console**, not a step
 debugger.
 
 ## Why not a step debugger (yet)
@@ -22,9 +22,10 @@ backend, or the Chrome DevTools inspector that JSC/V8 expose), gated behind the
 ## Protocol methods
 
 The component methods use the inspector JSON message shape (`Domain.method` +
-`params`). They are reachable only after a custom host explicitly constructs
-and wires the server; `pulp inspect` is the experimental client for such a
-fixture.
+`params`). They are reachable only after `pulp run --inspect` (or another
+explicit profile) in a GPU-enabled desktop build constructs and wires the
+standalone server; `pulp inspect`
+is the experimental low-level client.
 
 ### `Runtime.getCapabilities`
 
@@ -126,6 +127,9 @@ Waiting on the cleanup worker itself returns `false` instead of deadlocking.
 debug console survives a reload. Without this wiring, `Runtime.evaluate` /
 `Runtime.interrupt` report the engine as unavailable and `getCapabilities`
 returns `attached:false`.
+This guarantee covers reloads within one `ScriptedUiSession`. A processor that
+replaces its entire editor/session currently causes standalone inspector startup
+to fail closed until all borrowed sources can be reattached atomically.
 
 ## Security
 

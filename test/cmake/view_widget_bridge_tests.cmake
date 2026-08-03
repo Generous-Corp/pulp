@@ -64,6 +64,19 @@ target_link_libraries(pulp-test-inspector-session PRIVATE
     pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-session)
 
+add_executable(pulp-test-inspector-test-input
+    test_inspector_test_input.cpp)
+target_link_libraries(pulp-test-inspector-test-input PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-test-input)
+
+add_executable(pulp-test-inspector-audit
+    test_inspector_audit.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)
+target_link_libraries(pulp-test-inspector-audit PRIVATE
+    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-audit)
+
 add_executable(pulp-test-inspector-server
     test_inspector_server.cpp
     unsafe_legacy_inspector_server.cpp)
@@ -146,6 +159,20 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-domains
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-hook-lifecycle
+        test_inspector_hook_lifecycle.cpp)
+    target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-hook-lifecycle
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-context-capture
+        test_inspector_context_capture.cpp)
+    target_link_libraries(pulp-test-inspector-context-capture PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-context-capture
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # Trace.* bridge to the process-global pulp::runtime::Tracing controller.
     # Config-agnostic: verifies the OFF (shipping) build reports tracing is not
     # compiled in, and the ON build round-trips a real .pftrace.
@@ -212,7 +239,7 @@ target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::format)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
-set(_pulp_inspector_symbol_tool "")
+unset(_pulp_inspector_symbol_tool)
 set(_pulp_inspector_symbol_mode "NM")
 if(MSVC)
     get_filename_component(_pulp_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
