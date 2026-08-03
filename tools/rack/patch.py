@@ -1344,7 +1344,30 @@ def restart_rack() -> tuple:
                              capture_output=True).returncode == 0
     if not running:
         return True, "Rack was not running; it will pick the module up next launch"
-    subprocess.run(["osascript", "-e", 'tell application "VCV Rack 2 Free" to quit'],
+    # WHICH Rack, rather than assuming the free one.
+    #
+    # This quit and relaunched "VCV Rack 2 Free" by name. Somebody with Rack
+    # Pro -- and Pro is what a subscriber runs -- got a quit aimed at an app
+    # they may not have, and then a launch of the wrong one, so the module they
+    # just built never appeared in the Rack they were actually using. Both can
+    # be installed side by side, which is exactly the case that hides it.
+    #
+    # The running one wins; otherwise prefer Pro, since somebody who installed
+    # it is using it.
+    name = None
+    for candidate in ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2"):
+        if subprocess.run(["pgrep", "-f", f"{candidate}.app"],
+                          capture_output=True).returncode == 0:
+            name = candidate
+            break
+    if name is None:
+        for candidate in ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2"):
+            if os.path.isdir(f"/Applications/{candidate}.app"):
+                name = candidate
+                break
+    if name is None:
+        return False, "no VCV Rack application found to restart"
+    subprocess.run(["osascript", "-e", f'tell application "{name}" to quit'],
                    capture_output=True)
     for _ in range(30):
         if subprocess.run(["pgrep", "-f", "VCV Rack"],
@@ -1354,8 +1377,8 @@ def restart_rack() -> tuple:
     else:
         return False, ("Rack would not quit — it may be showing a dialog. "
                        "Restart it yourself to pick up the new module.")
-    subprocess.run(["open", "-a", "VCV Rack 2 Free"], capture_output=True)
-    return True, "restarted Rack"
+    subprocess.run(["open", "-a", name], capture_output=True)
+    return True, f"restarted {name}"
 
 
 def settings() -> dict:
