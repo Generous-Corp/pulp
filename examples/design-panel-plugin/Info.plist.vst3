@@ -5,13 +5,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>PulpGain</string>
+    <string>PulpDesignPanel</string>
     <key>CFBundleIdentifier</key>
     <string>com.pulp.gain.vst3</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>PulpGain</string>
+    <string>PulpDesignPanel</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>

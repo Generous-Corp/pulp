@@ -1,5 +1,5 @@
 {
-  "Name": "PulpGain",
+  "Name": "PulpDesignPanel",
   "Version": "1.0.0",
   "Factory Info": {
     "Vendor": "Pulp",
@@ -16,7 +16,7 @@
     {
       "CID": "50554C50474149000000000100000001",
       "Category": "Audio Module Class",
-      "Name": "PulpGain",
+      "Name": "PulpDesignPanel",
       "Vendor": "Pulp",
       "Version": "1.0.0",
       "SDKVersion": "VST 3.8.0",

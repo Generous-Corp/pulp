@@ -5,13 +5,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>PulpGain</string>
+    <string>PulpDesignPanel</string>
     <key>CFBundleIdentifier</key>
     <string>com.pulp.gain.au</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>PulpGain</string>
+    <string>PulpDesignPanel</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
@@ -22,19 +22,19 @@
     <array>
         <dict>
             <key>name</key>
-            <string>Pulp: PulpGain</string>
+            <string>Pulp: PulpDesignPanel</string>
             <key>description</key>
-            <string>PulpGain Audio Effect</string>
+            <string>PulpDesignPanel Audio Effect</string>
             <key>manufacturer</key>
             <string>Pulp</string>
             <key>type</key>
             <string>aufx</string>
             <key>subtype</key>
-            <string>PGan</string>
+            <string>PDpl</string>
             <key>version</key>
             <integer>65536</integer>
             <key>factoryFunction</key>
-            <string>PulpGainAUFactory</string>
+            <string>PulpDesignPanelAUFactory</string>
             <key>sandboxSafe</key>
             <true/>
         </dict>

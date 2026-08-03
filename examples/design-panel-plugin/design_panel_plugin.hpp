@@ -62,6 +62,22 @@ public:
         });
     }
 
+    /// The editor's size, taken from the design itself.
+    ///
+    /// Most imported-design plugins get this from the `PULP_PLUGIN_DESIGN_W/H`
+    /// CMake args, but a plugin that CARRIES its IR already knows: the root
+    /// states its own width and height, so reading them keeps the window and
+    /// the document from disagreeing. Without this the base class falls back to
+    /// `editor_size()` — 400x300 — and the panel renders correctly into a
+    /// window far too small for it, which looks like a layout bug and is not.
+    format::ViewSize view_size() const override {
+        const auto& root = embedded_design().root.style;
+        const auto w = static_cast<std::uint32_t>(root.width.value_or(0.0f));
+        const auto h = static_cast<std::uint32_t>(root.height.value_or(0.0f));
+        if (w == 0 || h == 0) return format::Processor::view_size();
+        return format::view_size_from_design(w, h, w / 2, h / 2, w * 2, h * 2);
+    }
+
     /// The panel, materialized from the IR the binary carries.
     ///
     /// Returning nullptr when the document is empty is deliberate: an editor
@@ -69,11 +85,21 @@ public:
     /// design look like a design choice, which is the failure this whole
     /// example is meant to make visible.
     std::unique_ptr<view::View> create_view() override {
-        view::DesignIR ir =
-            view::parse_design_ir_json(std::string(kEmbeddedDesignIr));
+        const view::DesignIR& ir = embedded_design();
         if (ir.root.children.empty()) return nullptr;
         return view::build_native_view_tree(ir, ir.asset_manifest);
     }
+
+private:
+    /// Parsed once. `view_size()` and `create_view()` must agree about the
+    /// document, and re-parsing 100+ KB of JSON per editor open is waste.
+    static const view::DesignIR& embedded_design() {
+        static const view::DesignIR ir =
+            view::parse_design_ir_json(std::string(kEmbeddedDesignIr));
+        return ir;
+    }
+
+public:
 
     void prepare(const format::PrepareContext&) override {}
 
