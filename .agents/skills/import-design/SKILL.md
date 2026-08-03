@@ -5011,6 +5011,34 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **A per-node clip RECTANGLE cannot carry a rounded clipper, and the node that
+  renders wrong is not the node that owns the radius.** Lowering flattens the
+  tree and gives each node its own resolved clip, deliberately dropping
+  `overflow` — correct, because CSS clips along the containing-block chain while
+  a view tree clips by parentage. But CSS confines overflow to the clipper's
+  **rounded padding box**, so a card with `border-radius` + `overflow: hidden`
+  cuts its children to that curve. With a bare rectangle the card's own border
+  curves while the child inside it paints a square corner, and the whole card
+  reads as unrounded.
+
+  This resists the obvious search. The radius is present and correct at every
+  layer you would check — captured by Chrome, carried in the IR, consumed by the
+  materializer, handled by `paint_background_and_border` — because the element
+  that *paints the wrong pixels* (the child) is not the element that *owns the
+  radius* (the card). **When ink is wrong, identify the node that painted those
+  pixels before auditing the node whose property looks missing.** A fast way to
+  settle it: rewrite every radius in the IR to something huge and re-render. A
+  node that does not move is not reading the field you are inspecting.
+
+  `IRStyle::ClipRect` carries four radii; a corner keeps its curve only while
+  that corner is still the rounded clipper's own, since a corner cut away by a
+  second, tighter clipper is square. Note also that a node sitting fully inside
+  the clip *rectangle* can still be cut by the *curve*, so any "this clip is a
+  no-op, skip it" shortcut has to test corner intrusion as well as containment.
+
+  The area metric is blind to this: forge moved 0.0522 → 0.0520 for a change
+  that visibly corrected every card corner. Judge it on a magnified crop.
+
 - **A slow `pulp-import-design` run is usually the scratch sweep, not the
   import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
   removes stale scratch siblings before every run by walking the temp root, so
@@ -5443,3 +5471,161 @@ Two rules when working on it:
   Node.js installations it checked (with versions) or, when there were none, the
   locations it searched. Listing the *browsers* it probed — the pre-fix
   behaviour — tells the user nothing about a missing Node.js.
+
+## A modern colour syntax that fails to parse paints WHITE, not nothing
+
+`parse_css_color` used to fall through to opaque white on `oklab()` / `oklch()`.
+That is worse than it sounds, because **Chromium's `getComputedStyle` serializes
+*every* modern colour syntax into those two** — `color-mix()`, relative colour,
+wide-gamut literals all arrive as `oklab(...)`. A dark faceplate therefore
+rendered as a white panel, and the first native render of a real capture came out
+white with stock widget art on top.
+
+Three separate places had to agree, and only one of them was visible:
+
+- `parse_css_color` — returned white instead of failing.
+- `linear-gradient(` — knew only the four `to <side>` keywords, so an angle was
+  handed to the colour parser and became that same white **first stop**, *and*
+  the direction silently reverted to `to bottom`. Note `to bottom right` matched
+  the `to bottom` prefix test, so even keyword handling was wrong.
+- The materializer's colour allowlist — knew only `rgb`/`hsl`, so `oklab()` text
+  and border colours were **never applied at all**. A silent loss, not a wrong
+  colour: the view simply kept its default.
+
+**How to test a colour path here.** Assert against **pixels read off Chrome's own
+render of that exact string**, never against hand-computed expectations — a
+fixture you derived from the same matrices as the code agrees with it by
+construction. On an out-of-gamut `oklch` the hand-written expectation was simply
+wrong and Chrome settled it.
+
+**Gradient geometry cannot be resolved when the CSS is parsed.** The importer
+runs its whole style pass *before* Yoga sizes anything, so
+`apply_css_background_gradient` sees a degenerate 1x1 box. Every box-dependent
+number therefore has to travel as CSS *intent* on `View::BackgroundGradient` and
+be resolved in `View::paint_background_and_border` against real `bounds_`:
+
+- a linear `<angle>`'s endpoints (the line's length is the box's projection onto
+  it, so the aspect ratio is in the answer);
+- a `to <corner>` keyword's angle, which is itself a function of the aspect;
+- a radial's radii, which are percentages of width and height *independently*.
+
+`View::resolve_radial` is the single place that turns a radial's CSS sizing into
+pixels, shared by the painter, the parser's calc()-stop resolution, and the
+tests, so the three cannot drift.
+
+**Three things about radial gradients that are easy to get wrong:**
+
+- **The default shape is an ELLIPSE, not a circle**, and a two-value size
+  (`90% 70%`) can only be an ellipse. Skia has no elliptical gradient — put the
+  y-squash in a **local matrix on the shader** (`set_fill_gradient_radial_-
+  elliptical`), never on the canvas: a background gradient is routinely filled
+  through a rounded-rect or per-corner path, and a canvas scale would stretch
+  those corners with it.
+- **The corner keywords are not the corner distance.** For an ellipse the spec
+  takes the matching `-side` aspect and scales it until it passes through the
+  corner, which works out to exactly `sqrt(2)` per axis — noticeably larger.
+- **`to bottom right` is `atan2(HEIGHT, width)`, not `atan2(width, height)`.**
+  The gradient line is perpendicular to the *other* diagonal `(w, -h)`, whose
+  perpendicular is `(h, w)`. The transposed form is a plausible-looking
+  expression that is only correct on a square box; on 160x100 it misses Chrome's
+  boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
+
+**A geometry fixture MUST be non-square and off-centre.** The pre-existing test
+for radial sizing asserted `closest-side → 0.5` and `farthest-corner → 0.7071`
+on a **200x200 box with the gradient at 50% 50%** — and on a square, centred box
+those wrong constants give exactly the right answer. The test could not have
+failed for the defect it was named after. The same trap makes a 45° angle its
+own reflection and an ellipse a circle. Use a box like 160x100 with the centre
+at something like `20% 20%`, and the wrong model and the correct one stop
+agreeing. This generalises past gradients: **any test whose subject is
+arithmetic over a box needs a fixture where the plausible-but-wrong formula
+gives a different answer**, or it is only asserting that two expressions
+coincide on the one input you chose.
+
+**Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
+premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
+fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
+the colour toward **black** as the alpha falls instead of just fading. Opaque
+gradients are bit-identical either way, which is why every existing gradient test
+passed over it. It only shows on a stop with alpha < 1, and that is exactly the
+form real panels use for a soft screen-sized wash. `skia_gradient_compat.hpp`
+now routes all four makers through `css_interpolation()`.
+
+**Symptom to recognise:** a wash that is present, correctly positioned, and
+*too weak and too grey* — the tint reads roughly a third of Chrome's over most
+of its area while matching near the hot centre. Compute the expected delta both
+ways (`α·(C−B)` vs `α·(lerp(C,black,f)−B)`) at one off-centre pixel; the two
+predictions differ by ~3x and pick the answer immediately.
+
+## Scoring a native panel — the instrument lies in two specific ways
+
+`tools/import-validation/score_native_panel.py` renders the emitted artifact and
+attributes failing pixels to nodes. Two traps are baked into the *metric*, not
+the code, and both were found by measuring rather than reasoning:
+
+- **A blank render scores well against a dark design.** SPECTR's render was empty
+  (max channel 10) and scored **12.45% failing**, because black "matches" a
+  mostly-black reference — while rendering it *correctly* raised the number to
+  ~11% with text failure going 49%→69%. **Area-weighted failing fraction is not a
+  fidelity measure without a companion coverage statistic.**
+- **Per-node scores are not usable yet.** worst-node reads 1.0000 and ~0% of
+  ink-bearing nodes pass on every real design. Quote the area-weighted number and
+  say the per-node gate is not live.
+
+**Its feature classifier lied about `background-blend-mode`, and the shape of
+that lie generalises.** `background-blend-mode` carries **one value per
+background layer**, so a node with two background layers and no blending at all
+computes to the string `"normal, normal"` — which is not `"normal"`. Comparing
+the whole computed value against the keyword classified every multi-layer
+background as a blend. That mislabelled *the single largest node on the panel* on
+three of four designs, and it read as "59-70% of failing area is
+`background-blend-mode`" when the corpus contains **zero** non-normal
+`background-blend-mode` anywhere; the node was two ordinary radial gradients.
+**Any CSS property that takes a comma-separated list per background layer or per
+transition needs its value split before a keyword comparison** — `background-*`,
+`transition-*`, `animation-*`, `mask-*` are all like this. A grep-shaped check
+over a computed style is not a check.
+
+**Always report a coverage statistic beside the failing fraction.** Take the
+reference's modal colour, call pixels beyond a threshold from it "ink", and
+report both `covered = |render ink ∩ ref ink| / |ref ink|` and
+`inkRatio = |render ink| / |ref ink|`. **Both, not one:** a solid-black render
+against SPECTR scores `covered = 1.00` (black is far from the modal colour
+everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
+blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
+
+**Two ways a background-build waiter lies, and both look like a result.**
+Measurement work runs long builds, so agents wrap them in wait loops. Two
+failure modes have each burned a session here:
+
+- **`pgrep -f "cmake --build ..."` matches ANOTHER agent's build in another
+  worktree.** Several worktrees share this machine and every one of them runs a
+  byte-identical command line, so `until ! pgrep -f …` either blocks on someone
+  else's build or — if your pattern does not match your own invocation — exits
+  instantly and reports "finished" before yours started. Match on something
+  unique to your run (a marker file the command writes on exit, or the build
+  log's own last line), never on the shared command line. A wait loop can also
+  match ITSELF: the shell running `pgrep -f "ctest …"` has that string in its
+  own argv, so the loop never ends.
+- **A pipeline ending in `grep -c` reports failure on a zero count.** `grep`
+  exits 1 when it finds nothing, so `… ; grep -cE " error:" build.log` makes a
+  perfectly clean build's task exit 1 and read as "build failed". Put the grep
+  anywhere but last, or `|| true` it.
+
+In both cases the honest move is the same: **read the build log's own tail
+rather than trusting the wrapper's verdict.**
+
+**Prove the bitmap is absent by substitution, not by scanning.** A static scan
+shows no node *references* the capture; it cannot show no pixel *comes from* it.
+Replace `browser.png` with solid magenta at identical dimensions, re-lower,
+re-render, and require the composite to be **byte-identical**. Note the envelope
+still validates the PNG's hash in native mode, so the file must exist even though
+nothing draws it.
+
+**τ must come from a control that contains native rasterisation.** The calibration
+control is an identity blit and measures exactly zero noise; carrying that `0.0`
+into native scoring guarantees failure. Measured properly: flat axis-aligned
+fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome and
+Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
+cannot be given a τ yet because its gradients are still measuring the defect
+above rather than noise.

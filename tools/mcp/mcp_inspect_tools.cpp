@@ -88,6 +88,53 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
         const auto insertion = description + tool_marker.size();
         tools_json.insert(insertion, "Inspector method " + std::string(tool.method) +
                                          " (capability " + std::string(capability) + "). ");
+
+        const bool discovers_and_pins_publication =
+            tool.name == "pulp_motion_start_trace" || tool.name == "pulp_trace_start";
+        if (!discovers_and_pins_publication) {
+            constexpr std::string_view input_marker =
+                "\"inputSchema\":{\"type\":\"object\",";
+            constexpr std::string_view required_selectors =
+                "\"required\":[\"session_id\",\"instance_id\",\"publication_id\"],";
+            const auto tool_end = tools_json.find("},{\"name\":", insertion);
+            const auto schema = tools_json.find(input_marker, insertion);
+            if (schema == std::string::npos ||
+                (tool_end != std::string::npos && schema >= tool_end))
+                return false;
+            const auto properties = tools_json.find("\"properties\":", schema);
+            if (properties == std::string::npos ||
+                (tool_end != std::string::npos && properties >= tool_end))
+                return false;
+            const auto existing_required = tools_json.find("\"required\":", schema);
+            if (existing_required == std::string::npos || existing_required > properties) {
+                tools_json.insert(schema + input_marker.size(), required_selectors);
+            } else {
+                const auto required_end = tools_json.find(']', existing_required);
+                if (required_end == std::string::npos || required_end > properties)
+                    return false;
+                const std::string_view required_fields(
+                    tools_json.data() + existing_required,
+                    required_end - existing_required);
+                if (required_fields.find("\"session_id\"") == std::string_view::npos) {
+                    tools_json.insert(
+                        required_end,
+                        ",\"session_id\",\"instance_id\",\"publication_id\"");
+                }
+            }
+
+            constexpr std::string_view optional_exact = "Optional exact";
+            constexpr std::string_view required_exact = "Exact";
+            auto updated_tool_end = tools_json.find("},{\"name\":", insertion);
+            if (updated_tool_end == std::string::npos)
+                updated_tool_end = tools_json.size();
+            auto optional = tools_json.find(optional_exact, insertion);
+            while (optional != std::string::npos && optional < updated_tool_end) {
+                tools_json.replace(optional, optional_exact.size(), required_exact);
+                updated_tool_end -= optional_exact.size() - required_exact.size();
+                optional = tools_json.find(optional_exact,
+                                           optional + required_exact.size());
+            }
+        }
     }
 
     constexpr std::string_view name_marker = "\"name\":\"";

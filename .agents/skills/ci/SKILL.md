@@ -20,7 +20,7 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.80.2`,
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.2`,
 which provides it, so the pinned binary is sufficient.
 
 Use these commands as the normal agent loop:
@@ -574,6 +574,14 @@ fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
 checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
 it was fired from, and the inventory steps would then validate `main` instead of
 the PR.
+
+The trusted gate also groups `pull_request_target` and manual dispatch runs by
+PR number with `cancel-in-progress: false`. Editing a PR can fire repeatedly
+without changing its head; GitHub therefore keeps the active required-check run
+and only the newest pending run instead of accumulating one hosted job per edit.
+Merge-group runs fall back to their queue ref, so separate queue entries never
+share the PR group. Closed-PR `edited` events are filtered at the job boundary
+and checked again by the resolver before checkout or commit-status mutation.
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
@@ -1674,13 +1682,18 @@ belt for any un-baked runner.
 
 `release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
 `resolve-macos-runner`) and `darwin-x64`, which **cross-compiles on an
-Apple-Silicon runner** via the `macos-15-xcompile` sentinel — routed by
-`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` (default `["macos-15"]`), deliberately
-NOT through `resolve-macos-runner`. It builds with
+Apple-Silicon runner** via the `macos-15-xcompile` sentinel. Its selector
+priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the
+dedicated `pulp-build-vm-release` Tart pool), the legacy
+`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, then hosted `macos-15`. It builds with
 `-DCMAKE_OSX_ARCHITECTURES=x86_64` plus
 `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, and smoke-tests the thin binary
 under Rosetta. It is a **REQUIRED** leg, the same reliability class as
 `darwin-arm64`, so Intel ships in every release.
+
+Do not route this required artifact build to the native Intel Mac Mini. Native
+Intel remains a separate advisory/nightly portability canary; it must not become
+release capacity or gate publication.
 
 The native `macos-15-intel` image is **not** used: it CPU-pegs, queues for hours,
 and never reliably shipped an artifact. Do not "restore" a native Intel leg, and
@@ -2164,6 +2177,19 @@ Shipyard ≥0.80.2 also makes this classifiable without reading prose: the `--js
 envelope carries `status` and `merge_error`, and a malformed-request failure exits
 `8` rather than masquerading as success. See the Shipyard `ci` skill's
 status/exit-code table.
+
+Shipyard v0.81.2 is the fleet floor for queue throughput and capacity health:
+fleet status observes complete registered and expected-host inventories, Tart
+disk/ccache admission problems, accidental hosted Linux routing, and stale
+releases whose bounded commit scan lacks an oldest timestamp. The earlier
+scheduler guarantee still refills
+newly free worker slots as each target finishes instead of waiting for the whole
+batch, and the release-version surface covers root-level `src/*.rs` so scheduler
+fixes cannot merge without producing the CLI release the fleet pin expects. It
+also keeps long Git-over-SSH pushes alive while Pulp's pre-push proof runs.
+For post-tag reconciliation, v0.81.1 corrected shell tag extraction and v0.81.2
+fully qualifies branch push refspecs so the detached tag checkout can publish
+its queue-bound PR branch.
 
 ### Stale-SHA merge race — DO NOT push onto a PR that's being shipped
 
@@ -5617,6 +5643,15 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 
 **Fluidity invariant:** every variable unset == today's GitHub-hosted routing. If the
 local pool is down, `github <leg>` is a full revert in one command.
+
+The lightweight resolver jobs for `release-cli.yml` and
+`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
+without moving artifact builds or publication there. Their selector priority is
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
+to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
+pinned to the repository default branch; never expose the persistent pool to
+`pull_request` or `merge_group` code through this fallback.
 
 Facts worth keeping (measured):
 

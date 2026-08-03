@@ -178,7 +178,9 @@ being rejected as unexpected. Executes three checks:
    less-indented content line).
 3. **`actionlint`** via the `raven-actions/actionlint` reusable action.
    Catches GitHub Actions-specific issues: unknown `uses:` refs,
-   deprecated action versions, shell escaping bugs, etc.
+   deprecated action versions, shell escaping bugs, etc. Custom self-hosted
+   runner labels are declared in `.github/actionlint.yaml`; changing that file
+   also triggers this workflow so the declaration cannot drift silently.
 
 Failure means the PR cannot merge until fixed. Running locally:
 

@@ -14,6 +14,7 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -352,4 +353,103 @@ TEST_CASE("a transparent background layer reveals the one beneath it",
         "linear-gradient(to right, transparent 0%, transparent 100%), "
         "linear-gradient(to right, #0000ff 0%, #ffff00 100%)",
         "linear-gradient(to right, #0000ff 0%, #ffff00 100%)");
+}
+
+// A CSS angle is not a colour. Reading `150deg` as the first stop returned the
+// parser's opaque-white fallback and left the direction at its `to bottom`
+// default, so every angled gradient in a captured design painted a white-to-
+// something ramp straight down — a wrong picture that looks deliberate.
+//
+// The equivalences are asserted against the keyword forms rather than against
+// stored endpoints: an endpoint pair can be arithmetically plausible and still
+// paint the wrong way round, and only the pixels settle that.
+TEST_CASE("an angled linear gradient means its keyword equivalent",
+          "[view][gradient][linear]") {
+    // 0deg points UP in CSS — toward the top — which is `to top`.
+    require_same_render("linear-gradient(0deg, #ff0000, #0000ff)",
+                        "linear-gradient(to top, #ff0000, #0000ff)");
+    require_same_render("linear-gradient(90deg, #ff0000, #0000ff)",
+                        "linear-gradient(to right, #ff0000, #0000ff)");
+    require_same_render("linear-gradient(180deg, #ff0000, #0000ff)",
+                        "linear-gradient(to bottom, #ff0000, #0000ff)");
+    require_same_render("linear-gradient(270deg, #ff0000, #0000ff)",
+                        "linear-gradient(to left, #ff0000, #0000ff)");
+    // Other units reach the same place.
+    require_same_render("linear-gradient(0.25turn, #ff0000, #0000ff)",
+                        "linear-gradient(to right, #ff0000, #0000ff)");
+}
+
+// The angle must actually be applied, not merely tolerated. A parser that
+// consumed `45deg` and then fell back to `to bottom` would pass every
+// equivalence above that happens to be vertical, so this one requires a
+// diagonal to differ from both axes it sits between.
+TEST_CASE("a diagonal linear gradient is neither of its axes",
+          "[view][gradient][linear]") {
+    bool applied = false;
+    const auto diagonal =
+        render_css("linear-gradient(45deg, #ff0000, #0000ff)", &applied);
+    REQUIRE(applied);
+    for (const char* axis : {"linear-gradient(to top, #ff0000, #0000ff)",
+                             "linear-gradient(to right, #ff0000, #0000ff)"}) {
+        const auto other = render_css(axis);
+        const auto cmp = compare_screenshots(diagonal, other);
+        INFO("vs " << axis << " similarity " << cmp.similarity);
+        CHECK(cmp.similarity < 0.99f);
+    }
+}
+
+// `to bottom right` used to match the `to bottom` prefix test and paint
+// straight down. On a square box its line is the diagonal, which is 135deg.
+TEST_CASE("a corner keyword paints toward its corner",
+          "[view][gradient][linear]") {
+    require_same_render("linear-gradient(to bottom right, #ff0000, #0000ff)",
+                        "linear-gradient(135deg, #ff0000, #0000ff)");
+    require_same_render("linear-gradient(to top left, #ff0000, #0000ff)",
+                        "linear-gradient(315deg, #ff0000, #0000ff)");
+}
+
+// Chromium serializes every modern colour syntax as oklab()/oklch(), so this is
+// the form a captured design actually arrives in. Unrecognised, it returned the
+// opaque-white fallback: a dark faceplate rendered white, and a gradient stop
+// that lands on white cannot be told apart from one the design asked for.
+//
+// The reference values are the pixels Chromium itself paints for these exact
+// colour strings, read back off a screenshot of solid swatches. That makes this
+// agreement with the browser rather than agreement with a second copy of these
+// matrices — including the out-of-gamut oklch, where the two could plausibly
+// have disagreed about gamut mapping and do not.
+TEST_CASE("oklab and oklch resolve to their sRGB colours",
+          "[view][gradient][color]") {
+    struct Case { const char* modern; const char* srgb; };
+    for (const auto& c : std::vector<Case>{
+             {"oklab(0.245896 -0.00351807 -0.00888171)", "rgb(29, 33, 37)"},
+             {"oklab(0.94828 -0.086092 0.0563978)", "rgb(192, 255, 198)"},
+             {"oklab(0.913804 -0.143517 0.0939829)", "rgb(142, 255, 157)"},
+             {"oklch(0.7 0.2 145)", "rgb(48, 189, 68)"},
+             {"oklch(0.55 0.12 250)", "rgb(50, 117, 180)"},
+             {"oklab(0 0 0)", "rgb(0, 0, 0)"}}) {
+        const auto got = parse_css_color(c.modern);
+        const auto want = parse_css_color(c.srgb);
+        INFO(c.modern << " -> " << got.r << "," << got.g << "," << got.b
+                      << "  want " << want.r << "," << want.g << "," << want.b);
+        // One 8-bit step of slack: the reference is a rounded serialization.
+        CHECK(std::abs(got.r - want.r) <= 1.5f / 255.0f);
+        CHECK(std::abs(got.g - want.g) <= 1.5f / 255.0f);
+        CHECK(std::abs(got.b - want.b) <= 1.5f / 255.0f);
+        CHECK(got.a == 1.0f);
+    }
+    // The white fallback is what made the defect invisible, so require these
+    // NOT to be white. Without this the case passes if every value above is
+    // parsed as the fallback and the reference happens to be near-white.
+    const auto dark = parse_css_color("oklab(0.245896 -0.00351807 -0.00888171)");
+    CHECK(dark.r < 0.5f);
+    CHECK(dark.g < 0.5f);
+    CHECK(dark.b < 0.5f);
+}
+
+TEST_CASE("an oklab alpha survives the conversion", "[view][gradient][color]") {
+    const auto c = parse_css_color("oklab(0 0 0 / 0.62)");
+    CHECK(std::abs(c.a - 0.62f) < 0.005f);
+    const auto pct = parse_css_color("oklch(50% 0.1 30 / 50%)");
+    CHECK(std::abs(pct.a - 0.5f) < 0.01f);
 }

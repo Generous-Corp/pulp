@@ -230,7 +230,8 @@ constexpr std::string_view kSnapshotStrings =
     R"J("matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)",)J"
     R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN",)J"
     R"J("visible","hidden","static","relative","absolute",)J"
-    R"J("0px","1px","circle(50%)","rgba(0, 0, 0, 0.5) 0px 0px 30px 0px")J";
+    R"J("0px","1px","circle(50%)","rgba(0, 0, 0, 0.5) 0px 0px 30px 0px",)J"
+    R"J("12px","12px 12px 0px 0px")J";
 
 /// The property list the clip cases are parallel to. `overflow` decides what
 /// clips; `position` and `transform` decide what a clip applies TO; the border
@@ -246,6 +247,14 @@ constexpr std::string_view kClipProperties =
 
 /// A row for the clip property list: no clip of any kind, no border.
 constexpr std::string_view kNoClipRow = "[50,52,11,11,55,55,55,55]";
+
+/// The clip property list plus the clipper's own `border-radius`. CSS confines
+/// overflow to the ROUNDED padding box, so the curve is part of what a clip is,
+/// not decoration on the clipper.
+constexpr std::string_view kClipRadiusProperties =
+    R"(["overflow","position","transform","clip-path",)"
+    R"("border-top-width","border-right-width",)"
+    R"("border-bottom-width","border-left-width","border-radius"])";
 
 /// Build a DOMSnapshot carrying exactly the arrays whole-tree lowering reads.
 std::string build_snapshot(const SnapshotSpec& spec) {
@@ -1505,6 +1514,77 @@ TEST_CASE("a hoisted node keeps the clip its DOM parent gave it",
     CHECK(*under->style.width == 200.0f);
 }
 
+TEST_CASE("a rounded clipper cuts its children to the curve, not to a box",
+          "[browser-capture][native-lowering][clip-model]") {
+    // A card that rounds its corners and clips its overflow puts the curve on
+    // the CLIP, not on the child: the child is a plain rectangle and gets its
+    // corners cut by the card. Carrying only the rectangle paints that child
+    // square into the corner, and the card reads as unrounded even though its
+    // own border curves — which is what the forge panel's project cards did.
+    //
+    // `#card` is 102x102 at (150,150), 1px border, radius 12px, overflow
+    // hidden. It clips to the PADDING box (151,151) 100x100, and CSS shrinks
+    // the radius by the border it sits behind: 12 - 1 = 11.
+    //
+    // `#media` spans the card's full width at its top, so it reaches into both
+    // top corners and must carry the clip. `#inset` sits well inside every
+    // corner square, so the curve cannot cut it and it carries no clip at all —
+    // without that second node the model could just clip everything.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV#panel (relative),
+    //        4 DIV#card, 5 DIV#media, 6 DIV#inset
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,3]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,3,4,4]",
+            .attributes = "[[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[50,52,11,11,55,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55,55],"
+                      "[50,53,11,11,55,55,55,55,55],"
+                      "[51,54,11,11,56,56,56,56,59],"
+                      "[50,54,11,11,55,55,55,55,55],"
+                      "[50,54,11,11,55,55,55,55,55]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[0,0,400,400],[150,150,102,102],"
+                      "[151,151,100,40],[181,181,40,40]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .computed_names = std::string(kClipRadiusProperties),
+        },
+        "clip-rounded");
+    CHECK(lowered.counts.clip_lost == 0);
+
+    const auto* media = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.width && *node.style.width == 100.0f &&
+               node.style.height && *node.style.height == 40.0f;
+    });
+    REQUIRE(media != nullptr);
+    REQUIRE(media->style.clip_rect.has_value());
+    // The clip is the card's padding box, in the child's own space.
+    CHECK(media->style.clip_rect->x == 0.0f);
+    CHECK(media->style.clip_rect->y == 0.0f);
+    CHECK(media->style.clip_rect->width == 100.0f);
+    CHECK(media->style.clip_rect->height == 100.0f);
+    // The curve the card cuts with: its outer 12px less the 1px border behind
+    // which it sits. Reading the outer radius here would round the clip more
+    // sharply than the border hiding inside it.
+    CHECK(media->style.clip_rect->radius_tl == 11.0f);
+    CHECK(media->style.clip_rect->radius_tr == 11.0f);
+    CHECK(media->style.clip_rect->radius_br == 11.0f);
+    CHECK(media->style.clip_rect->radius_bl == 11.0f);
+
+    // A node no corner can reach carries no clip: the rectangle already holds
+    // it, and so does the curve.
+    const auto* inset = find_node(lowered.root, [](const IRNode& node) {
+        return node.style.height && *node.style.height == 40.0f &&
+               node.style.width && *node.style.width == 40.0f;
+    });
+    REQUIRE(inset != nullptr);
+    CHECK_FALSE(inset->style.clip_rect.has_value());
+}
+
 TEST_CASE("a clip that really does apply is carried, and a no-op one is not",
           "[browser-capture][native-lowering][clip-model]") {
     // Without this, the model could simply be "never clip anything" and both
@@ -2144,4 +2224,57 @@ TEST_CASE("whole-tree lowering census over a real captured design",
         REQUIRE(entry.node->stable_anchor_id);
         CHECK_FALSE(entry.node->stable_anchor_id->empty());
     }
+}
+
+// Writes the natively-lowered IR for a capture directory so the panel can be
+// rendered from its own nodes and scored against Chrome's pixels. Separate tag
+// from the census so neither drags the other into a run that has no capture.
+//   PULP_NATIVE_LOWERING_CAPTURE=<capture-dir> \
+//   PULP_NATIVE_LOWERING_IR_OUT=<path.ir.json> \
+//     pulp-test-browser-capture-import "[.native-ir-emit]" -s
+TEST_CASE("natively lowered IR is emitted for a real captured design",
+          "[.native-ir-emit]") {
+    const char* directory = std::getenv("PULP_NATIVE_LOWERING_CAPTURE");
+    const char* out = std::getenv("PULP_NATIVE_LOWERING_IR_OUT");
+    REQUIRE(directory != nullptr);
+    REQUIRE(out != nullptr);
+    const auto envelope = fs::path(directory) / "capture.json";
+    REQUIRE(fs::is_regular_file(envelope));
+
+    BrowserCaptureIrOptions native_options;
+    native_options.native_panel_lowering = true;
+    const auto native = lower_browser_capture_to_ir(envelope, native_options);
+    INFO("native error: " << native.error);
+    REQUIRE(native.design_ir);
+
+    // The photograph must be gone from the tree before anything downstream
+    // reads it. Asserted here as well as on the written artifact, because a
+    // score over a composite that still contains the capture measures nothing.
+    REQUIRE_FALSE(any_capture_node(native.design_ir->root));
+
+    for (const char* key : {"native_painted_nodes", "native_nodes_native",
+                            "native_nodes_image_asset",
+                            "native_nodes_element_capture_fallback",
+                            "native_nodes_text", "native_nodes_pooled",
+                            "native_nodes_missing_paint_order",
+                            "native_tree_depth", "native_nodes_hoisted",
+                            "native_nodes_overlapping_reorders",
+                            "native_nodes_clip_over_applied",
+                            "native_nodes_clip_lost",
+                            "native_nodes_skipped_empty_box",
+                            "native_nodes_skipped_blank_text",
+                            "native_nodes_skipped_non_visual"}) {
+        const auto it = native.design_ir->root.attributes.find(key);
+        if (it != native.design_ir->root.attributes.end())
+            WARN("  " << key << " = " << it->second);
+    }
+    WARN("  root_width = " << native.design_ir->root.style.width.value_or(-1));
+    WARN("  root_height = " << native.design_ir->root.style.height.value_or(-1));
+
+    std::ofstream stream(out, std::ios::binary);
+    REQUIRE(stream.good());
+    stream << pulp::view::serialize_design_ir(*native.design_ir);
+    stream.close();
+    REQUIRE(fs::is_regular_file(out));
+    REQUIRE(fs::file_size(out) > 0);
 }

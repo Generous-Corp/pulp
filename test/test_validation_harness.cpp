@@ -237,6 +237,25 @@ TEST_CASE("ValidationHarness exposes the underlying headless host",
     REQUIRE(&const_harness.host().descriptor() == &const_harness.descriptor());
 }
 
+TEST_CASE("ValidationHarness never publishes an inspector session",
+          "[harness][inspect][negative]") {
+    const auto scratch = make_temp_dir("pulp-harness-inspector-negative");
+    const auto runtime_dir = scratch / "runtime";
+    ScopedEnv profile("PULP_INSPECT_PROFILE");
+    ScopedEnv discovery("PULP_INSPECTOR_RUNTIME_DIR");
+    profile.set("develop");
+    discovery.set(runtime_dir.string());
+
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.output_dir = scratch});
+    harness.prepare();
+    REQUIRE(harness.process_blocks(1).size() == 1024);
+    REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
+
+    std::error_code error;
+    std::filesystem::remove_all(scratch, error);
+}
+
 TEST_CASE("ValidationHarness option and entry defaults match report schema",
           "[harness]") {
     pulp::format::ValidationRunOptions options;

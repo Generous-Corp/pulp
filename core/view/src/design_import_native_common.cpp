@@ -1230,9 +1230,17 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 // A helper rather than six more fallbacks, because the bug is that the
 // knowledge lived at a call site: the eighth paint site added later would have
 // repeated it.
+// The allowlist is what decides whether a colour reaches the paint site at all,
+// so a function missing from it is a colour silently NOT applied — the view
+// keeps its default and nothing reports a loss. `oklab()` / `oklch()` are the
+// forms Chromium serializes every modern colour syntax into, so a captured
+// design's text and fills arrive in them; without these two entries a bright
+// accent label rendered in the default text colour.
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
-    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 || value == "transparent")
+    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 ||
+        value.rfind("oklab", 0) == 0 || value.rfind("oklch", 0) == 0 ||
+        value == "transparent")
         return parse_css_color(value);
     return std::nullopt;
 }
@@ -1352,6 +1360,9 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_ancestor_clip_rect(Rect{style.clip_rect->x, style.clip_rect->y,
                                          style.clip_rect->width,
                                          style.clip_rect->height});
+        view.set_ancestor_clip_radii(
+            style.clip_rect->radius_tl, style.clip_rect->radius_tr,
+            style.clip_rect->radius_br, style.clip_rect->radius_bl);
     }
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) {

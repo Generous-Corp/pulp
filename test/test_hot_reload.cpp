@@ -82,6 +82,7 @@ TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
     });
 
     // Initially no reload pending
+    REQUIRE_FALSE(reloader.has_pending_reload());
     REQUIRE_FALSE(reloader.poll_reload());
     REQUIRE(reloader.reload_count() == 0);
 
@@ -350,8 +351,10 @@ TEST_CASE("HotReloader pending reload without callback still drains",
     HotReloader reloader(entry, {});
     reloader.pending_code_ = "// pending";
     reloader.has_pending_ = true;
+    REQUIRE(reloader.has_pending_reload());
 
     REQUIRE(reloader.poll_reload());
+    REQUIRE_FALSE(reloader.has_pending_reload());
     REQUIRE(reloader.reload_count() == 0);
     REQUIRE_FALSE(reloader.poll_reload());
 

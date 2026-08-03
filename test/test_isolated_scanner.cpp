@@ -16,8 +16,10 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 #ifndef PULP_ISOLATED_SCANNER_REAL_WORKER
@@ -55,6 +57,40 @@ struct ScratchDir {
 
     ScratchDir(const ScratchDir&) = delete;
     ScratchDir& operator=(const ScratchDir&) = delete;
+};
+
+class ScopedEnv {
+public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* value = std::getenv(name_.c_str())) previous_ = value;
+    }
+
+    ~ScopedEnv() {
+        if (previous_)
+            set(*previous_);
+        else
+            unset();
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), 1);
+#endif
+    }
+
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
 };
 
 void write_file(const fs::path& path, const std::string& body) {
@@ -97,6 +133,25 @@ TEST_CASE("IsolatedPluginScanner returns FormatError for an unknown extension",
     REQUIRE(result.status == ScanStatus::FormatError);
     REQUIRE(result.exit_code == 3);
     REQUIRE_THAT(result.error_message, ContainsSubstring("unsupported"));
+}
+
+TEST_CASE("IsolatedPluginScanner never publishes an inspector session",
+          "[host][isolated-scanner][inspect][negative]") {
+    ScratchDir scratch("inspector-negative");
+    const auto runtime_dir = scratch.path / "runtime";
+    const auto bundle = scratch.path / "InspectorProbe.vst3";
+    fs::create_directories(bundle / "Contents" / "Resources");
+    ScopedEnv profile("PULP_INSPECT_PROFILE");
+    ScopedEnv discovery("PULP_INSPECTOR_RUNTIME_DIR");
+    profile.set("develop");
+    discovery.set(runtime_dir.string());
+
+    IsolatedPluginScanner scanner{PULP_ISOLATED_SCANNER_REAL_WORKER};
+    const auto result = scanner.scan(bundle.string(), /*timeout_ms=*/5000);
+
+    REQUIRE(result.status == ScanStatus::Ok);
+    REQUIRE(result.descriptor.has_value());
+    REQUIRE_FALSE(fs::exists(runtime_dir));
 }
 
 TEST_CASE("pulp-scan-worker command line reports usage and unsupported bundles",

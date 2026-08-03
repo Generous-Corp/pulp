@@ -80,6 +80,34 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// An ellipse is a circle of radius rx with the y axis squashed by ry/rx about
+// the centre. Skia has no elliptical gradient, but every shader carries a local
+// matrix, so the squash goes on the SHADER rather than on the canvas — which
+// matters because the canvas transform would also distort the shape being
+// filled, and a background gradient is routinely filled through a rounded-rect
+// or per-corner path whose corners must not stretch with it.
+void SkiaCanvas::set_fill_gradient_radial_elliptical(
+        float cx, float cy, float rx, float ry,
+        const Color* colors, const float* positions, int count) {
+    if (!(rx > 0.0f) || !(ry > 0.0f)) {
+        set_fill_gradient_radial(cx, cy, rx, colors, positions, count);
+        return;
+    }
+    std::vector<SkColor4f> sk_colors;
+    std::vector<float> sk_pos;
+    colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
+    auto shader = skia_gradient::make_radial({cx, cy}, rx,
+                                             sk_colors.data(), sk_pos.data(), count);
+    if (shader) {
+        SkMatrix m = SkMatrix::Translate(cx, cy);
+        m.preScale(1.0f, ry / rx);
+        m.preTranslate(-cx, -cy);
+        shader = shader->makeWithLocalMatrix(m);
+    }
+    gradient_shader_ = std::move(shader);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 // A sweep's start angle is ROTATION, not a window into the turn. Skia clamps
 // angles outside [start, end] rather than wrapping them, so handing it
 // `start .. start + 360` left every angle before `start` outside the window and

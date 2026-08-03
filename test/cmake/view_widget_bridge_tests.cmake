@@ -146,6 +146,20 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-domains
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    add_executable(pulp-test-inspector-hook-lifecycle
+        test_inspector_hook_lifecycle.cpp)
+    target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-hook-lifecycle
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-context-capture
+        test_inspector_context_capture.cpp)
+    target_link_libraries(pulp-test-inspector-context-capture PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-context-capture
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     # Trace.* bridge to the process-global pulp::runtime::Tracing controller.
     # Config-agnostic: verifies the OFF (shipping) build reports tracing is not
     # compiled in, and the ON build round-trips a real .pftrace.
@@ -212,7 +226,7 @@ target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::format)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
-set(_pulp_inspector_symbol_tool "")
+unset(_pulp_inspector_symbol_tool)
 set(_pulp_inspector_symbol_mode "NM")
 if(MSVC)
     get_filename_component(_pulp_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
