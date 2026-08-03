@@ -108,3 +108,18 @@ add_test(NAME project-package-compile-out
 set_tests_properties(project-package-compile-out PROPERTIES
     LABELS "timeline;cmake;sdk;slow"
     TIMEOUT 1200)
+
+# VST3 bundle layout: moduleinfo.json must live in Contents/Resources/.
+#
+# Putting it directly under Contents/ makes codesign treat it as an unsigned
+# nested code object, so the bundle cannot be signed and therefore cannot be
+# notarized or shipped — and Pulp's own scanner reads it from Contents/
+# Resources/, so it was invisible there too. Both failures are silent until
+# packaging, which is exactly why this is a test.
+add_test(NAME vst3-bundle-layout
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/check_vst3_bundle_layout.py"
+        "${CMAKE_BINARY_DIR}")
+set_tests_properties(vst3-bundle-layout PROPERTIES
+    LABELS "format;vst3;packaging"
+    TIMEOUT 60)
