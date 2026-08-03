@@ -66,7 +66,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Resolve the macOS runner for the darwin-arm64 matrix legs.
+  # Resolve the macOS runners for both Darwin matrix legs.
   #
   # Priority (first set wins):
   #   1. PULP_RELEASE_MACOS_RUNS_ON_JSON — dedicated release-cli override
@@ -167,7 +167,10 @@ jobs:
           # variable is a complete revert. That fluidity is the point: routing a
           # release leg on or off the local pool must never need a code change.
           DARWIN_ARM64: ${{ vars.PULP_RELEASE_DARWIN_ARM64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
-          DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
+          # darwin-x64 is cross-compiled on ARM and is safe on the same
+          # dedicated release Tart pool as darwin-arm64. Keep the old
+          # Intel-specific variable as a lower-priority compatibility fallback.
+          DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
           LINUX_X64: ${{ vars.PULP_RELEASE_LINUX_X64_RUNS_ON_JSON }}
           LINUX_ARM64: ${{ vars.PULP_RELEASE_LINUX_ARM64_RUNS_ON_JSON }}
           WINDOWS_X64: ${{ vars.PULP_RELEASE_WINDOWS_X64_RUNS_ON_JSON }}
@@ -195,9 +198,11 @@ jobs:
           # runner, NOT the flaky native `macos-15-intel` image (which CPU-pegs
           # and never shipped an artifact — see nightly-intel.yml, whose Job B
           # universal cross-check exists precisely because the native Job A is
-          # unreliable). The `macos-15-xcompile` sentinel routes to the pinned
-          # hosted arm64 pool via PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON below
-          # (default `["macos-15"]`) — deliberately NOT `resolve-macos-runner`,
+          # unreliable). The `macos-15-xcompile` sentinel routes through the
+          # resolver map to the dedicated `pulp-build-vm-release` Tart pool,
+          # falling back to the legacy Intel selector and then `macos-15` only
+          # when the release-pool variables are unset. It never targets native
+          # Intel hardware; the Mac Mini remains an advisory/nightly canary.
           # to keep Intel work off the self-hosted Studios that back the
           # required `macos` gate. The x86_64 slice is produced by
           # `-DCMAKE_OSX_ARCHITECTURES=x86_64` (C++) plus

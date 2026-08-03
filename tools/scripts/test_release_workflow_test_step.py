@@ -1114,6 +1114,25 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
         self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
 
+    def test_darwin_x64_prefers_the_dedicated_release_tart_pool(self) -> None:
+        steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
+        resolver = next(step for step in steps if step.get("id") == "resolve")
+        selector = resolver["env"]["DARWIN_X64"]
+        per_leg = selector.index("PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON")
+        release_pool = selector.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        legacy_intel = selector.index("PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON")
+        self.assertLess(per_leg, release_pool)
+        self.assertLess(release_pool, legacy_intel)
+
+    def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        for job in ("build-cli", "smoke-cli"):
+            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            darwin_x64 = next(
+                row for row in rows if row["platform"] == "darwin-x64"
+            )
+            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+
 
 class TrustedReleaseControlPlaneRouting(unittest.TestCase):
     """Only trusted release resolver jobs may reuse persistent Linux capacity."""
