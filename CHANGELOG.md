@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07790"></a>
+## [0.779.0] - 2026-08-03
+
+- release/version bump ([#7125](https://github.com/Generous-Corp/pulp/pull/7125))
+- release/version bump ([#7122](https://github.com/Generous-Corp/pulp/pull/7122))
+- feat/note transaction builders ([#7003](https://github.com/Generous-Corp/pulp/pull/7003))
+- feat/p011 pr2 ([#7007](https://github.com/Generous-Corp/pulp/pull/7007))
+- release/post tag sync v0.778.1 242e30877a7b ([#7118](https://github.com/Generous-Corp/pulp/pull/7118))
+- fix/inspector phase4 cli gpuoff 20260803 ([#7117](https://github.com/Generous-Corp/pulp/pull/7117))
+
 <a id="v07781"></a>
 ## [0.778.1] - 2026-08-03
 
@@ -7386,6 +7396,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.779.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.779.0
 [0.778.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.778.1
 [0.778.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.778.0
 [0.777.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.777.0
