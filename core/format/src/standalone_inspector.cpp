@@ -350,7 +350,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         state_.set_value_channels(
             std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
-        domains_.set_script_inspector(nullptr);
         domains_.set_runtime_evaluator(nullptr);
         log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel);
         bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
@@ -841,6 +840,8 @@ StandaloneInspectorRuntime::~StandaloneInspectorRuntime() {
 }
 
 bool StandaloneInspectorRuntime::profile_is_off(std::string_view profile) {
+    if (profile == "local")
+        return false;
     const auto parsed_profile = parse_standalone_inspector_profile(profile);
     return parsed_profile && *parsed_profile == inspect::InspectorProfile::Off;
 }
