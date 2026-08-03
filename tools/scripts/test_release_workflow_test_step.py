@@ -43,9 +43,11 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +66,7 @@ WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
 VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
+SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 
 class SignAndReleaseNoTestGate(unittest.TestCase):
@@ -1329,14 +1332,68 @@ class ReleaseBotSshSigning(unittest.TestCase):
         cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
         cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
         cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
+        cls.shipyard_config = SHIPYARD_CONFIG.read_text(encoding="utf-8")
 
     def test_signing_helper_requires_release_bot_private_key_secret(self) -> None:
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY:?RELEASE_BOT_SSH_SIGNING_KEY", self.helper)
-        self.assertIn("git config --global gpg.format ssh", self.helper)
-        self.assertIn("git config --global user.signingkey", self.helper)
-        self.assertIn("git config --global commit.gpgsign true", self.helper)
-        self.assertIn("git config --global tag.gpgSign true", self.helper)
+        self.assertIn("git config --local gpg.format ssh", self.helper)
+        self.assertIn('git config --local gpg.ssh.program "${ssh_program}"', self.helper)
+        self.assertIn("git config --local user.signingkey", self.helper)
+        self.assertIn("git config --local commit.gpgsign true", self.helper)
+        self.assertIn("git config --local tag.gpgSign true", self.helper)
+        self.assertNotIn("git config --global", self.helper)
         self.assertIn(self.BOT_EMAIL, self.helper)
+
+    def test_signing_helper_overrides_inherited_program_without_global_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            key = root / "source-key"
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+                check=True,
+            )
+            global_config = root / "global.gitconfig"
+            subprocess.run(
+                ["git", "config", "--file", str(global_config), "gpg.ssh.program", "/bin/false"],
+                check=True,
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GIT_CONFIG_GLOBAL": str(global_config),
+                    "RELEASE_BOT_SSH_SIGNING_KEY": key.read_text(encoding="utf-8"),
+                    "RUNNER_TEMP": str(root / "runner-temp"),
+                }
+            )
+
+            subprocess.run(["bash", str(RELEASE_SIGNING_HELPER)], cwd=repo, env=env, check=True)
+
+            effective = subprocess.run(
+                ["git", "config", "--get", "gpg.ssh.program"],
+                cwd=repo,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(effective, subprocess.run(
+                ["sh", "-c", "command -v ssh-keygen"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "config", "--file", str(global_config), "gpg.ssh.program"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+                "/bin/false",
+            )
 
     def test_auto_release_signs_version_tags(self) -> None:
         self.assertIn("name: Configure release bot SSH signing", self.auto_release)
@@ -1351,9 +1408,13 @@ class ReleaseBotSshSigning(unittest.TestCase):
         )
 
     def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
+        self.assertIn(
+            'ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"',
+            self.shipyard_config,
+        )
         self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.post_tag_sync)
-        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
+        self.assertIn("bash -- tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
 
 
 class StrandedReleaseTrackerWorkflow(unittest.TestCase):
