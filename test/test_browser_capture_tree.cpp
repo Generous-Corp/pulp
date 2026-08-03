@@ -2463,12 +2463,22 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
     //        5 DIV sibling of outer. Chrome paints outer(2), sibling(3),
     //        inner(4); nesting composes outer, inner, sibling — so the
     //        inner/sibling pair is emitted against Chrome's order.
+    // The inner node carries a background COLOUR, because the audit counts an
+    // inversion only where the node that ends up on top actually puts ink on
+    // the canvas. A bare positioning div reordered over a painted sibling is an
+    // empty rectangle in front of a filled one — nothing a painter can show —
+    // so a fixture of style-less divs would drive this to zero and assert
+    // nothing. Index 31 is "rgb(9, 11, 16)".
     const std::string names = "[0,1,2,3,3,3]";
     const std::string types = "[9,1,1,1,1,1]";
     const std::string parents = "[-1,0,1,2,3,2]";
     const std::string attributes = "[[],[],[],[],[],[]]";
     const std::string styles =
-        "[[11,14],[11,14],[11,14],[11,14],[11,14],[11,14]]";
+        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[31,11,14],[11,11,14]]";
+    const std::string inkless_styles =
+        "[[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14],[11,11,14]]";
+    const std::string paint_names =
+        R"(["background-color","background-image","display"])";
     const std::string paint_orders = "[0,1,1,2,4,3]";
 
     const auto overlapping = lower_snapshot(
@@ -2482,11 +2492,37 @@ TEST_CASE("the reorder audit counts a real inversion and only a visible one",
             .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
                       "[20,20,100,100],[40,40,60,60],[60,60,100,100]]",
             .paint_orders = paint_orders,
+            .computed_names = paint_names,
         },
         "reorder-visible");
     CHECK(overlapping.counts.lowered == 5);
     CHECK(overlapping.counts.hoisted_escapes == 0);  // not the same effect
     CHECK(overlapping.counts.overlapping_reorders == 1);
+    // Named, not just counted: a bare total says a panel can paint wrong
+    // without saying where, and finding the pair by eye means diffing two
+    // renders.
+    CHECK(overlapping.counts.overlapping_reorder_pairs.size() == 1);
+
+    // The SAME inversion, over the same overlapping boxes, with the node that
+    // lands on top painting nothing. The painter has no ink to show out of
+    // order, so this must not count — which is what stops the number being a
+    // tally of how hierarchical a document happens to be.
+    const auto inkless = lower_snapshot(
+        {
+            .node_names = names,
+            .node_types = types,
+            .parents = parents,
+            .attributes = attributes,
+            .layout_nodes = "[0,1,2,3,4,5]",
+            .styles = inkless_styles,
+            .bounds = "[[0,0,300,300],[0,0,300,300],[0,0,300,300],"
+                      "[20,20,100,100],[40,40,60,60],[60,60,100,100]]",
+            .paint_orders = paint_orders,
+            .computed_names = paint_names,
+        },
+        "reorder-inkless");
+    CHECK(inkless.counts.lowered == 5);
+    CHECK(inkless.counts.overlapping_reorders == 0);
 
     // The identical inversion with the two boxes moved apart. A painter cannot
     // show a reorder of disjoint boxes, so the audit must NOT count it — which
