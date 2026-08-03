@@ -56,7 +56,12 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.81.4 (current pin) — keeps v0.81.3's attached supervised PR push and
+# v0.83.0 (current pin) — inspects GitHub's formal stack metadata at every
+#   merge-queue mutation boundary, including runner-steward enqueue, and
+#   refuses the unstacked mutation path until the asynchronous stack lifecycle
+#   is modeled durably.
+#
+# v0.81.4 (earlier pin) — keeps v0.81.3's attached supervised PR push and
 #   regenerates Pulp's repository-local SSH-signing setup from trusted config.
 #
 # v0.81.3 (earlier pin) — keeps v0.81.2's full refspec and attaches the
