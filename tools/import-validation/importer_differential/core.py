@@ -22,7 +22,13 @@ SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
 CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
 
-COMPUTED_STYLES = [
+# `layout.styles` rows are positional, so a row is unreadable without the
+# request order that produced it. The capture writes that order into the
+# snapshot as `computedStyleNames`; this list is only the shape of a snapshot
+# predating that field. Keying off the snapshot is what stops a property added
+# to the capture from shifting every later value here by one and mapping, say,
+# a background into a border with no error anywhere.
+LEGACY_COMPUTED_STYLES = [
     "display", "visibility", "opacity", "position", "z-index",
     "background-color", "background-image", "background-blend-mode",
     "border-top-color", "border-right-color", "border-bottom-color",
@@ -157,6 +163,7 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
     document = documents[0]
     raw_nodes = document.get("nodes", {})
     layout = document.get("layout", {})
+    style_names = snapshot.get("computedStyleNames") or LEGACY_COMPUTED_STYLES
     layout_by_node = {
         node_index: layout_index
         for layout_index, node_index in enumerate(layout.get("nodeIndex", []))
@@ -204,9 +211,18 @@ def browser_nodes(snapshot: dict[str, Any]) -> list[BrowserNode]:
             raw_styles = layout.get("styles", [])
             if layout_index < len(raw_styles):
                 values_for_style = raw_styles[layout_index]
+                # zip() truncates in silence, which is precisely how a stale
+                # property list turns into shifted-by-one values that read as
+                # real style data. A row that does not match the declared
+                # request order is a decoding failure, not a short row.
+                if len(values_for_style) != len(style_names):
+                    raise LabError(
+                        f"snapshot style row has {len(values_for_style)} "
+                        f"values but declares {len(style_names)} property "
+                        "names; the capture and this reader have drifted")
                 styles = {
                     name: decode_string(strings, value)
-                    for name, value in zip(COMPUTED_STYLES, values_for_style)
+                    for name, value in zip(style_names, values_for_style)
                 }
         if bounds and (bounds[2] <= 0 or bounds[3] <= 0):
             continue

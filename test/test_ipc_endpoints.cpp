@@ -1,10 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/runtime/socket.hpp>
 
+#include <chrono>
 #include <string_view>
 #include <vector>
 
 using namespace pulp::events;
+using namespace pulp::runtime;
+using namespace std::chrono_literals;
 
 TEST_CASE("IPC socket endpoints reject empty ports without opening connections",
           "[events][ipc][issue-642]") {
@@ -55,6 +59,40 @@ TEST_CASE("IPC socket client rejects malformed port strings without connecting",
         REQUIRE(client.state() == IpcState::Error);
         REQUIRE_FALSE(client.is_connected());
     }
+}
+
+TEST_CASE("IPC socket connect timeout bounds a saturated listener",
+          "[events][ipc][timeout]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    // Leave accepted connections queued until the kernel refuses to complete
+    // another handshake. Timed connects keep this setup bounded even on hosts
+    // whose effective listen backlog is larger than the requested one.
+    std::vector<Socket> queued;
+    bool saturated = false;
+    for (int attempt = 0; attempt < 512; ++attempt) {
+        Socket client;
+        REQUIRE(client.create(SocketType::TCP));
+        if (!client.connect("127.0.0.1", port, 10ms)) {
+            saturated = true;
+            break;
+        }
+        queued.push_back(std::move(client));
+    }
+    REQUIRE(saturated);
+
+    InterprocessConnection client;
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_FALSE(client.connect(
+        "127.0.0.1:" + std::to_string(port),
+        IpcTransport::Socket, 50ms));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(elapsed < 1s);
 }
 
 TEST_CASE("IPC socket connection-server rejects malformed port strings",

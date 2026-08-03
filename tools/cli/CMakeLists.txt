@@ -20,6 +20,17 @@ configure_file(
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+if(TARGET pulp::inspect-client)
+    set(_pulp_inspect_command_source cmd_inspect.cpp)
+else()
+    set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
+endif()
+if(TARGET pulp::inspect-authoring)
+    set(_pulp_tweaks_command_source cmd_tweaks.cpp)
+else()
+    set(_pulp_tweaks_command_source cmd_tweaks_unavailable.cpp)
+endif()
+
 set(_pulp_migration_index_src "${CMAKE_CURRENT_BINARY_DIR}/generated/migration_index.cpp")
 file(GLOB _pulp_migration_docs
      LIST_DIRECTORIES FALSE
@@ -76,7 +87,6 @@ add_executable(pulp-cli
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
-    cmd_seq.cpp
     cmd_audio_plugin_common.cpp
     cmd_audio_render.cpp
     cmd_audio_render_parse.cpp
@@ -102,8 +112,8 @@ add_executable(pulp-cli
     kit_commands.cpp
     kit_manifest_validation.cpp
     cmd_pr.cpp
-    cmd_inspect.cpp
-    cmd_tweaks.cpp
+    ${_pulp_inspect_command_source}
+    ${_pulp_tweaks_command_source}
     design_binding.cpp
     create_build_commands.cpp
     create_targets.cpp
@@ -132,6 +142,9 @@ add_executable(pulp-cli
     mac_runtime_validators.cpp
     install_paths_mac.cpp
     "${_pulp_migration_index_src}")
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    target_sources(pulp-cli PRIVATE cmd_seq.cpp)
+endif()
 # The C++ CLI was historically the user-facing `pulp` binary. The Rust
 # binary now takes the `pulp` slot and this target emits `pulp-cpp`.
 # Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
@@ -140,7 +153,20 @@ add_executable(pulp-cli
 # all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::tool-timeline pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
+target_link_libraries(pulp-cli PRIVATE
+    pulp::runtime pulp::tool-audio pulp::audio-analysis
+    pulp::ship pulp::view pulp::render pulp::format pulp::host)
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
+endif()
+target_compile_definitions(pulp-cli PRIVATE
+    PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>)
+if(TARGET pulp::inspect-client)
+    target_link_libraries(pulp-cli PRIVATE pulp::inspect-client)
+endif()
+if(TARGET pulp::inspect-authoring)
+    target_link_libraries(pulp-cli PRIVATE pulp::inspect-authoring)
+endif()
 if(WIN32)
     target_link_libraries(pulp-cli PRIVATE Advapi32 User32)
 endif()
@@ -236,13 +262,15 @@ if(PULP_BUILD_TESTS)
     add_dependencies(pulp-test-cli-bake pulp-cli)
     add_test(NAME pulp-test-cli-bake COMMAND pulp-test-cli-bake)
 
-    add_executable(pulp-test-cli-timeline ${CMAKE_SOURCE_DIR}/test/test_cli_timeline.cpp)
-    target_compile_definitions(pulp-test-cli-timeline PRIVATE
-        PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>")
-    target_link_libraries(pulp-test-cli-timeline PRIVATE
-        pulp::audio pulp::timeline pulp::tool-timeline pulp-mcp-core Catch2::Catch2WithMain)
-    add_dependencies(pulp-test-cli-timeline pulp-cli)
-    add_test(NAME pulp-test-cli-timeline COMMAND pulp-test-cli-timeline)
+    if(PULP_ENABLE_PROJECT_PACKAGE)
+        add_executable(pulp-test-cli-timeline ${CMAKE_SOURCE_DIR}/test/test_cli_timeline.cpp)
+        target_compile_definitions(pulp-test-cli-timeline PRIVATE
+            PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>")
+        target_link_libraries(pulp-test-cli-timeline PRIVATE
+            pulp::audio pulp::timeline pulp::tool-timeline pulp-mcp-core Catch2::Catch2WithMain)
+        add_dependencies(pulp-test-cli-timeline pulp-cli)
+        add_test(NAME pulp-test-cli-timeline COMMAND pulp-test-cli-timeline)
+    endif()
 
     set(_pulp_cli_doctor_ctest_env
         "PULP_UPDATE_CHECK_DISABLED=1"

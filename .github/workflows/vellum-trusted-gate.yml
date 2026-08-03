@@ -19,10 +19,20 @@ permissions:
   contents: read
   statuses: write
 
+# A PR title/body edit can emit another pull_request_target event without
+# changing the head SHA. Keep the in-flight required check alive, retain only
+# the newest pending run for that PR, and give each merge-group ref its own
+# independent group.
+concurrency:
+  group: vellum-trusted-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   trusted-gate:
     name: Trusted base executor
-    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
     runs-on: ubuntu-latest
     steps:
       # Resolve before checkout: the checkout below needs the base sha, and on a
@@ -36,6 +46,7 @@ jobs:
           EVENT_BASE: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           EVENT_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_STATE: ${{ github.event.pull_request.state }}
           DISPATCH_PR: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
@@ -50,6 +61,10 @@ jobs:
             head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
             number="$DISPATCH_PR"
           else
+            if [ "$EVENT_STATE" != "open" ]; then
+              echo "PR #$EVENT_NUMBER is $EVENT_STATE — refusing to post a status to a closed PR" >&2
+              exit 1
+            fi
             base="$EVENT_BASE"; head="$EVENT_HEAD"; number="$EVENT_NUMBER"
           fi
           {

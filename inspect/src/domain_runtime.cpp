@@ -128,7 +128,16 @@ InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
         return make_response(req.id, choc::json::toString(obj, false));
     }
     if (req.method == methods::kRuntimeGetHotReloadStatus) {
-        return make_response(req.id, R"({"available":false})");
+        auto obj = choc::value::createObject("");
+        bool available = false;
+        if (agent_context_) {
+            const auto context = agent_context_->snapshot();
+            available = context.hot_reload_available;
+            obj.addMember("enabled", choc::value::createBool(context.hot_reload_enabled));
+            obj.addMember("pending", choc::value::createBool(context.hot_reload_pending));
+        }
+        obj.addMember("available", choc::value::createBool(available));
+        return make_response(req.id, choc::json::toString(obj, false));
     }
     return make_error(req.id, "Unknown Runtime method: " + req.method);
 }

@@ -462,3 +462,21 @@ TEST_CASE("RemoveAsset is rejected while a clip still references the asset") {
     REQUIRE(session->snapshot()->assets().size() == 1);
     REQUIRE(session->snapshot()->find_asset({asset_id}) != nullptr);
 }
+
+TEST_CASE("ConflictCode ordinals are wire stable and TransactionError defaults to Unspecified") {
+    // tools/mcp/timeline_session_store.cpp emits these ordinals verbatim as the
+    // numeric_code field of every transaction-failure envelope, so an existing
+    // value must never renumber. New causes are appended at the end.
+    REQUIRE(static_cast<unsigned>(ConflictCode::InvalidIdentifier) == 0);
+    REQUIRE(static_cast<unsigned>(ConflictCode::StaleRevision) == 2);
+    REQUIRE(static_cast<unsigned>(ConflictCode::ModelInvariant) == 19);
+    REQUIRE(static_cast<unsigned>(ConflictCode::JournalDurability) == 20);
+    REQUIRE(static_cast<unsigned>(ConflictCode::CheckpointMismatch) == 21);
+    REQUIRE(static_cast<unsigned>(ConflictCode::ReplayDivergence) == 22);
+    REQUIRE(static_cast<unsigned>(ConflictCode::Unspecified) == 23);
+
+    // A producer that returns an error without assigning its cause must report
+    // an obviously wrong value, not a plausible real one.
+    REQUIRE(TransactionError{}.code == ConflictCode::Unspecified);
+    REQUIRE(TransactionError{}.code != ConflictCode::ModelInvariant);
+}

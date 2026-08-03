@@ -402,7 +402,12 @@ TEST_CASE("Timeline journal checkpoint equality includes device-chain order") {
     const auto reordered = make_device_chain_project({{{8}}, {{7}}});
     auto rejected = session->journal().replay(reordered, {});
     REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().code == ConflictCode::CheckpointMismatch);
+    // The revision matched; only the document differed. Both revision fields
+    // therefore carry the same value and no information -- they exist because
+    // this arm shares its error object with the StaleRevision arm.
+    REQUIRE(rejected.error().expected_revision == rejected.error().current_revision);
+    REQUIRE_FALSE(rejected.error().model_error);
 }
 
 TEST_CASE("Timeline journal checkpoint equality includes authored track order") {
@@ -418,7 +423,7 @@ TEST_CASE("Timeline journal checkpoint equality includes authored track order") 
     const auto reordered = make_track_order_project({{7}, {4}});
     auto rejected = session->journal().replay(reordered, {});
     REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().code == ConflictCode::CheckpointMismatch);
 }
 
 TEST_CASE("Timeline commands and replay preserve durable asset metadata") {
@@ -459,7 +464,7 @@ TEST_CASE("Timeline commands and replay preserve durable asset metadata") {
     auto wrong_checkpoint = make_durable_media_project(hash_of('c'));
     auto rejected = journal.replay(wrong_checkpoint, {});
     REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().code == ConflictCode::CheckpointMismatch);
 }
 
 TEST_CASE("Timeline journal is fail closed when full and truncates only checkpoints") {
@@ -492,7 +497,10 @@ TEST_CASE("Timeline journal is fail closed when full and truncates only checkpoi
     auto wrong_snapshot = make_project();
     auto inconsistent = journal.replay(wrong_snapshot, {1});
     REQUIRE_FALSE(inconsistent);
-    REQUIRE(inconsistent.error().code == ConflictCode::ModelInvariant);
+    // Same guard as stale_base above, opposite cause: the revision matched and
+    // the document did not, so the two must not report the same code.
+    REQUIRE(inconsistent.error().code == ConflictCode::CheckpointMismatch);
+    REQUIRE(inconsistent.error().code != stale_base.error().code);
 }
 
 TEST_CASE("Timeline replay enforces revision and writer ID continuity across entries") {
@@ -520,7 +528,48 @@ TEST_CASE("Timeline replay enforces revision and writer ID continuity across ent
 
         const auto replayed = journal.replay(initial, {});
         REQUIRE_FALSE(replayed);
-        REQUIRE(replayed.error().code == ConflictCode::ModelInvariant);
+        REQUIRE(replayed.error().code == ConflictCode::ReplayDivergence);
+        REQUIRE(replayed.error().transaction == first.id);
+    }
+
+    SECTION("an entry that no longer reduces diverges rather than rejecting an edit") {
+        // A journaled entry the reducer refuses on the second pass. Its own code
+        // would be ModelInvariant with a populated model_error -- byte for byte
+        // what a live edit rejection looks like -- so replay must relabel it
+        // while keeping the reducer's account of the objection.
+        CommandJournal journal({});
+        MediaAsset unsealed{{initial.next_item_id()},
+                            "unsealed.wav",
+                            480,
+                            {48'000, 1},
+                            ContentHash{},
+                            AssetStoragePolicy::External,
+                            {},
+                            {},
+                            {}};
+        REQUIRE_FALSE(unsealed.content_hash.valid());
+        auto unreducible = transaction({1}, 1, 1, {}, {CreateAsset{unsealed}});
+
+        // The reducer's verdict, which the pre-fix code propagated verbatim.
+        auto direct = reduce_transaction(initial, unreducible);
+        REQUIRE_FALSE(direct);
+        REQUIRE(direct.error().code == ConflictCode::ModelInvariant);
+        REQUIRE(direct.error().model_error);
+
+        pulp::timeline::detail::JournalAccess::append(
+            journal, {{}, {1}, unreducible, first_reduced->dirty, JournalEntryKind::Ordinary},
+            initial);
+        const auto replayed = journal.replay(initial, {});
+        REQUIRE_FALSE(replayed);
+        REQUIRE(replayed.error().code == ConflictCode::ReplayDivergence);
+        REQUIRE(replayed.error().code != direct.error().code);
+        // Relabelled, not blanked: the reducer's targets and model detail survive.
+        REQUIRE(replayed.error().transaction == unreducible.id);
+        REQUIRE(replayed.error().item == direct.error().item);
+        REQUIRE(replayed.error().related_item == direct.error().related_item);
+        REQUIRE(replayed.error().model_error);
+        REQUIRE(replayed.error().model_error->code == direct.error().model_error->code);
+        REQUIRE(replayed.error().model_error->code == ModelErrorCode::InvalidContentHash);
     }
 
     SECTION("transaction IDs cannot repeat") {
@@ -587,7 +636,7 @@ TEST_CASE("Timeline replay checkpoint equality includes inactive tombstones") {
 
     auto rejected = session->journal().replay(visible_match.value(), {1});
     REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().code == ConflictCode::CheckpointMismatch);
     REQUIRE(session->journal().replay(*session->snapshot(), {1}));
 }
 

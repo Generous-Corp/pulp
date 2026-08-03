@@ -145,6 +145,8 @@ endfunction()
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
     test_cli_audio_heritage.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-shellout PRIVATE
+    PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
@@ -177,12 +179,22 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-if(TARGET pulp::inspect)
+if(TARGET pulp::inspect-runtime AND TARGET pulp::inspect-client)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
         pulp::platform
-        pulp::inspect
+        pulp::inspect-runtime
+        pulp::inspect-client
         Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect)
+        target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
+            pulp::inspect)
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=1)
+    else()
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=0)
+    endif()
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()

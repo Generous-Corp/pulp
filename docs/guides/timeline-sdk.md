@@ -18,10 +18,10 @@ capabilities and losses.
 Use the cookbook's
 [library-selection recipe](timeline-cookbook.md#choose-libraries-for-an-external-consumer)
 for the minimal `find_package()` and `target_link_libraries()` setup. The
-lowercase aliases `pulp::timebase`, `pulp::timeline`, and `pulp::playback` are
-also available. Components validate that the installed SDK contains each
-requested target; the package still defines its complete set of installed
-targets.
+lowercase aliases `pulp::timebase`, `pulp::timeline`, `pulp::project-package`,
+and `pulp::playback` are also available. Components validate that the installed
+SDK contains each requested target; the package still defines its complete set
+of installed targets.
 
 ## Dependency boundary
 
@@ -53,6 +53,29 @@ host targets enter the closure.
 
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.
+
+## Optional durable project publication
+
+Canonical Timeline JSON remains a document-model concern. When an application
+needs to publish that JSON together with package-relative assets, request the
+separate project-package component. It no-replace publishes hash-verified,
+fenced content-addressed blobs, then validates their references before
+atomically replacing `project.json` inside the stable package root. Unpublished
+staging remains unreachable:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS project-package)
+target_link_libraries(my_timeline_app PRIVATE Pulp::project-package)
+```
+
+This component does not add an archive format or interchange policy. Those stay
+in the DAWproject, SMF, and interchange components below. Its lower-level
+generic file and directory publisher is also no-replace; that guarantee does
+not apply to the stable root's replaceable `project.json` generation.
+Configuring Pulp from source with `-DPULP_ENABLE_PROJECT_PACKAGE=OFF` omits this
+component and the Timeline authoring tools that depend on it. An SDK installed
+from that build cannot satisfy `find_package(Pulp REQUIRED COMPONENTS
+project-package)`.
 
 ## Optional DAWproject importer
 

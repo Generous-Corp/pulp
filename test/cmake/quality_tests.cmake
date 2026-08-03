@@ -7,6 +7,8 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
     add_test(NAME auval-helper-worker-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_run_auval_component.py")
     if(UNIX)
@@ -46,6 +48,13 @@ if(Python3_Interpreter_FOUND)
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
+
+    # Unbounded-wait lint: a test wait that cannot time out turns a real
+    # regression into a CI job timeout with no output. The selftest is the
+    # load-bearing part — it scans the SAME wait unbounded and bounded, so the
+    # gate is proven to distinguish them rather than proven to be quiet.
+    add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
 
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
@@ -132,6 +141,14 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
+    if(UNIX)
+        add_test(NAME native-intel-runner-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_native_intel_runner.py")
+        add_test(NAME portable-ci-timeout-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_timeout.py")
+    endif()
 
     # Silent-revert guard: reject a push whose diff byte-exactly restores the
     # pre-landing bytes of every file a recent commit changed. Includes a replay
@@ -262,6 +279,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

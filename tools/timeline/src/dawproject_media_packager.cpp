@@ -50,7 +50,7 @@ add_dawproject_media(const LoadedProject& loaded, pulp::interchange::ExportArtif
                     return fail(DawProjectMediaErrorCode::MissingAsset, reference->asset_id.value,
                                 {}, "referenced asset is missing");
                 if (asset->name.empty() ||
-                    !pulp::timeline::package_relative_path_is_lexically_safe(asset->name))
+                    !pulp::timeline::package_relative_path_is_portable(asset->name))
                     return fail(DawProjectMediaErrorCode::InvalidAssetName,
                                 reference->asset_id.value, asset->name,
                                 "asset name is not a safe package-relative path");

@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_reconcile import (  # noqa: E402
+    CIRCUIT_OPEN,
     DEFERRED,
     STUCK_QUEUE,
     ESCALATE,
@@ -30,7 +31,11 @@ from release_reconcile import (  # noqa: E402
     TOO_OLD,
     TagState,
     decide,
+    latest_validation_failures,
+    needs_job_details,
+    incident_stays_open,
     runs_this_tag,
+    validation_failures,
 )
 
 NOW = datetime(2026, 7, 12, 12, 0, 0, tzinfo=timezone.utc)
@@ -44,6 +49,7 @@ def state(
     has_release_object: bool = False,
     assets: frozenset[str] | None = None,
     run_states: tuple[str, ...] = (),
+    validation_failures: tuple[str, ...] = (),
     dispatch_attempts: int = 0,
 ) -> TagState:
     if assets is None:
@@ -56,6 +62,7 @@ def state(
         has_release_object=has_release_object,
         assets=assets,
         run_states=run_states,
+        validation_failures=validation_failures,
         dispatch_attempts=dispatch_attempts,
     )
 
@@ -92,6 +99,75 @@ class Decide(unittest.TestCase):
         self.assertEqual(decision.action, REDISPATCH)
         self.assertIn("no release was created", decision.reason)
 
+    def test_terminal_failure_opens_circuit_instead_of_redispatching(self) -> None:
+        decision = decide(
+            state(
+                run_states=("completed",),
+                validation_failures=("Smoke windows-x64: Smoke CLI runtime",),
+            ),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, CIRCUIT_OPEN)
+        self.assertIn("immutable-tag failures are not retried", decision.reason)
+
+    def test_non_validation_workflow_failure_retains_bounded_retry(self) -> None:
+        decision = decide(
+            state(run_states=("completed",)),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_cancelled_run_retains_bounded_retry_path(self) -> None:
+        decision = decide(
+            state(run_states=("completed",)),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_timeout_retains_bounded_retry_path(self) -> None:
+        decision = decide(
+            state(run_states=("completed",)),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_startup_failure_retains_bounded_retry_path(self) -> None:
+        decision = decide(
+            state(
+                run_states=("completed",),
+            ),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, REDISPATCH)
+
+    def test_cancelled_run_still_honors_retry_budget(self) -> None:
+        decision = decide(
+            state(
+                run_states=("completed",),
+                dispatch_attempts=3,
+            ),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, ESCALATE)
+
+    def test_terminal_failure_outranks_an_interrupted_retry(self) -> None:
+        decision = decide(
+            state(
+                run_states=("completed", "completed"),
+                validation_failures=("Smoke windows-x64: Smoke CLI runtime",),
+                dispatch_attempts=1,
+            ),
+            NOW,
+            **LIMITS,
+        )
+        self.assertEqual(decision.action, CIRCUIT_OPEN)
+
     def test_orphan_draft_is_redispatched_not_deleted(self) -> None:
         """A draft left behind by a half-finished finalizer must be re-driven.
 
@@ -99,9 +175,7 @@ class Decide(unittest.TestCase):
         finalizer re-uploads assets onto the existing draft and publishes it), so
         recovery never has to destroy release state.
         """
-        decision = decide(
-            state(has_release_object=True, run_states=("completed",)), NOW, **LIMITS
-        )
+        decision = decide(state(has_release_object=True), NOW, **LIMITS)
         self.assertEqual(decision.action, REDISPATCH)
         self.assertIn("draft", decision.reason)
 
@@ -252,6 +326,268 @@ class UnresolvedTracking(unittest.TestCase):
         self.assertEqual(decide(s, NOW, **LIMITS).action, IN_FLIGHT)
         self.assertTrue(s.unresolved(**self.CTX))
 
+    def test_circuit_open_incident_does_not_flap_during_first_repair(self) -> None:
+        s = state(
+            run_states=("in_progress",),
+            validation_failures=("Smoke windows-x64: Smoke CLI runtime",),
+            dispatch_attempts=1,
+        )
+        self.assertEqual(decide(s, NOW, **LIMITS).action, IN_FLIGHT)
+        self.assertTrue(
+            incident_stays_open(
+                s,
+                newest_published=None,
+                asset_floor=(0, 1, 0),
+                max_attempts=3,
+            )
+        )
+
+
+class ValidationFailureClassification(unittest.TestCase):
+    def test_cancelled_terminal_run_is_inspected_for_finished_failures(self) -> None:
+        self.assertTrue(
+            needs_job_details(
+                {"event": "push", "status": "completed", "conclusion": "cancelled"}
+            )
+        )
+
+    def test_successful_push_does_not_need_job_details(self) -> None:
+        self.assertFalse(
+            needs_job_details(
+                {"event": "push", "status": "completed", "conclusion": "success"}
+            )
+        )
+
+    def test_dispatch_always_needs_jobs_for_tag_attribution(self) -> None:
+        self.assertTrue(
+            needs_job_details(
+                {"event": "workflow_dispatch", "status": "queued"}
+            )
+        )
+
+    def test_smoke_failure_is_immutable_product_evidence(self) -> None:
+        jobs = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Smoke CLI, delegates, MCP, and import-design runtime (Windows)",
+                        "conclusion": "failure",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            validation_failures(jobs),
+            (
+                "Smoke windows-x64: Smoke CLI, delegates, MCP, and "
+                "import-design runtime (Windows)",
+            ),
+        )
+
+    def test_artifact_transfer_failure_remains_retryable(self) -> None:
+        jobs = [
+            {
+                "name": "CLI linux-x64",
+                "conclusion": "failure",
+                "steps": [
+                    {"name": "Upload CLI artifact", "conclusion": "failure"}
+                ],
+            }
+        ]
+        self.assertEqual(validation_failures(jobs), ())
+
+    def test_dynamic_skia_verification_failure_remains_retryable(self) -> None:
+        jobs = [
+            {
+                "name": "CLI darwin-x64",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Verify fetched Skia is x86_64 (darwin-x64)",
+                        "conclusion": "failure",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(validation_failures(jobs), ())
+
+    def test_linux_sdk_second_build_failure_remains_retryable(self) -> None:
+        jobs = [
+            {
+                "name": "CLI linux-x64",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Prepare SDK build dir (Linux)",
+                        "conclusion": "failure",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(validation_failures(jobs), ())
+
+    def test_successful_validation_step_is_not_failure_evidence(self) -> None:
+        jobs = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "success"}],
+            }
+        ]
+        self.assertEqual(validation_failures(jobs), ())
+
+    def test_newer_same_gate_pass_clears_older_failure(self) -> None:
+        newer_windows_pass = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "success",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "success"}],
+            }
+        ]
+        old_failure = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        runs = [
+            {"id": 2, "created_at": "2026-07-12T11:00:00Z", "status": "completed"},
+            {"id": 1, "created_at": "2026-07-12T10:00:00Z", "status": "completed"},
+        ]
+        self.assertEqual(
+            latest_validation_failures(
+                runs, {1: old_failure, 2: newer_windows_pass}
+            ),
+            (),
+        )
+
+    def test_newer_other_platform_pass_does_not_clear_failure(self) -> None:
+        newer_linux_pass = [
+            {
+                "name": "Smoke linux-x64",
+                "conclusion": "success",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "success"}],
+            }
+        ]
+        old_failure = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        runs = [
+            {"id": 2, "created_at": "2026-07-12T11:00:00Z", "status": "completed"},
+            {"id": 1, "created_at": "2026-07-12T10:00:00Z", "status": "completed"},
+        ]
+        self.assertEqual(
+            latest_validation_failures(runs, {1: old_failure, 2: newer_linux_pass}),
+            ("Smoke windows-x64: Smoke CLI runtime",),
+        )
+
+    def test_independent_failures_across_attempts_are_all_reported(self) -> None:
+        newer_linux_failure = [
+            {
+                "name": "Smoke linux-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        older_windows_failure = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        runs = [
+            {"id": 2, "created_at": "2026-07-12T11:00:00Z", "status": "completed"},
+            {"id": 1, "created_at": "2026-07-12T10:00:00Z", "status": "completed"},
+        ]
+        self.assertEqual(
+            latest_validation_failures(
+                runs, {1: older_windows_failure, 2: newer_linux_failure}
+            ),
+            (
+                "Smoke linux-x64: Smoke CLI runtime",
+                "Smoke windows-x64: Smoke CLI runtime",
+            ),
+        )
+
+    def test_newer_prestart_cancellation_does_not_erase_failure(self) -> None:
+        old_failure = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        runs = [
+            {"id": 2, "created_at": "2026-07-12T11:00:00Z", "status": "completed"},
+            {"id": 1, "created_at": "2026-07-12T10:00:00Z", "status": "completed"},
+        ]
+        self.assertEqual(
+            latest_validation_failures(runs, {1: old_failure, 2: []}),
+            ("Smoke windows-x64: Smoke CLI runtime",),
+        )
+
+    def test_in_progress_pass_does_not_clear_older_failure(self) -> None:
+        current_pass = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "success",
+                "run_attempt": 1,
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "success"}],
+            }
+        ]
+        old_failure = [
+            {
+                "name": "Smoke windows-x64",
+                "conclusion": "failure",
+                "run_attempt": 1,
+                "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+            }
+        ]
+        runs = [
+            {"id": 2, "created_at": "2026-07-12T11:00:00Z", "status": "in_progress"},
+            {"id": 1, "created_at": "2026-07-12T10:00:00Z", "status": "completed"},
+        ]
+        self.assertEqual(
+            latest_validation_failures(runs, {1: old_failure, 2: current_pass}),
+            ("Smoke windows-x64: Smoke CLI runtime",),
+        )
+
+    def test_rerun_attempt_keeps_failure_from_prior_attempt(self) -> None:
+        attempt_one_failure = {
+            "name": "Smoke windows-x64",
+            "conclusion": "failure",
+            "run_attempt": 1,
+            "steps": [{"name": "Smoke CLI runtime", "conclusion": "failure"}],
+        }
+        attempt_two_cancelled = {
+            "name": "Resolve macOS runner — v0.770.0",
+            "conclusion": "cancelled",
+            "run_attempt": 2,
+            "steps": [],
+        }
+        runs = [
+            {
+                "id": 1,
+                "created_at": "2026-07-12T10:00:00Z",
+                "status": "completed",
+                "run_attempt": 2,
+            }
+        ]
+        self.assertEqual(
+            latest_validation_failures(
+                runs, {1: [attempt_one_failure, attempt_two_cancelled]}
+            ),
+            ("Smoke windows-x64: Smoke CLI runtime",),
+        )
+
 
 class QueuedIsNotRunning(unittest.TestCase):
     """A job that never STARTED is stuck, not slow — and must escalate.
@@ -323,6 +659,18 @@ class SupersededTagsAreNotRebuilt(unittest.TestCase):
         decision = decide(
             state(run_states=("completed",)), NOW,
             newest_published=self.NEWER, **LIMITS,
+        )
+        self.assertEqual(decision.action, SUPERSEDED)
+
+    def test_superseded_terminal_failure_does_not_open_incident(self) -> None:
+        decision = decide(
+            state(
+                run_states=("completed",),
+                validation_failures=("Smoke windows-x64: Smoke CLI runtime",),
+            ),
+            NOW,
+            newest_published=self.NEWER,
+            **LIMITS,
         )
         self.assertEqual(decision.action, SUPERSEDED)
 
@@ -426,6 +774,7 @@ class AssetContractFloor(unittest.TestCase):
             has_release_object=True,
             assets=REQUIRED_ASSETS - {"pulp-darwin-x64.tar.gz", "SHA256SUMS"},
             run_states=("completed",),
+            validation_failures=(),
             dispatch_attempts=0,
         )
         decision = decide(old, NOW, asset_floor=self.FLOOR, **LIMITS)
@@ -440,6 +789,7 @@ class AssetContractFloor(unittest.TestCase):
             has_release_object=True,
             assets=REQUIRED_ASSETS - {"pulp-darwin-x64.tar.gz"},
             run_states=("completed",),
+            validation_failures=(),
             dispatch_attempts=0,
         )
         decision = decide(new, NOW, asset_floor=self.FLOOR, **LIMITS)
@@ -493,6 +843,13 @@ class NeverDestructive(unittest.TestCase):
                 "release by destroying release state is the bug this module exists "
                 "to undo.",
             )
+
+    def test_circuit_incident_requires_an_explicit_repair_run(self) -> None:
+        source = (
+            Path(__file__).resolve().parent / "release_reconcile.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("manually dispatch the repaired workflow", source)
+        self.assertNotIn("reconciler will re-dispatch within 30 minutes", source)
 
 
 if __name__ == "__main__":

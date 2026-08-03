@@ -109,6 +109,7 @@ public:
     /// Callers that do teardown after run_event_loop() returns must move it into
     /// the close callback (set_close_callback) — on the web the host outlives
     /// this call and is torn down by request_close() or page unload.
+    bool event_loop_blocks_until_close() const override { return false; }
     void run_event_loop() override {
         if (running_) return;
         running_ = true;
@@ -177,6 +178,7 @@ public:
     // ── Capture ─────────────────────────────────────────────────────────
 
     std::vector<uint8_t> capture_png() override { return capture_back_buffer_png(); }
+    bool supports_compositor_capture() const override { return true; }
 
     /// Renders a fresh frame and reads it back. SUBMIT BEFORE READBACK: the
     /// pixels only exist once SkiaSurface::end_frame() has flushed and submitted
