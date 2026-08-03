@@ -168,6 +168,26 @@ add_executable(PulpSDKSmokeTimelineProbe
     "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeTimelineProbe PRIVATE Pulp::timeline)
 
+if(NOT TARGET Pulp::timeline-agent-view)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::timeline-agent-view")
+endif()
+if(NOT TARGET pulp::timeline-agent-view)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose pulp::timeline-agent-view")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_agent_view_export_probe.cpp"
+"#include <pulp/timeline_agent_view/agent_view.hpp>\n"
+"\n"
+"int main() {\n"
+"    const auto result = pulp::timeline_agent_view::AgentView::create({});\n"
+"    return result ? 1 : 0;\n"
+"}\n")
+add_executable(PulpSDKSmokeTimelineAgentViewProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/timeline_agent_view_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeTimelineAgentViewProbe
+    PRIVATE Pulp::timeline-agent-view)
+
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a
 # target-existence check alone produced a linkable-looking but unusable package.

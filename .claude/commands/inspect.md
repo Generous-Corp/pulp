@@ -1,12 +1,12 @@
 ---
 name: inspect
-description: Use the experimental inspector client with an explicitly hosted fixture
+description: Use the experimental client with an explicitly activated Development Inspector
 ---
 
-`pulp inspect` is currently a low-level client, not a normal `pulp run` or
-plugin-format workflow. Normal Pulp launches do not start an inspector
-endpoint. Use these commands only with a custom host/test fixture that
-explicitly constructs `InspectorServer`.
+`pulp inspect` is the low-level authenticated client for an explicitly
+activated Development Inspector. Start a GPU-enabled desktop standalone with
+`pulp run --inspect` (or another profile); normal `pulp run`, GPU-off/mobile
+builds, and plugin-format launches do not start an endpoint.
 
 ```bash
 ./build/pulp inspect
@@ -15,10 +15,10 @@ explicitly constructs `InspectorServer`.
 ./build/pulp inspect --command State.getParameters
 ```
 
-`Capture.screenshot` and `Capture.screenshotNode` currently return explicit
-unavailable errors until host-capture wiring lands. `Runtime.evaluate` is
-unavailable in normal launches, but an explicitly wired custom fixture can
-enable it; treat that opt-in as remote code execution.
+`Capture.screenshot` captures the selected standalone window when its host
+provides compositor capture. `Capture.screenshotNode` remains unavailable.
+`Runtime.evaluate` is unavailable in normal launches. An explicitly wired custom fixture
+can enable it; treat that opt-in as remote code execution.
 
 The inspector exposes:
 - View hierarchy with bounds, flex properties, and styles
@@ -26,6 +26,7 @@ The inspector exposes:
 - Theme tokens and computed colors
 - Layout debug information
 
-Auto-discovery is a transitional port-file hint without authenticated session
-identity. Prefer an explicit loopback port for a controlled fixture. Do not use
-the current transport for privileged mutation or runtime evaluation.
+Auto-discovery reads owner-private ephemeral records and credentials, selects
+an exact session/instance/publication generation, and authenticates both peers
+with role-separated per-connection nonce/HMAC proofs bound to that generation.
+Mutations additionally require the session's controller lease.

@@ -42,7 +42,9 @@ Run:
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -212,12 +214,47 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
-    def test_cli_and_sdk_build_disable_inspector(self) -> None:
+    def test_cli_and_sdk_build_ship_inspector_sdk(self) -> None:
         self.assertGreaterEqual(
-            self.text.count("-DPULP_ENABLE_INSPECTOR=OFF"),
+            self.text.count("-DPULP_ENABLE_INSPECTOR=ON"),
             2,
-            "release-cli.yml must keep the inspector disabled for both the "
-            "CLI and SDK release configure steps.",
+            "release-cli.yml must enable the inspector component for both "
+            "release configure steps because release_product_matrix.json "
+            "promises the installed pulp-inspect archive family.",
+        )
+        matrix = json.loads(
+            (REPO_ROOT / "tools/scripts/release_product_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        floor = matrix["inspector_sdk_floor"]
+        self.assertGreaterEqual(self.text.count(floor), 2)
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = authoritative["inspector_sdk_floor"]',
+            self.text,
+        )
+        for step_name in (
+            "Configure (CLI, no WebView on Linux)",
+            "Prepare SDK build dir (Linux)",
+        ):
+            workflow = yaml.safe_load(self.text)
+            step = next(
+                step
+                for step in workflow["jobs"]["build-cli"]["steps"]
+                if step.get("name") == step_name
+            )
+            self.assertEqual(
+                step["env"]["RELEASE_TAG"],
+                "${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}",
+            )
+
+    def test_release_path_gate_matches_inspector_sdk_flag(self) -> None:
+        gate = RELEASE_PATH_PR_GATE.read_text(encoding="utf-8")
+        self.assertIn(
+            "-DPULP_ENABLE_INSPECTOR=ON",
+            gate,
+            "the PR-time release-path configure must match the tagged release "
+            "inspector SDK flag.",
         )
 
     def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
@@ -336,7 +373,10 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_disables_audio_probes(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
-        self.assertIn("-DPULP_ENABLE_INSPECTOR=OFF", run_block)
+
+    def test_windows_release_gate_ships_inspector_sdk(self) -> None:
+        run_block = self._find_step_run("Configure (matches release-cli.yml)")
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=ON", run_block)
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
@@ -683,6 +723,24 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
 
+    def test_release_content_helper_shell_is_syntactically_valid(self) -> None:
+        """Catch heredoc indentation that only fails on tagged Linux jobs."""
+        workflow = yaml.safe_load(self.text)
+        step = next(
+            step
+            for step in workflow["jobs"]["build-cli"]["steps"]
+            if step.get("name")
+            == "Ensure release-content verifier helpers exist"
+        )
+        result = subprocess.run(
+            ["bash", "-n"],
+            input=step["run"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_manual_dispatch_compatibility_helpers_do_not_dirty_tracked_source(
         self,
     ) -> None:
@@ -838,7 +896,7 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
 
-    def test_release_finalizer_uses_authoritative_provenance_floor(self) -> None:
+    def test_release_finalizer_uses_authoritative_provenance_floors(self) -> None:
         steps = self.workflow["jobs"]["release"]["steps"]
         finalizer = next(
             step
@@ -857,6 +915,11 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertIn(
             'selected["sdk_provenance_floor"] = '
             'authoritative["sdk_provenance_floor"]',
+            run_block,
+        )
+        self.assertIn(
+            'selected["inspector_sdk_floor"] = '
+            'authoritative["inspector_sdk_floor"]',
             run_block,
         )
         self.assertIn('--matrix "$publication_matrix"', run_block)
@@ -1056,6 +1119,63 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         """The resolver is a repo script; without a checkout the job dies at once."""
         steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
         self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
+
+    def test_darwin_x64_prefers_the_dedicated_release_tart_pool(self) -> None:
+        steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
+        resolver = next(step for step in steps if step.get("id") == "resolve")
+        selector = resolver["env"]["DARWIN_X64"]
+        per_leg = selector.index("PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON")
+        release_pool = selector.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        legacy_intel = selector.index("PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON")
+        self.assertLess(per_leg, release_pool)
+        self.assertLess(release_pool, legacy_intel)
+
+    def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        for job in ("build-cli", "smoke-cli"):
+            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            darwin_x64 = next(
+                row for row in rows if row["platform"] == "darwin-x64"
+            )
+            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+
+
+class TrustedReleaseControlPlaneRouting(unittest.TestCase):
+    """Only trusted release resolver jobs may reuse persistent Linux capacity."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.release_text = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.sign_text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+        cls.release = yaml.safe_load(cls.release_text)
+        cls.sign = yaml.safe_load(cls.sign_text)
+
+    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+        for workflow in (self.release, self.sign):
+            with self.subTest(workflow=workflow["name"]):
+                runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
+                dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
+                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
+                fallback = runs_on.index('"ubuntu-latest"')
+                self.assertLess(dedicated, existing)
+                self.assertLess(existing, fallback)
+
+    def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
+        for text in (self.release_text, self.sign_text):
+            with self.subTest(workflow=text.splitlines()[0]):
+                trigger_block = text.split("\n# Never cancel", 1)[0]
+                self.assertNotIn("pull_request:", trigger_block)
+                self.assertNotIn("merge_group:", trigger_block)
+
+    def test_release_resolver_checks_out_trusted_main_control_code(self) -> None:
+        steps = self.release["jobs"]["resolve-macos-runner"]["steps"]
+        checkouts = [step for step in steps if "uses" in step]
+        self.assertGreaterEqual(len(checkouts), 1)
+        for checkout in checkouts:
+            self.assertEqual(
+                checkout["with"]["ref"],
+                "${{ github.event.repository.default_branch }}",
+            )
 
 
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):

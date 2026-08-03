@@ -24,6 +24,10 @@ struct ParseRunResult {
     int frames = 1;                    ///< --frames <n>, default 1
     bool watch = false;                ///< --watch
 
+    // Development Inspector launcher profile. Empty means off.
+    std::string inspector_profile;     ///< --inspect[=<profile>]
+    std::vector<std::string> inspector_capabilities; ///< custom profile capability ids
+
     // Live Audio Inspector discoverability flags.
     bool audio_inspector = false;      ///< --audio-inspector (PULP_AUDIO_INSPECTOR=1)
     std::string audio_probe_json_path; ///< --audio-probe-json <path>; implies --headless

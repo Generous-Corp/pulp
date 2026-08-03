@@ -44,6 +44,27 @@ inline bool parse_nonnegative_int(std::string_view value, int& out) {
 }
 
 inline StandaloneConfig standalone_config_from_environment(StandaloneConfig config) {
+    if (auto profile = runtime::get_env("PULP_INSPECT_PROFILE");
+        profile && config.inspector_profile.empty()) {
+        config.inspector_profile = *profile;
+    }
+    if (config.inspector_profile.empty() &&
+        standalone_env_truthy("PULP_INSPECTOR")) {
+        config.inspector_profile = "local";
+    }
+    if (auto capabilities = runtime::get_env("PULP_INSPECT_CAPABILITIES");
+        capabilities && config.inspector_capabilities.empty()) {
+        std::string_view remaining = *capabilities;
+        while (!remaining.empty()) {
+            const auto comma = remaining.find(',');
+            auto capability = remaining.substr(0, comma);
+            if (!capability.empty())
+                config.inspector_capabilities.emplace_back(capability);
+            if (comma == std::string_view::npos) break;
+            remaining.remove_prefix(comma + 1);
+        }
+    }
+
     if (standalone_env_truthy("PULP_HEADLESS")
         || standalone_env_truthy("PULP_TEST_MODE")
         || standalone_env_truthy("CI")) {

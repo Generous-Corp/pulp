@@ -53,6 +53,16 @@ STUCK_QUEUE = "stuck-queue"  # queued for hours and never started — no runner 
 DEFERRED = "deferred"        # a NEWER tag is still building; wait and see
 REDISPATCH = "redispatch"    # stuck, and we still have budget to retry
 ESCALATE = "escalate"        # stuck, and out of budget — a human must look
+CIRCUIT_OPEN = "circuit-open"  # product validation failed; do not retry the tag
+
+# These steps validate immutable release content. Failures in bootstrap, artifact
+# transfer, attestation, or publication are workflow failures and retain the
+# bounded retry path; a failure here is evidence that repeating the same tag would
+# only repeat runner load.
+VALIDATION_STEP_PREFIXES = (
+    "Smoke CLI",
+    "Verify release archive product matrix",
+)
 
 
 INCOMPLETE = "incomplete"    # published, but missing assets — unfixable by us
@@ -89,7 +99,12 @@ class TagState:
     has_release_object: bool  # a release exists at all (draft or published)
     assets: frozenset[str]   # asset names on that release
     run_states: tuple[str, ...]  # states of every release-cli run for this tag
+    validation_failures: tuple[str, ...]  # failed product-validation step names
     dispatch_attempts: int   # how many times we have already re-dispatched
+
+    @property
+    def circuit_open(self) -> bool:
+        return bool(self.validation_failures)
 
     @property
     def missing_assets(self) -> frozenset[str]:
@@ -203,20 +218,12 @@ def decide(
     # Escalate to a human — re-dispatching would just mint another queued run on the
     # same broken route.
     queued = [s for s in state.run_states if s in LIVE_RUN_STATES]
-    if queued and age > timedelta(hours=stuck_queue_hours):
-        return Decision(
-            STUCK_QUEUE,
-            f"queued for over {stuck_queue_hours}h and never started — no runner is "
-            f"serving this job (check `runs-on` labels and the runner pool)",
-        )
-    if queued:
+    if queued and age <= timedelta(hours=stuck_queue_hours):
         return Decision(IN_FLIGHT, f"{state.tag} has a release-cli run in flight")
 
-    # No live run and no release yet — but the tag may simply have been pushed
-    # seconds ago and the run not registered.
-    if age < timedelta(minutes=grace_minutes) and not state.has_release_object:
-        return Decision(GRACE, f"{state.tag} is younger than {grace_minutes}m")
-
+    # A release already replaced by a newer published version needs neither an
+    # incident nor more runner time. A genuinely running job still outranks this
+    # branch, but a stale queue entry or terminal result does not.
     if superseded(state.tag, newest_published):
         return Decision(
             SUPERSEDED,
@@ -224,22 +231,39 @@ def decide(
             f"not spending a rebuild on it",
         )
 
-    # A NEWER tag is still building. Wait for it.
-    #
-    # If it publishes, this tag becomes SUPERSEDED and never needed a rebuild at
-    # all — so repairing it now is speculative work that competes for the very
-    # runners the newer release is waiting on. That is self-defeating on a starved
-    # pool: we would be slowing down the release that makes this one unnecessary.
-    #
-    # This is a WAIT, not a write-off. Nothing is cancelled or deleted, and if the
-    # newer tag's run ends without publishing, it stops being live and this tag
-    # becomes repairable on the very next sweep.
+    if queued:
+        return Decision(
+            STUCK_QUEUE,
+            f"queued for over {stuck_queue_hours}h and never started — no runner is "
+            f"serving this job (check `runs-on` labels and the runner pool)",
+        )
+
+    # A NEWER tag is still building. Wait for it. If it publishes, this tag is
+    # superseded and never needed an incident or rebuild; if it fails, this tag is
+    # evaluated normally on the next sweep.
     if version_of(state.tag) and newest_live and version_of(state.tag) < newest_live:
         return Decision(
             DEFERRED,
             f"{state.tag} is stuck, but a NEWER tag is still building — waiting, "
             f"since publishing that one supersedes this one",
         )
+
+    # The source selected by release-cli is an immutable tag. A failed product
+    # validation step is evidence that dispatching the same tag again would only
+    # repeat runner load. Workflow/infrastructure failures do not set this flag
+    # and retain the bounded retry path.
+    if state.circuit_open:
+        observed = "; ".join(sorted(set(state.validation_failures)))
+        return Decision(
+            CIRCUIT_OPEN,
+            f"{state.tag} failed immutable product validation: {observed}; circuit "
+            "open — immutable-tag failures are not retried",
+        )
+
+    # No live run and no release yet — but the tag may simply have been pushed
+    # seconds ago and the run not registered.
+    if age < timedelta(minutes=grace_minutes) and not state.has_release_object:
+        return Decision(GRACE, f"{state.tag} is younger than {grace_minutes}m")
 
     if state.dispatch_attempts >= max_attempts:
         return Decision(
@@ -318,23 +342,36 @@ def collect(
     )
     flat_runs = [r for page in runs for r in page["workflow_runs"]]
 
+    # Job details serve two purposes: dispatch runs carry their tag in a job name,
+    # and failed runs carry the step-level evidence that distinguishes immutable
+    # product validation from retryable workflow/infrastructure failure.
+    job_cache: dict[int, list[dict]] = {}
+    for r in flat_runs:
+        if not needs_job_details(r):
+            continue
+        try:
+            result = gh_json(
+                [
+                    "api",
+                    f"repos/{repo}/actions/runs/{r['id']}/jobs?filter=all&per_page=100",
+                ]
+            )
+            job_cache[r["id"]] = (result or {}).get("jobs", [])
+        except subprocess.CalledProcessError:
+            job_cache[r["id"]] = []
+
     # For a dispatch run, head_branch is `main`, so resolve its tag from its first
-    # job's name (release-cli.yml embeds it there). Only dispatch runs need this
-    # extra lookup, and there are only ever a handful in the window.
+    # job's name (release-cli.yml embeds it there).
     dispatch_tag: dict[int, str | None] = {}
     for r in flat_runs:
         if r.get("event") != "workflow_dispatch":
             continue
         found = None
-        try:
-            jobs = gh_json(["api", f"repos/{repo}/actions/runs/{r['id']}/jobs"])
-            for j in (jobs or {}).get("jobs", []):
-                m = SEMVER_IN_TEXT.search(j.get("name", ""))
-                if m:
-                    found = m.group(0)
-                    break
-        except subprocess.CalledProcessError:
-            pass
+        for j in job_cache.get(r["id"], []):
+            m = SEMVER_IN_TEXT.search(j.get("name", ""))
+            if m:
+                found = m.group(0)
+                break
         dispatch_tag[r["id"]] = found
 
     states: list[TagState] = []
@@ -354,6 +391,7 @@ def collect(
                     a["name"] for a in (rel or {}).get("assets", [])
                 ),
                 run_states=tuple(r["status"] for r in tag_runs),
+                validation_failures=latest_validation_failures(tag_runs, job_cache),
                 # A tag push produces one `push` run; every run beyond that is a
                 # re-dispatch, ours or a human's.
                 dispatch_attempts=sum(
@@ -362,6 +400,90 @@ def collect(
             )
         )
     return states
+
+
+def needs_job_details(run: dict) -> bool:
+    """Inspect dispatches and every terminal run that did not fully succeed."""
+    if run.get("event") == "workflow_dispatch":
+        return True
+    return run.get("status") == "completed" and run.get("conclusion") != "success"
+
+
+def validation_failures(jobs: Iterable[dict]) -> tuple[str, ...]:
+    """Return failed steps that establish an immutable product defect."""
+    failures, _ = validation_outcomes(jobs)
+    return tuple(failures.values())
+
+
+def validation_outcomes(
+    jobs: Iterable[dict],
+) -> tuple[dict[str, str], set[str]]:
+    """Return failed and passed product gates, keyed by platform and gate."""
+    failures: dict[str, str] = {}
+    passed: set[str] = set()
+    for job in jobs:
+        job_name = job.get("name", "unknown job")
+        for step in job.get("steps", []):
+            name = step.get("name", "")
+            prefix = next(
+                (
+                    candidate
+                    for candidate in VALIDATION_STEP_PREFIXES
+                    if name.startswith(candidate)
+                ),
+                None,
+            )
+            if prefix is None:
+                continue
+            gate = f"{job_name}|{prefix}"
+            if step.get("conclusion") == "failure":
+                failures[gate] = f"{job_name}: {name}"
+            elif step.get("conclusion") == "success":
+                passed.add(gate)
+    return failures, passed
+
+
+def latest_validation_failures(
+    runs: Iterable[dict], job_cache: dict[int, list[dict]]
+) -> tuple[str, ...]:
+    """Return current validation evidence, allowing a later pass to clear it."""
+    attempts: list[tuple[str, int, bool, list[dict]]] = []
+    for run in runs:
+        jobs_by_attempt: dict[int, list[dict]] = {}
+        for job in job_cache.get(run["id"], []):
+            jobs_by_attempt.setdefault(int(job.get("run_attempt", 1)), []).append(job)
+        latest_attempt = int(run.get("run_attempt", max(jobs_by_attempt, default=1)))
+        for attempt, jobs in jobs_by_attempt.items():
+            # Earlier attempts are necessarily terminal. The current attempt may
+            # contribute failure evidence while running, but its passes clear old
+            # evidence only after the workflow itself reaches a terminal state.
+            may_clear = attempt < latest_attempt or run.get("status") == "completed"
+            attempts.append((run.get("created_at", ""), attempt, may_clear, jobs))
+
+    newest_first = sorted(attempts, key=lambda item: (item[0], item[1]), reverse=True)
+    cleared: set[str] = set()
+    active: dict[str, str] = {}
+    for _, _, may_clear, jobs in newest_first:
+        failures, passed = validation_outcomes(jobs)
+        for gate, why in failures.items():
+            if gate not in cleared and gate not in active:
+                active[gate] = why
+        if may_clear:
+            cleared.update(passed)
+    return tuple(active.values())
+
+
+def incident_stays_open(
+    state: TagState,
+    *,
+    newest_published: tuple | None,
+    asset_floor: tuple | None,
+    max_attempts: int,
+) -> bool:
+    """Keep an escalated incident stable while a human repair is running."""
+    return state.unresolved(
+        newest_published=newest_published, floor=asset_floor
+    ) and (state.circuit_open or state.dispatch_attempts >= max_attempts)
 
 
 def runs_this_tag(run: dict, tag: str, dispatch_tag: str | None = None) -> bool:
@@ -452,11 +574,13 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
         "exhausted its retry budget or cannot be fixed by a rebuild — this is a "
         "real failure, not a flake.\n\n"
         + "\n".join(f"- `{tag}` — {why}" for tag, why in report)
-        + "\n\nUsually the build is broken at that tag: open the failing "
-        "`release-cli.yml` run, land the fix on `main`, and the reconciler will "
-        "re-dispatch within 30 minutes. A release that is published but missing "
-        "assets cannot be repaired in place (published releases are immutable) — "
-        "ship a new patch tag.\n\nMaintained in place by "
+        + "\n\nOpen the failing `release-cli.yml` run and land the fix on `main`. "
+        "A product-validation circuit stays open until a later run passes the "
+        "failed gate: manually dispatch the repaired workflow for the same tag "
+        "when a pipeline overlay can fix it, or ship a new patch tag when product "
+        "source must change. A published release missing assets also requires a "
+        "new patch tag because published releases are immutable.\n\nMaintained "
+        "in place by "
         "`.github/workflows/release-reconcile.yml`; it closes itself once every "
         "recent tag is published and complete."
     )
@@ -549,11 +673,13 @@ def main() -> int:
                 continue
             budget -= 1
             redispatch(repo, state.tag, dry_run)
-        elif decision.action in (ESCALATE, INCOMPLETE, STUCK_QUEUE):
+        elif decision.action in (CIRCUIT_OPEN, ESCALATE, INCOMPLETE, STUCK_QUEUE):
             report.append((state.tag, decision.reason))
-        elif (
-            state.unresolved(newest_published=newest_published, floor=asset_floor)
-            and state.dispatch_attempts >= max_attempts
+        elif incident_stays_open(
+            state,
+            newest_published=newest_published,
+            asset_floor=asset_floor,
+            max_attempts=max_attempts,
         ):
             # Already escalated on a previous sweep and STILL not published — a
             # human is presumably mid-repair, so it has a live run and is not

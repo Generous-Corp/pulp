@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -161,9 +162,23 @@ TEST_CASE("prepare_swap publishes a reinit-free edit with NO silent block "
         }
     });
 
+    // Observing at least one swap outcome is a precondition of the assertions
+    // below, and the fixed block budget alone does not establish it: nothing
+    // orders the editor thread's first iteration before this loop ends, so on a
+    // loaded machine the whole budget can be spent before that thread is ever
+    // scheduled. Spend the budget, then keep rendering until an outcome lands.
+    // The deadline bounds a real regression (a graph that never swaps) into a
+    // failed CHECK instead of a hang.
     bool saw_silent = false;
     for (int i = 0; i < 5000; ++i) {
         if (render_peak(g) == 0.0f) saw_silent = true;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (swapped.load(std::memory_order_relaxed) == 0
+           && needs_eager.load(std::memory_order_relaxed) == 0
+           && std::chrono::steady_clock::now() < deadline) {
+        if (render_peak(g) == 0.0f) saw_silent = true;
+        std::this_thread::yield();
     }
     stop.store(true, std::memory_order_relaxed);
     editor.join();

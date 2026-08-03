@@ -80,6 +80,10 @@ void AudioInspector::set_runtime_telemetry(
     telemetry_available_.store(true, std::memory_order_release);
 }
 
+void AudioInspector::set_xrun_count(uint64_t xrun_count) {
+    telemetry_xrun_count_.store(xrun_count, std::memory_order_relaxed);
+}
+
 void AudioInspector::clear_runtime_telemetry() {
     telemetry_available_.store(false, std::memory_order_release);
     telemetry_load_.store(0.0f, std::memory_order_relaxed);

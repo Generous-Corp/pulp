@@ -176,8 +176,10 @@ int cmd_design(const std::vector<std::string>& args);
 int cmd_cache(const std::vector<std::string>& args);
 int cmd_upgrade(const std::vector<std::string>& args);
 int cmd_audio(const std::vector<std::string>& args);
+#if PULP_ENABLE_PROJECT_PACKAGE
 int cmd_seq(const std::vector<std::string>& args);
 int cmd_render(const std::vector<std::string>& args);
+#endif
 int cmd_sdk(const std::vector<std::string>& args);
 int cmd_version(const std::vector<std::string>& args);
 int cmd_dev(const std::vector<std::string>& args);

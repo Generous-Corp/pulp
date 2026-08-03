@@ -1040,6 +1040,104 @@ and launch slots are durable document state. The compiler accepts Arrangement
 only; the embedding application owns runtime launcher interpretation and
 scene-to-track arbitration.
 
+## project_package
+
+Crash-consistent publication for stable project-package roots and generic
+files or directories. `AtomicPublisher::create()` creates a private sibling
+directory stage, accepts only safe package-relative paths through `write()`,
+and publishes it with `commit_directory()`. File publication instead uses
+`create_file()`, which returns one pre-created `staging_file()` that an external
+producer may truncate and fill before `commit_file()`. Both modes publish a
+previously absent destination without replacing it. `PackageWriter` instead maintains one
+stable package root: `stage_blob()` hash-verifies and fences content-addressed
+blobs before publishing them no-replace, while `publish()` validates every
+package-relative asset reference before atomically replacing the root's
+`project.json` generation and fencing the root directory. An interrupted stage
+remains unreachable and cannot expose a durable reference to unfenced content;
+package-wide abandoned-stage recovery and reachability GC belong to the
+follow-on recovery layer.
+
+Writer exclusion is cooperative. All package writers must honor the package
+lock, and callers must not concurrently rename or replace package or private
+staging entries out of band from another process running as the same account.
+Any external producer using `staging_directory()` or `staging_file()` must
+finish and release the stage before commit or cancellation begins. On Windows,
+staged objects retain a private DACL until the rename succeeds; the still-open
+published handle then adopts the destination parent's inheritance. A crash
+before or during that adoption can leave the published object or some
+descendants owner-private instead of broadly inherited; callers must treat
+final permissions as incomplete.
+The implementation pins and revalidates identities to reject detected
+rebinding, but POSIX does not provide a portable operation that renames an
+already-open directory by identity.
+
+**Link:** `pulp::project-package` · **Include prefix:**
+`<pulp/project_package/...>`
+
+```cpp
+#include <pulp/project_package/atomic_publisher.hpp>
+
+using namespace pulp::project_package;
+
+auto publisher = AtomicPublisher::create(destination);
+if (!publisher)
+    return;
+auto staged = publisher->write("render-manifest.json", manifest_json);
+if (!staged || !staged.value())
+    return;
+
+auto outcome = publisher->commit_directory();
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+```
+
+Use `PackageWriter` when the destination is a stable project-package root.
+Stage each referenced blob first, then publish the Project that references it;
+opening the package revalidates both the generation and its references:
+
+```cpp
+#include <pulp/project_package/project_package.hpp>
+
+using namespace pulp::project_package;
+using pulp::timeline::make_builtin_timeline_registry;
+
+auto registry = make_builtin_timeline_registry();
+if (!registry)
+    return;
+auto writer = PackageWriter::create(package_root, registry.value());
+if (!writer)
+    return;
+
+auto blob = writer.value().stage_blob(BlobStore::Media, media_hash, media_bytes);
+if (!blob)
+    return;
+// `project` contains the matching package-relative asset reference.
+auto outcome = writer.value().publish(project);
+if (!outcome || outcome.value() != AtomicPublishOutcome::PublishedDurably)
+    return;
+
+auto opened = open_package(package_root, registry.value());
+if (!opened)
+    return;
+```
+
+`PublishedDurabilityUncertain` means the new `project.json` may already be
+visible even though final permission adoption or the directory fence did not
+complete; callers must not report that outcome as a definite rollback.
+
+Source builds may set `PULP_ENABLE_PROJECT_PACKAGE=OFF` to omit this component
+and the dependent Timeline authoring tools. The resulting installed SDK does
+not export `Pulp::project-package`, so requesting the `project-package`
+component with `find_package(Pulp REQUIRED COMPONENTS ...)` fails.
+
+The module owns publication and bounded exact-prefix cleanup of its private
+staging files, not package-wide recovery, reachability GC, a project schema, or
+an archive format. Timeline remains the authority for canonical project JSON;
+DAWproject ZIP admission and interchange loss accounting stay in their format
+and tooling layers rather than entering this dependency floor.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## interchange
 
 Format-neutral interchange machinery shared by every exporter and importer.
@@ -1169,6 +1267,30 @@ separate target exists for consumers that want manifest handling alone.
 **Depends on:** `pulp::runtime`
 
 
+## timeline_agent_view
+
+Bounded, versioned read projections for agents and other context-limited
+consumers. `AgentView` pins an immutable `timeline::DocumentView`; every read
+requires the caller's expected revision and refuses mismatches. The outline is
+project/sequence/track/clip sized. Rows carry Merkle content commitments, while
+each `omitted` count and SHA-256 covers only the directly omitted authored rows,
+so omission counts form a non-overlapping partition of the structural census.
+
+Region pages select clip starts in a half-open window and order them by
+`(start, id)`. A cursor is accepted only when its version, revision, sequence,
+anchor, exact window bounds, and key identify a member of that same window.
+`DirtySet` projection additionally requires an adjacent before/after revision
+range ending at the pinned view. That range rejects stale and multi-commit
+projections, but it cannot authenticate `DirtySet` origin because the public set
+type carries no session-issued provenance token; callers must pair it with the
+`CommitResult` that produced it. Removed identities map to their tombstoned
+nearest outline owner.
+
+**Link:** `pulp::timeline-agent-view` · **Include prefix:**
+`<pulp/timeline_agent_view/...>`
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 ## timeline_editor
 
 Interfaces for building a timeline editor over the document model, plus the edit
@@ -1239,6 +1361,33 @@ submits to. The verbs live at this rung rather than in the document model so the
 floor check can reject a reducer or serializer that reaches for one; the model's
 floor excludes this module, which is the only direction in which the two rungs
 differ.
+
+`TrackEditIntent` is a second channel beside it, for arranging tracks rather than
+editing clips, and `lower_track_edit_intent` turns one into the `MoveTrack` that
+performs it. It is a separate type rather than added fields on `EditIntent`
+because the two name different subjects: a clip intent names a clip inside a
+track and carries clip time ranges, while a track intent names a track inside a
+sequence and carries an insertion point. Folded together, every clip intent would
+carry track-destination fields that are always empty and vice versa, with nothing
+in the type able to say which combination is meaningful. `TrackEditIntentHost` is
+the matching `SequencerUiHostT<TrackEditIntent>`, so a view that only rearranges
+tracks never acquires the clip vocabulary.
+
+Insertion is expressed as "before this track", matching the command, so a
+front-end that resolved a drop position to a neighbour need not convert it to an
+index. A `std::nullopt` destination means last position — a request, not an
+omission, and deliberately not a separate append verb.
+
+```cpp
+#include <pulp/timeline_editor/track_edit_intent.hpp>
+
+TrackEditIntent intent;                       // drag `moved` above `neighbour`
+intent.sequence_id = sequence_id;
+intent.track_id = moved;
+intent.expected_before_track_id = current_neighbour_of(moved);
+intent.replacement_before_track_id = neighbour;
+auto transaction = lower_track_edit_intent(intent, identity);
+```
 
 Piano-roll gestures use the sibling `NoteEditIntent` vocabulary. Insert carries
 only a replacement note, erase carries only the expected note, and move, resize,

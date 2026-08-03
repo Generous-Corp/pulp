@@ -36,6 +36,7 @@ using namespace pulp::canvas;
 class InspectorOverlay {
 public:
     explicit InspectorOverlay(View& root);
+    ~InspectorOverlay();
 
     // The root View this overlay inspects and paints into. Used by the
     // installed paint hook to gate: the overlay's selection box /

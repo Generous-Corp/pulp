@@ -412,7 +412,14 @@ endif()
 # of PULP_BENCHMARK. Downstream targets that only use view APIs do NOT need to
 # link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
-    target_link_libraries(pulp-view-core PRIVATE pulp::render)
+    # plugin_frame_renderer.hpp exposes render::GpuSurface when Skia is on,
+    # so consumers need the render include and link contract in that build.
+    # The no-Skia build keeps render as an implementation detail.
+    if(PULP_HAS_SKIA)
+        target_link_libraries(pulp-view-core PUBLIC pulp::render)
+    else()
+        target_link_libraries(pulp-view-core PRIVATE pulp::render)
+    endif()
     target_link_libraries(pulp-view-script PRIVATE pulp::render)
     # Enables the offscreen-GPU view-capture path (render_to_png_gpu / capture_view
     # via pulp::render::HeadlessSurface) in src/screenshot_gpu.cpp. Gate on Skia,
