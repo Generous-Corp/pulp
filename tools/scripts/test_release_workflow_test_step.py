@@ -380,7 +380,7 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
-    """release-path-pr-gate.yml must route darwin via the release macOS var."""
+    """release-path-pr-gate.yml must have a release-priority-safe selector."""
 
     def setUp(self) -> None:
         self.assertTrue(
@@ -391,7 +391,13 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
 
     def test_darwin_leg_uses_release_macos_runner_resolver(self) -> None:
         self.assertIn("resolve-macos-runner:", self.text)
+        self.assertIn("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON", self.text)
         self.assertIn("PULP_RELEASE_MACOS_RUNS_ON_JSON", self.text)
+        self.assertLess(
+            self.text.index("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON"),
+            self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON"),
+            "the PR-gate-specific selector must win before the legacy shared fallback",
+        )
         self.assertIn("needs: resolve-macos-runner", self.text)
         self.assertIn(
             "matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os",
