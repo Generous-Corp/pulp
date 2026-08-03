@@ -1,5 +1,7 @@
 #include "forge/process_engine.hpp"
 
+#include <pulp/platform/child_process.hpp>
+
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -42,6 +44,21 @@ ProcessEngine::ProcessEngine(std::string tools_dir, std::string log_path)
                         .string();
 }
 
+int ProcessEngine::run_tool(const std::string& executable,
+                            const std::vector<std::string>& args,
+                            std::string& output,
+                            const std::string& working_dir) {
+    output.clear();
+    pulp::platform::ProcessOptions opts;
+    opts.working_directory = working_dir;
+    // Both streams, into one string, because every caller here reports the
+    // whole transcript to a person: a Python traceback arrives on stderr, and
+    // a message that drops it says only "it failed".
+    const auto r = pulp::platform::ChildProcess::run(executable, args, opts);
+    output = r.stdout_output + r.stderr_output;
+    return r.exit_code;
+}
+
 int ProcessEngine::run(const std::string& command, std::string& output) {
     output.clear();
     std::FILE* pipe = ::popen(command.c_str(), "r");
@@ -77,8 +94,9 @@ bool ProcessEngine::ensure_running() {
     // reads as a hang.
     if (python_ok_.load(std::memory_order_relaxed) < 0) {
         std::string out;
-        python_ok_.store(run("python3 -c 'pass' 2>&1", out) == 0 ? 1 : 0,
-                         std::memory_order_relaxed);
+        python_ok_.store(
+            run_tool("python3", {"-c", "pass"}, out) == 0 ? 1 : 0,
+            std::memory_order_relaxed);
     }
     if (python_ok_.load(std::memory_order_relaxed) != 1) {
         error_ = "python3 is not available on this machine";
@@ -154,8 +172,17 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     // child of the app's process group -- quitting the window SIGHUPs it
     // mid-build. Observed: a run died right after "manifest + panel
     // validated", never reaching "compiled", because the app was closed.
+    // -u, because Python BLOCK-BUFFERS stdout when it is not a terminal.
+    //
+    // The transcript is redirected to a file, so without this nothing reaches
+    // the log until 4-8KB has accumulated or the process exits. BuildMonitor
+    // tails that file to drive the stage list, so a run that was working
+    // perfectly showed an empty log, no stage, and no elapsed time for
+    // minutes: observed at 4m50s into a generation with a 0-byte log and a
+    // healthy python. Indistinguishable, from the outside, from a run that
+    // died on the first line -- which is the reading it invites.
     cmd << "cd " << shell_quote(tools_dir_) << " && "
-        << "nohup python3 " << tool << verb << shell_quote(prompt)
+        << "nohup python3 -u " << tool << verb << shell_quote(prompt)
         // Truncate: BuildMonitor treats a shrinking file as a new run, so the
         // transcript starts clean rather than replaying the previous build.
         << " > " << shell_quote(log_path_) << " 2>&1 &";
@@ -176,11 +203,12 @@ std::string ProcessEngine::explain(const std::string& patch_path) const {
     if (!fs::exists(patch_path, ec))
         return "There is no patch open to explain yet.";
 
-    std::ostringstream cmd;
-    cmd << "cd " << shell_quote(tools_dir_) << " && "
-        << "python3 patch.py explain " << shell_quote(patch_path) << " 2>&1";
+    // No shell: the patch path is an argument, and `working_directory` is what
+    // the `cd` was for. A path with a space or a quote in it used to depend on
+    // shell_quote getting it exactly right.
     std::string out;
-    if (run(cmd.str(), out) != 0 || out.empty())
+    if (run_tool("python3", {"patch.py", "explain", patch_path}, out,
+                 tools_dir_) != 0 || out.empty())
         return "I could not read that patch.";
     return out;
 }

@@ -4089,6 +4089,54 @@ TEST_CASE("the Home guard reads nothing outside its own fixture", "[no-leak]") {
     CHECK(listings == 0);
 }
 
+TEST_CASE("a run that has printed nothing still shows a stage and a clock",
+          "[stage]") {
+    // The failure this exists to prevent, seen in full: a generation ran for
+    // seven minutes with a healthy model call in flight and a 0-byte log,
+    // and the card showed five identical grey rows the whole time. Python
+    // block-buffers stdout when it is redirected to a file, so the first line
+    // had not reached disk yet -- and the stage was driven ONLY by that file,
+    // starting at -1 until something matched.
+    //
+    // On screen that is identical to a generator that died before its first
+    // line, which is how it was read. The app launched the process and knows
+    // when; that is enough to show a stage and count.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-silent.log";
+    std::filesystem::remove(log);
+    { std::ofstream f(log); }                    // exists, and is EMPTY
+    shell.watch_build_log(log.string());
+    shell.on_poll();
+
+    CHECK(chrome->active_chip() == 0);
+    CHECK_FALSE(chrome->active_stage_elapsed_text().empty());
+    const auto activity = chrome->status_activity_text();
+    INFO("activity: " << activity);
+    CHECK(activity.find("elapsed") != std::string::npos);
+
+    // And the log still WINS the moment it says anything: a silent run is
+    // shown at stage 0, not pinned there. The line is a real marker
+    // (stage_of maps "manifest" to Writing files) rather than an invented
+    // one -- the first draft of this used "writing files", which matches
+    // nothing, so it asserted that the log could not move the stage.
+    { std::ofstream f(log, std::ios::app); f << "  manifest + panel ok\n"; }
+    shell.on_poll();
+    CHECK(chrome->active_chip() > 0);
+}
+
 TEST_CASE("a running build shows a clock, not just a word", "[phase7][stage]") {
     // "asking the model" with nothing moving is indistinguishable from a wedged
     // process, and a model call takes minutes. Forge's own chips carry a live

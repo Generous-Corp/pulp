@@ -16,6 +16,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace forge_modular {
 
@@ -76,7 +77,27 @@ public:
 
     /// Run a tool and collect its output. Public so a test can drive the same
     /// path the app does rather than a private shortcut.
+    ///
+    /// Takes a SHELL command, and that is the thing to move away from: it
+    /// pins the app to a POSIX shell, and every caller has to quote its own
+    /// arguments correctly or a prompt containing a quote becomes syntax.
+    /// Prefer `run_tool` for anything that is really "an executable and some
+    /// arguments". What is left here is the cases that genuinely use the
+    /// shell — backgrounding a long run, and asking whether a process exists
+    /// — each of which needs a capability Pulp core does not expose yet.
     static int run(const std::string& command, std::string& output);
+
+    /// Run an executable with arguments, with no shell involved.
+    ///
+    /// `pulp::platform::ChildProcess` takes an argv vector straight to
+    /// posix_spawn or CreateProcess, so there is no quoting step to get wrong
+    /// and no shell to be portable to. A prompt with a quote, a semicolon or a
+    /// backtick in it is an argument, not syntax, because it never passes
+    /// through a parser that could read it as syntax.
+    static int run_tool(const std::string& executable,
+                        const std::vector<std::string>& args,
+                        std::string& output,
+                        const std::string& working_dir = {});
 
 private:
     std::string tools_dir_;

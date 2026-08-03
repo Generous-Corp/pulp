@@ -1266,7 +1266,23 @@ void ForgeModularShell::on_poll() {
 
     // Keep the stage card in step with what the generator is actually doing.
     if (watching_) {
-        const int stage = monitor_.stage();
+        // A run that has printed NOTHING is still a run.
+        //
+        // stage() reads the generator's log, and starts at -1 until a line
+        // matches. Everything below used to be gated on `stage >= 0`, so a
+        // run whose output had not reached the file yet drove no chip, no
+        // clock and no status: five identical grey rows, for as long as the
+        // silence lasted. Observed at seven minutes, with a healthy model
+        // call in flight and a 0-byte log -- and it is indistinguishable, on
+        // screen, from a generator that died before its first line.
+        //
+        // The log is the GENERATOR's report. That we submitted is the APP's
+        // own knowledge, and it does not need confirming by the thing it
+        // launched. So a silent run shows the first stage and counts from
+        // submission; the log refines that as soon as it says anything.
+        const int reported = monitor_.stage();
+        const bool silent = reported < 0;
+        const int stage = silent ? 0 : reported;
         if (stage != reported_stage_) {
             reported_stage_ = stage;
             stage_started_ = std::chrono::steady_clock::now();
@@ -1277,11 +1293,21 @@ void ForgeModularShell::on_poll() {
         // the model" is indistinguishable from a wedged process, which is
         // exactly how it read.
         if (auto* c = chrome();
-            c && monitor_.outcome() == BuildOutcome::running && stage >= 0) {
+            c && monitor_.outcome() == BuildOutcome::running) {
             c->set_active_stage_elapsed(format_elapsed(stage_started_));
-            if (stage == 0)
-                c->set_status_activity("asking the model \u00b7 " +
-                                       format_elapsed(run_started_) + " elapsed");
+            if (stage == 0) {
+                std::string note = "asking the model \u00b7 " +
+                                   format_elapsed(run_started_) + " elapsed";
+                // Say the quiet part once it is worth saying. A first line
+                // normally lands in seconds, so a minute of nothing is a fact
+                // about the run, and the person watching should not have to
+                // read a log to learn it.
+                if (silent &&
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - run_started_).count() > 60)
+                    note += " \u00b7 no output yet";
+                c->set_status_activity(note);
+            }
         }
     }
 

@@ -1811,7 +1811,21 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # session has no Homebrew on PATH. The hook dies naming node, which
         # looks nothing like "the PATH is short".
         import toolpaths
-        r = subprocess.run([claude, "-p", "\n".join(parts)],
+        # --strict-mcp-config, with no --mcp-config: load NO MCP servers.
+        #
+        # Without it the generator inherits whatever MCP servers the person
+        # running it has configured globally. A real run spawned Pencil's
+        # server and `npm exec chrome-devtools-mcp` to write a Rack patch;
+        # none of them can help, because the model is asked for JSON against
+        # a contract and every fact it needs is already in the prompt.
+        #
+        # This is a determinism fix, NOT a speed one. It was first written as
+        # a speed fix, and measuring refused that: a trivial prompt took 3.1s
+        # both with and without the flag. What it buys is that a generation
+        # does not depend on which MCP servers the operator happens to have
+        # configured, or on whether one of them is broken today.
+        r = subprocess.run([claude, "-p", "--strict-mcp-config",
+                            "\n".join(parts)],
                            capture_output=True, text=True, timeout=600,
                            env=toolpaths.tool_env())
         if r.returncode != 0:
