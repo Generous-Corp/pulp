@@ -81,6 +81,10 @@ TEST_CASE("DomainHandler: agent context is typed and host-owned",
     REQUIRE(value["unsavedTweakCount"].getInt64() == 2);
     REQUIRE(value["actionableIssues"][0].getString()
             == "audio device changed");
+    const auto first_issues = response.params_json.find("\"actionableIssues\"");
+    REQUIRE(first_issues != std::string::npos);
+    REQUIRE(response.params_json.find("\"actionableIssues\"", first_issues + 1) ==
+            std::string::npos);
 
     auto hot_reload = handler.handle(
         make_request(3, methods::kRuntimeGetHotReloadStatus));

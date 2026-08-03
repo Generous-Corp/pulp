@@ -64,6 +64,7 @@ target_sources(pulp-view-core PRIVATE
     src/w3c_tokens.cpp
     src/widget_skin_derive.cpp
     src/screenshot_compare.cpp
+    src/screenshot_png_validation.cpp
     src/screenshot_gpu.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
