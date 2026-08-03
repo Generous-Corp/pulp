@@ -262,11 +262,11 @@ TEST_CASE("Runtime reset quarantines a partially built replacement until owner t
     {
         auto session = std::make_unique<ScriptedUiSession>(root, store, ScriptedUiOptions{
             .script_path = script,
-            .granted_capabilities = CapabilitySet{},
             .value_channel_access = [&](const ValueChannelVisitor& visitor) {
                 ++live_channel_visits;
                 visitor(live_channel_visits == 1 ? nullptr : &channels);
             },
+            .granted_capabilities = CapabilitySet{},
         });
         REQUIRE(session->load());
         REQUIRE(session->bridge() != nullptr);
@@ -363,10 +363,10 @@ TEST_CASE("Ordinary reload retries after a live-only provisional failure",
     REQUIRE(channels.declare_scalar("meter") != nullptr);
     ScriptedUiSession session(root, store, ScriptedUiOptions{
         .script_path = script,
-        .granted_capabilities = CapabilitySet{},
         .value_channel_access = [&](const ValueChannelVisitor& visitor) {
             visitor(&channels);
         },
+        .granted_capabilities = CapabilitySet{},
     });
     REQUIRE(session.load());
 

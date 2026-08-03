@@ -214,9 +214,13 @@ private:
             ~ActiveScope() { objects.erase(identity); }
         } active_scope{active_objects_, identity};
 
-        const int is_array = qjs::JS_IsArray(context_, value);
-        if (is_array < 0)
-            throw_pending_exception();
+        auto* object = static_cast<qjs::JSObject*>(value.u.ptr);
+        if (!object || !object->shape)
+            throw std::runtime_error("Runtime.evaluate result has an invalid object");
+        // Accept direct arrays, but reject proxies and other exotic objects.
+        // Their ownKeys hooks can allocate or execute arbitrarily before the
+        // serializer sees a count, defeating this component's resource bound.
+        const bool is_array = object->class_id == qjs::JS_CLASS_ARRAY;
         if (is_array) {
             auto length_value = owner_.takeValue(
                 qjs::JS_GetPropertyStr(context_, value, "length"));
@@ -237,6 +241,25 @@ private:
             append_byte(']');
             return;
         }
+
+        if (object->is_exotic)
+            throw std::runtime_error(
+                "Runtime.evaluate result contains an unsupported exotic object");
+
+        // JS_GetOwnPropertyNames allocates its complete descriptor array. For
+        // ordinary objects the shape exposes a conservative live-property
+        // count, so reject before that allocation when even the minimum JSON
+        // punctuation would exceed the caller's byte budget.
+        const auto shape_property_count = object->shape->prop_count;
+        const auto deleted_property_count = object->shape->deleted_prop_count;
+        if (shape_property_count < 0 || deleted_property_count < 0
+            || deleted_property_count > shape_property_count)
+            throw std::runtime_error("Runtime.evaluate result has an invalid object shape");
+        const auto live_property_count = static_cast<std::size_t>(
+            shape_property_count - deleted_property_count);
+        const auto property_budget = limit_ / 4 + (limit_ % 4 != 0 ? 1 : 0);
+        if (live_property_count > property_budget)
+            result_too_large();
 
         qjs::JSPropertyEnum* properties = nullptr;
         std::uint32_t property_count = 0;

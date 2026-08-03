@@ -87,6 +87,32 @@ TEST_CASE("Runtime eval component rejects cyclic and deeply nested results",
     REQUIRE(recovered.json == "{\"answer\":42}");
 }
 
+TEST_CASE("Runtime eval component bounds property enumeration before allocation",
+          "[inspect][runtime-eval][component][negative][limits]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    auto evaluator = make_script_runtime_evaluator(&bridge);
+
+    const auto too_many_properties = bridge.evaluate(
+        "(() => { const value = {};"
+        " for (let i = 0; i < 20; ++i) value['p' + i] = 0;"
+        " return value; })()",
+        2s, 64);
+    REQUIRE_FALSE(too_many_properties.ok);
+    REQUIRE(too_many_properties.error ==
+            "Runtime.evaluate result exceeds the 64-byte limit");
+
+    const auto exotic = evaluator->evaluate("new Proxy({}, { ownKeys() { for (;;) {} } })");
+    REQUIRE_FALSE(exotic.ok);
+    REQUIRE(exotic.error ==
+            "Runtime.evaluate result contains an unsupported exotic object");
+
+    const auto recovered = evaluator->evaluate("({ answer: 6 * 7 })");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "{\"answer\":42}");
+}
+
 TEST_CASE("Runtime eval component independently rejects oversized code",
           "[inspect][runtime-eval][component][negative][limits]") {
     ScriptEngine engine;

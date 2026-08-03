@@ -22,7 +22,7 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 
 static_assert(offsetof(StandaloneConfig, inspector_runtime_eval)
-              < offsetof(StandaloneConfig, screenshot_path));
+              > offsetof(StandaloneConfig, enable_musical_typing_keyboard));
 
 namespace {
 
@@ -31,7 +31,7 @@ TEST_CASE("StandaloneConfig preserves its legacy positional aggregate prefix",
     StandaloneConfig config{
         "audio-device", "midi-device", 48'000.0, 128, 2, 0, {}, {},
         true, false, false, true, true, "develop", {"session.describe"},
-        false, "capture.png"};
+        "capture.png"};
     REQUIRE(config.inspector_profile == "develop");
     REQUIRE(config.screenshot_path == "capture.png");
     REQUIRE_FALSE(config.inspector_runtime_eval);

@@ -27,10 +27,6 @@ struct ScriptedUiOptions {
     std::filesystem::path script_path;
     std::filesystem::path theme_path;
     std::vector<std::filesystem::path> asset_roots;
-    /// Native bridge APIs granted to this realm. Trusted/local scripted UIs
-    /// retain the historical all-capabilities default; protected hosts pass an
-    /// explicit empty or reviewed set.
-    CapabilitySet granted_capabilities = CapabilitySet::all();
     bool enable_hot_reload = false;
     bool enable_theme_reload = true;
     /// Compatibility adapter for stable, non-reloadable processors. Converted
@@ -39,6 +35,11 @@ struct ScriptedUiOptions {
     /// Leased access to the hosting processor's named value channels. The
     /// visitor must not retain a set or source after its callback returns.
     ValueChannelAccess value_channel_access;
+    /// Native bridge APIs granted to this realm. Trusted/local scripted UIs
+    /// retain the historical all-capabilities default; protected hosts pass an
+    /// explicit empty or reviewed set. Appended to preserve the public
+    /// aggregate's legacy positional layout.
+    CapabilitySet granted_capabilities = CapabilitySet::all();
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and

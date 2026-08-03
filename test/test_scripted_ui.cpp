@@ -26,18 +26,18 @@ using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
 
 static_assert(offsetof(ScriptedUiOptions, granted_capabilities)
-              < offsetof(ScriptedUiOptions, enable_hot_reload));
+              > offsetof(ScriptedUiOptions, value_channel_access));
 
 namespace {
 
 TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
           "[view][scripted-ui][compat]") {
     ScriptedUiOptions options{
-        fs::path{"ui.js"}, fs::path{"theme.json"}, {}, CapabilitySet{},
+        fs::path{"ui.js"}, fs::path{"theme.json"}, {},
         true, false, nullptr, {}};
     REQUIRE(options.enable_hot_reload);
     REQUIRE_FALSE(options.enable_theme_reload);
-    REQUIRE_FALSE(options.granted_capabilities.has(ReloadCapability::Exec));
+    REQUIRE(options.granted_capabilities.has(ReloadCapability::Exec));
 }
 
 fs::path make_temp_dir(const char* stem) {
