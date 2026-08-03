@@ -22,9 +22,12 @@
 #
 set -uo pipefail
 
-GOLDEN=9003
-CLONE_BASE=200            # clones live at 200..219, well clear of 101/102
-CLONE_MAX=219
+GOLDEN=9005
+CLONE_BASE=200            # three pool slots, well clear of persistent VMs 101/102
+CLONE_MAX=202
+GUEST_IPV4_PREFIX=192.168.86
+GUEST_IPV4_FIRST_OCTET=251
+GUEST_IPV4_GATEWAY=192.168.86.1
 CORES=4
 MEM_MB=8192
 REPO="Generous-Corp/pulp"
@@ -64,6 +67,14 @@ for id in $(seq "$CLONE_BASE" "$CLONE_MAX"); do
 done
 [ -n "$VMID" ] || { flock -u 9; die "no free clone id in ${CLONE_BASE}..${CLONE_MAX}"; }
 
+# A fresh random MAC per clone consumed a new DHCP lease per job until the LAN
+# pool was exhausted on 2026-08-02. Keep both network identities deterministic:
+# VMIDs 200..202 map to 192.168.86.251..253 and locally administered MACs.
+SLOT_INDEX=$((VMID - CLONE_BASE))
+GUEST_IP="${GUEST_IPV4_PREFIX}.$((GUEST_IPV4_FIRST_OCTET + SLOT_INDEX))"
+printf -v GUEST_MAC '02:50:55:4c:50:%02x' "$SLOT_INDEX"
+RUNNER_NAME="pulp-ci-ephemeral-${VMID}-$(cat /proc/sys/kernel/random/uuid)"
+
 cleanup() {
     # Guard: only tear down a VM this invocation actually created. Without this,
     # a failure before the clone lands makes cleanup destroy whatever now owns
@@ -78,21 +89,31 @@ cleanup() {
     # otherwise leave an offline ghost runner that GitHub still schedules to —
     # jobs then queue against a VM that no longer exists.
     if [ -n "${PAT:-}" ]; then
-        rid="$(curl -s -H "Authorization: Bearer $PAT" \
-                 -H "Accept: application/vnd.github+json" \
-                 "https://api.github.com/repos/${REPO}/actions/runners" 2>/dev/null \
-             | python3 -c "
+        runners_json="$(curl -fSs -H "Authorization: Bearer $PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/actions/runners?per_page=100" 2>/dev/null)" \
+            || { log "ERROR: cannot read runner registrations; leaving clone $VMID for safe recovery"; return; }
+        runner_lookup="$(printf '%s' "$runners_json" | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
-except Exception: sys.exit()
+except Exception: sys.exit(1)
 for r in d.get('runners',[]):
-    if r['name']=='pulp-ci-ephemeral-${VMID}': print(r['id']); break
-" 2>/dev/null)"
-        if [ -n "${rid:-}" ]; then
-            curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $PAT" \
+    if r['name']=='${RUNNER_NAME}': print('found:'+str(r['id'])); break
+else: print('not-found:'+str(d.get('total_count', 0)))
+" 2>/dev/null)" \
+            || { log "ERROR: cannot parse runner registrations; leaving clone $VMID for safe recovery"; return; }
+        if [[ "$runner_lookup" == found:* ]]; then
+            rid="${runner_lookup#found:}"
+            if ! curl -fSs -o /dev/null -X DELETE -H "Authorization: Bearer $PAT" \
                 -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/runners/${rid}" || true
+                "https://api.github.com/repos/${REPO}/actions/runners/${rid}"; then
+                log "ERROR: cannot deregister runner id $rid; leaving clone $VMID for safe recovery"
+                return
+            fi
             log "deregistered runner id $rid"
+        elif [ "${runner_lookup#not-found:}" -gt 100 ]; then
+            log "ERROR: runner lookup exceeded one API page; leaving clone $VMID for safe recovery"
+            return
         fi
     fi
     log "destroying clone $VMID"
@@ -121,18 +142,22 @@ CLONED=1
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
 qm set "$VMID" --cores "$CORES" --memory "$MEM_MB" --cpulimit "$CORES" \
-    --cpuunits 50 --balloon 0 --onboot 0 >/dev/null
+    --cpuunits 50 --balloon 0 --onboot 0 \
+    --net0 "virtio=${GUEST_MAC},bridge=vmbr0" \
+    --ipconfig0 "ip=${GUEST_IP}/24,gw=${GUEST_IPV4_GATEWAY}" \
+    --nameserver "$GUEST_IPV4_GATEWAY" >/dev/null \
+    || die "failed to apply deterministic network identity to clone $VMID"
 qm start "$VMID" >/dev/null || die "start failed"
 
 # ── wait for the guest ───────────────────────────────────────────────────────
-GUEST_IP=""
 for _ in $(seq 1 45); do
-    GUEST_IP="$(qm guest cmd "$VMID" network-get-interfaces 2>/dev/null \
-        | grep -oE '192\.168\.[0-9]+\.[0-9]+' | head -1)"
-    [ -n "$GUEST_IP" ] && break
+    qm guest cmd "$VMID" network-get-interfaces 2>/dev/null \
+        | grep -Fq "\"ip-address\" : \"${GUEST_IP}\"" && break
     sleep 10
 done
-[ -n "$GUEST_IP" ] || die "clone $VMID never reported an IP"
+qm guest cmd "$VMID" network-get-interfaces 2>/dev/null \
+    | grep -Fq "\"ip-address\" : \"${GUEST_IP}\"" \
+    || die "clone $VMID never reported expected IP $GUEST_IP"
 log "clone $VMID up at $GUEST_IP"
 # The golden's host keys were cleared, so each clone presents a NEW key on a
 # possibly-recycled DHCP address. Drop any stale entry rather than failing.
@@ -145,6 +170,18 @@ for _ in $(seq 1 20); do
 done
 
 # ── register ephemeral ───────────────────────────────────────────────────────
+# Preamble/alias jobs use the GitHub CLI with the per-job GITHUB_TOKEN that
+# Actions injects. With token variables cleared, --show-token exposes every
+# credential the CLI can resolve from its config or credential store. Refuse a
+# clone if the executable is missing or any persistent token is resolvable.
+ssh -o BatchMode=yes "ci@$GUEST_IP" '
+    command -v gh >/dev/null &&
+    ! env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+        -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST \
+        gh auth status --show-token 2>&1 \
+        | grep -Eq "^[[:space:]-]*Token:"
+' || die "golden $GOLDEN lacks an uncredentialed gh CLI"
+
 # A registration token is minted per job and is single-use by design, which is
 # what makes --ephemeral viable: the runner takes exactly one job, deregisters
 # itself, and the clone is destroyed under it.
@@ -160,7 +197,7 @@ ssh -o BatchMode=yes "ci@$GUEST_IP" "
     cd ~/actions-runner
     ./config.sh --unattended --ephemeral --replace \
       --url https://github.com/${REPO} --token ${RT} \
-      --name pulp-ci-ephemeral-${VMID} --labels ${LABELS} --work _work
+      --name ${RUNNER_NAME} --labels ${LABELS} --work _work
 " >/dev/null 2>&1 || die "runner registration failed"
 
 # ── run exactly one job ──────────────────────────────────────────────────────

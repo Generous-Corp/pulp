@@ -1515,6 +1515,41 @@ public:
     /// clears the slot. URL refs (`url(#id)`) and named shape forms
     /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
     /// `path("...")` form is honored today.
+    /// The clip an IMPORTER resolved for this view, in the view's own
+    /// coordinate space — the rectangle CSS's clip chain leaves of it.
+    ///
+    /// Unlike `overflow`, this clips ONLY this view's own painting, never its
+    /// children: each child carries the rectangle its own chain resolves to.
+    /// That is deliberate and is the whole reason the slot exists. CSS clips
+    /// along the containing-block chain while a view tree clips by parentage,
+    /// so a child can legitimately need a WIDER clip than its parent — an
+    /// absolutely positioned node whose containing block sits above the
+    /// `overflow: hidden` box it is nested in escapes that clip in a browser.
+    /// An inherited clip is an intersection and cannot widen, so no assignment
+    /// of inherited rectangles can express that; a per-view rectangle can.
+    ///
+    /// Native and authored trees never set it and pay nothing.
+    void set_ancestor_clip_rect(Rect r) { style_extras().ancestor_clip = r; }
+    const std::optional<Rect>& ancestor_clip_rect() const {
+        static const std::optional<Rect> kNone;
+        return style_extras_ ? style_extras_->ancestor_clip : kNone;
+    }
+
+    /// Corner radii for the ancestor clip, clockwise from top-left.
+    ///
+    /// CSS clips overflow to the clipper's ROUNDED padding box, so a child with
+    /// square corners inside a rounded card is cut to the card's curve. Clipping
+    /// to the bare rectangle instead paints that child square into the corner
+    /// and the card reads as unrounded even though its own border curves.
+    /// Zero on every corner is the common case and clips to the plain rectangle.
+    void set_ancestor_clip_radii(float tl, float tr, float br, float bl) {
+        style_extras().ancestor_clip_radii = {tl, tr, br, bl};
+    }
+    const std::array<float, 4>& ancestor_clip_radii() const {
+        static const std::array<float, 4> kNone{0.0f, 0.0f, 0.0f, 0.0f};
+        return style_extras_ ? style_extras_->ancestor_clip_radii : kNone;
+    }
+
     void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
     const std::string& clip_path() const {
         static const std::string kEmpty;
@@ -1776,7 +1811,60 @@ public:
         float sweep_turns = 1.0f;   // conic: turns the stop list spans
         std::vector<Color> colors;
         std::vector<float> positions;
+
+        // ── Geometry only a laid-out box can resolve ────────────────────
+        //
+        // CSS gradient geometry is a function of the box: an angle's endpoints
+        // depend on the aspect ratio, and a radial's radii are percentages of
+        // the width and height. Style is applied BEFORE the box is sized —
+        // the design importer runs the whole style pass ahead of Yoga — so
+        // anything resolved when the CSS is parsed is resolved against a
+        // degenerate 1x1 box, which silently turns every angled gradient the
+        // wrong way and gives every radial the wrong radius. These slots carry
+        // the CSS intent forward instead, and the painter resolves them
+        // against the real bounds.
+
+        /// Where a linear gradient's endpoints come from. `endpoints` means
+        /// x0..y1 are already box fractions and need no box (the four
+        /// `to <side>` keywords, and every caller of the explicit setter).
+        enum class LinearFrom { endpoints, angle, corner };
+        LinearFrom linear_from = LinearFrom::endpoints;
+        /// CSS angle in radians, clockwise from "to top". Valid for
+        /// LinearFrom::angle.
+        float linear_angle = 0.0f;
+        /// Signs of the named corner for LinearFrom::corner: x is +1 for
+        /// `right`, -1 for `left`; y is +1 for `bottom`, -1 for `top`.
+        float corner_x = 1.0f, corner_y = 1.0f;
+
+        /// How a radial gradient's radii are sized, per css-images-3.
+        /// `max_side` is not a CSS keyword — it is the pre-existing
+        /// `radius x max(w,h)` circle the explicit setter has always meant,
+        /// kept so those callers are unaffected.
+        enum class RadialSize {
+            max_side, farthest_corner, farthest_side, closest_corner,
+            closest_side, explicit_radii,
+        };
+        RadialSize radial_size = RadialSize::max_side;
+        /// A circle has one radius resolved against the box's diagonal-ish
+        /// metric; an ellipse gets a separate radius per axis. CSS defaults to
+        /// ellipse unless `circle` is named or a single length is given.
+        bool radial_circle = false;
+        /// RadialSize::explicit_radii: radii as fractions of width and height,
+        /// plus an absolute term. A `%` radius fills the fraction slot and a
+        /// `px` radius the absolute one, so both spellings — and a calc() that
+        /// mixes them — resolve through one expression.
+        float radial_rx = 0.0f, radial_ry = 0.0f;
+        float radial_rx_px = 0.0f, radial_ry_px = 0.0f;
     };
+
+    /// A radial gradient's centre and radii in pixels, resolved against a box.
+    struct ResolvedRadial { float cx, cy, rx, ry; };
+
+    /// Resolve a radial layer's CSS sizing against a box of `w` x `h`.
+    /// Free of any View state so the painter, the parser and tests all get the
+    /// same answer from the same code.
+    static ResolvedRadial resolve_radial(const BackgroundGradient& g,
+                                         float w, float h);
 
     /// Replace the background-image stack, first layer on top.
     void set_background_gradient_layers(std::vector<BackgroundGradient> layers) {
@@ -1846,7 +1934,11 @@ public:
     int background_gradient_type() const {
         return bg_gradients_.empty() ? 0 : bg_gradients_.front().type;
     }
-    /// Radial radius as a fraction of max(w,h). Exposed for tests/inspection.
+    /// The legacy single-radius slot, as a fraction of max(w,h). Reports what
+    /// set_background_gradient_radial() was given and nothing else — a radial
+    /// parsed from CSS has per-axis radii that this cannot express, and leaves
+    /// this at its default. Use resolve_radial() for a gradient's real
+    /// geometry.
     float background_gradient_radius() const {
         return bg_gradients_.empty() ? 0.7071f : bg_gradients_.front().radius;
     }
@@ -2187,6 +2279,12 @@ private:
     struct ViewStyleExtras {
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
+        // Import-resolved clip on this view's OWN ink; see
+        // set_ancestor_clip_rect for why it does not descend.
+        std::optional<Rect> ancestor_clip;
+        // Corner radii of that clip, clockwise from top-left; see
+        // set_ancestor_clip_radii.
+        std::array<float, 4> ancestor_clip_radii{0.0f, 0.0f, 0.0f, 0.0f};
         std::string clip_path;
         std::string mask_image;
         std::string mask;

@@ -85,6 +85,18 @@ without opening a window.
 
 ## Gotchas (each cost real time)
 
+- **Release Skia archives require `SK_RELEASE` in every consumer, including
+  Debug Pulp builds.** The published skia-builder libraries live under
+  `lib/Release` and compile Skia's inline ref-counting code with release
+  semantics. `FindSkia.cmake` therefore exports `SK_RELEASE` from the
+  `skia::skia` imported target for every backend. Without it, a Debug Pulp
+  translation unit can compile a derived `SkRefCnt` destructor with
+  `SK_DEBUG`, while the archive's `internal_dispose()` uses release behavior;
+  teardown then traps at `SkRefCnt.h:41` (`fRefCnt was 0`) even though ownership
+  is correct. If a Graphite `Recorder` teardown hits that assertion, inspect
+  the target's `INTERFACE_COMPILE_DEFINITIONS` before changing `sk_sp`
+  ownership or destruction order. `tools/scripts/test_findskia_arch_assert.py`
+  guards this imported-target ABI contract.
 - **Graphite drops any raster `SkImage` it is handed — it never uploads one on
   its own.** When Graphite meets a non-GPU-backed image while building a paint
   key it asks `Recorder::clientImageProvider()->findOrCreate()`, and Skia's

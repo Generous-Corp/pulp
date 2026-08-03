@@ -118,6 +118,31 @@ struct IRStyle {
     // consume these; sources that carry them — and Figma mask
     // layers once the extractor emits a clip-path — survive the IR.
     std::optional<std::string> clip_path;
+    // The clip an importer resolved for THIS node, in the node's own
+    // coordinate space (origin at its top-left, same space as `clip_path`).
+    //
+    // Carried per node rather than inherited from a clipping parent, because
+    // CSS clips along the containing-block chain while a tree clips by
+    // parentage, and the two disagree in both directions: an absolutely
+    // positioned node can escape an `overflow: hidden` ancestor it sits inside,
+    // and a node moved to a new parent must keep the clip its old one gave it.
+    // A rectangle attached to the node travels with the node, so re-parenting
+    // cannot change what it clips. The engine (View::set_ancestor_clip_rect)
+    // applies it to the node's OWN ink only — every descendant carries its own.
+    //
+    // The corner radii belong to the clip, not to the node: CSS clips overflow
+    // to the clipper's ROUNDED padding box, so a square-cornered child inside a
+    // rounded card is cut to the card's curve. Without them a rounded card whose
+    // media area is a plain rectangle paints that rectangle square into the
+    // corner, and the card reads as unrounded even though its own border curves.
+    // A radius applies only where the clip's corner is still the clipper's own —
+    // a corner cut by a second, tighter clipper is square, so the resolver drops
+    // the radius there rather than rounding a corner nothing rounded.
+    struct ClipRect {
+        float x = 0, y = 0, width = 0, height = 0;
+        float radius_tl = 0, radius_tr = 0, radius_br = 0, radius_bl = 0;
+    };
+    std::optional<ClipRect> clip_rect;
     std::optional<std::string> mask;                   // `mask` shorthand
     std::optional<std::string> mask_image;
     std::optional<std::string> mask_size;

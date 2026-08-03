@@ -65,9 +65,20 @@ FORBIDDEN_CLAIMS = {
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
         "safe multi-consumer fan-out is not implemented",
+        "A normal `pulp run`",
+        "standalone ownership lands",
+        "standalone attachment lands",
+        "standalone still constructs only the visual overlay",
+        "Production standalone session owner",
+        "Production standalone attachment",
+        "Production standalone activation",
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
+        "Requires a custom host/test fixture that explicitly constructs an inspector endpoint",
+        "Requires a custom inspector fixture; normal launches provide no endpoint",
+        "Normal launches provide no endpoint",
+        "Live host capture is unavailable",
         '"name":"pulp_motion_load_fixture"',
         '"out_path":{"type":"string","description":"Explicit .pftrace output path',
     ),
@@ -115,8 +126,9 @@ FORBIDDEN_CLAIMS = {
 
 REQUIRED_CLAIMS = {
     ".claude/commands/inspect.md": (
-        "unavailable in normal launches",
-        "explicitly wired custom fixture",
+        "GPU-enabled desktop",
+        "pulp run --inspect",
+        "installed `pulp` command",
     ),
     "docs/agent-integrations.md": (
         "unavailable in normal launches",
@@ -131,9 +143,17 @@ REQUIRED_CLAIMS = {
         "trace_control_available",
     ),
     "docs/reference/development-inspector-capabilities.md": (
+        "pulp run --inspect",
+        "source checkout.",
+        "selected standalone window",
         "owner-private ephemeral record/token files",
         "extended ACLs",
         "Capability dispatch is fail-closed",
+    ),
+    "tools/mcp/pulp_mcp.cpp": (
+        "pulp run --inspect",
+        "Installed in-process",
+        "Standalone profiles do not grant runtime.eval",
     ),
     "docs/reference/scripted-ui-inspector.md": (
         "nonce/HMAC",
@@ -428,7 +448,16 @@ def check_root(
     for tool_name, description in MCP_TOOL_RE.findall(mcp_source):
         if tool_name == "pulp_inspect_pending_requests":
             continue
-        if "source-checkout" not in description:
+        if tool_name.startswith("pulp_inspect_"):
+            if "source-checkout" in description:
+                errors.append(
+                    f"{tool_name} retains a source-checkout-only client path"
+                )
+            if not re.search(r"\b(?:Installed|in-process)\b", description):
+                errors.append(
+                    f"{tool_name} must disclose its installed in-process client path"
+                )
+        elif "source-checkout" not in description:
             errors.append(
                 f"{tool_name} must disclose its source-checkout-only client path"
             )

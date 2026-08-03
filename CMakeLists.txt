@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.771.0
+    VERSION 0.778.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -80,6 +80,9 @@ else()
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_ENABLE_PROJECT_PACKAGE
+       "Build and export the durable project-package subsystem and dependent C++ timeline authoring tools"
+       ON)
 option(PULP_ENABLE_SCENE3D "Enable opt-in native no-JS 3D scene/glTF renderer spikes" OFF)
 # Opt-in lane for the native-component Rust contract proof: builds a Cargo
 # `staticlib` reference core (with an RT-checking global allocator) and links
@@ -325,6 +328,13 @@ add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/timebase)
 add_subdirectory(core/timeline)
+if(PULP_ENABLE_PROJECT_PACKAGE)
+    add_subdirectory(core/project_package)
+else()
+    message(STATUS
+        "Pulp: project-package disabled; atomic Timeline authoring targets and "
+        "the corresponding pulp-cpp/pulp-mcp commands will not be built")
+endif()
 add_subdirectory(core/timeline_agent_view)
 add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
@@ -407,6 +417,8 @@ endif()
 # Keeping this dependency off pulp-format is what prevents ordinary plugin
 # targets from inheriting inspector archives through the format SDK.
 if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
+    target_sources(pulp-standalone PRIVATE
+        core/format/src/standalone_inspector.cpp)
     target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
     target_compile_definitions(pulp-standalone PRIVATE
         PULP_ENABLE_INSPECTOR=1
@@ -417,10 +429,14 @@ else()
 endif()
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
+# tools/timeline publishes through core/project_package, so the target does not
+# exist in a package-stripped build.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     add_subdirectory(tools/design-ab)
-    add_subdirectory(tools/timeline)
+    if(PULP_ENABLE_PROJECT_PACKAGE)
+        add_subdirectory(tools/timeline)
+    endif()
 endif()
 
 # ── Testing ─────────────────────────────────────────────────────────────────
@@ -471,7 +487,8 @@ include(PulpLinkFloor)
 # The CLI already requires the desktop GPU stack for render/audio authoring
 # commands. Inspector commands use the CPU-only client/authoring targets when
 # the optional component exists and compile explicit unavailable stubs when it
-# does not; the CLI never links the visual pulp::inspect overlay.
+# does not; the CLI never links the visual pulp::inspect overlay. Its optional
+# Timeline authoring commands follow PULP_ENABLE_PROJECT_PACKAGE inside tools/cli.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
@@ -481,13 +498,10 @@ endif()
 # CMake build graph. Coexists with pulp-cli (the C++ binary) — both
 # install side-by-side under `${CMAKE_INSTALL_BINDIR}`.
 #
-# Mirror the EXACT desktop guard used for tools/cli above — both the
-# `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
-# desktop-CLI-lane guard. Without the GPU guard, sanitizer-style
-# GPU-off jobs still pull cargo into the default `all` build whenever
-# cargo happens to be on PATH, introducing unrelated Rust-toolchain
-# / network failures (and minutes of cargo build time) in lanes that
-# intentionally disable the CLI/GPU paths.
+# Mirror the desktop/GPU guard used for tools/cli above. The Rust binary itself
+# has no link dependency on pulp::tool-timeline or project-package: delegated
+# commands already degrade explicitly when the optional pulp-cpp sibling is
+# absent, so a package-stripped build still keeps the unrelated native Rust CLI.
 # PROJECT_IS_TOP_LEVEL: Pulp's own experimental CLI builds only when Pulp is the
 # top-level project. A consumer that vendors Pulp via add_subdirectory() wants the
 # libraries + pulp_add_plugin(), not Pulp's dev CLIs.
@@ -497,7 +511,9 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
-# Dev tools below build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
+# pulp-mcp keeps its package-independent tools in package-stripped builds; its
+# optional Timeline registrations follow PULP_ENABLE_PROJECT_PACKAGE internally.
+# Dev tools build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()

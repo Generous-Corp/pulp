@@ -2,11 +2,17 @@
 // Modeled on Chrome DevTools Protocol with domain.method naming.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace pulp::inspect {
+
+/// Bounded transfer ceiling used by clients and by hosts that expose image
+/// capture. Ordinary inspector servers may retain their smaller 1 MiB default.
+inline constexpr std::size_t kInspectorExtendedMessageBytes =
+    16u * 1024u * 1024u;
 
 /// A single inspector protocol message (request, response, or event).
 struct InspectorMessage {
