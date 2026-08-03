@@ -555,8 +555,9 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     };
 
     add("backgroundGradient", node.style.background_gradient);
-    if (!node.style.box_shadow.empty())
-        add("boxShadow", box_shadow_to_css(node.style.box_shadow));
+    // boxShadow is applied now (see apply_visual_style), so warning about it
+    // would train a reader to ignore this list — the cost of a diagnostic that
+    // outlives its gap is that the real ones stop being read.
     add("filter", node.style.filter);
     add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);
@@ -1257,6 +1258,40 @@ void apply_visual_style(View& view, const IRStyle& style,
     // gap — see core/view/src/css_gradient.cpp for the shared parser.
     if (style.background_gradient && !style.background_gradient->empty())
         apply_css_background_gradient(view, *style.background_gradient);
+
+    // Box-shadows, in CSS author order.
+    //
+    // Not painting these was the single largest fidelity gap in an imported
+    // panel, and it did not present as a shadow bug. A knob whose softness IS
+    // its shadow stack — an inset bottom sheen plus two spread rings — renders
+    // as a flat, hard-edged disc, so the face reads as an over-contrasty
+    // gradient and the search goes to the gradient code, which was correct all
+    // along. Measured on one generated panel: the conic samples matched Chrome
+    // within 4/255 while the same node failed on the annulus its rings should
+    // have drawn.
+    //
+    // The first layer paints ON TOP (View::add_box_shadow appends and the
+    // painter iterates in reverse), which is the order the IR already holds, so
+    // set-then-append reproduces the cascade without reversing anything here.
+    if (!style.box_shadow.empty()) {
+        bool first = true;
+        for (const auto& layer : style.box_shadow) {
+            // A layer whose colour will not parse is DROPPED rather than
+            // defaulted to black: a shadow nobody asked for is more visible
+            // than a shadow that is missing, and the census below still counts
+            // the node as carrying shadows.
+            const auto color = parse_any_css_color(layer.color);
+            if (!color) continue;
+            if (first) {
+                view.set_box_shadow(layer.offset_x, layer.offset_y, layer.blur,
+                                    layer.spread, *color, layer.inset);
+                first = false;
+            } else {
+                view.add_box_shadow(layer.offset_x, layer.offset_y, layer.blur,
+                                    layer.spread, *color, layer.inset);
+            }
+        }
+    }
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
     if (style.background_size)
