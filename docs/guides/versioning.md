@@ -421,7 +421,14 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.81.4 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
+
+v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
+enqueue mutation boundary, including the cross-repository runner steward. Pulp
+can therefore run a small native GitHub stacked-PR pilot without allowing an
+unattended steward tick to send one layer through the legacy unstacked queue
+path. Shipyard remains observe-only for formal stacks until it durably models
+GitHub's asynchronous stack-merge request and completion lifecycle.
 
 v0.81.4 preserves v0.81.3's attached supervised PR push and regenerates Pulp's
 SSH-signing setup from `release.post_tag_hook.ssh_signing_setup_script`, so a

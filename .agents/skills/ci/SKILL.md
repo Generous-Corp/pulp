@@ -20,8 +20,12 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.4`,
-which provides it, so the pinned binary is sufficient.
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
+which provides it, so the pinned binary is sufficient. That pin also makes
+formal GitHub stacks fail closed at every Shipyard merge-queue mutation
+boundary, including `shipyard runner steward`; use the native `gh stack`
+lifecycle for an explicit pilot rather than routing stack members through the
+unstacked enqueue path.
 
 Use these commands as the normal agent loop:
 
