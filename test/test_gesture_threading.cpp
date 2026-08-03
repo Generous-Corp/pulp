@@ -24,6 +24,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 
 using namespace pulp;
@@ -307,6 +308,38 @@ TEST_CASE("StateStore defers a final editor-lease host callback until flush",
     REQUIRE(ends == 1);
     store.flush_deferred_gesture_releases();
     REQUIRE(ends == 1);
+}
+
+TEST_CASE("a replacement gesture cannot overtake a deferred host end",
+          "[state][gesture][balance][deferred]") {
+    state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    std::vector<std::string> callbacks;
+    store.set_gesture_callbacks(
+        [&](state::ParamID) { callbacks.emplace_back("begin"); },
+        [&](state::ParamID) { callbacks.emplace_back("end"); });
+
+    store.acquire_gesture(1);
+    store.defer_gesture_release(1);
+    REQUIRE(callbacks == std::vector<std::string>{"begin"});
+
+    // Runtime evaluation can publish a replacement realm before the next
+    // owner-thread poll. Its first press must close the retired bracket before
+    // opening a new one for the same parameter.
+    store.acquire_gesture(1);
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin"});
+
+    store.flush_deferred_gesture_releases();
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin"});
+    store.release_gesture(1);
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin", "end"});
 }
 
 TEST_CASE("end_gesture without a matching begin is a no-op toward the host",

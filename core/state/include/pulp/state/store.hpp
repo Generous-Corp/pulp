@@ -492,6 +492,10 @@ private:
     std::unordered_map<ParamID, std::size_t> gesture_leases_;
     std::vector<ParamID> deferred_gesture_releases_;
 
+    // Close a retired owner's pending host bracket before a replacement owner
+    // is allowed to begin the same parameter again.
+    void flush_deferred_gesture_release(ParamID id) noexcept;
+
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
     // the caller is not on the main thread. Observability only — never blocks

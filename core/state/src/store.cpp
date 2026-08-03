@@ -622,6 +622,10 @@ void StateStore::begin_gesture(ParamID id) {
         assert(false && "StateStore::begin_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
+    // A retired realm can leave its host end queued until the next UI pump.
+    // Close that old bracket before a replacement realm opens the same
+    // parameter, otherwise the queued end would terminate the new gesture.
+    flush_deferred_gesture_release(id);
     // Preserve the direct API's duplicate-suppression contract while sharing
     // host ownership with lease-based editor bindings.
     if (!direct_gestures_.insert(id).second) return;
@@ -644,6 +648,9 @@ void StateStore::end_gesture(ParamID id) {
 }
 
 void StateStore::acquire_gesture(ParamID id) {
+    // See begin_gesture(): replacement leases must not overtake a queued end
+    // for the same host parameter.
+    flush_deferred_gesture_release(id);
     auto& leases = gesture_leases_[id];
     if (leases++ != 0) return;
     if (open_gestures_.insert(id).second && on_begin_gesture_)
@@ -692,6 +699,22 @@ void StateStore::flush_deferred_gesture_releases() noexcept {
             // Bookkeeping was already closed when the release was deferred.
             // One hostile host callback must not suppress later queued ends.
         }
+    }
+}
+
+void StateStore::flush_deferred_gesture_release(ParamID id) noexcept {
+    const auto found = std::find(
+        deferred_gesture_releases_.begin(),
+        deferred_gesture_releases_.end(),
+        id);
+    if (found == deferred_gesture_releases_.end()) return;
+    deferred_gesture_releases_.erase(found);
+    try {
+        if (on_end_gesture_)
+            on_end_gesture_(id);
+    } catch (...) {
+        // The retired owner's bookkeeping is already closed. Match the bulk
+        // flush contract: a hostile host callback cannot strand later work.
     }
 }
 
