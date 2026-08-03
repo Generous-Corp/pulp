@@ -1134,6 +1134,50 @@ commands:
         kind: option
         required: false
         description: File path for the one-shot command response
+      - name: --id
+        kind: option
+        required: false
+        description: Numeric parameter ID for set-parameter
+      - name: --value
+        kind: option
+        required: false
+        description: Finite parameter value for set-parameter
+      - name: --normalized
+        kind: flag
+        required: false
+        description: Interpret set-parameter value in normalized 0 through 1 space
+      - name: --kind
+        kind: option
+        required: false
+        description: MIDI kind note_on or note_off for inject-midi
+      - name: --channel
+        kind: option
+        required: false
+        description: Public MIDI channel 1 through 16 for inject-midi
+      - name: --note
+        kind: option
+        required: false
+        description: MIDI note 0 through 127 for inject-midi
+      - name: --velocity
+        kind: option
+        required: false
+        description: MIDI velocity 0 through 127 for inject-midi
+      - name: --duration-ms
+        kind: option
+        required: false
+        description: Required bounded note_on hold from 1 through 2000 milliseconds for inject-midi
+      - name: --playing
+        kind: option
+        required: false
+        description: Boolean standalone play state for set-transport
+      - name: --position-samples
+        kind: option
+        required: false
+        description: Nonnegative standalone sample position for set-transport
+      - name: --tempo-bpm
+        kind: option
+        required: false
+        description: Finite standalone tempo from 20 through 400 BPM for set-transport
       - name: --json
         kind: flag
         required: false
@@ -1147,6 +1191,12 @@ commands:
         summary: Authenticate and report available/effective capabilities for one exact publication
       - name: doctor
         summary: Report discovery runtime-directory readiness and live-session count
+      - name: set-parameter
+        summary: Apply one typed numeric parameter mutation under state.write and a controller lease
+      - name: inject-midi
+        summary: Inject one bounded standalone note; note_on is paired with note_off on the same controller lease
+      - name: set-transport
+        summary: Apply one coherent partial standalone play, position, or tempo update under test.input and a controller lease
     docs: reference/cli.md#inspect
 
   - name: motion

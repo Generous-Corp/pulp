@@ -6,9 +6,14 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -60,6 +65,37 @@ bool parse_port(std::string_view text, int& output) {
     int value = 0;
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size() || value <= 0 || value > 65535)
+        return false;
+    output = value;
+    return true;
+}
+
+bool parse_uint32(std::string_view text, std::uint32_t& output) {
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() ||
+        value > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    output = static_cast<std::uint32_t>(value);
+    return true;
+}
+
+bool parse_nonnegative_int64(std::string_view text, std::int64_t& output) {
+    std::int64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value < 0)
+        return false;
+    output = value;
+    return true;
+}
+
+bool parse_finite_double(std::string_view text, double& output) {
+    const std::string owned(text);
+    char* end = nullptr;
+    errno = 0;
+    const auto value = std::strtod(owned.c_str(), &end);
+    if (errno == ERANGE || end == owned.c_str() || end != owned.c_str() + owned.size() ||
+        !std::isfinite(value))
         return false;
     output = value;
     return true;
@@ -181,6 +217,20 @@ bool exact_target(std::string_view session_id, std::string_view instance_id,
     return !session_id.empty() && !instance_id.empty() && !publication_id.empty();
 }
 
+std::string typed_result_json(std::string_view schema_version,
+                              const InspectorDiscoveryRecord& publication,
+                              std::string_view response_json) {
+    auto root = choc::value::createObject("");
+    root.addMember("schemaVersion", choc::value::createString(schema_version));
+    root.addMember("session", publication_json(publication));
+    try {
+        root.addMember("result", choc::json::parse(response_json));
+    } catch (...) {
+        root.addMember("result", choc::value::createString(response_json));
+    }
+    return choc::json::toString(root, false);
+}
+
 } // namespace
 
 int cmd_inspect(const std::vector<std::string>& args) {
@@ -192,7 +242,18 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string command;
     std::string params = "{}";
     std::string output_file;
+    std::string parameter_id_text;
+    std::string parameter_value_text;
+    std::string midi_kind;
+    std::string midi_channel_text;
+    std::string midi_note_text;
+    std::string midi_velocity_text;
+    std::string midi_duration_text;
+    std::string transport_playing_text;
+    std::string transport_position_text;
+    std::string transport_tempo_text;
     bool params_provided = false;
+    bool normalized = false;
     bool json_output = false;
     std::string verb;
 
@@ -200,7 +261,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
     if (!args.empty() && !args.front().starts_with("-")) {
         verb = args.front();
         first_option = 1;
-        if (verb != "profiles" && verb != "list" && verb != "capabilities" && verb != "doctor") {
+        if (verb != "profiles" && verb != "list" && verb != "capabilities" && verb != "doctor" &&
+            verb != "set-parameter" && verb != "inject-midi" && verb != "set-transport") {
             std::cerr << "Error: unknown inspect command: " << verb << "\n";
             return 2;
         }
@@ -209,24 +271,43 @@ int cmd_inspect(const std::vector<std::string>& args) {
     for (std::size_t index = first_option; index < args.size(); ++index) {
         const auto& arg = args[index];
         if (arg == "--help" || arg == "-h") {
-            std::cout << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
-                      << "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]\n"
-                      << "       pulp inspect [legacy one-shot options]\n\n"
-                      << "Options:\n"
-                      << "  --session ID      Select the exact live session\n"
-                      << "  --instance ID     Select the exact instance within a session\n"
-                      << "  --publication ID  Pin one non-reusable publication generation\n"
-                      << "  --host HOST       Filter discovery by host (loopback only)\n"
-                      << "  --port PORT       Filter discovery by port; never bypasses auth\n"
-                      << "  --command METHOD  Send one command and print its result\n"
-                      << "  --params JSON     JSON params for --command (default: {})\n"
-                      << "  --output FILE     Write the one-shot result to FILE\n"
-                      << "  --json            Stable JSON output for named commands\n\n"
-                      << "Normal launches do not start an inspector endpoint. A standalone\n"
-                      << "must be explicitly launched with an inspector profile. Discovery is\n"
-                      << "ephemeral and every connection proves possession of its owner-private\n"
-                      << "session credential. Runtime.evaluate additionally requires its\n"
-                      << "separate build and runtime opt-in.\n";
+            std::cout
+                << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
+                << "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]\n"
+                << "       pulp inspect set-parameter --id ID --value VALUE --session ID "
+                   "--instance ID --publication ID\n"
+                << "       pulp inspect inject-midi --kind note_on|note_off --channel 1..16 --note "
+                   "0..127 [--velocity 0..127] [--duration-ms 1..2000] --session ID --instance ID "
+                   "--publication ID\n"
+                << "       pulp inspect set-transport [--playing true|false] [--position-samples "
+                   "N] [--tempo-bpm 20..400] --session ID --instance ID --publication ID\n"
+                << "       pulp inspect [legacy one-shot options]\n\n"
+                << "Options:\n"
+                << "  --session ID      Select the exact live session\n"
+                << "  --instance ID     Select the exact instance within a session\n"
+                << "  --publication ID  Pin one non-reusable publication generation\n"
+                << "  --host HOST       Filter discovery by host (loopback only)\n"
+                << "  --port PORT       Filter discovery by port; never bypasses auth\n"
+                << "  --id ID           Numeric parameter ID for set-parameter\n"
+                << "  --value VALUE     Finite parameter value for set-parameter\n"
+                << "  --normalized      Interpret --value in normalized [0,1]\n"
+                << "  --kind KIND       MIDI kind: note_on or note_off\n"
+                << "  --channel N       MIDI channel in the public 1..16 range\n"
+                << "  --note N          MIDI note number from 0 to 127\n"
+                << "  --velocity N      MIDI velocity from 0 to 127\n"
+                << "  --duration-ms N   Required note_on hold from 1 to 2000 ms\n"
+                << "  --playing BOOL    Set standalone transport play state\n"
+                << "  --position-samples N  Set nonnegative standalone sample position\n"
+                << "  --tempo-bpm N     Set standalone tempo from 20 to 400 BPM\n"
+                << "  --command METHOD  Send one command and print its result\n"
+                << "  --params JSON     JSON params for --command (default: {})\n"
+                << "  --output FILE     Write the one-shot result to FILE\n"
+                << "  --json            Stable JSON output for named commands\n\n"
+                << "Normal launches do not start an inspector endpoint. A standalone\n"
+                << "must be explicitly launched with an inspector profile. Discovery is\n"
+                << "ephemeral and every connection proves possession of its owner-private\n"
+                << "session credential. Runtime.evaluate additionally requires its\n"
+                << "separate build and runtime opt-in.\n";
             return 0;
         }
         if (arg == "--host") {
@@ -248,6 +329,38 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 return 2;
         } else if (arg == "--publication") {
             if (!require_arg_value(args, index, "--publication", publication_id))
+                return 2;
+        } else if (arg == "--id") {
+            if (!require_arg_value(args, index, "--id", parameter_id_text))
+                return 2;
+        } else if (arg == "--value") {
+            if (!require_arg_value(args, index, "--value", parameter_value_text))
+                return 2;
+        } else if (arg == "--normalized") {
+            normalized = true;
+        } else if (arg == "--kind") {
+            if (!require_arg_value(args, index, "--kind", midi_kind))
+                return 2;
+        } else if (arg == "--channel") {
+            if (!require_arg_value(args, index, "--channel", midi_channel_text))
+                return 2;
+        } else if (arg == "--note") {
+            if (!require_arg_value(args, index, "--note", midi_note_text))
+                return 2;
+        } else if (arg == "--velocity") {
+            if (!require_arg_value(args, index, "--velocity", midi_velocity_text))
+                return 2;
+        } else if (arg == "--duration-ms") {
+            if (!require_arg_value(args, index, "--duration-ms", midi_duration_text))
+                return 2;
+        } else if (arg == "--playing") {
+            if (!require_arg_value(args, index, "--playing", transport_playing_text))
+                return 2;
+        } else if (arg == "--position-samples") {
+            if (!require_arg_value(args, index, "--position-samples", transport_position_text))
+                return 2;
+        } else if (arg == "--tempo-bpm") {
+            if (!require_arg_value(args, index, "--tempo-bpm", transport_tempo_text))
                 return 2;
         } else if (arg == "--command") {
             if (!require_arg_value(args, index, "--command", command))
@@ -290,6 +403,141 @@ int cmd_inspect(const std::vector<std::string>& args) {
     if (!verb.empty() && (!command.empty() || params_provided || !output_file.empty())) {
         std::cerr << "Error: named inspect commands do not accept legacy "
                      "--command/--params/--output options\n";
+        return 2;
+    }
+
+    const bool parameter_options_present =
+        !parameter_id_text.empty() || !parameter_value_text.empty() || normalized;
+    if (parameter_options_present && verb != "set-parameter") {
+        std::cerr << "Error: --id, --value, and --normalized require set-parameter\n";
+        return 2;
+    }
+    const bool midi_options_present = !midi_kind.empty() || !midi_channel_text.empty() ||
+                                      !midi_note_text.empty() || !midi_velocity_text.empty() ||
+                                      !midi_duration_text.empty();
+    if (midi_options_present && verb != "inject-midi") {
+        std::cerr << "Error: --kind, --channel, --note, --velocity, and --duration-ms require "
+                     "inject-midi\n";
+        return 2;
+    }
+    const bool transport_options_present = !transport_playing_text.empty() ||
+                                           !transport_position_text.empty() ||
+                                           !transport_tempo_text.empty();
+    if (transport_options_present && verb != "set-transport") {
+        std::cerr
+            << "Error: --playing, --position-samples, and --tempo-bpm require set-transport\n";
+        return 2;
+    }
+
+    std::uint32_t parameter_id = 0;
+    double parameter_value = 0.0;
+    if (verb == "set-parameter") {
+        if (parameter_id_text.empty() || parameter_value_text.empty()) {
+            std::cerr << "Error: set-parameter requires --id and --value\n";
+            return 2;
+        }
+        if (!parse_uint32(parameter_id_text, parameter_id)) {
+            std::cerr << "Error: invalid --id value: " << parameter_id_text << "\n";
+            return 2;
+        }
+        if (!parse_finite_double(parameter_value_text, parameter_value)) {
+            std::cerr << "Error: invalid --value value: " << parameter_value_text << "\n";
+            return 2;
+        }
+        if (normalized && (parameter_value < 0.0 || parameter_value > 1.0)) {
+            std::cerr << "Error: --normalized requires --value from 0 to 1\n";
+            return 2;
+        }
+    }
+
+    MidiTestInput midi_input;
+    std::chrono::milliseconds midi_hold_duration{0};
+    if (verb == "inject-midi") {
+        std::uint32_t channel = 0;
+        std::uint32_t note = 0;
+        std::uint32_t velocity = 0;
+        if ((midi_kind != "note_on" && midi_kind != "note_off") || midi_channel_text.empty() ||
+            midi_note_text.empty()) {
+            std::cerr
+                << "Error: inject-midi requires --kind note_on|note_off, --channel, and --note\n";
+            return 2;
+        }
+        if (!parse_uint32(midi_channel_text, channel) || channel < 1 || channel > 16) {
+            std::cerr << "Error: --channel must be from 1 to 16\n";
+            return 2;
+        }
+        if (!parse_uint32(midi_note_text, note) || note > 127) {
+            std::cerr << "Error: --note must be from 0 to 127\n";
+            return 2;
+        }
+        if (midi_kind == "note_on" && midi_velocity_text.empty()) {
+            std::cerr << "Error: note_on requires --velocity\n";
+            return 2;
+        }
+        std::uint32_t duration_ms = 0;
+        if (midi_kind == "note_on" && (!parse_uint32(midi_duration_text, duration_ms) ||
+                                       duration_ms < 1 || duration_ms > 2000)) {
+            std::cerr << "Error: note_on requires --duration-ms from 1 to 2000\n";
+            return 2;
+        }
+        if (midi_kind == "note_off" && !midi_duration_text.empty()) {
+            std::cerr << "Error: --duration-ms applies only to note_on\n";
+            return 2;
+        }
+        if (!midi_velocity_text.empty() &&
+            (!parse_uint32(midi_velocity_text, velocity) || velocity > 127)) {
+            std::cerr << "Error: --velocity must be from 0 to 127\n";
+            return 2;
+        }
+        midi_input.kind =
+            midi_kind == "note_on" ? MidiTestInputKind::NoteOn : MidiTestInputKind::NoteOff;
+        midi_input.channel = static_cast<std::uint8_t>(channel - 1);
+        midi_input.note = static_cast<std::uint8_t>(note);
+        midi_input.velocity = static_cast<std::uint8_t>(velocity);
+        midi_hold_duration = std::chrono::milliseconds(duration_ms);
+    }
+
+    StandaloneTransportTestInput transport_input;
+    if (verb == "set-transport") {
+        if (!transport_options_present) {
+            std::cerr
+                << "Error: set-transport requires --playing, --position-samples, or --tempo-bpm\n";
+            return 2;
+        }
+        if (!transport_playing_text.empty()) {
+            if (transport_playing_text == "true")
+                transport_input.playing = true;
+            else if (transport_playing_text == "false")
+                transport_input.playing = false;
+            else {
+                std::cerr << "Error: --playing must be true or false\n";
+                return 2;
+            }
+        }
+        if (!transport_position_text.empty()) {
+            std::int64_t value = 0;
+            if (!parse_nonnegative_int64(transport_position_text, value)) {
+                std::cerr << "Error: --position-samples must be a nonnegative integer\n";
+                return 2;
+            }
+            transport_input.position_samples = value;
+        }
+        if (!transport_tempo_text.empty()) {
+            double value = 0.0;
+            if (!parse_finite_double(transport_tempo_text, value) || value < 20.0 ||
+                value > 400.0) {
+                std::cerr << "Error: --tempo-bpm must be from 20 to 400\n";
+                return 2;
+            }
+            transport_input.tempo_bpm = value;
+        }
+    }
+
+    if ((verb == "set-parameter" || verb == "inject-midi" || verb == "set-transport") &&
+        !exact_target(session_id, instance_id, publication_id)) {
+        std::cerr
+            << "Error: " << verb
+            << " requires --session, --instance, and --publication from `pulp inspect list`\n";
         return 2;
     }
 
@@ -477,6 +725,70 @@ int cmd_inspect(const std::vector<std::string>& args) {
         }
         std::cerr << "\n";
         return 1;
+    }
+
+    if (verb == "set-parameter" || verb == "inject-midi" || verb == "set-transport") {
+        const InspectorClientTarget target{session_id, instance_id, publication_id};
+        InspectorClientResult result;
+        if (verb == "set-parameter") {
+            auto typed_params = choc::value::createObject("");
+            typed_params.addMember("id", choc::value::createInt64(parameter_id));
+            typed_params.addMember("value", choc::value::createFloat64(parameter_value));
+            typed_params.addMember("normalized", choc::value::createBool(normalized));
+            result = request_inspector(std::string(methods::kStateSetParameter),
+                                       choc::json::toString(typed_params, false), target,
+                                       std::chrono::seconds(3), discovery);
+        } else if (verb == "inject-midi") {
+            result = inject_inspector_midi(midi_input, midi_hold_duration, target,
+                                           std::chrono::seconds(5), discovery);
+        } else {
+            result = set_inspector_transport(transport_input, target, std::chrono::seconds(3),
+                                             discovery);
+        }
+        if (!result.succeeded()) {
+            if (json_output)
+                std::cout << command_error_json(result.response) << "\n";
+            else
+                print_error(result.response);
+            return 1;
+        }
+        if (json_output) {
+            if (verb == "set-parameter") {
+                auto root = choc::value::createObject("");
+                root.addMember("schemaVersion",
+                               choc::value::createString("pulp.inspect.set-parameter.v1"));
+                root.addMember("session", publication_json(*result.publication));
+                root.addMember("parameterId", choc::value::createInt64(parameter_id));
+                root.addMember("value", choc::value::createFloat64(parameter_value));
+                root.addMember("normalized", choc::value::createBool(normalized));
+                try {
+                    root.addMember("result", choc::json::parse(result.response.params_json));
+                } catch (...) {
+                    root.addMember("result",
+                                   choc::value::createString(result.response.params_json));
+                }
+                std::cout << choc::json::toString(root, false) << "\n";
+            } else {
+                const auto schema = verb == "inject-midi" ? "pulp.inspect.inject-midi.v1"
+                                                          : "pulp.inspect.set-transport.v1";
+                auto output =
+                    typed_result_json(schema, *result.publication, result.response.params_json);
+                if (verb == "inject-midi" && midi_input.kind == MidiTestInputKind::NoteOn) {
+                    auto root = choc::json::parse(output);
+                    root.addMember("durationMs",
+                                   choc::value::createInt64(midi_hold_duration.count()));
+                    output = choc::json::toString(root, false);
+                }
+                std::cout << output << "\n";
+            }
+        } else if (verb == "set-parameter") {
+            std::cout << "Updated parameter " << parameter_id << "\n";
+        } else if (verb == "inject-midi") {
+            std::cout << "Injected MIDI event\n";
+        } else {
+            std::cout << "Updated standalone transport\n";
+        }
+        return 0;
     }
 
     auto& status = command.empty() ? std::cout : std::cerr;

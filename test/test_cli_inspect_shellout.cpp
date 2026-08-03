@@ -138,8 +138,9 @@ InspectorPolicyConfig fixture_policy() {
     policy.available_capabilities = {
         InspectorCapability::SessionDescribe, InspectorCapability::SessionControl,
         InspectorCapability::StateRead,       InspectorCapability::StateWrite,
-        InspectorCapability::UiRead,          InspectorCapability::DiagnosticsRead,
-        InspectorCapability::LogsRead,        InspectorCapability::AuthoringTweaks,
+        InspectorCapability::TestInput,       InspectorCapability::UiRead,
+        InspectorCapability::DiagnosticsRead, InspectorCapability::LogsRead,
+        InspectorCapability::AuthoringTweaks,
     };
     return policy;
 }
@@ -265,6 +266,86 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
     REQUIRE(fixture.seen.size() == 1);
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE((fixture.seen[0].params_json.empty() || fixture.seen[0].params_json == "{}"));
+}
+
+TEST_CASE("pulp inspect exposes bounded typed MIDI and transport commands",
+          "[cli][shellout][inspect][test-input]") {
+    REQUIRE(binary_exists());
+
+    InspectServerFixture fixture;
+    fixture.handler = [](const InspectorMessage& request) {
+        if (request.method == pulp::inspect::methods::kTestInjectMidi)
+            return make_response(request.id, R"({"accepted":true})");
+        if (request.method == pulp::inspect::methods::kTestSetTransport)
+            return make_response(request.id, R"({"applied":true})");
+        if (request.method == pulp::inspect::methods::kStateSetParameter)
+            return make_response(request.id, R"({"applied":true})");
+        return make_response(request.id, "{}");
+    };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto& record = *fixture.publisher.record();
+    const std::vector<std::string> exact{"--session",     record.session_id,
+                                         "--instance",    record.instance_id,
+                                         "--publication", record.publication_id};
+    auto run_exact = [&](std::vector<std::string> command) {
+        command.insert(command.end(), exact.begin(), exact.end());
+        return run_pulp(command, 10000);
+    };
+
+    const auto parameter = run_exact(
+        {"inspect", "set-parameter", "--id", "7", "--value", "0.25", "--normalized", "--json"});
+    REQUIRE_FALSE(parameter.timed_out);
+    REQUIRE(parameter.exit_code == 0);
+    CHECK(parameter.stdout_output.find("pulp.inspect.set-parameter.v1") != std::string::npos);
+    CHECK(parameter.stdout_output.find("\"parameterId\": 7") != std::string::npos);
+    CHECK(parameter.stdout_output.find("\"normalized\": true") != std::string::npos);
+
+    const auto note_on =
+        run_exact({"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60",
+                   "--velocity", "100", "--duration-ms", "10", "--json"});
+    REQUIRE_FALSE(note_on.timed_out);
+    REQUIRE(note_on.exit_code == 0);
+    CHECK(note_on.stdout_output.find("pulp.inspect.inject-midi.v1") != std::string::npos);
+    CHECK(note_on.stdout_output.find(record.publication_id) != std::string::npos);
+    CHECK(note_on.stdout_output.find("\"accepted\": true") != std::string::npos);
+    CHECK(note_on.stdout_output.find("\"durationMs\": 10") != std::string::npos);
+
+    const auto note_off = run_exact({"inspect", "inject-midi", "--kind", "note_off", "--channel",
+                                     "1", "--note", "60", "--json"});
+    REQUIRE_FALSE(note_off.timed_out);
+    REQUIRE(note_off.exit_code == 0);
+
+    const auto transport = run_exact({"inspect", "set-transport", "--playing", "true",
+                                      "--position-samples", "0", "--tempo-bpm", "120", "--json"});
+    REQUIRE_FALSE(transport.timed_out);
+    REQUIRE(transport.exit_code == 0);
+    CHECK(transport.stdout_output.find("pulp.inspect.set-transport.v1") != std::string::npos);
+    CHECK(transport.stdout_output.find("\"applied\": true") != std::string::npos);
+
+    const auto missing_velocity = run_pulp(
+        {"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60", "--json"},
+        10000);
+    REQUIRE(missing_velocity.exit_code == 2);
+    CHECK(missing_velocity.stderr_output.find("note_on requires --velocity") != std::string::npos);
+
+    const auto missing_duration =
+        run_pulp({"inspect", "inject-midi", "--kind", "note_on", "--channel", "1", "--note", "60",
+                  "--velocity", "100", "--json"},
+                 10000);
+    REQUIRE(missing_duration.exit_code == 2);
+    CHECK(missing_duration.stderr_output.find("note_on requires --duration-ms") !=
+          std::string::npos);
+
+    const auto empty_transport = run_pulp({"inspect", "set-transport", "--json"}, 10000);
+    REQUIRE(empty_transport.exit_code == 2);
+    CHECK(empty_transport.stderr_output.find(
+              "set-transport requires --playing, --position-samples, or --tempo-bpm") !=
+          std::string::npos);
+
+    const auto bad_parameter =
+        run_pulp({"inspect", "set-parameter", "--id", "gain", "--value", "0.5", "--json"}, 10000);
+    REQUIRE(bad_parameter.exit_code == 2);
+    CHECK(bad_parameter.stderr_output.find("invalid --id value: gain") != std::string::npos);
 }
 
 TEST_CASE("pulp inspect named commands expose stable human and JSON contracts",

@@ -104,6 +104,59 @@ TEST_CASE("shared one-shot client selects exact publications and owns controller
     CHECK_FALSE(next_client.request("Session.acquireController").is_error);
 }
 
+TEST_CASE("shared one-shot client validates and sends typed standalone test input",
+          "[inspect][client][one-shot][test-input]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+    const auto& record = records.front();
+    const pulp::inspect::InspectorClientTarget target{record.session_id, record.instance_id,
+                                                      record.publication_id};
+
+    const auto midi = inject_inspector_midi({.kind = pulp::inspect::MidiTestInputKind::NoteOn,
+                                             .channel = 0,
+                                             .note = 60,
+                                             .velocity = 100},
+                                            std::chrono::milliseconds(10), target,
+                                            std::chrono::seconds(1), fixture.reader);
+    REQUIRE(midi.succeeded());
+    CHECK(choc::json::parse(midi.response.params_json)["applied"].getBool());
+    {
+        std::lock_guard lock(fixture.seen_mutex);
+        std::vector<std::string> midi_kinds;
+        for (const auto& request : fixture.seen) {
+            if (request.method == pulp::inspect::methods::kTestInjectMidi)
+                midi_kinds.push_back(
+                    std::string(choc::json::parse(request.params_json)["kind"].getString()));
+        }
+        CHECK(midi_kinds == std::vector<std::string>{"note_on", "note_off"});
+    }
+
+    const auto transport =
+        set_inspector_transport({.playing = false, .position_samples = 0, .tempo_bpm = 120.0},
+                                target, std::chrono::seconds(1), fixture.reader);
+    REQUIRE(transport.succeeded());
+    CHECK(choc::json::parse(transport.response.params_json)["applied"].getBool());
+
+    const auto invalid_midi = inject_inspector_midi(
+        {.kind = pulp::inspect::MidiTestInputKind::NoteOn,
+         .channel = 16,
+         .note = 60,
+         .velocity = 100},
+        std::chrono::milliseconds(10), target, std::chrono::seconds(1), fixture.reader);
+    CHECK_FALSE(invalid_midi.succeeded());
+    CHECK(invalid_midi.response.error_code == "invalid_params");
+
+    const auto invalid_transport =
+        set_inspector_transport({}, target, std::chrono::seconds(1), fixture.reader);
+    CHECK_FALSE(invalid_transport.succeeded());
+    CHECK(invalid_transport.response.error_code == "invalid_params");
+
+    InspectorClient next_client;
+    REQUIRE(next_client.connect(record, fixture.reader));
+    CHECK_FALSE(next_client.request("Session.acquireController").is_error);
+}
+
 TEST_CASE("shared one-shot client returns stable structured selection errors",
           "[inspect][client][one-shot][selection]") {
     TemporaryDirectory temporary;

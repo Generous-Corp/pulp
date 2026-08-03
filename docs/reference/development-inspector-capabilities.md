@@ -38,8 +38,8 @@ trip.
 | `trace.control` | no | yes | Domain components exist but the standalone owner does not advertise them without a trace binding |
 | `trace.session.control` | no | yes | Process-global Trace sessions require a publication-scoped binding |
 | `state.write` | no | yes | The `develop` standalone profile applies legal parameter mutations on the main thread after acquiring the same-connection controller lease |
-| `test.input` | no | yes | Reserved capability; typed MIDI/transport methods are not implemented |
-| `authoring.tweaks` | no | yes | The standalone session exposes its tweak store; filesystem and editor-launch methods remain classified unavailable |
+| `test.input` | no | yes | `Test.injectMidi` accepts bounded note-on/off events and `Test.setTransport` applies coherent standalone play/position/tempo updates through the normal host path |
+| `authoring.tweaks` | no | yes | Transient tweaks, highlight, bypass, lock, live constants, editor URL templates, and repaint flashing stay in this capability; filesystem and editor-launch methods remain unavailable |
 | `telemetry.stream` | no | yes | Registered events are policy-filtered before authenticated fan-out, but the standalone owner does not yet attach independent live telemetry sources |
 | `runtime.eval` | no | no | High-risk separate opt-in; no standalone profile enables it |
 | `unavailable` | no | no | Filesystem-backed tweak/fixture operations and editor launch are classified unavailable for the future policy |
@@ -56,8 +56,8 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses | Processor-level editor replacement remains fail-closed |
 | Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |
-| CLI | `pulp inspect profiles/list/capabilities/doctor` provide schema-versioned human/JSON orientation; every live operation accepts an exact session/instance/publication selector; the shared client authenticates and owns bounded request/controller-lease lifetimes | Higher-level task-specific commands remain phase-owned |
-| MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus exact typed operations; success carries publication identity and failures carry structured code/message/data | Higher-level task-specific tools remain phase-owned |
+| CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
+| MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
 | Capture/telemetry | Whole-window compositor capture and the value-channel catalog are attached to the standalone session | Node capture and independent bounded live telemetry fan-out |
 | Shipping | The component gate removes inspector targets and CLI commands fail explicitly when disabled; ordinary-format symbol stripping is continuously checked | Per-target declaration, shipped-product manifest, and override proof |
 
@@ -84,6 +84,25 @@ late response cannot be mistaken for a safe retry boundary.
 Build presence, host wiring, profile allowance, and current enablement are
 separate facts. `Session.getCapabilities` reports the available and effective
 sets for an authenticated session; no client should infer one from another.
+
+## Typed test input and authoring boundary
+
+`test.input` is deliberately narrow. `Test.injectMidi` accepts only `note_on`
+and `note_off`, public channels 1–16, note/velocity bytes 0–127, and no raw
+status bytes, SysEx, CC, timestamp, path, or script. Outstanding injected notes
+belong to the controller session and are released when its lease is released,
+expires, disconnects, or the session tears down. The installed one-shot clients
+require a 1–2000 ms hold for note-on and send the matching note-off on the same
+controller connection before releasing the lease. `Test.setTransport` accepts an
+idempotent partial update containing at least one of `playing`, nonnegative
+`position_samples`, or finite `tempo_bpm` from 20 through 400. Both operations
+run through the owning thread and normal standalone host/processor path.
+
+Numeric parameter changes remain `state.write`. Transient authoring controls
+remain `authoring.tweaks`. Generic preset load/save, filesystem tweak
+load/save, source jump, raw MIDI, and arbitrary UI scripting are not test-input
+shortcuts; those methods remain unavailable. `Runtime.evaluate` is never an
+implementation path for MIDI, transport, parameters, or authoring controls.
 
 ## Client evidence loop
 

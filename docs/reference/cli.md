@@ -318,7 +318,7 @@ even when the protocol/client SDK components are present.
 - `--inspect=observe|develop` selects a named capability set.
 - `--inspect=custom --inspect-capability <id>...` selects an explicit,
   nonempty capability set; the capability option is repeatable. A custom set
-  containing `state.write` or `authoring.tweaks` must also contain
+  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
   `session.control`, because mutations require a controller lease.
 - `--inspect=off` is the default and starts no listener or discovery artifact.
 
@@ -1309,6 +1309,13 @@ pulp inspect capabilities --json \
   --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 pulp inspect --session SESSION_ID --instance INSTANCE_ID \
   --publication PUBLICATION_ID --command State.getParameters
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
 
 The named commands are the stable orientation surface:
@@ -1319,6 +1326,9 @@ The named commands are the stable orientation surface:
 | `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
 | `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
 | `doctor` | Discovery runtime directory, live-session count, and issues. |
+| `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
+| `inject-midi` | One bounded note-on/off event under `test.input`. |
+| `set-transport` | One idempotent partial standalone transport update under `test.input`. |
 
 Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
 The installed Rust `pulp` forwards `inspect` to its installed sibling
@@ -1335,7 +1345,27 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
-- `--json` - stable JSON for `profiles`, `list`, `capabilities`, or `doctor`
+- `--id`, `--value`, `--normalized` - typed `set-parameter` fields
+- `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
+  `inject-midi` fields; note-on duration is 1 through 2000 ms
+- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
+- `--json` - stable JSON for named commands
+
+Typed parameter, MIDI, and transport mutations require the exact three-part
+publication identity and a same-connection controller lease. `inject-midi`
+accepts only note-on/off events on public channels 1–16 with byte-range note
+and velocity values. A note-on requires a bounded duration and the client sends
+the matching note-off on the same connection before releasing its lease; a
+separate note-off is only an individual cleanup event. `set-transport` requires at least one of play state,
+nonnegative sample position, or finite tempo from 20 through 400 BPM. Their
+schema versions are `pulp.inspect.set-parameter.v1`,
+`pulp.inspect.inject-midi.v1`, and `pulp.inspect.set-transport.v1`.
+
+This is not a preset/filesystem or raw-event API. Parameter writes remain under
+`state.write`; transient authoring controls remain under `authoring.tweaks`;
+generic preset/filesystem operations, raw MIDI, and arbitrary scripting remain
+unavailable. Injected notes are released on lease loss, disconnect, or teardown.
+None of these typed commands routes through `Runtime.evaluate`.
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.

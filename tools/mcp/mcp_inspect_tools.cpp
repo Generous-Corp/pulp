@@ -1,5 +1,6 @@
 // mcp_inspect_tools.cpp — Design inspection request MCP handlers.
 
+#include "mcp_inspect_tools_internal.hpp"
 #include "mcp_json.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
@@ -9,6 +10,7 @@
 #include <pulp/inspect/protocol.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -22,6 +24,8 @@ constexpr auto kInspectorMcpTools = std::to_array<InspectorMcpToolDescriptor>({
     {"pulp_inspect_params", methods::kStateGetParameters},
     {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
     {"pulp_inspect_set_param", methods::kStateSetParameter},
+    {"pulp_inspect_inject_midi", methods::kTestInjectMidi},
+    {"pulp_inspect_set_transport", methods::kTestSetTransport},
     {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
     {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
     {"pulp_inspect_performance", methods::kPerfGetMetrics},
@@ -157,6 +161,132 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
     }
     return true;
 }
+
+namespace detail {
+namespace {
+
+bool is_inspector_selector_field(std::string_view name) {
+    return name == "session_id" || name == "instance_id" || name == "publication_id";
+}
+
+} // namespace
+
+std::optional<InspectorMidiArguments>
+parse_inspector_midi_arguments(const choc::value::Value& arguments, std::string& error) {
+    for (std::uint32_t index = 0; index < arguments.size(); ++index) {
+        const auto name = std::string_view(arguments.getObjectMemberAt(index).name);
+        if (!is_inspector_selector_field(name) && name != "kind" && name != "channel" &&
+            name != "note" && name != "velocity" && name != "duration_ms") {
+            error = "Error: unknown test-input field: " + std::string(name);
+            return std::nullopt;
+        }
+    }
+    if (!arguments.hasObjectMember("kind") || !arguments["kind"].isString()) {
+        error = "Error: kind must be note_on or note_off";
+        return std::nullopt;
+    }
+    InspectorMidiArguments parsed;
+    parsed.kind = std::string(arguments["kind"].getString());
+    if (parsed.kind != "note_on" && parsed.kind != "note_off") {
+        error = "Error: kind must be note_on or note_off";
+        return std::nullopt;
+    }
+    const auto read_bounded = [&](std::string_view name, std::int64_t minimum, std::int64_t maximum,
+                                  std::uint8_t& output) {
+        const auto key = std::string(name);
+        if (!arguments.hasObjectMember(key) || !arguments[key].isInt())
+            return false;
+        const auto value = arguments[key].getInt64();
+        if (value < minimum || value > maximum)
+            return false;
+        output = static_cast<std::uint8_t>(value);
+        return true;
+    };
+    std::uint8_t public_channel = 0;
+    if (!read_bounded("channel", 1, 16, public_channel)) {
+        error = "Error: channel is outside the supported range 1 through 16";
+        return std::nullopt;
+    }
+    parsed.channel = static_cast<std::uint8_t>(public_channel - 1);
+    if (!read_bounded("note", 0, 127, parsed.note)) {
+        error = "Error: note is outside the supported range 0 through 127";
+        return std::nullopt;
+    }
+    if (arguments.hasObjectMember("velocity")) {
+        if (!read_bounded("velocity", 0, 127, parsed.velocity)) {
+            error = "Error: velocity is outside the supported range 0 through 127";
+            return std::nullopt;
+        }
+    } else if (parsed.kind == "note_on") {
+        error = "Error: velocity is required for note_on";
+        return std::nullopt;
+    }
+    if (parsed.kind == "note_on") {
+        if (!arguments.hasObjectMember("duration_ms") || !arguments["duration_ms"].isInt()) {
+            error = "Error: duration_ms is required for note_on";
+            return std::nullopt;
+        }
+        const auto duration_ms = arguments["duration_ms"].getInt64();
+        if (duration_ms < 1 || duration_ms > 2000) {
+            error = "Error: duration_ms must be from 1 through 2000";
+            return std::nullopt;
+        }
+        parsed.hold_duration = std::chrono::milliseconds(duration_ms);
+    } else if (arguments.hasObjectMember("duration_ms")) {
+        error = "Error: duration_ms applies only to note_on";
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::optional<InspectorTransportArguments>
+parse_inspector_transport_arguments(const choc::value::Value& arguments, std::string& error) {
+    for (std::uint32_t index = 0; index < arguments.size(); ++index) {
+        const auto name = std::string_view(arguments.getObjectMemberAt(index).name);
+        if (!is_inspector_selector_field(name) && name != "playing" && name != "position_samples" &&
+            name != "tempo_bpm") {
+            error = "Error: unknown test-input field: " + std::string(name);
+            return std::nullopt;
+        }
+    }
+    InspectorTransportArguments parsed;
+    if (arguments.hasObjectMember("playing")) {
+        if (!arguments["playing"].isBool()) {
+            error = "Error: playing must be a boolean";
+            return std::nullopt;
+        }
+        parsed.playing = arguments["playing"].getBool();
+    }
+    if (arguments.hasObjectMember("position_samples")) {
+        if (!arguments["position_samples"].isInt() ||
+            arguments["position_samples"].getInt64() < 0) {
+            error = "Error: position_samples must be a nonnegative integer";
+            return std::nullopt;
+        }
+        parsed.position_samples = arguments["position_samples"].getInt64();
+    }
+    if (arguments.hasObjectMember("tempo_bpm")) {
+        const auto value = arguments["tempo_bpm"];
+        if (!value.isInt() && !value.isFloat()) {
+            error = "Error: tempo_bpm must be a number";
+            return std::nullopt;
+        }
+        const auto tempo =
+            value.isInt() ? static_cast<double>(value.getInt64()) : value.getFloat64();
+        if (!std::isfinite(tempo) || tempo < 20.0 || tempo > 400.0) {
+            error = "Error: tempo_bpm must be finite and from 20 to 400";
+            return std::nullopt;
+        }
+        parsed.tempo_bpm = tempo;
+    }
+    if (!parsed.playing && !parsed.position_samples && !parsed.tempo_bpm) {
+        error = "Error: set transport requires playing, position_samples, or tempo_bpm";
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+} // namespace detail
 
 // Read the pull-based agent-request queue (.pulp-design-requests.json) for a
 // design project and return its not-yet-consumed requests as a JSON array.
