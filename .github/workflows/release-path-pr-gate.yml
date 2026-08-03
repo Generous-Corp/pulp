@@ -64,13 +64,17 @@ jobs:
     steps:
       - id: resolve
         env:
+          PR_GATE_JSON: ${{ vars.PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON }}
           RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
           LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
         run: |
-          if [ -n "${RELEASE_JSON:-}" ]; then
+          if [ -n "${PR_GATE_JSON:-}" ]; then
+            echo "runs_on_json=${PR_GATE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-path PR gate via PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON: ${PR_GATE_JSON}"
+          elif [ -n "${RELEASE_JSON:-}" ]; then
             echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
-            echo "Routing macOS release-path PR gate via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
+            echo "Routing macOS release-path PR gate via legacy PULP_RELEASE_MACOS_RUNS_ON_JSON fallback: ${RELEASE_JSON}"
           elif [ -n "${LOCAL_JSON:-}" ]; then
             echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
             echo "Routing macOS release-path PR gate via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
