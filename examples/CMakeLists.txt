@@ -25,6 +25,7 @@ endif()
 add_subdirectory(pulp-gain)
 add_subdirectory(design-panel-plugin)
 add_subdirectory(design-panel-instrument)
+add_subdirectory(design-panel-midi-effect)
 add_subdirectory(eq-curve-demo)
 
 # PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components

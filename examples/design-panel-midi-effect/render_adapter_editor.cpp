@@ -13,7 +13,7 @@
 // the host's native-window step, and the editor's CONTENT is fully built
 // without it. That is what makes this runnable with no window and no host.
 
-#include "design_panel_instrument.hpp"
+#include "design_panel_midi_effect.hpp"
 
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/state/store.hpp>
@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto processor = pulp::examples::create_design_panel_instrument();
+    auto processor = pulp::examples::create_design_panel_midi_effect();
     pulp::state::StateStore store;
     processor->define_parameters(store);
 

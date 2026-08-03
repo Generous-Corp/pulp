@@ -5,7 +5,7 @@
 // would prove the importer works and say nothing about what the plugin shows,
 // which is the substitution this tool exists to refuse.
 
-#include "design_panel_instrument.hpp"
+#include "design_panel_midi_effect.hpp"
 
 #include <pulp/view/screenshot.hpp>
 
@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto processor = pulp::examples::create_design_panel_instrument();
+    auto processor = pulp::examples::create_design_panel_midi_effect();
     auto editor = processor->create_view();
     if (editor == nullptr) {
         std::cerr << "create_view() returned no editor — the plugin carries no "
