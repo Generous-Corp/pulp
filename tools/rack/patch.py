@@ -1331,6 +1331,41 @@ def install_free_module(plugin: str, version: str, premium: bool) -> tuple:
         return False, f"could not fetch {plugin}: {exc}"
 
 
+RACK_APPS = ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2")
+
+
+def rack_app_name(running=None, installed=None):
+    """WHICH Rack to drive, rather than assuming the free one.
+
+    restart_rack() quit and relaunched "VCV Rack 2 Free" by name. Somebody on
+    Rack Pro -- what a VCV+ subscriber runs -- got a quit aimed at an app they
+    may not have and a launch of the wrong one, so a module they had just built
+    never appeared in the Rack they were using. Both install side by side,
+    which is exactly the case that hides it.
+
+    The RUNNING one wins: whatever the user has open is the one they mean.
+    Failing that Pro is preferred, because somebody who installed Pro is using
+    it -- and deleting Pro falls back to Free with no setting to change.
+
+    `running` / `installed` are injected by the tests so the choice can be
+    checked without an app on disk or a process to launch.
+    """
+    import os as _os
+    import subprocess as _sp
+    if running is None:
+        running = lambda n: _sp.run(["pgrep", "-f", n + ".app"],
+                                    capture_output=True).returncode == 0
+    if installed is None:
+        installed = lambda n: _os.path.isdir("/Applications/" + n + ".app")
+    for c in RACK_APPS:
+        if running(c):
+            return c
+    for c in RACK_APPS:
+        if installed(c):
+            return c
+    return None
+
+
 def restart_rack() -> tuple:
     """Quit and relaunch Rack so a new module is usable now.
 
@@ -1354,17 +1389,7 @@ def restart_rack() -> tuple:
     #
     # The running one wins; otherwise prefer Pro, since somebody who installed
     # it is using it.
-    name = None
-    for candidate in ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2"):
-        if subprocess.run(["pgrep", "-f", f"{candidate}.app"],
-                          capture_output=True).returncode == 0:
-            name = candidate
-            break
-    if name is None:
-        for candidate in ("VCV Rack 2 Pro", "VCV Rack 2 Free", "VCV Rack 2"):
-            if os.path.isdir(f"/Applications/{candidate}.app"):
-                name = candidate
-                break
+    name = rack_app_name()
     if name is None:
         return False, "no VCV Rack application found to restart"
     subprocess.run(["osascript", "-e", f'tell application "{name}" to quit'],

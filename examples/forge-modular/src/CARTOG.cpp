@@ -458,8 +458,27 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         if (!swept_) {
             swept_ = true;                  // one sweep per session, not per rescan
             const std::set<std::string> bad = quarantined();
+            // OUR plugin only, unless explicitly asked for more.
+            //
+            // Building a model runs its author's constructor and destructor.
+            // That is fine for code we wrote and a gamble on code we did not:
+            // sweeping every installed plugin on a machine with a VCV+
+            // subscription -- around a hundred of them -- reached a vendor
+            // module whose destructor freed a pointer it never allocated, and
+            // libmalloc aborted the whole of Rack from inside our scan. The
+            // quarantine below catches the SECOND occurrence; nothing catches
+            // the first, because the process is already gone.
+            //
+            // The gap this sweep was written for was our own 30 modules being
+            // unmeasured. Somebody else's are still measured the moment they
+            // are placed in a rack, which is safe because Rack built them, not
+            // us. So the default gives up nothing that matters and stops
+            // running strangers' destructors at startup.
+            const char* sweep_all = std::getenv("FORGE_CARTOG_SWEEP_ALL");
+            const bool ours_only = !(sweep_all && *sweep_all);
             for (rack::plugin::Plugin* plug : rack::plugin::plugins) {
                 if (!plug) continue;
+                if (ours_only && plug->slug != "ForgeModular") continue;
                 for (rack::plugin::Model* model : plug->models) {
                     if (!model || !model->plugin) continue;
                     const std::string key =
