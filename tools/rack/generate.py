@@ -97,10 +97,21 @@ def ask_model(prompt: str, retry_context: str | None = None) -> str:
     # and because claude runs its own plugin hooks with `node`, which a host-
     # launched process has no PATH to find either.
     import toolpaths
-    r = subprocess.run([find_claude(), "-p", full], capture_output=True,
+    r = subprocess.run([find_claude(), "-p", "--strict-mcp-config", full],
+                       capture_output=True,
                        text=True, timeout=600, env=toolpaths.tool_env())
     if r.returncode != 0:
-        raise SystemExit(f"model call failed ({r.returncode}): {r.stderr[:500]}")
+        # Built from BOTH streams, via the shared formatter.
+        #
+        # This read `r.stderr` alone and printed "model call failed (1):" with
+        # nothing after the colon -- because `claude` reports its errors on
+        # STDOUT and exits 1 with an empty stderr. patch.py already had a
+        # formatter written for exactly that, and this path never got it, so
+        # module builds gave a blank where the reason was while patch builds
+        # explained themselves. A message that names only the exit code tells
+        # the reader what they could already see.
+        import patch
+        raise SystemExit(patch.model_failure(r.stdout, r.stderr))
     return r.stdout
 
 
