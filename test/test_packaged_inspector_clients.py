@@ -331,8 +331,49 @@ def exercise_clients(
         "packaged CLI observe capabilities",
     )
     require(
-        "state.write" not in observe_capabilities.get("policy", {}).get("effective", []),
+        observe_capabilities.get("sessionId") == observe_ready["session_id"],
         str(observe_capabilities),
+    )
+    require(
+        observe_capabilities.get("publicationId") == observe_ready["publication_id"],
+        str(observe_capabilities),
+    )
+    require(
+        "state.write" not in observe_capabilities.get("effective", []),
+        str(observe_capabilities),
+    )
+    observe_mutation_result = subprocess.run(
+        [
+            str(rust),
+            "inspect",
+            "set-parameter",
+            "--id",
+            str(PARAMETER_ID),
+            "--value",
+            str(CLI_PARAMETER_VALUE),
+            "--json",
+            *observe_selector,
+        ],
+        cwd=client_cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    require(
+        f"fallthrough → {cpp}" in observe_mutation_result.stderr,
+        "Rust observe mutation did not delegate to its extracted sibling:\n"
+        + observe_mutation_result.stderr,
+    )
+    require(observe_mutation_result.returncode == 1, str(observe_mutation_result))
+    observe_denial = parse_json_output(
+        observe_mutation_result, "packaged CLI observe mutation denial"
+    )
+    require(observe_denial.get("ok") is False, str(observe_denial))
+    require(
+        observe_denial.get("error", {}).get("code") == "capability_denied",
+        str(observe_denial),
     )
     observe_dom = parse_json_output(
         run_cli(["inspect", "--json", *observe_selector, "--command", "DOM.getDocument"]),
