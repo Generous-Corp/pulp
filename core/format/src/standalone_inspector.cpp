@@ -118,26 +118,6 @@ std::int64_t mtime_unix_ms(const std::filesystem::path& path) {
     return system_time.time_since_epoch().count();
 }
 
-std::optional<std::pair<std::uint32_t, std::uint32_t>>
-png_dimensions(const std::vector<std::uint8_t>& png) {
-    constexpr std::uint8_t signature[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
-    if (png.size() < 24 || !std::equal(std::begin(signature), std::end(signature), png.begin())
-        || !std::equal(png.begin() + 12, png.begin() + 16, "IHDR")) {
-        return std::nullopt;
-    }
-    const auto read_be32 = [&png](std::size_t offset) {
-        return (static_cast<std::uint32_t>(png[offset]) << 24u)
-             | (static_cast<std::uint32_t>(png[offset + 1]) << 16u)
-             | (static_cast<std::uint32_t>(png[offset + 2]) << 8u)
-             | static_cast<std::uint32_t>(png[offset + 3]);
-    };
-    const auto width = read_be32(16);
-    const auto height = read_be32(20);
-    if (width == 0 || height == 0)
-        return std::nullopt;
-    return std::pair{width, height};
-}
-
 } // namespace
 
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,

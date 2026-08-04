@@ -93,6 +93,7 @@ public:
     int repaint_calls = 0;
     std::vector<std::uint8_t> capture_bytes;
     bool capture_supported = true;
+    bool compositor_capture_supported = true;
     bool blocking_event_loop = true;
     bool exit_drain_supported = true;
     bool deferred_close_supported = true;
@@ -104,6 +105,7 @@ public:
     int run_until_calls = 0;
     int readiness_checks = 0;
     bool run_until_ready = false;
+    bool design_viewport_active = false;
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
@@ -113,7 +115,23 @@ public:
             capture_callback();
         return capture_bytes;
     }
-    bool supports_compositor_capture() const override { return capture_supported; }
+    std::vector<std::uint8_t> capture_back_buffer_png() override {
+        return capture_png();
+    }
+    bool supports_back_buffer_capture() const override { return capture_supported; }
+    bool supports_compositor_capture() const override {
+        return compositor_capture_supported;
+    }
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (!design_viewport_active)
+            return false;
+        sx = 1.5f;
+        sy = 1.5f;
+        tx = 0.0f;
+        ty = 0.0f;
+        return true;
+    }
     bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
     bool event_loop_supports_exit_drain() const override {
         return exit_drain_supported;
