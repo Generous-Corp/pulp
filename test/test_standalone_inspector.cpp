@@ -458,7 +458,7 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     std::filesystem::remove_all(temp, cleanup_error);
 }
 
-TEST_CASE("Standalone inspector accepts processor-level editor replacement",
+TEST_CASE("Standalone inspector accepts processor-level editor reload",
           "[standalone][inspect][telemetry][reload]") {
     const auto suffix = std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
@@ -587,9 +587,11 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     auto retired_source = processor.value_channel_lifetime();
     processor.replace_value_channels("after_reload");
     REQUIRE(retired_source.expired());
+    auto* scripted_before_reload = processor.active_scripted_ui();
     const auto retired_scripted_before = processor.retired_scripted_sessions;
     REQUIRE(bridge.poll_editor_reload());
-    REQUIRE(processor.retired_scripted_sessions == retired_scripted_before + 1);
+    REQUIRE(processor.retired_scripted_sessions == retired_scripted_before);
+    REQUIRE(processor.active_scripted_ui() == scripted_before_reload);
     const auto scripted_visits_after_reload = processor.scripted_ui_visits;
     const auto reloaded_runtime_capabilities = request_with_dispatch(
         client, dispatcher, "Runtime.getCapabilities", "{}");

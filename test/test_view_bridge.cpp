@@ -20,6 +20,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -178,6 +180,13 @@ public:
     }
 
     std::unique_ptr<view::ScriptedUiSession> scripted_session;
+};
+
+class ThrowingInPlaceOptInProcessor final : public ScriptedCustomViewProcessor {
+public:
+    bool supports_in_place_scripted_ui_reload() const override {
+        throw std::runtime_error("fixture opt-in failure");
+    }
 };
 
 // Uses the AutoUi default editor with NO processor-declared size (unlike
@@ -389,6 +398,19 @@ TEST_CASE("ViewBridge detects processor-owned scripted custom views",
 
     const auto& const_bridge = bridge;
     REQUIRE(const_bridge.scripted_ui() == p.scripted_session.get());
+}
+
+TEST_CASE("ViewBridge contains throwing scripted reload opt-in callbacks",
+          "[view_bridge][scripted-ui][exceptions]") {
+    ThrowingInPlaceOptInProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() == p.scripted_session.get());
 }
 
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
@@ -996,6 +1018,51 @@ public:
     // Simulate a hot-swap: new logic content + a bumped generation.
     void hot_swap_to(int v) { variant = v; ++gen; }
 };
+
+class LegacyReloadingScriptedProcessor final : public ScriptedCustomViewProcessor {
+public:
+    std::uint64_t generation = 0;
+    int create_count = 0;
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation; }
+    std::unique_ptr<view::View> create_view() override {
+        ++create_count;
+        return ScriptedCustomViewProcessor::create_view();
+    }
+};
+
+class ReloadingScriptedProcessor final : public StubProcessor {
+public:
+    explicit ReloadingScriptedProcessor(std::filesystem::path script_path)
+        : script_path(std::move(script_path)) {}
+
+    std::uint64_t generation = 0;
+    int create_count = 0;
+    bool allow_in_place_reload = false;
+    std::filesystem::path script_path;
+    std::unique_ptr<view::ScriptedUiSession> session;
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation; }
+    bool supports_in_place_scripted_ui_reload() const override { return true; }
+    bool reload_active_scripted_ui_in_place(std::string* error) override {
+        return allow_in_place_reload && session != nullptr && session->reload(error);
+    }
+    view::ScriptedUiSession* active_scripted_ui() override { return session.get(); }
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return session.get();
+    }
+    std::unique_ptr<view::View> create_view() override {
+        ++create_count;
+        auto root = std::make_unique<view::View>();
+        session = std::make_unique<view::ScriptedUiSession>(
+            *root, state(), view::ScriptedUiOptions{.script_path = script_path});
+        std::string error;
+        if (!session->load(&error)) return nullptr;
+        return root;
+    }
+};
 }  // namespace
 
 TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridge][reload][issue-1_9]") {
@@ -1036,6 +1103,80 @@ TEST_CASE("ViewBridge rebuilds the open editor in place on reload", "[view_bridg
     // Idempotent: a second poll with no further generation change is a no-op.
     REQUIRE_FALSE(bridge.poll_editor_reload());
     REQUIRE(dynamic_cast<view::Label*>(root->child_at(0))->text() == "B");
+}
+
+TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
+          "[view_bridge][reload][scripted-ui]") {
+    const auto temp_dir = std::filesystem::temp_directory_path()
+        / ("pulp-view-bridge-scripted-reload-"
+           + std::to_string(std::chrono::steady_clock::now()
+                                .time_since_epoch().count()));
+    struct TempDirCleanup {
+        std::filesystem::path path;
+        ~TempDirCleanup() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } cleanup{temp_dir};
+    REQUIRE(std::filesystem::create_directories(temp_dir));
+    const auto script_path = temp_dir / "ui.js";
+    {
+        std::ofstream script(script_path);
+        script << R"(createLabel("reload-label", "before", "root");)";
+        REQUIRE(script.good());
+    }
+
+    state::StateStore store;
+    ReloadingScriptedProcessor proc(script_path);
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    auto* stable_root = bridge.view();
+    auto* stable_session = proc.session.get();
+    REQUIRE(stable_root != nullptr);
+    REQUIRE(stable_session != nullptr);
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(stable_root->child_count() == 1);
+    REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
+            == "before");
+
+    {
+        std::ofstream script(script_path, std::ios::trunc);
+        script << R"(createLabel("reload-label", "after", "root");)";
+        REQUIRE(script.good());
+    }
+    ++proc.generation;
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(proc.session.get() == stable_session);
+    proc.allow_in_place_reload = true;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(proc.create_count == 1);
+    REQUIRE(bridge.view() == stable_root);
+    REQUIRE(proc.session.get() == stable_session);
+    REQUIRE(proc.active_scripted_ui() == bridge.scripted_ui());
+    REQUIRE(stable_root->child_count() == 1);
+    REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
+            == "after");
+}
+
+TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
+          "[view_bridge][reload][scripted-ui]") {
+    state::StateStore store;
+    LegacyReloadingScriptedProcessor proc;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    auto* stable_root = bridge.view();
+    REQUIRE(stable_root != nullptr);
+    REQUIRE(proc.create_count == 1);
+
+    ++proc.generation;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(bridge.view() == stable_root);
+    REQUIRE(proc.create_count == 2);
 }
 
 TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bridge][reload][issue-1_9]") {

@@ -285,6 +285,11 @@ public:
     }
     bool supports_editor_reload() const override { return true; }
     std::uint64_t editor_reload_generation() const override { return generation_; }
+    bool supports_in_place_scripted_ui_reload() const override { return true; }
+    bool reload_active_scripted_ui_in_place(std::string* error) override {
+        auto* session = active_scripted_ui();
+        return session != nullptr && session->reload(error);
+    }
     pulp::view::ValueChannelSet* value_channels() override {
         ++value_channel_visits;
         return reload_channels_.get();
