@@ -1881,6 +1881,10 @@ void ForgeModularShell::on_view_closed(pulp::view::View& view) {
     tab_labels_.clear();
     tab_module_ = nullptr;
     tab_patch_ = nullptr;
+    source_tabs_.clear();
+    source_labels_.clear();
+    download_tabs_.clear();
+    download_labels_.clear();
     mentions_.forget_views();
     forge::ForgeShell::on_view_closed(view);
 }

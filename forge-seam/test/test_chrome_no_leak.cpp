@@ -1395,6 +1395,33 @@ TEST_CASE("the generation preferences are on Home and clickable",
     CHECK(shell.launched().size() == before + 2);
 }
 
+TEST_CASE("closing the editor forgets the preference controls",
+          "[prefs][seam]") {
+    // The preference buttons are BORROWED from the editor's tree, and this
+    // shell outlives every editor its host opens. Kept across a close they
+    // name freed memory -- the exact class of crash show_rack already had.
+    ScratchHome home;
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    // Wired through the real chrome, not a bare accessory call.
+    REQUIRE(shell.module_source_tabs().size() == 3);
+    REQUIRE(shell.auto_download_tabs().size() == 2);
+
+    shell.on_view_closed(*view);
+    view.reset();
+    CHECK(shell.module_source_tabs().empty());
+    CHECK(shell.auto_download_tabs().empty());
+}
+
 TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]") {
     // From the prototype: three depths in the Build title bar, wrapped in the
     // `isPatch` guard. A module build has one artifact and nothing to narrate
