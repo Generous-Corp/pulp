@@ -2232,16 +2232,30 @@ void ForgeModularShell::offer_random() {
     const std::size_t count = patch ? std::size(kRandomPatch) : std::size(kRandomModule);
     if (count == 0) return;
 
-    // Never the same suggestion twice running: drawing the prompt just
-    // dismissed reads as a broken button, which is how this was reported.
+    // Never offer what the composer is ALREADY SHOWING.
+    //
+    // Two ways it can be showing one of these, and both look like a dead
+    // button. The obvious one is the suggestion just offered. The other is
+    // the placeholder: it is drawn from the same pool, so the very first
+    // press wrote the words already on the screen and the button appeared to
+    // do nothing at all on its first and most-judged use. What a person reads
+    // is the same whether it is placeholder or text, so the comparison is
+    // against whichever of the two is in front of them.
+    pulp::view::TextEditor* input =
+        chrome() ? chrome()->prompt_input() : nullptr;
+    std::string showing = last_random_;
+    if (input != nullptr)
+        showing = input->text().empty() ? input->placeholder : input->text();
+
     std::size_t pick = next_random_ % count;
-    if (count > 1 && pool[pick] == last_random_) pick = (pick + 1) % count;
+    for (std::size_t tried = 0; tried + 1 < count; ++tried) {
+        if (pool[pick] != showing && pool[pick] != last_random_) break;
+        pick = (pick + 1) % count;
+    }
     next_random_ = pick + 1;
     last_random_ = pool[pick];
 
-    if (auto* c = chrome()) {
-        if (auto* input = c->prompt_input()) input->set_text(last_random_);
-    }
+    if (input != nullptr) input->set_text(last_random_);
 }
 
 void ForgeModularShell::process_audio(
