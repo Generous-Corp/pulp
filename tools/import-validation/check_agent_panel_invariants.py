@@ -50,6 +50,9 @@ def main() -> int:
     ap.add_argument("--pack-fonts", default="", help="dir of pack @font-face files")
     ap.add_argument("--min-fidelity", type=float, default=0.0,
                     help="floor; ratchets up as paint gaps close")
+    ap.add_argument("--expect-reject", default="",
+                    help="the import must FAIL and name this token; for a "
+                         "fixture that exists to prove a gate still rejects")
     args = ap.parse_args()
 
     repo = Path(args.repo)
@@ -82,12 +85,31 @@ def main() -> int:
              "--output", str(ir_path), "--emit", "ir-json",
              "--native-panel-lowering", "--allow-browser-network"],
             capture_output=True, text=True, timeout=600)
+        output = proc.stdout + proc.stderr
         if proc.returncode != 0:
-            tail = (proc.stdout + proc.stderr).strip().splitlines()[-4:]
+            tail = output.strip().splitlines()[-4:]
             if "browser" in " ".join(tail).lower() and "not" in " ".join(tail).lower():
                 return skip("browser capture unavailable: " + " / ".join(tail))
+            # A fixture whose whole job is to be refused. Checked BEFORE the
+            # generic failure path, and it demands the NAMED reason: any import
+            # error would otherwise satisfy "it failed", so a gate that stopped
+            # working would keep passing on the back of an unrelated crash.
+            if args.expect_reject:
+                if args.expect_reject in output:
+                    print(f"PASS rejected as intended   {args.expect_reject}")
+                    return 0
+                fail(f"import failed, but not with '{args.expect_reject}' — "
+                     "this fixture exists to prove that gate still fires")
+                print("\n".join("  " + t for t in tail))
+                return 1
             fail(f"import exited {proc.returncode}")
             print("\n".join("  " + t for t in tail))
+            return 1
+        # A negative fixture that IMPORTS is the failure: either the gate
+        # regressed or the fixture was quietly repaired, and both need a human.
+        if args.expect_reject:
+            fail(f"import SUCCEEDED, but this fixture must be rejected by "
+                 f"'{args.expect_reject}' — the gate no longer fires")
             return 1
 
         ir = json.loads(ir_path.read_text())

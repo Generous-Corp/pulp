@@ -215,6 +215,25 @@ test("capture snapshots redact the private loopback token", () => {
   });
 });
 
+test("redaction carries the authored frame through unchanged", () => {
+  // The capture is deliberately larger than the design, so `authored_frame` is
+  // the only thing that says where the design sits inside the image. A consumer
+  // that loses it has to GUESS the offset, and a centred guess is wrong because
+  // the growth is asymmetric — which is how a visually-close panel once scored
+  // as 73% different. Redaction runs over the whole envelope, so this asserts
+  // the geometry survives it: four numbers carry no path and no URL, and a null
+  // frame must stay null rather than collapsing to a zero offset.
+  const snapshot = {
+    reference: {
+      path: "browser.png",
+      device_scale_factor: 2,
+      authored_frame: { x: 120, y: 120, width: 760, height: 886.0625 },
+    },
+    unresolved: { authored_frame: null },
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, ""), snapshot);
+});
+
 test("path redaction keeps the CSS alpha separator intact", () => {
   const snapshot = {
     strings: [

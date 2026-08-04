@@ -117,6 +117,11 @@ PY
 OUT="${PULP_REPLAY_OUT:-$REPO/build/replay/$(basename "$PANEL_DIR")}"
 mkdir -p "$OUT"
 cp "$CAP/browser.png" "$OUT/chrome.png" 2>/dev/null
+# capture.json carries reference.authored_frame — where the design sits inside
+# chrome.png. Without it a comparison has to guess the offset, and a centered
+# guess is wrong because the capture grows asymmetrically. Publish it so any
+# crop-and-compare can register the two images instead of eyeballing them.
+cp "$CAP/capture.json" "$OUT/capture.json" 2>/dev/null
 cp "$CAP/validation-proof/render/render.png" "$OUT/native.png" 2>/dev/null
 cp "$CAP/validation-proof/diff/diff.png" "$OUT/diff.png" 2>/dev/null
 cp "$WORK/panel.ir.json" "$OUT/panel.ir.json" 2>/dev/null

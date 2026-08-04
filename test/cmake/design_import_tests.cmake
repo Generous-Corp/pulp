@@ -28,4 +28,26 @@ if(PULP_DESIGN_PANEL_PACK_CSS)
         LABELS "parser-import;browser-capture"
         TIMEOUT 600
         SKIP_RETURN_CODE 77)
+
+    # The negative fixture. polystrike declares a root shorter than its own
+    # content, so CHROME clips four controls too — the oracle itself is broken
+    # and there is nothing to compare against. Keeping it is what exercises
+    # `capture-control-clipped` end to end; without it that gate has no test,
+    # and a gate nothing tests is a gate that can stop firing silently.
+    #
+    # It passes by being REFUSED. A fixture that fails on purpose is not a
+    # failing suite.
+    add_test(
+        NAME agent-panel-clipped-is-rejected
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/import-validation/check_agent_panel_invariants.py"
+            --repo "${CMAKE_SOURCE_DIR}"
+            --panel "${CMAKE_SOURCE_DIR}/test/fixtures/agent-panels/polystrike"
+            --pack-css "${PULP_DESIGN_PANEL_PACK_CSS}"
+            --pack-fonts "${PULP_DESIGN_PANEL_PACK_FONTS}"
+            --expect-reject "capture-control-clipped")
+    set_tests_properties(agent-panel-clipped-is-rejected PROPERTIES
+        LABELS "parser-import;browser-capture"
+        TIMEOUT 600
+        SKIP_RETURN_CODE 77)
 endif()

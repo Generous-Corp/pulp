@@ -750,6 +750,58 @@ async function runCapture(options) {
     }
     const captureWidth = finalExtent.width;
     const captureHeight = finalExtent.height;
+
+    // Where the authored frame sits INSIDE the captured image. Measured HERE,
+    // while the page is still live — the envelope is assembled after teardown,
+    // and evaluating there returns null.
+    //
+    // The capture is deliberately larger than the design: the root carries its
+    // own padding, and the width growth above extends past a centered canvas so
+    // captureBeyondViewport does not clip it. Both are correct; shrinking the
+    // image would clip the drop shadows the growth exists to preserve. What was
+    // missing is the OFFSET. Without it a consumer must guess where the design
+    // starts, and a centered guess is wrong because the growth is asymmetric —
+    // it scored a visually-close panel as 73% different, and two phantom
+    // "renderer bugs" (a 9x-too-tall caret, advances 1/8 px short) were both
+    // this offset misread as pixel error.
+    //
+    // Best effort: a capture that cannot resolve the frame still succeeds with
+    // a null, because a missing offset must degrade to "cannot align" rather
+    // than fail an otherwise good capture.
+    let authoredFrame = null;
+    try {
+      const frameEval = await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          if (!document.body) return null;
+          // NOT firstElementChild: the harness injects a <style> into the body
+          // for the scroll-shift correction, and a style tag measures 0x0.
+          // Take the first child that actually occupies space.
+          let el = null;
+          for (const c of document.body.children) {
+            const b = c.getBoundingClientRect();
+            if (b.width > 0 && b.height > 0) { el = c; break; }
+          }
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left + window.scrollX, y: r.top + window.scrollY,
+                   width: r.width, height: r.height };
+        })()`,
+        returnByValue: true,
+      });
+      const box = frameEval.result?.value;
+      if (box && box.width > 0 && box.height > 0) {
+        // Relative to the capture origin — the document extent's top-left,
+        // which is negative for content starting left of the viewport.
+        authoredFrame = {
+          x: box.x - finalExtent.left,
+          y: box.y - finalExtent.top,
+          width: box.width,
+          height: box.height,
+        };
+      }
+    } catch {
+      authoredFrame = null;
+    }
     validateCaptureDimensions(
       captureWidth, captureHeight, dpr, "final capture extent");
     const screenshotOptions = {
@@ -972,6 +1024,10 @@ async function runCapture(options) {
         logical_width: captureWidth,
         logical_height: captureHeight,
         device_scale_factor: dpr,
+        // Null when the frame could not be resolved, and null is meaningful:
+        // it says "this capture cannot be registered", which a consumer must
+        // treat as "refuse to score" rather than as zero offset.
+        authored_frame: authoredFrame,
       },
     };
     await writeJson(
