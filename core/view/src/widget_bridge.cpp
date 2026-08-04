@@ -457,13 +457,16 @@ WidgetBridge::foreign_owned_widget_states() const {
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
     std::size_t count = 0;
     for (const auto* bridge : all_bridges_set()) {
-        if (bridge != this)
+        // Only successive realms attached to this exact View tree can own
+        // descendants that must survive our retirement. Other roots may live
+        // on other UI threads; their containers are deliberately out of scope.
+        if (bridge != this && &bridge->root_ == &root_)
             count += bridge->owned_widgets_.size();
     }
     std::vector<BridgeWidgetState> foreign;
     foreign.reserve(count);
     for (const auto* bridge : all_bridges_set()) {
-        if (bridge == this)
+        if (bridge == this || &bridge->root_ != &root_)
             continue;
         foreign.insert(foreign.end(), bridge->owned_widgets_.begin(),
                        bridge->owned_widgets_.end());
@@ -510,6 +513,11 @@ void WidgetBridge::invalidate_cached_subtrees_everywhere(
     }
     std::vector<std::pair<WidgetBridge*, std::string>> removals;
     for (auto* bridge : all_bridges_set()) {
+        // Cache entries can only refer to nodes in the bridge's own root.
+        // Restricting cleanup to that root also preserves the one-UI-thread
+        // ownership boundary for widgets_ and registrations_.
+        if (&bridge->root_ != &root_)
+            continue;
         if (deadline_check) deadline_check();
         for (const auto& [id, state] : bridge->widgets_) {
             if (deadline_check) deadline_check();
