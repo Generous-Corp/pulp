@@ -2554,6 +2554,50 @@ TEST_CASE("panels butt together at their true widths", "[rack]") {
     CHECK(L.panels.front().x == Approx(1000.0f - right).margin(0.01));
 }
 
+TEST_CASE("panels at their true widths are not stacked on each other",
+          "[rack]") {
+    // The positions in a patch are only as good as the widths whoever wrote
+    // them had. A generated patch spaced five CV funk modules 8 HP apart and
+    // they turned out to be 15, 30, 14, 15 and 24 HP, so every one of them
+    // starts inside its neighbour. Drawn literally, the rack is a heap.
+    std::vector<forge_modular::RackModule> mods;
+    int at = 0;
+    for (const int hp : {15, 30, 14}) {
+        forge_modular::RackModule m;
+        m.id = "M" + std::to_string(mods.size());
+        m.hp = hp;
+        m.has_grid_pos = true;
+        m.grid_x = at;
+        at += 8;                     // what the patch believed the widths were
+        mods.push_back(std::move(m));
+    }
+    const auto L = forge_modular::layout_rack(mods, 1200.0f, 700.0f);
+    REQUIRE(L.panels.size() == 3);
+
+    // True widths kept, order kept, and no panel starting inside the one
+    // before it.
+    for (std::size_t i = 0; i < L.panels.size(); ++i) {
+        INFO("panel " << i);
+        CHECK(L.panels[i].width ==
+              Approx(mods[i].hp * forge_modular::kHorizontalPitch * L.scale));
+        if (i == 0) continue;
+        CHECK(L.panels[i].x >= L.panels[i - 1].x + L.panels[i - 1].width - 0.01f);
+    }
+    // The row is as wide as the modules in it, not as wide as the gaps the
+    // patch thought it was leaving.
+    CHECK(L.total_width == Approx((15 + 30 + 14) * forge_modular::kHorizontalPitch));
+
+    // A rack whose positions DO fit is left exactly where it was put: the gap
+    // a patch deliberately leaves is not closed up.
+    std::vector<forge_modular::RackModule> roomy = mods;
+    roomy[0].grid_x = 0;
+    roomy[1].grid_x = 20;      // 15 wide at 0, so 5 HP of daylight
+    roomy[2].grid_x = 50;
+    const auto R = forge_modular::layout_rack(roomy, 1200.0f, 700.0f);
+    CHECK(R.panels[1].x - (R.panels[0].x + R.panels[0].width) ==
+          Approx(5 * forge_modular::kHorizontalPitch * R.scale));
+}
+
 TEST_CASE("a small rack is not blown up past life size", "[rack]") {
     // Two modules stretched to fill a wide window stop looking like Eurorack.
     const std::vector<forge_modular::RackModule> two{sample_rack()[0], sample_rack()[2]};
@@ -2987,7 +3031,180 @@ std::pair<double, double> disc_luma_range(const Frame& f, double cx, double cy,
     return {lo, hi};
 }
 
+/// Panel artwork of a KNOWN width, so a drawn panel can be measured against
+/// the module it is a picture of.
+///
+/// Flat red, because every measurement below is "where on the frame is this
+/// panel", and a colour no other part of the preview paints answers that
+/// without depending on where the knobs went. Written at the true proportions
+/// of a Eurorack panel -- hp x 15 by 380 -- which is what a vendor ships.
+std::filesystem::path sized_panel_dir(const std::string& dir_slug,
+                                      const std::vector<std::pair<std::string, int>>& panels) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("forge-sized-panel-" + dir_slug);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    for (const auto& [slug, hp] : panels) {
+        const int w = hp * static_cast<int>(forge_modular::kHorizontalPitch);
+        std::ofstream svg(dir / (slug + ".svg"));
+        svg << R"(<svg xmlns="http://www.w3.org/2000/svg" width=")" << w
+            << R"(" height="380" viewBox="0 0 )" << w << R"( 380">)"
+            << R"(<rect x="0" y="0" width=")" << w
+            << R"(" height="380" fill="#FF0000"/></svg>)";
+    }
+    return dir;
+}
+
+/// Where the flat red panels are, as [left, right) column runs.
+///
+/// Red and not merely "bright": the stage behind the rack, the rail screws and
+/// every cable colour the preview paints are all something else, so a column
+/// with red in it is a column with panel in it. The test measures the drawn
+/// panel rather than the box the layout says it drew -- a preview whose
+/// arithmetic is right and whose painting is not looks exactly like one whose
+/// arithmetic is wrong.
+bool is_panel_red(const Frame& f, std::size_t x, std::size_t y) {
+    const auto p = f.at(x, y);
+    // Generous, because the preview shades both edges of every panel into
+    // black and draws a lit line down the left of it: the extremes of a red
+    // panel are a dark red and a pale red, and both are still the panel.
+    return p[0] >= 60 && p[1] <= p[0] * 0.55 && p[2] <= p[0] * 0.55;
+}
+
+struct PanelInk {
+    std::size_t x0 = 0, x1 = 0, y0 = 0, y1 = 0;   ///< inclusive
+    double width() const { return static_cast<double>(x1 - x0 + 1); }
+    double height() const { return static_cast<double>(y1 - y0 + 1); }
+};
+
+std::vector<PanelInk> panel_ink(const Frame& f) {
+    std::vector<PanelInk> out;
+    if (!f.ok()) return out;
+    std::vector<bool> has(f.w, false);
+    for (std::size_t x = 0; x < f.w; ++x)
+        for (std::size_t y = 0; y < f.h; ++y)
+            if (is_panel_red(f, x, y)) { has[x] = true; break; }
+
+    for (std::size_t x = 0; x < f.w; ++x) {
+        if (!has[x]) continue;
+        PanelInk run;
+        run.x0 = x;
+        while (x + 1 < f.w && has[x + 1]) ++x;
+        run.x1 = x;
+        bool first = true;
+        for (std::size_t px = run.x0; px <= run.x1; ++px)
+            for (std::size_t py = 0; py < f.h; ++py) {
+                if (!is_panel_red(f, px, py)) continue;
+                if (first) { run.y0 = run.y1 = py; first = false; }
+                run.y0 = std::min(run.y0, py);
+                run.y1 = std::max(run.y1, py);
+            }
+        out.push_back(run);
+    }
+    return out;
+}
+
 }  // namespace
+
+TEST_CASE("a panel's own artwork says how wide its module is", "[rack]") {
+    // The real headers, off the five CV funk panels a generated patch drew at
+    // 8 HP each because nothing on the machine had measured them. Every one is
+    // a picture of the module at its true size, so every one of them knew.
+    using forge_modular::panel_hp_from_artwork;
+    auto header = [](const char* w, const char* h, const char* vb) {
+        return std::string(R"(<svg xmlns="http://www.w3.org/2000/svg" width=")") +
+               w + R"(" height=")" + h + R"(" viewBox=")" + vb + R"("><rect/></svg>)";
+    };
+    CHECK(panel_hp_from_artwork(header("76.199997mm", "128.5mm",
+                                       "0 0 76.200002 128.50002")) == 15);
+    CHECK(panel_hp_from_artwork(header("152.384mm", "128.5mm",
+                                       "0 0 152.38401 128.50002")) == 30);
+    CHECK(panel_hp_from_artwork(header("71.120003mm", "128.5mm",
+                                       "0 0 71.120011 128.50002")) == 14);
+    CHECK(panel_hp_from_artwork(header("121.92mm", "128.5mm",
+                                       "0 0 121.92 128.5")) == 24);
+
+    // Points rather than millimetres, which is what our own emitter writes and
+    // what Rack works in. The same module either way: only the aspect is read.
+    CHECK(panel_hp_from_artwork(header("180", "380", "0 0 180 380")) == 12);
+    CHECK(panel_hp_from_artwork(header("45", "380", "0 0 45 380")) == 3);
+
+    // Nothing to go on stays nothing to go on. Answering anyway would replace
+    // a width that is known to be a guess with one that looks measured.
+    CHECK(panel_hp_from_artwork("") == 0);
+    CHECK(panel_hp_from_artwork("not markup at all") == 0);
+    CHECK(panel_hp_from_artwork(R"(<svg xmlns="http://www.w3.org/2000/svg"/>)") == 0);
+}
+
+TEST_CASE("a panel is drawn at the shape of the module it is",
+          "[rack][render]") {
+    // MEASURED OFF THE FRAME, not off the layout. A Eurorack panel is 128.5 mm
+    // tall and 5.08 mm to the HP, so a 30 HP module is two and a third times
+    // wider than it is tall and a 4 HP module is a strip. Drawn at a guessed
+    // 8 HP -- which is what a module nobody has measured used to get -- the
+    // first is squeezed to a quarter of its width and reads as a panel
+    // stretched to the ceiling.
+    //
+    // Two panels in one rack with a gap between them, so the same frame also
+    // answers whether a rack of mixed widths is drawn at ONE scale.
+    const auto dir = sized_panel_dir("aspect", {{"WIDE", 30}, {"NARROW", 4}});
+
+    auto rack = [&] {
+        std::vector<forge_modular::RackModule> mods;
+        for (const char* slug : {"NARROW", "WIDE"}) {
+            forge_modular::RackModule m;
+            m.id = slug;
+            m.brand = "ForgeModular";
+            m.name = slug;
+            // What a freshly fetched module looks like: a width nobody has
+            // measured, so `hp` is the fallback and not the module's own.
+            m.hp = 8;
+            m.width_measured = false;
+            m.has_grid_pos = true;
+            m.grid_x = std::string(slug) == "NARROW" ? 0 : 20;
+            m.grid_y = 0;
+            mods.push_back(std::move(m));
+        }
+        return mods;
+    };
+
+    // Two viewports of opposite shape: a panel's proportions are the module's,
+    // never the window's.
+    for (const auto [vw, vh] : {std::pair<int, int>{900, 520},
+                                std::pair<int, int>{520, 900}}) {
+        INFO("viewport " << vw << "x" << vh);
+        forge_modular::RackPreview preview;
+        preview.set_panel_directory(dir.string());
+        preview.set_rack(rack(), {});
+        preview.set_bounds({0, 0, float(vw), float(vh)});
+        const auto shot = std::filesystem::temp_directory_path() /
+                          ("rack-aspect-" + std::to_string(vw) + ".png");
+        REQUIRE(pulp::view::render_to_file(preview, vw, vh, shot.string(), 1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        const auto frame = decode(read_all(shot));
+        REQUIRE(frame.ok());
+
+        const auto ink = panel_ink(frame);
+        REQUIRE(ink.size() == 2);          // two panels, and the gap between them
+        const auto& narrow = ink[0];
+        const auto& wide = ink[1];
+
+        const double per_hp = forge_modular::kHorizontalPitchMm /
+                              forge_modular::kPanelHeightMm;
+        // 2%: wider than the 0.15% by which Rack's 380-point panel differs
+        // from a true 128.5 mm one plus a pixel of antialiasing at each edge,
+        // and far narrower than the 3.75x a guessed width is out by.
+        INFO("narrow " << narrow.width() << "x" << narrow.height()
+                       << "  wide " << wide.width() << "x" << wide.height());
+        CHECK(narrow.width() / narrow.height() == Approx(4 * per_hp).epsilon(0.02));
+        CHECK(wide.width() / wide.height() == Approx(30 * per_hp).epsilon(0.02));
+
+        // One scale for the whole rack: same height, and the same number of
+        // pixels to the HP across a 7.5x difference in width.
+        CHECK(narrow.height() == Approx(wide.height()).margin(1.5));
+        CHECK(narrow.width() / 4.0 == Approx(wide.width() / 30.0).epsilon(0.02));
+    }
+}
 
 TEST_CASE("a rail screw goes where the artwork's hole is", "[rack]") {
     // The arithmetic behind the painted screw, asserted exactly. The generated

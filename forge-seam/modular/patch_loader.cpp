@@ -192,13 +192,19 @@ LoadedPatch load_patch(const std::string& path) {
             rm.grid_y = static_cast<int>(m["pos"][1].getWithDefault<int64_t>(0));
             rm.has_grid_pos = true;
         }
+        // A width nobody measured, flagged as such: 8 HP is the commonest
+        // module width and therefore the least wrong guess, but it is a guess,
+        // and drawing a 30 HP sequencer as one is what makes a rack look
+        // stretched. The preview reads the flag and goes to the artwork.
         rm.hp = 8;
+        rm.width_measured = false;
         rm.placed = false;
         if (const auto* mapped = PortMap::shared().find(rm.brand, rm.name)) {
             if (mapped->width > 0.0f) {
                 // 15 points to the HP, which is Rack's own RACK_GRID_WIDTH.
                 rm.hp = std::max(1, static_cast<int>(
                                         std::lround(mapped->width / 15.0f)));
+                rm.width_measured = true;
             }
             const float w = mapped->width > 0.0f ? mapped->width : 1.0f;
             auto add = [&](const std::vector<MappedWidget>& group,
@@ -330,7 +336,10 @@ LoadedPatch load_patch(const std::string& path) {
         // default slot and its artwork letterboxed inside it -- which is why
         // the modules in a rack did not line up. The generator knows the real
         // width; it writes it down.
-        if (it->second.hp > 0) m.hp = it->second.hp;
+        if (it->second.hp > 0) {
+            m.hp = it->second.hp;
+            m.width_measured = true;
+        }
         for (const auto& [id, xy] : it->second.ports) {
             Port p;
             p.id = id;

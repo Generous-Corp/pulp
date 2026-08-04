@@ -88,6 +88,19 @@ struct RackModule {
     int grid_x = 0;   ///< HP from the left of the rack
     int grid_y = 0;   ///< which row
 
+    /// False when nothing ever measured this module's WIDTH, so `hp` is the
+    /// fallback rather than the module's own.
+    ///
+    /// A .vcv records no width, a plugin.json does not either, and a module
+    /// nobody has scanned has no entry in the port map -- so a freshly fetched
+    /// third-party module arrives with none of the three, and the fallback is
+    /// all there is. Drawn at the fallback, a 30 HP sequencer is squeezed into
+    /// 8 HP: its artwork is compressed to a quarter of its width, which reads
+    /// as a panel stretched to the ceiling rather than as a width nobody knew.
+    /// The flag exists so the preview can tell "this module is 8 HP" from "we
+    /// do not know how wide this module is" and go and look at the artwork.
+    bool width_measured = true;
+
     /// How the module is named in prose, when that differs from `name`.
     ///
     /// `name` stays the model slug because the panel artwork is filed under
@@ -145,6 +158,18 @@ struct RackLayout {
 inline constexpr float kHorizontalPitch = 15.0f;
 /// A 3U panel's height, unscaled.
 inline constexpr float kPanelHeight = 380.0f;
+
+/// The same panel in millimetres, which is what it is in the world and what
+/// every vendor's artwork is drawn in: 128.5 mm tall, 5.08 mm to the HP.
+///
+/// The point pair above is Rack's rendering of these at 75 dpi. The pitch is
+/// exact (5.08 mm is 15 points); the height is Rack rounding 379.43 to 380, so
+/// a panel's aspect in points is 0.15% off its aspect in millimetres. Anything
+/// comparing the two needs a tolerance wider than that and narrower than a
+/// mistake -- a width taken from the wrong module is out by a whole multiple,
+/// never by a fraction of a percent.
+inline constexpr float kHorizontalPitchMm = 5.08f;
+inline constexpr float kPanelHeightMm = 128.5f;
 
 /// How far a rail screw sits from the panel's own edge, unscaled.
 ///
