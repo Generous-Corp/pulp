@@ -1748,6 +1748,118 @@ def check_setting_writer() -> tuple:
     return bad, 5
 
 
+def check_streamed_model_call() -> tuple:
+    """A long model call has to look different from a wedged one.
+
+    The call is minutes of network with nothing printed around it, so a
+    healthy seven-minute generation and a hung process produced the same
+    screen: a stage chip and a clock. A clock counts either way.
+    """
+    import io
+    import stat
+    import contextlib
+    import tempfile
+
+    bad, ran = 0, 3
+    home = tempfile.mkdtemp()
+
+    # A stub that answers the way the CLI does with
+    # --output-format=stream-json --include-partial-messages: one JSON event
+    # per line, deltas first, the assembled answer last.
+    stub = os.path.join(home, "claude")
+    events = [
+        {"type": "system", "subtype": "init"},
+        {"type": "stream_event",
+         "event": {"type": "content_block_delta",
+                   "delta": {"type": "text_delta", "text": "x" * 400}}},
+        {"type": "stream_event",
+         "event": {"type": "content_block_delta",
+                   "delta": {"type": "text_delta", "text": "y" * 400}}},
+        {"type": "result", "subtype": "success",
+         "result": "```json patch\n{\"modules\": []}\n```"},
+    ]
+    with open(stub, "w") as f:
+        f.write("#!/bin/sh\n")
+        for e in events:
+            f.write("echo '" + json.dumps(e) + "'\n")
+            f.write("sleep 0.05\n")
+    os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said):
+        code, text, _ = P.ask_model(stub, "hello", 30.0, tick=0.0)
+    narration = said.getvalue()
+
+    if code != 0:
+        bad += 1
+        print(f"  WRONG  a healthy streamed call reported failure ({code})")
+    elif "json patch" not in text:
+        bad += 1
+        print(f"  WRONG  the streamed answer did not come back whole: {text!r}")
+    else:
+        print("  ok     a streamed answer is reassembled from its events")
+
+    if "characters" not in narration or "800" not in narration:
+        bad += 1
+        print(f"  WRONG  a run in flight said nothing about its progress: "
+              f"{narration!r}")
+    else:
+        print("  ok     the model call says how much has come back")
+
+    # A stub that prints the answer plainly is still understood: every other
+    # check here stubs the CLI that way, and imitating a stream to test the
+    # code AROUND the model is work for nothing.
+    plain = os.path.join(home, "claude-plain")
+    with open(plain, "w") as f:
+        f.write("#!/bin/sh\necho '```json patch'\necho '{}'\necho '```'\n")
+    os.chmod(plain, os.stat(plain).st_mode | stat.S_IEXEC)
+    code, text, _ = P.ask_model(plain, "hello", 30.0)
+    if code != 0 or "json patch" not in text:
+        bad += 1
+        print(f"  WRONG  a plain-text answer was lost: {code} {text!r}")
+    else:
+        print("  ok     a plain-text answer still reads back")
+
+    # The limit is a setting, clamped, and a call that overruns says so in
+    # words that name the remedy rather than as a traceback.
+    hang = os.path.join(home, "claude-hang")
+    with open(hang, "w") as f:
+        f.write("#!/bin/sh\nsleep 30\n")
+    os.chmod(hang, os.stat(hang).st_mode | stat.S_IEXEC)
+    code, _, why = P.ask_model(hang, "hello", 1.0)
+    if code == 0 or "limit" not in why:
+        bad += 1
+        print(f"  WRONG  an overrunning call did not report its limit: {why!r}")
+    else:
+        print("  ok     a call past its limit is stopped and says so")
+    ran += 1
+
+    real = P.SETTINGS_PATH
+    try:
+        P.SETTINGS_PATH = os.path.join(home, "settings.json")
+        if P.generation_seconds() != 600.0:
+            bad += 1
+            print(f"  WRONG  the default limit is not ten minutes: "
+                  f"{P.generation_seconds()}")
+        P.write_setting("generation_minutes", 25)
+        if P.generation_seconds() != 1500.0:
+            bad += 1
+            print(f"  WRONG  a chosen limit did not take: "
+                  f"{P.generation_seconds()}")
+        # Hand-edited nonsense is clamped rather than obeyed: a zero here
+        # would fail every generation instantly with nothing to explain it.
+        json.dump({"generation_minutes": 0}, open(P.SETTINGS_PATH, "w"))
+        if P.generation_seconds() != 600.0:
+            bad += 1
+            print(f"  WRONG  a zero limit was obeyed: {P.generation_seconds()}")
+        else:
+            print("  ok     the time limit is a setting, and a clamped one")
+    finally:
+        P.SETTINGS_PATH = real
+    ran += 1
+    return bad, ran
+
+
 def check_fresh_machine() -> tuple:
     """What a Mac that has never seen this source gets.
 
@@ -2146,13 +2258,14 @@ def main():
     uk_bad, uk_ran = check_unjudged_patch_is_kept()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
+    stream_bad, stream_ran = check_streamed_model_call()
     fresh_bad, fresh_ran = check_fresh_machine()
     ship_bad, ship_ran = check_shipped_generator()
     ver_bad, ver_ran = check_version_stamping()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
-    acq_bad += nf_bad + gs_bad + uk_bad
-    acq_ran += nf_ran + gs_ran + uk_ran
+    acq_bad += nf_bad + gs_bad + uk_bad + stream_bad
+    acq_ran += nf_ran + gs_ran + uk_ran + stream_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

@@ -278,6 +278,32 @@ std::string modular_setting(const std::string& key, const std::string& fallback)
                                       : all.substr(open + 1, close - open - 1);
 }
 
+/// A NUMERIC preference, which the reader above cannot see.
+///
+/// `modular_setting` finds the next quoted string after the key's colon, and a
+/// number is not quoted -- so asked for one it returns the NEXT KEY'S value,
+/// confidently and in the right shape. Numbers get their own reader rather
+/// than a cleverer one shared with strings.
+int modular_setting_int(const std::string& key, int fallback) {
+    const char* home = std::getenv("HOME");
+    const std::string all = slurp(std::string(home ? home : ".") +
+                                  "/Library/Application Support/Forge Modular/settings.json");
+    const auto at = all.find("\"" + key + "\"");
+    if (at == std::string::npos) return fallback;
+    auto p = all.find(':', at);
+    if (p == std::string::npos) return fallback;
+    ++p;
+    while (p < all.size() && std::isspace(static_cast<unsigned char>(all[p]))) ++p;
+    std::size_t end = p;
+    while (end < all.size() && std::isdigit(static_cast<unsigned char>(all[end]))) ++end;
+    if (end == p) return fallback;
+    try {
+        return std::stoi(all.substr(p, end - p));
+    } catch (...) {
+        return fallback;
+    }
+}
+
 std::string auto_download_pref() {
     return modular_setting("auto_download", "entitled");
 }
@@ -622,6 +648,28 @@ ForgeModularShell::settings_choices() {
     downloads.value = auto_download_;
     downloads.on_choose = [this](const std::string& v) { choose_auto_download(v); };
 
+    // HOW LONG A GENERATION MAY TAKE. Ten minutes was a constant in the
+    // generator, and a rack of forty modules asked for in one sentence can
+    // want longer -- at which point the only remedy was editing a JSON file
+    // nobody knows the path of. The ceiling is deliberate: a call that has
+    // been quiet for half an hour is stuck, not slow.
+    generation_minutes_ = modular_setting_int("generation_minutes", 10);
+    forge::ForgeShell::SettingsChoice limit;
+    limit.caption = "Time limit";
+    limit.detail =
+        "How long one model call may run before it is given up on. About "
+        "seven minutes covers a forty-module rack; raise it for something "
+        "bigger.";
+    limit.options = {{"10 min", "10"}, {"15 min", "15"},
+                     {"20 min", "20"}, {"25 min", "25"}};
+    limit.value = std::to_string(generation_minutes_);
+    limit.on_choose = [this](const std::string& v) {
+        const int minutes = std::atoi(v.c_str());
+        if (minutes <= 0 || minutes == generation_minutes_) return;
+        generation_minutes_ = minutes;
+        write_pref("generation_minutes", v);
+    };
+
     // THE ONE THING THAT COULD NOT BE ASKED FOR. The index the @ list and
     // every prompt inventory are built from rebuilt itself only when it was
     // missing or a week old, and there was no way to say "do it now" -- so a
@@ -660,8 +708,8 @@ ForgeModularShell::settings_choices() {
             details_text(gather_details(), std::time(nullptr)));
     };
 
-    return {std::move(source), std::move(downloads), std::move(refresh),
-            std::move(about)};
+    return {std::move(source), std::move(downloads), std::move(limit),
+            std::move(refresh), std::move(about)};
 }
 
 AppDetails ForgeModularShell::gather_details() {
