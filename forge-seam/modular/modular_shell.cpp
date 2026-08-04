@@ -52,6 +52,86 @@ std::string tools_dir() {
     return "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
 }
 
+
+/// Read a whole small file, or "" when it is not there. cstdio rather than
+/// <fstream> deliberately: that header pulls std::quoted into scope, which
+/// then collides with this file's own quoted() on every call site.
+/// Defined further down, declared here because the @-mention fetch below is
+/// the first caller. Without this the name resolves to std::quoted -- which a
+/// transitive include makes visible -- and a shell command carrying a path
+/// with a space in it ("Forge Modular") silently becomes a stream manipulator.
+std::string quoted(const std::string& text);
+
+std::string slurp(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return {};
+    std::string all;
+    char buf[4096];
+    while (std::size_t n = std::fread(buf, 1, sizeof buf, f)) all.append(buf, n);
+    std::fclose(f);
+    return all;
+}
+
+}  // namespace
+
+MentionFetch plan_mention_fetch(MentionCandidate::Availability state,
+                                bool signed_in, const std::string& pref) {
+    // Decided here, as a pure function of three facts, so the reasons can be
+    // tested without a library account, a network or a running Rack.
+    //
+    // The point is to REFUSE BEFORE PROMISING. A background fetch that cannot
+    // possibly succeed still prints "fetching…", and the failure lands in a
+    // log nobody opens -- which is the same silent-success shape as a download
+    // that answered 403 for a year. Both of these are knowable instantly from
+    // local files, so neither ever needs to be reported asynchronously.
+    if (state == MentionCandidate::Availability::ready)
+        return {false, " is already installed."};
+    if (state == MentionCandidate::Availability::paid)
+        // Not "buy it". Nothing here spends money, and telling somebody to go
+        // and buy something is a sales pitch rather than an answer.
+        return {false, " is a paid module this account does not own. "
+                       "The prompt can still name it."};
+    if (!signed_in)
+        return {false, " needs a VCV library sign-in first: Rack's "
+                       "Library menu, then Log In. The prompt can still "
+                       "name it."};
+    if (pref == "none")
+        return {false, " is free, but automatic downloading is switched off "
+                       "in Settings. The prompt can still name it."};
+    return {true, ""};
+}
+
+/// Whether Rack holds a library token. Presence only -- the token itself is
+/// the user's credential and this never reads or copies its value.
+bool rack_signed_in() {
+    const char* home = std::getenv("HOME");
+    const std::string all = slurp(std::string(home ? home : ".") +
+                                  "/Library/Application Support/Rack2/settings.json");
+    const auto at = all.find("\"token\"");
+    if (at == std::string::npos) return false;
+    // "token": "" is signed OUT, and it is what Rack leaves behind after a
+    // log-out, so presence of the key is not the question.
+    const auto open = all.find('"', all.find(':', at) + 1);
+    return open != std::string::npos && all[open + 1] != '"';
+}
+
+/// The auto_download preference, defaulting to the same value patch.py does
+/// so the two cannot disagree about what happens.
+std::string auto_download_pref() {
+    const char* home = std::getenv("HOME");
+    const std::string all = slurp(std::string(home ? home : ".") +
+                                  "/Library/Application Support/Forge Modular/settings.json");
+    const auto at = all.find("\"auto_download\"");
+    if (at == std::string::npos) return "entitled";
+    const auto open = all.find('"', all.find(':', at) + 1);
+    if (open == std::string::npos) return "entitled";
+    const auto close = all.find('"', open + 1);
+    return close == std::string::npos ? "entitled"
+                                      : all.substr(open + 1, close - open - 1);
+}
+
+namespace {
+
 /// Where the emitter writes each module's panel artwork. Derived from
 /// `tools_dir()` rather than spelled out again, so a developer pointing at a
 /// checkout gets that checkout's panels and not the installed copy's.
@@ -446,11 +526,10 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
         const std::string who = what.brand.empty()
                                     ? what.name
                                     : what.brand + " " + what.name;
-        if (what.state == MentionCandidate::Availability::paid) {
-            // Not "buy it". Nothing here spends money, and telling somebody to
-            // go and buy something is a sales pitch, not an answer.
-            mentions_.show_notice(who + " is a paid module this account does "
-                                        "not own. The prompt can still name it.");
+        const MentionFetch plan =
+            plan_mention_fetch(what.state, rack_signed_in(), auto_download_pref());
+        if (!plan.fetch) {
+            mentions_.show_notice(who + plan.why);
             return;
         }
         // FETCH IT. Telling somebody to go to Rack's Library, install a free

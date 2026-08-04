@@ -7356,3 +7356,38 @@ TEST_CASE("a scanned panel draws its screens and lamps", "[.screens-look]") {
             static_cast<std::streamsize>(png.size()));
     WARN("wrote " << out.string());
 }
+
+// --- @-mention fetch: refuse before promising --------------------------------
+
+static bool says(const std::string& hay, const char* needle) {
+    return hay.find(needle) != std::string::npos;
+}
+
+TEST_CASE("a mention fetch that cannot succeed is refused, not promised",
+          "[mention][library]") {
+    using A = forge_modular::MentionCandidate::Availability;
+
+    // The whole point. A fetch spawned while signed out still printed
+    // "fetching...", and the "not signed in" reply landed in a log nobody
+    // opens -- a silent failure wearing the costume of progress.
+    const auto out = forge_modular::plan_mention_fetch(A::available, false, "entitled");
+    REQUIRE_FALSE(out.fetch);
+    REQUIRE(says(out.why, "Log In"));
+
+    // Off means off: the mention row honours the same preference the
+    // generation path does, or the setting is a lie in one of two places.
+    const auto off = forge_modular::plan_mention_fetch(A::available, true, "none");
+    REQUIRE_FALSE(off.fetch);
+    REQUIRE(says(off.why, "switched off"));
+
+    // Paid and unowned is refused without ever suggesting a purchase.
+    const auto paid = forge_modular::plan_mention_fetch(A::paid, true, "entitled");
+    REQUIRE_FALSE(paid.fetch);
+    REQUIRE(says(paid.why, "does not own"));
+    REQUIRE_FALSE(says(paid.why, "buy"));
+
+    // And the case that must actually work.
+    REQUIRE(forge_modular::plan_mention_fetch(A::available, true, "entitled").fetch);
+    // Already installed: saying "fetching" would be its own small lie.
+    REQUIRE_FALSE(forge_modular::plan_mention_fetch(A::ready, true, "entitled").fetch);
+}

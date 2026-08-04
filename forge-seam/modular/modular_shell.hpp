@@ -32,6 +32,29 @@ namespace forge_modular {
 
 class ModuleSummary;
 
+/// Whether an @-mentioned module can be fetched, and what to say if not.
+struct MentionFetch {
+    bool fetch = false;   ///< spawn the download
+    std::string why;      ///< appended to the module name, shown to the user
+};
+
+/// Decide before promising.
+///
+/// A background fetch that cannot possibly succeed still prints "fetching…",
+/// and its failure lands in a log nobody opens. Every reason below is knowable
+/// instantly from local files, so none of them needs a network round trip or
+/// an asynchronous report -- refusing up front is both cheaper and honest.
+MentionFetch plan_mention_fetch(MentionCandidate::Availability state,
+                                bool signed_in, const std::string& pref);
+
+/// Whether Rack holds a non-empty library token. Presence only: the token is
+/// the user's credential and nothing here reads or copies its value.
+bool rack_signed_in();
+
+/// The `auto_download` preference, defaulting exactly as patch.py does so the
+/// two cannot disagree about what is going to happen.
+std::string auto_download_pref();
+
 /// What Forge Modular is currently set to build.
 enum class Artifact { module, patch };
 
