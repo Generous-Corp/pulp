@@ -67,6 +67,8 @@
     "pulp-smf-interchange",
     "pulp-smf-interop",
     "pulp-standalone",
+    "pulp-standalone-inspector",
+    "pulp-standalone-inspector-runtime-eval",
     "pulp-state",
     "pulp-timebase",
     "pulp-timeline",

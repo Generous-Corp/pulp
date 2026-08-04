@@ -187,7 +187,9 @@ REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
         "if(PULP_ENABLE_INSPECTOR)\n    add_subdirectory(inspect)\nendif()",
         "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)",
-        "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)",
+        "target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)",
+        "target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)",
+        "pulp-standalone-inspector-runtime-eval PRIVATE\n        pulp::inspect pulp::inspect-runtime-eval",
     ),
     "inspect/CMakeLists.txt": (
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
