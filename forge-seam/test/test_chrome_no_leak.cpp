@@ -2073,6 +2073,14 @@ TEST_CASE("Random fills the composer, and never repeats itself", "[seam]") {
     auto* input = shell.chrome()->prompt_input();
     REQUIRE(input != nullptr);
 
+    // The first press is the one everybody judges the button by, and it drew
+    // the placeholder -- which comes out of the same pool, so the composer
+    // read exactly the same before and after the click.
+    const std::string placeholder = input->placeholder;
+    REQUIRE_FALSE(placeholder.empty());
+    random.on_click();
+    CHECK(input->text() != placeholder);
+
     std::set<std::string> seen;
     std::string previous;
     for (int i = 0; i < 6; ++i) {
