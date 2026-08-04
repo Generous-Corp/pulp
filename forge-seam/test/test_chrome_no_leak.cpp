@@ -1268,6 +1268,133 @@ TEST_CASE("a run reports itself on the status card, not in the chat",
     std::filesystem::remove(log);
 }
 
+namespace {
+
+/// Point HOME at a scratch directory for one test, so a preference the test
+/// writes or clicks can never land in the person-at-the-machine's real
+/// settings file, and their real file can never leak into an assertion.
+struct ScratchHome {
+    ScratchHome() {
+        const char* real = std::getenv("HOME");
+        saved = real ? real : "";
+        dir = std::filesystem::temp_directory_path() / "forge-modular-prefs";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(
+            dir / "Library" / "Application Support" / "Forge Modular", ec);
+        ::setenv("HOME", dir.string().c_str(), /*overwrite=*/1);
+    }
+    ~ScratchHome() {
+        if (saved.empty()) ::unsetenv("HOME");
+        else ::setenv("HOME", saved.c_str(), /*overwrite=*/1);
+    }
+    std::filesystem::path settings() const {
+        return dir / "Library" / "Application Support" / "Forge Modular" /
+               "settings.json";
+    }
+    void write(const std::string& json) const {
+        std::ofstream out(settings());
+        out << json;
+    }
+    std::filesystem::path dir;
+    std::string saved;
+};
+
+}  // namespace
+
+TEST_CASE("preferences are read from the file patch.py owns", "[prefs][seam]") {
+    ScratchHome home;
+
+    // No file at all: the fallback is the answer, exactly as patch.py fills
+    // its defaults in.
+    CHECK(forge_modular::modular_setting("module_source", "prefer_existing") ==
+          "prefer_existing");
+    CHECK(forge_modular::auto_download_pref() == "entitled");
+
+    home.write("{\"module_source\": \"balanced\", \"auto_download\": \"none\"}");
+    CHECK(forge_modular::modular_setting("module_source", "prefer_existing") ==
+          "balanced");
+    CHECK(forge_modular::auto_download_pref() == "none");
+
+    // A key the file does not carry falls back rather than misreading a
+    // neighbour's value.
+    CHECK(forge_modular::modular_setting("made_up", "fallback") == "fallback");
+}
+
+TEST_CASE("the generation preferences are on Home and clickable",
+          "[prefs][seam]") {
+    // The user asked for module_source and auto_download to be theirs to
+    // change. Until this surface existed they lived only in a JSON file,
+    // while the mention overlay said "switched off in Settings" about a
+    // Settings nobody could reach.
+    ScratchHome home;
+    home.write("{\"module_source\": \"prefer_generated\", "
+               "\"auto_download\": \"none\"}");
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    auto accessory = shell.home_accessory();
+    REQUIRE(accessory != nullptr);
+
+    // Both controls exist, with every option present and handled -- the
+    // Random button shipped once with no handler at all.
+    const auto& source = shell.module_source_tabs();
+    const auto& download = shell.auto_download_tabs();
+    REQUIRE(source.size() == 3);
+    REQUIRE(download.size() == 2);
+    for (auto* b : source) REQUIRE(b->on_click);
+    for (auto* b : download) REQUIRE(b->on_click);
+
+    // The control shows the FILE's values, not the defaults: the person who
+    // edited the file by hand last week must not see their choice undone by
+    // the control's first paint.
+    CHECK(shell.module_source_shown() == "prefer_generated");
+    CHECK(shell.auto_download_shown() == "none");
+
+    // Exactly one option per row reads as chosen, by painted colour.
+    const auto raised = [](const std::vector<pulp::view::TextButton*>& tabs) {
+        int n = 0, at = -1;
+        for (std::size_t i = 0; i < tabs.size(); ++i) {
+            if (tabs[i]->style() == pulp::view::TextButton::Style::secondary) {
+                ++n;
+                at = static_cast<int>(i);
+            }
+            auto* lbl = dynamic_cast<pulp::view::Label*>(tabs[i]->child_at(0));
+            REQUIRE(lbl != nullptr);
+            if (tabs[i]->style() != pulp::view::TextButton::Style::secondary)
+                CHECK(lbl->text_color() != forge::design::color::text);
+        }
+        return std::pair{n, at};
+    };
+    CHECK(raised(source) == std::pair{1, 2});     // Build my own
+    CHECK(raised(download) == std::pair{1, 1});   // Off
+
+    // Clicking a different option adopts it, restyles, and hands the write
+    // to patch.py -- the one validated writer -- rather than writing JSON
+    // from the shell. The bare shell records the command and launches
+    // nothing, so this asserts the decision without touching the machine.
+    const auto before = shell.launched().size();
+    source[1]->on_click();
+    CHECK(shell.module_source_shown() == "balanced");
+    CHECK(raised(source) == std::pair{1, 1});
+    REQUIRE(shell.launched().size() == before + 1);
+    CHECK(shell.launched().back().find("patch.py setting module_source balanced")
+          != std::string::npos);
+
+    download[0]->on_click();
+    CHECK(shell.auto_download_shown() == "entitled");
+    CHECK(raised(download) == std::pair{1, 0});
+    REQUIRE(shell.launched().size() == before + 2);
+    CHECK(shell.launched().back().find("patch.py setting auto_download entitled")
+          != std::string::npos);
+
+    // Re-clicking the already-chosen option is a no-op: no second process to
+    // write what is already written.
+    source[1]->on_click();
+    download[0]->on_click();
+    CHECK(shell.launched().size() == before + 2);
+}
+
 TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]") {
     // From the prototype: three depths in the Build title bar, wrapped in the
     // `isPatch` guard. A module build has one artifact and nothing to narrate
@@ -2971,7 +3098,11 @@ TEST_CASE("pressing Build through a real click does not tear itself down",
     std::function<void(pulp::view::View*)> walk = [&](pulp::view::View* v) {
         if (!v || build) return;
         if (auto* b = dynamic_cast<pulp::view::TextButton*>(v)) {
-            if (b->access_label().find("Build") != std::string::npos) {
+            // The composer's primary, by its exact labels. A bare "Build"
+            // substring matched the Home preference tabs the moment one of
+            // them mentioned building, and this test clicked a preference.
+            if (b->access_label() == "Build the patch" ||
+                b->access_label() == "Build the module") {
                 build = b;
                 return;
             }
@@ -7379,6 +7510,9 @@ TEST_CASE("a mention fetch that cannot succeed is refused, not promised",
     const auto off = forge_modular::plan_mention_fetch(A::available, true, "none");
     REQUIRE_FALSE(off.fetch);
     REQUIRE(says(off.why, "switched off"));
+    // And it points at the REAL control. This copy said "in Settings" while
+    // the preference lived only in a JSON file nobody could find.
+    REQUIRE(says(off.why, "Home screen"));
 
     // Paid and unowned is refused without ever suggesting a purchase.
     const auto paid = forge_modular::plan_mention_fetch(A::paid, true, "entitled");

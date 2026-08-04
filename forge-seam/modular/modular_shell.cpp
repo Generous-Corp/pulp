@@ -14,6 +14,7 @@
 
 #include <pulp/runtime/log.hpp>
 
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
@@ -130,8 +131,12 @@ MentionFetch plan_mention_fetch(MentionCandidate::Availability state,
                        "Library menu, then Log In. The prompt can still "
                        "name it."};
     if (pref == "none")
-        return {false, " is free, but automatic downloading is switched off "
-                       "in Settings. The prompt can still name it."};
+        // Named where the switch actually is. This said "in Settings" while
+        // the preference lived only in a JSON file; the Downloads control on
+        // the Home screen is now the real place.
+        return {false, " is free, but automatic downloading is switched off. "
+                       "Turn Downloads back to Automatic on the Home screen, "
+                       "or the prompt can still name it."};
     return {true, ""};
 }
 
@@ -149,19 +154,25 @@ bool rack_signed_in() {
     return open != std::string::npos && all[open + 1] != '"';
 }
 
-/// The auto_download preference, defaulting to the same value patch.py does
-/// so the two cannot disagree about what happens.
-std::string auto_download_pref() {
+/// Any preference, read from the same file patch.py reads. The caller's
+/// fallback stands in for patch.py's default, so the two sides cannot
+/// disagree about what happens. String values only, which is what both
+/// user-visible preferences are.
+std::string modular_setting(const std::string& key, const std::string& fallback) {
     const char* home = std::getenv("HOME");
     const std::string all = slurp(std::string(home ? home : ".") +
                                   "/Library/Application Support/Forge Modular/settings.json");
-    const auto at = all.find("\"auto_download\"");
-    if (at == std::string::npos) return "entitled";
+    const auto at = all.find("\"" + key + "\"");
+    if (at == std::string::npos) return fallback;
     const auto open = all.find('"', all.find(':', at) + 1);
-    if (open == std::string::npos) return "entitled";
+    if (open == std::string::npos) return fallback;
     const auto close = all.find('"', open + 1);
-    return close == std::string::npos ? "entitled"
+    return close == std::string::npos ? fallback
                                       : all.substr(open + 1, close - open - 1);
+}
+
+std::string auto_download_pref() {
+    return modular_setting("auto_download", "entitled");
 }
 
 namespace {
@@ -467,7 +478,161 @@ std::unique_ptr<View> ForgeModularShell::home_accessory() {
     tab_module_ = add_tab("Module", Artifact::module);
     tab_patch_ = add_tab("Patch", Artifact::patch);
     style_tabs();
-    return tabs;
+
+    // The tabs plus the generation preferences, in one column. The chrome's
+    // settings sheet has no per-product hook (ForgeChrome has no virtuals),
+    // so Home is where this product's own choices live -- and these two were
+    // file-only until they lived here, which made "automatic downloading is
+    // switched off in Settings" a sentence about a file nobody could find.
+    auto column = std::make_unique<View>();
+    column->flex().direction = FlexDirection::column;
+    column->flex().align_items = FlexAlign::center;
+    column->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    column->flex().gap = 14;
+    column->add_child(std::move(tabs));
+    column->add_child(build_pref_rows());
+    return column;
+}
+
+std::unique_ptr<View> ForgeModularShell::build_pref_rows() {
+    // Two labelled choice rows, styled like the depth tabs: small, quiet,
+    // exactly one option raised. The values are patch.py's own enum strings;
+    // the words are what the strings mean.
+    module_source_ = modular_setting("module_source", "prefer_existing");
+    auto_download_ = modular_setting("auto_download", "entitled");
+    source_tabs_.clear();
+    source_labels_.clear();
+    download_tabs_.clear();
+    download_labels_.clear();
+
+    auto rows = std::make_unique<View>();
+    rows->flex().direction = FlexDirection::column;
+    rows->flex().align_items = FlexAlign::center;
+    rows->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    rows->flex().gap = 6;
+
+    const auto add_row = [&](const char* caption,
+                             std::vector<pulp::view::TextButton*>& tabs_out,
+                             std::vector<pulp::view::Label*>& labels_out,
+                             std::initializer_list<std::pair<const char*, const char*>>
+                                 options,
+                             auto&& choose) {
+        auto row = std::make_unique<View>();
+        row->flex().direction = FlexDirection::row;
+        row->flex().align_items = FlexAlign::center;
+        row->flex().justify_content = pulp::view::FlexJustify::center;
+        row->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        row->flex().gap = 6;
+
+        auto cap = std::make_unique<pulp::view::Label>(caption);
+        cap->set_font_family(forge::design::type::display);
+        cap->set_font_size(12.0f);
+        cap->set_text_color(forge::design::color::text_muted);
+        cap->set_hit_testable(false);
+        cap->flex().preferred_width = 88;
+        cap->set_text_align(pulp::view::LabelAlign::right);
+        row->add_child(std::move(cap));
+
+        for (const auto& [label, value] : options) {
+            auto b = std::make_unique<pulp::view::TextButton>();
+            // Lower-cased on purpose: "Build my own" in an access label made
+            // this the first hit for a tree walk looking for the composer's
+            // Build button. Access labels describe; they must not collide
+            // with the primary actions' names.
+            std::string spoken = label;
+            if (!spoken.empty()) spoken[0] = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(spoken[0])));
+            b->set_access_label(std::string(caption) + ": " + spoken);
+            auto lbl = std::make_unique<pulp::view::Label>(label);
+            lbl->set_font_family(forge::design::type::display);
+            lbl->set_font_size(12.0f);
+            lbl->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+            lbl->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
+            lbl->set_text_align(pulp::view::LabelAlign::center);
+            lbl->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
+            lbl->set_hit_testable(false);
+            labels_out.push_back(lbl.get());
+            b->add_child(std::move(lbl));
+            b->flex().preferred_height = 24;
+            b->flex().padding_left = 12;
+            b->flex().padding_right = 12;
+            b->flex().flex_grow = 0;
+            b->flex().flex_shrink = 0;
+            // `choose` is copied INTO the handler: the row builder returns
+            // long before anyone clicks, so a reference capture here would
+            // be a dangling call the first time the control is used.
+            const std::string chosen = value;
+            b->on_click = [chosen, choose] { choose(chosen); };
+            tabs_out.push_back(b.get());
+            row->add_child(std::move(b));
+        }
+        rows->add_child(std::move(row));
+    };
+
+    add_row("Modules", source_tabs_, source_labels_,
+            {{"Library first", "prefer_existing"},
+             {"Balanced", "balanced"},
+             {"Build my own", "prefer_generated"}},
+            [this](const std::string& v) { choose_module_source(v); });
+    add_row("Downloads", download_tabs_, download_labels_,
+            {{"Automatic", "entitled"}, {"Off", "none"}},
+            [this](const std::string& v) { choose_auto_download(v); });
+
+    style_pref_tabs();
+    return rows;
+}
+
+void ForgeModularShell::style_pref_tabs() {
+    // Exactly one option per row reads as chosen, by the colour actually
+    // painted -- the depth tabs shipped a style-only version of this once and
+    // two tabs looked selected at the same time.
+    static const char* kSourceValues[] = {"prefer_existing", "balanced",
+                                          "prefer_generated"};
+    for (std::size_t i = 0; i < source_tabs_.size(); ++i) {
+        const bool active = module_source_ == kSourceValues[i];
+        source_tabs_[i]->set_style(active ? TextButton::Style::secondary
+                                          : TextButton::Style::ghost);
+        if (i < source_labels_.size() && source_labels_[i])
+            source_labels_[i]->set_text_color(active ? color::text
+                                                     : color::text_muted);
+        source_tabs_[i]->request_repaint();
+    }
+    static const char* kDownloadValues[] = {"entitled", "none"};
+    for (std::size_t i = 0; i < download_tabs_.size(); ++i) {
+        const bool active = auto_download_ == kDownloadValues[i];
+        download_tabs_[i]->set_style(active ? TextButton::Style::secondary
+                                            : TextButton::Style::ghost);
+        if (i < download_labels_.size() && download_labels_[i])
+            download_labels_[i]->set_text_color(active ? color::text
+                                                       : color::text_muted);
+        download_tabs_[i]->request_repaint();
+    }
+}
+
+void ForgeModularShell::write_pref(const std::string& key,
+                                   const std::string& value) {
+    // patch.py is the ONE validated writer of the settings file: it merges
+    // into what is already there, refuses unknown values, and keeps never_buy
+    // out of the file. Writing JSON from here would be a second writer with
+    // none of that. Detached like every other helper call, and recorded by
+    // launched() in a bare shell, which is how a test asserts the decision
+    // without touching the machine.
+    run_detached("cd " + quoted(tools_dir()) + " && python3 patch.py setting " +
+                 key + " " + value);
+}
+
+void ForgeModularShell::choose_module_source(const std::string& value) {
+    if (value == module_source_) return;
+    module_source_ = value;
+    style_pref_tabs();
+    write_pref("module_source", value);
+}
+
+void ForgeModularShell::choose_auto_download(const std::string& value) {
+    if (value == auto_download_) return;
+    auto_download_ = value;
+    style_pref_tabs();
+    write_pref("auto_download", value);
 }
 
 void ForgeModularShell::style_tabs() {
