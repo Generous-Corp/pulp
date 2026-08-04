@@ -444,10 +444,27 @@ productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/com
   ${RESOURCE_ARGS:+--resources "$STAGE/resources"} \
   --sign "$INST_ID" "$PKG" >/dev/null
 if [[ "$NOTARIZE" == 1 ]]; then
+  _notarized=0
   if [[ -x "$CLI" ]]; then
     # In-tree / top-level builds: the C++ CLI is built and drives notarize+staple.
-    "$CLI" ship notarize --path "$PKG"
-  else
+    #
+    # Tried, not required. The CLI resolves a Pulp PROJECT from the working
+    # directory, and this recipe runs from the consumer's tree -- so a checkout
+    # that happens to have built pulp-cpp took this branch, failed with "not in
+    # a Pulp project directory", and under `set -e` aborted with the .pkg
+    # already written and NOT notarized. That package sits in the output
+    # directory looking finished; Gatekeeper rejects it as an unnotarized
+    # Developer ID, which surfaces to a user as a broken installer rather than
+    # a build that stopped. Falling through to notarytool is strictly better:
+    # it needs no project, only the key.
+    if "$CLI" ship notarize --path "$PKG"; then
+      _notarized=1
+    else
+      echo "  note: '$CLI ship notarize' declined here (it resolves a project" >&2
+      echo "        from the working directory); using notarytool directly." >&2
+    fi
+  fi
+  if [[ "$_notarized" != 1 ]]; then
     # Submodule / standalone consumers never build pulp-cpp (it is gated to
     # top-level Pulp builds), so fall back to notarytool directly using the
     # file-based App Store Connect key. Secrets live in ~/.config/pulp/secrets.
@@ -456,7 +473,7 @@ if [[ "$NOTARIZE" == 1 ]]; then
     fi
     : "${PULP_NOTARY_KEY_PATH:=$HOME/.config/pulp/secrets/AuthKey_${PULP_NOTARY_KEY_ID:-}.p8}"
     if [[ -z "${PULP_NOTARY_KEY_ID:-}" || -z "${PULP_NOTARY_ISSUER_ID:-}" || ! -f "$PULP_NOTARY_KEY_PATH" ]]; then
-      echo "error: cannot notarize — pulp-cpp is not built and no notary key is configured." >&2
+      echo "error: cannot notarize — no notary key is configured." >&2
       echo "  Build the Pulp CLI (top-level build) or set PULP_NOTARY_KEY_ID / PULP_NOTARY_ISSUER_ID" >&2
       echo "  and place the .p8 in ~/.config/pulp/secrets/ (see 'pulp ship doctor'). Or pass --no-notarize." >&2
       exit 1
