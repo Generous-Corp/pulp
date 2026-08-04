@@ -573,25 +573,36 @@ static int ship_package_impl(const std::vector<std::string>& args,
             return rc;
         }
 
-        std::vector<fs::path> inspector_artifacts;
+        std::vector<std::pair<fs::path, std::string>> inspector_artifacts;
 #if defined(__linux__)
         if (format == "appimage" && !binary_path.empty())
-            inspector_artifacts.emplace_back(binary_path);
+            inspector_artifacts.emplace_back(binary_path,
+                product_filter.empty() ? fs::path(binary_path).filename().string()
+                                       : product_filter);
 #endif
 #if defined(__APPLE__)
         const auto standalone_apps = find_standalone_apps(build_dir, product_filter);
         if (target != "android") {
-            for (const auto& app : standalone_apps)
-                inspector_artifacts.push_back(
-                    app / "Contents/MacOS" / app.stem());
+            const auto validator_env =
+                pulp::cli::mac_runtime::make_default_env();
+            for (const auto& app : standalone_apps) {
+                const auto executable =
+                    pulp::cli::mac_runtime::resolve_standalone_executable(
+                        app, validator_env);
+                if (executable.empty()) {
+                    std::cerr << "pulp ship package: could not resolve "
+                                 "CFBundleExecutable for inspector evidence scan: "
+                              << app << "\n";
+                    return 2;
+                }
+                inspector_artifacts.emplace_back(
+                    executable, app.stem().string());
+            }
         }
 #endif
         std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
         artifact_reports.reserve(inspector_artifacts.size());
-        for (const auto& artifact : inspector_artifacts) {
-            const auto product_name = product_filter.empty()
-                ? artifact.filename().string()
-                : product_filter;
+        for (const auto& [artifact, product_name] : inspector_artifacts) {
             auto artifact_report =
                 pulp::cli::inspector_shipping::load_exact_artifact_report(
                     artifact, artifact.parent_path(), product_name);
@@ -952,19 +963,30 @@ static int ship_package(const std::vector<std::string>& args,
 
     InspectorPackageEvidence evidence;
     std::ostringstream human_output;
+    std::ostringstream error_output;
     int result = 0;
     if (json_output) {
-        ScopedOutputCapture capture(std::cout, human_output.rdbuf());
-        ScopedStdoutRedirect process_output(true);
-        result = ship_package_impl(package_args, root, build_dir, evidence);
+        {
+            ScopedOutputCapture capture_stdout(std::cout, human_output.rdbuf());
+            ScopedOutputCapture capture_stderr(std::cerr, error_output.rdbuf());
+            ScopedStdoutRedirect process_output(true);
+            result = ship_package_impl(package_args, root, build_dir, evidence);
+        }
     } else {
         result = ship_package_impl(package_args, root, build_dir, evidence);
     }
-    if (json_output && result == 0) {
-        std::cout << "{\"inspector_capabilities\": " << evidence.report.json
-                  << ", \"evidence\": "
-                  << pulp::cli::json_string(evidence.path.string())
-                  << "}\n";
+    if (json_output) {
+        if (result == 0) {
+            std::cout << "{\"inspector_capabilities\": " << evidence.report.json
+                      << ", \"evidence\": "
+                      << pulp::cli::json_string(evidence.path.string())
+                      << "}\n";
+        } else {
+            auto message = error_output.str();
+            if (message.empty()) message = human_output.str();
+            std::cout << "{\"error\": " << pulp::cli::json_string(message)
+                      << ", \"exit_code\": " << result << "}\n";
+        }
     }
     return result;
 }
@@ -1942,7 +1964,8 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
-        pulp::cli::inspector_shipping::Report inspector_report;
+        auto inspector_report =
+            pulp::cli::inspector_shipping::empty_report();
         if (ext == ".app") {
             const auto executable =
                 pulp::cli::mac_runtime::resolve_standalone_executable(
@@ -1959,7 +1982,7 @@ static int ship_share(const std::vector<std::string>& args,
                 std::cerr << "pulp ship share: " << inspector_report.error << "\n";
                 return 2;
             }
-        } else {
+        } else if (!dry_run) {
             std::string inspection_error;
             if (!pulp::cli::inspector_shipping::load_container_artifact_report(
                     input, inspector_report, inspection_error)) {
@@ -1967,7 +1990,8 @@ static int ship_share(const std::vector<std::string>& args,
                 return 2;
             }
         }
-        if (!inspector_acknowledgements_match(
+        if ((ext == ".app" || !dry_run) &&
+            !inspector_acknowledgements_match(
                 inspector_report, ship_inspector,
                 ship_inspector_runtime_eval, "pulp ship share")) {
             return 2;

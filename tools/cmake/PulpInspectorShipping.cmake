@@ -86,19 +86,20 @@ function(_pulp_configure_inspector_shipping target bundle_id product_name)
         "{\n  \"schema_version\": 1,\n  \"target\": \"${_json_target}\",\n  \"product_name\": \"${_json_product_name}\",\n  \"bundle_id\": \"${_json_bundle_id}\",\n  \"shipping_override\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"activation\": \"product-owned; runtime default off\",\n  \"capabilities\": [${_json_caps}]\n}\n")
     set(PULP_${target}_INSPECTOR_MANIFEST "${_manifest}" CACHE INTERNAL "")
 
+    set(_marker_source "${CMAKE_CURRENT_BINARY_DIR}/${target}_inspector_shipping_marker.cpp")
+    set(_marker_content
+        "#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_standalone_component_v1[] = \"PULP_STANDALONE_COMPONENT_V1\";\n")
     if(PULP_${target}_SHIP_INSPECTOR)
-        set(_marker_source "${CMAKE_CURRENT_BINARY_DIR}/${target}_inspector_shipping_marker.cpp")
-        file(GENERATE OUTPUT "${_marker_source}" CONTENT
-            "#include <pulp/format/detail/standalone_inspector.hpp>\n#include <string>\n#include <vector>\n#if defined(_MSC_VER)\n#define PULP_SHIPPING_USED\n#else\n#define PULP_SHIPPING_USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_inspector_shipping_manifest_v1[] = \"PULP_INSPECT_SHIPPING_MANIFEST_V1\\0${_marker_caps}\";\nnamespace { struct PulpInspectorShippingRegistration { PulpInspectorShippingRegistration() { const volatile char marker_anchor = pulp_inspector_shipping_manifest_v1[0]; (void) marker_anchor; pulp::format::detail::set_standalone_inspector_shipping_capabilities(std::vector<std::string>{${_registration_caps}}); } } pulp_inspector_shipping_registration; }\n")
-        set(PULP_${target}_INSPECTOR_MARKER_SOURCE "${_marker_source}" CACHE INTERNAL "")
+        string(APPEND _marker_content
+            "#include <pulp/format/detail/standalone_inspector.hpp>\n#include <string>\n#include <vector>\nextern \"C\" PULP_SHIPPING_USED const volatile char pulp_inspector_shipping_manifest_v1[] = \"PULP_INSPECT_SHIPPING_MANIFEST_V1\\0${_marker_caps}\";\nextern \"C\" void pulp_inspector_shipping_declaration_v1() {}\nnamespace { struct PulpInspectorShippingRegistration { PulpInspectorShippingRegistration() { const volatile char marker_anchor = pulp_inspector_shipping_manifest_v1[0]; (void) marker_anchor; pulp::format::detail::set_standalone_inspector_shipping_capabilities(std::vector<std::string>{${_registration_caps}}); } } pulp_inspector_shipping_registration; }\n")
     endif()
+    file(GENERATE OUTPUT "${_marker_source}" CONTENT "${_marker_content}")
+    set(PULP_${target}_INSPECTOR_MARKER_SOURCE "${_marker_source}" CACHE INTERNAL "")
 endfunction()
 
 function(_pulp_attach_inspector_shipping target artifact_target)
-    if(PULP_${target}_SHIP_INSPECTOR)
-        target_sources(${artifact_target} PRIVATE
-            "${PULP_${target}_INSPECTOR_MARKER_SOURCE}")
-    endif()
+    target_sources(${artifact_target} PRIVATE
+        "${PULP_${target}_INSPECTOR_MARKER_SOURCE}")
     add_custom_command(TARGET ${artifact_target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${PULP_${target}_INSPECTOR_MANIFEST}"

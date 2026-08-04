@@ -24,6 +24,15 @@ void write_manifest(const fs::path& path, std::string_view body) {
 void write_artifact(const fs::path& path, std::string_view body) {
     std::ofstream output(path, std::ios::binary);
     output.write(body.data(), static_cast<std::streamsize>(body.size()));
+    output.close();
+    fs::permissions(path, fs::perms::owner_exec, fs::perm_options::add);
+}
+
+std::string standalone_artifact(std::string_view suffix = {}) {
+    std::string result = "PULP_STANDALONE_";
+    result += "COMPONENT_V1";
+    result += suffix;
+    return result;
 }
 } // namespace
 
@@ -98,12 +107,13 @@ TEST_CASE("artifact scan rejects a stale manifest before packaging") {
     REQUIRE(report.manifests.size() == 1);
 
     const auto artifact = temporary.path / "Ordinary";
-    write_artifact(artifact, "ordinary-product");
+    write_artifact(artifact, standalone_artifact(" ordinary-product"));
     std::string error;
     CHECK(pulp::cli::inspector_shipping::scan_artifact(
         artifact, report.manifests.front(), error));
 
-    write_artifact(artifact, "PULP_INSPECT_SHIPPING_MANIFEST_V1");
+    write_artifact(artifact,
+        standalone_artifact(" PULP_INSPECT_SHIPPING_MANIFEST_V1"));
     error.clear();
     CHECK_FALSE(pulp::cli::inspector_shipping::scan_artifact(
         artifact, report.manifests.front(), error));
@@ -121,8 +131,9 @@ TEST_CASE("artifact scan accepts exact declared capability markers") {
     REQUIRE(report.manifests.size() == 1);
 
     const auto artifact = temporary.path / "Developer";
-    write_artifact(artifact,
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    write_artifact(artifact, standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1"));
     std::string error;
     CHECK(pulp::cli::inspector_shipping::scan_artifact(
         artifact, report.manifests.front(), error));
@@ -139,8 +150,9 @@ TEST_CASE("ordinary artifacts may contain unrelated inspector-like names") {
     REQUIRE(report.manifests.size() == 1);
 
     const auto artifact = temporary.path / "Ordinary";
-    write_artifact(artifact,
-        "third-party InspectorServer DiscoveryPublisher publish_discovery_record");
+    write_artifact(artifact, standalone_artifact(
+        " third-party InspectorServer DiscoveryPublisher "
+        "publish_discovery_record"));
     std::string error;
     CHECK(pulp::cli::inspector_shipping::scan_artifact(
         artifact, report.manifests.front(), error));
@@ -153,8 +165,9 @@ TEST_CASE("inspector evidence rejects capability aliases and stale build artifac
     const auto sidecar = artifacts / "Alias.inspector-capabilities.json";
     write_manifest(sidecar,
         R"({"product_name":"Alias","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["state-write"]})");
-    write_artifact(artifacts / "Alias",
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_STATE_WRITE_V1");
+    write_artifact(artifacts / "Alias", standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1"));
     auto alias =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
     CHECK_FALSE(alias.complete);
@@ -167,7 +180,8 @@ TEST_CASE("inspector evidence rejects capability aliases and stale build artifac
     CHECK_FALSE(stale.complete);
     CHECK(stale.error.find("does not match manifest") != std::string::npos);
 
-    write_artifact(artifacts / "Alias", "ordinary standalone");
+    write_artifact(artifacts / "Alias",
+        standalone_artifact(" ordinary standalone"));
     auto exact =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
     REQUIRE(exact.complete);
@@ -183,7 +197,7 @@ TEST_CASE("inspector evidence rejects standalone artifacts without copied sideca
         temporary.path / "products" / "Missing Product.app" / "Contents/MacOS" /
         "Missing Product";
     fs::create_directories(executable.parent_path());
-    write_artifact(executable, "ordinary standalone");
+    write_artifact(executable, standalone_artifact(" ordinary standalone"));
 
     const auto report =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
@@ -192,13 +206,40 @@ TEST_CASE("inspector evidence rejects standalone artifacts without copied sideca
           std::string::npos);
 
     fs::remove(temporary.path / "pulp-inspector-manifests" / "Missing.json");
-    write_artifact(executable,
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    write_artifact(executable, standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1"));
     const auto unconfigured =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
     CHECK_FALSE(unconfigured.complete);
     CHECK(unconfigured.error.find("missing inspector capability sidecar") !=
           std::string::npos);
+}
+
+TEST_CASE("container evidence requires sidecars for ordinary Pulp standalones") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto executable = temporary.path / "Ordinary.app" / "Contents" /
+        "MacOS" / "custom-entry-point";
+    fs::create_directories(executable.parent_path());
+    write_artifact(executable, standalone_artifact(" ordinary standalone"));
+
+    const auto missing =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE_FALSE(missing.complete);
+    CHECK(missing.error.find("missing inspector capability sidecar") !=
+          std::string::npos);
+
+    write_manifest(executable.parent_path() /
+                       "OrdinaryTarget.inspector-capabilities.json",
+        R"({"target":"OrdinaryTarget","product_name":"Ordinary Product","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
+    write_artifact(executable.parent_path() / "libpulp-standalone.a",
+        standalone_artifact());
+    const auto complete =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE(complete.complete);
+    REQUIRE(complete.manifests.size() == 1);
+    CHECK(complete.manifests.front().product_name == "Ordinary Product");
 }
 
 TEST_CASE("mixed build trees reject unconfigured standalone artifacts") {
@@ -208,15 +249,17 @@ TEST_CASE("mixed build trees reject unconfigured standalone artifacts") {
     const auto current_dir =
         temporary.path / "products" / "Current.app" / "Contents/MacOS";
     fs::create_directories(current_dir);
-    write_artifact(current_dir / "Current", "ordinary current standalone");
+    write_artifact(current_dir / "Current",
+        standalone_artifact(" ordinary current standalone"));
     write_manifest(current_dir / "Current.inspector-capabilities.json",
         R"({"target":"Current","product_name":"Current","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
 
     const auto stale_dir =
         temporary.path / "products" / "Removed.app" / "Contents/MacOS";
     fs::create_directories(stale_dir);
-    write_artifact(stale_dir / "Removed",
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    write_artifact(stale_dir / "Removed", standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1"));
 
     const auto report =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
@@ -231,11 +274,13 @@ TEST_CASE("one sidecar cannot mask a sibling standalone executable") {
     fs::remove_all(temporary.path / "pulp-inspector-manifests");
     const auto products = temporary.path / "products";
     fs::create_directories(products);
-    write_artifact(products / "First.exe", "ordinary first standalone");
+    write_artifact(products / "First.exe",
+        standalone_artifact(" ordinary first standalone"));
     write_manifest(products / "First.inspector-capabilities.json",
         R"({"target":"First","product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
-    write_artifact(products / "Second.exe",
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    write_artifact(products / "Second.exe", standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1"));
 
     const auto report =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
@@ -250,8 +295,10 @@ TEST_CASE("target and product aliases cannot bind one sidecar twice") {
     fs::remove_all(temporary.path / "pulp-inspector-manifests");
     const auto products = temporary.path / "products";
     fs::create_directories(products);
-    write_artifact(products / "Target.exe", "ordinary target executable");
-    write_artifact(products / "Product.exe", "ordinary product executable");
+    write_artifact(products / "Target.exe",
+        standalone_artifact(" ordinary target executable"));
+    write_artifact(products / "Product.exe",
+        standalone_artifact(" ordinary product executable"));
     write_manifest(products / "Target.inspector-capabilities.json",
         R"({"target":"Target","product_name":"Product","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})");
 
@@ -290,14 +337,27 @@ TEST_CASE("unrelated app bundles do not require standalone evidence") {
     CHECK(report.manifests.empty());
 }
 
+TEST_CASE("standalone static archives are not runnable shipping artifacts") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto archive = temporary.path / "libpulp-standalone.a";
+    write_artifact(archive, standalone_artifact());
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    REQUIRE(report.complete);
+    CHECK(report.manifests.empty());
+}
+
 TEST_CASE("plugin-like directory names cannot hide inspector artifacts") {
     TemporaryDirectory temporary;
     fs::remove_all(temporary.path / "pulp-inspector-manifests");
     const auto executable = temporary.path / "AU" / "Developer.app" /
         "Contents" / "MacOS" / "Developer";
     fs::create_directories(executable.parent_path());
-    write_artifact(executable,
-        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
+    write_artifact(executable, standalone_artifact(
+        " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        "PULP_INSPECT_CAPABILITY_UI_READ_V1"));
 
     const auto report =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);

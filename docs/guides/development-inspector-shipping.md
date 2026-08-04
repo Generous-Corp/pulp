@@ -23,6 +23,9 @@ not activate the endpoint: the product still owns runtime profile selection,
 and the default remains off. Once activated, the manifest is the maximum runtime
 grant set. The effective grants are its intersection with the selected runtime
 profile, so neither a broader profile nor a broader manifest widens the other.
+The exported inspector-capable archive is an implementation detail of this
+helper: linking it directly cannot produce a runnable endpoint because the
+generated product declaration supplies a required link symbol.
 
 `runtime.eval` is arbitrary execution in the product process. The generic
 shipping override never implies it. A target that truly needs it must declare
@@ -40,6 +43,8 @@ declared by the build manifest. If and only if that manifest includes
 mismatches fail before packaging. `pulp validate --json`, `pulp ship check
 --json`, and `pulp ship package --json` include the capability report; package
 also writes `artifacts/inspector-capability-package-input.json`.
+JSON package failures remain JSON and include a nonzero `exit_code` plus the
+fail-closed diagnostic.
 
 Every standalone build runs a manifest-versus-binary scanner using retained,
 Pulp-specific shipping and capability markers. Intentional artifacts fail if

@@ -21,6 +21,12 @@ using namespace pulp_test_cli;
 
 namespace {
 
+std::string standalone_artifact_marker() {
+    std::string marker = "PULP_STANDALONE_";
+    marker += "COMPONENT_V1";
+    return marker;
+}
+
 std::string repo_project_version_for_shellout_tests() {
     const auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
     auto cmake = read_file(repo_root / "CMakeLists.txt");
@@ -3075,11 +3081,11 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     fs::create_directories(second);
     {
         std::ofstream executable(first / "First", std::ios::binary);
-        executable << "ordinary standalone";
+        executable << standalone_artifact_marker() << " ordinary standalone";
     }
     {
         std::ofstream executable(second / "Second", std::ios::binary);
-        executable << "ordinary standalone";
+        executable << standalone_artifact_marker() << " ordinary standalone";
     }
     {
         std::ofstream manifest(first / "First.inspector-capabilities.json");
@@ -3095,7 +3101,8 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
 
     {
         std::ofstream executable(first / "First", std::ios::binary);
-        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
     auto stale = run_pulp({"validate", "--target", "standalone", "--json",
                            (dir / "First.app").string()});
@@ -3114,7 +3121,8 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     const auto raw = dir / "RawStandalone";
     {
         std::ofstream executable(raw, std::ios::binary);
-        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
     {
         std::ofstream sidecar(dir / "RawStandalone.inspector-capabilities.json");
@@ -3158,7 +3166,8 @@ TEST_CASE("pulp validate accepts a manifest-free empty build report",
     }
     {
         std::ofstream executable(artifact_dir / "Stale", std::ios::binary);
-        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
     }
     auto incomplete = run_pulp_in_directory(project, {"validate"});
     REQUIRE_FALSE(incomplete.timed_out);
@@ -3219,9 +3228,12 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
     fs::create_directories(executable_dir);
     {
         std::ofstream executable(executable_dir / "Share", std::ios::binary);
-        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
                       "PULP_INSPECT_CAPABILITY_UI_READ_V1";
     }
+    fs::permissions(executable_dir / "Share", fs::perms::owner_exec,
+                    fs::perm_options::add);
     {
         std::ofstream sidecar(executable_dir / "Share.inspector-capabilities.json");
         sidecar << R"({"product_name":"Share","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})";
@@ -3252,8 +3264,8 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
     auto container_refused = run_pulp_in_directory(
         project, {"ship", "share", dmg.string(), "--dry-run"});
     REQUIRE_FALSE(container_refused.timed_out);
-    REQUIRE(container_refused.exit_code != 0);
-    REQUIRE(container_refused.stderr_output.find("requires --ship-inspector") !=
+    REQUIRE(container_refused.exit_code == 0);
+    REQUIRE(container_refused.stdout_output.find("pulp ship share plan") !=
             std::string::npos);
 
     auto container_acknowledged = run_pulp_in_directory(
@@ -3263,5 +3275,45 @@ TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
     REQUIRE(container_acknowledged.exit_code == 0);
     REQUIRE(container_acknowledged.stdout_output.find("pulp ship share plan") !=
             std::string::npos);
+
+    const auto placeholder_dmg = project / "build" / "Placeholder.dmg";
+    {
+        std::ofstream placeholder(placeholder_dmg, std::ios::binary);
+        placeholder << "not a disk image";
+    }
+    auto placeholder_plan = run_pulp_in_directory(
+        project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
+    REQUIRE_FALSE(placeholder_plan.timed_out);
+    REQUIRE(placeholder_plan.exit_code == 0);
+    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
 #endif
+}
+
+TEST_CASE("pulp ship package json remains structured on inspector refusal",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-ship-package-json-error");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(PackageJson)\n";
+    }
+    {
+        std::ofstream cache(project / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
+    }
+
+    auto result = run_pulp_in_directory(
+        project, {"ship", "package", "--json", "--ship-inspector"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
+    REQUIRE(result.stdout_output.find("\"error\":") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"exit_code\":") != std::string::npos);
+    pulp::cli::pkg::JsonParser parser{result.stdout_output, 0};
+    REQUIRE(parser.parse().type == pulp::cli::pkg::JsonValue::Object);
 }

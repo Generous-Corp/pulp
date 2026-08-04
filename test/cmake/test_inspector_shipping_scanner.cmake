@@ -48,23 +48,24 @@ set(_shipping_manifest
 set(_eval_manifest
     "{\"shipping_override\": true,\"unsafe_runtime_eval_acknowledged\": true}")
 
-_scan(ordinary "ordinary-product" "${_ordinary_manifest}" TRUE)
-_scan(developer "PULP_INSPECT_SHIPPING_MANIFEST_V1" "${_shipping_manifest}" TRUE)
+set(_standalone "PULP_STANDALONE_COMPONENT_V1")
+_scan(ordinary "${_standalone} ordinary-product" "${_ordinary_manifest}" TRUE)
+_scan(developer "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1" "${_shipping_manifest}" TRUE)
 _scan(developer-eval
-    "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
+    "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
     "${_eval_manifest}" TRUE)
-_scan(missing-marker "ordinary-product" "${_shipping_manifest}" FALSE)
+_scan(missing-marker "${_standalone} ordinary-product" "${_shipping_manifest}" FALSE)
 _scan(unrelated-listener-name "InspectorServer DiscoveryPublisher publish_discovery_record"
-    "${_ordinary_manifest}" TRUE)
+    "${_ordinary_manifest}" FALSE)
 _scan(eval-with-generic-override
-    "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
+    "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_RUNTIME_EVAL_HIGH_RISK_COMPONENT_V1"
     "${_shipping_manifest}" FALSE)
 _scan(eval-ack-without-component
-    "PULP_INSPECT_SHIPPING_MANIFEST_V1" "${_eval_manifest}" FALSE)
+    "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1" "${_eval_manifest}" FALSE)
 _scan(undeclared-capability-marker
-    "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1"
+    "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1"
     "${_shipping_manifest}" FALSE)
 _scan(missing-capability-marker
-    "PULP_INSPECT_SHIPPING_MANIFEST_V1"
+    "${_standalone} PULP_INSPECT_SHIPPING_MANIFEST_V1"
     "{\"shipping_override\": true,\"unsafe_runtime_eval_acknowledged\": false,\"capabilities\":[\"ui.read\"]}"
     FALSE)

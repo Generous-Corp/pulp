@@ -41,6 +41,12 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 using namespace pulp::test::standalone_inspector;
 
+#if PULP_TEST_STANDALONE_INSPECTOR
+// Production executables receive this link declaration only from the generated
+// product shipping marker. Unit tests exercise the composition root directly.
+extern "C" void pulp_inspector_shipping_declaration_v1() {}
+#endif
+
 namespace {
 
 struct ScopedShippingCapabilitiesReset {
@@ -347,8 +353,10 @@ TEST_CASE("shipping-bounded profiles omit unavailable capture",
     pulp::state::StateStore store;
     ViewBridge bridge(processor, store);
     View root;
+    auto native_overlay = std::make_unique<View>();
+    native_overlay->set_contains_native_overlay(true);
+    root.add_child(std::move(native_overlay));
     StubWindowHost window;
-    window.capture_supported = false;
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "observe", {});
     REQUIRE(runtime != nullptr);

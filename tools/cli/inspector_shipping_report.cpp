@@ -81,21 +81,44 @@ std::string capability_marker(std::string_view capability) {
     return marker;
 }
 
-bool artifact_has_capability_marker(const fs::path& artifact) {
+const std::string& standalone_artifact_marker() {
+    // Build the sentinel at runtime so the scanner executable does not carry
+    // the exact byte sequence it is looking for and identify itself as a
+    // product artifact when validating a build tree.
+    static const std::string marker = [] {
+        std::string value = "PULP_STANDALONE_";
+        value += "COMPONENT_V1";
+        return value;
+    }();
+    return marker;
+}
+
+bool artifact_has_standalone_marker(const fs::path& artifact) {
     std::ifstream input(artifact, std::ios::binary);
     if (!input) return false;
     const std::string binary(std::istreambuf_iterator<char>(input), {});
-#define PULP_INSPECT_CAPABILITY(symbol, id, risk, observe, develop, grantable, publication_bound) \
-    if (binary.find(capability_marker(id)) != std::string::npos) return true;
-#include <pulp/inspect/capability_definitions.inc>
-#undef PULP_INSPECT_CAPABILITY
-    return false;
+    return binary.find(standalone_artifact_marker()) != std::string::npos;
+}
+
+bool is_runnable_candidate(const fs::path& artifact) {
+    std::error_code error;
+    if (!fs::is_regular_file(artifact, error) || error) return false;
+    const auto extension = artifact.extension().string();
+    if (extension == ".a" || extension == ".lib" || extension == ".o" ||
+        extension == ".obj")
+        return false;
+    const auto permissions = fs::status(artifact, error).permissions();
+    if (error) return false;
+    return extension == ".exe" ||
+        (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
+                        fs::perms::others_exec)) != fs::perms::none;
 }
 
 bool has_matching_inspector_sidecar(const fs::path& executable) {
     const auto directory = executable.parent_path();
     const auto executable_name = executable.filename().string();
     std::error_code error;
+    std::size_t sidecar_count = 0;
     for (fs::directory_iterator iterator(directory, error), end;
          !error && iterator != end; iterator.increment(error)) {
         const auto path = iterator->path();
@@ -103,6 +126,7 @@ bool has_matching_inspector_sidecar(const fs::path& executable) {
         if (!iterator->is_regular_file() ||
             !filename.ends_with(".inspector-capabilities.json"))
             continue;
+        ++sidecar_count;
         constexpr std::string_view suffix = ".inspector-capabilities.json";
         const auto sidecar_target =
             filename.substr(0, filename.size() - suffix.size());
@@ -118,7 +142,17 @@ bool has_matching_inspector_sidecar(const fs::path& executable) {
             manifest.target + ".exe" == executable_name)
             return true;
     }
-    return false;
+    if (error || sidecar_count != 1 ||
+        !artifact_has_standalone_marker(executable))
+        return false;
+    std::size_t standalone_count = 0;
+    for (fs::directory_iterator iterator(directory, error), end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (is_runnable_candidate(iterator->path()) &&
+            artifact_has_standalone_marker(iterator->path()))
+            ++standalone_count;
+    }
+    return !error && standalone_count == 1;
 }
 
 bool inside_plugin_format(const fs::path& path) {
@@ -258,30 +292,14 @@ Report load_artifact_report(const fs::path& search_root) {
     fs::recursive_directory_iterator artifact_end;
     while (!artifact_error && artifact_iterator != artifact_end) {
         const auto path = artifact_iterator->path();
-        if (artifact_iterator->is_directory() && path.extension() == ".app" &&
-            !inside_plugin_format(path)) {
-            const auto executable = path / "Contents/MacOS" / path.stem();
-            if (fs::is_regular_file(executable) &&
-                !has_matching_inspector_sidecar(executable) &&
-                ((has_configured_manifests &&
-                  matches_configured_standalone(executable, configured)) ||
-                 artifact_has_capability_marker(executable))) {
-                Report missing;
-                missing.error =
-                    "standalone artifact is missing inspector capability sidecar: " +
-                    executable.string();
-                return missing;
-            }
-        } else if (artifact_iterator->is_regular_file()) {
+        if (artifact_iterator->is_regular_file()) {
             if (!inside_plugin_format(path)) {
-                const auto permissions = artifact_iterator->status().permissions();
-                const bool executable = path.extension() == ".exe" ||
-                    (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
-                                    fs::perms::others_exec)) != fs::perms::none;
+                const bool executable = is_runnable_candidate(path);
                 const bool configured_standalone = has_configured_manifests &&
                     matches_configured_standalone(path, configured);
                 if (executable && !has_matching_inspector_sidecar(path) &&
-                    (configured_standalone || artifact_has_capability_marker(path))) {
+                    (configured_standalone ||
+                     artifact_has_standalone_marker(path))) {
                     Report missing;
                     missing.error =
                         "standalone artifact is missing inspector capability sidecar: " +
@@ -315,21 +333,40 @@ Report load_artifact_report(const fs::path& search_root) {
 
             const auto suffix = std::string(".inspector-capabilities.json");
             const auto target = filename.substr(0, filename.size() - suffix.size());
-            std::vector<fs::path> candidates = {
+            std::vector<fs::path> exact_candidates = {
                 path.parent_path() / manifest.product_name,
                 path.parent_path() / (manifest.product_name + ".exe"),
                 path.parent_path() / target,
                 path.parent_path() / (target + ".exe"),
             };
-            std::sort(candidates.begin(), candidates.end());
-            candidates.erase(std::unique(candidates.begin(), candidates.end()),
-                             candidates.end());
+            std::sort(exact_candidates.begin(), exact_candidates.end());
+            exact_candidates.erase(
+                std::unique(exact_candidates.begin(), exact_candidates.end()),
+                exact_candidates.end());
             std::vector<fs::path> existing;
-            std::copy_if(candidates.begin(), candidates.end(),
+            std::copy_if(exact_candidates.begin(), exact_candidates.end(),
                          std::back_inserter(existing),
-                         [](const fs::path& candidate) {
-                             return fs::is_regular_file(candidate);
-                         });
+                         is_runnable_candidate);
+            if (existing.empty()) {
+                std::error_code sibling_error;
+                for (fs::directory_iterator sibling(path.parent_path(), sibling_error),
+                     sibling_end;
+                     !sibling_error && sibling != sibling_end;
+                     sibling.increment(sibling_error)) {
+                    if (is_runnable_candidate(sibling->path()) &&
+                        artifact_has_standalone_marker(sibling->path()))
+                        existing.push_back(sibling->path());
+                }
+                if (sibling_error) {
+                    report.error =
+                        "could not enumerate standalone artifacts beside inspector capability sidecar: " +
+                        path.string();
+                    return report;
+                }
+                std::sort(existing.begin(), existing.end());
+                existing.erase(std::unique(existing.begin(), existing.end()),
+                               existing.end());
+            }
             if (existing.empty()) {
                 report.error =
                     "could not resolve standalone executable for inspector capability "
@@ -370,6 +407,7 @@ Report load_artifact_report(const fs::path& search_root) {
 Report load_exact_artifact_report(
     const fs::path& artifact, const fs::path& manifest_root,
     std::optional<std::string_view> product) {
+    if (!artifact_has_standalone_marker(artifact)) return empty_report();
     auto report = load_report(manifest_root, product);
     if (!report.complete) return report;
     if (report.manifests.size() != 1) {
@@ -420,6 +458,11 @@ bool scan_artifact(const fs::path& artifact, const Manifest& manifest,
     const auto contains = [&](std::string_view token) {
         return binary.find(token) != std::string::npos;
     };
+    if (!contains(standalone_artifact_marker())) {
+        error = "inspector capability manifest is not paired with a Pulp standalone artifact: " +
+            artifact.string();
+        return false;
+    }
     const bool has_shipping_marker = contains("PULP_INSPECT_SHIPPING_MANIFEST_V1");
     if (has_shipping_marker != manifest.ships_inspector) {
         error = "artifact inspector endpoint marker does not match manifest: " +
