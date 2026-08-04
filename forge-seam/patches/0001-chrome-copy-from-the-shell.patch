@@ -385,7 +385,7 @@ index 27f98d0..cdecceb 100644
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..f39d06c 100644
+index c8101e1..e273fb0 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -456,7 +456,7 @@ index c8101e1..f39d06c 100644
  
      // Remove the persisted generated build (the chrome's delete path): drop the
      // retained source and reinstall the default hand-fed build so audio keeps
-@@ -343,6 +395,129 @@ public:
+@@ -343,6 +395,141 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -553,6 +553,18 @@ index c8101e1..f39d06c 100644
 +    /// sheet is byte-identical to what it was before this hook existed.
 +    virtual std::vector<SettingsChoice> settings_choices() { return {}; }
 +
++    /// Does this product's work go through a provider's own permission
++    /// system -- the approvals a local provider asks the user for?
++    ///
++    /// Forge's own three do: the provider is chosen in Settings and it, not
++    /// Forge, decides what a run is allowed to touch, so the Permissions tab
++    /// says as much. A product whose model call is a question with a text
++    /// answer never reaches that machinery, and a card explaining that
++    /// approval prompts cannot be bypassed then describes something the user
++    /// will never see -- which reads as a limitation of the product rather
++    /// than as copy that does not apply.
++    virtual bool has_provider_permissions() const { return true; }
++
 +    /// Called on the chrome's poll tick (~120ms), on the main thread.
 +    ///
 +    /// A product that drives work outside Forge's own generation loop has no
@@ -587,7 +599,7 @@ index c8101e1..f39d06c 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..d1d5657 100644
+index 1c3814e..04cfd07 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -145,6 +145,26 @@ public:
@@ -730,7 +742,7 @@ index 1c3814e..d1d5657 100644
  }
  
  std::string trim_copy(const std::string& s) {
-@@ -1324,7 +1381,11 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
+@@ -1324,7 +1381,15 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
                [this](std::string error) {
                    append_agent_line(error, /*error=*/true,
                                      /*record=*/false);
@@ -739,11 +751,15 @@ index 1c3814e..d1d5657 100644
 +              // The product's settings rows, asked of the shell when the
 +              // sheet is built. The three original products answer with
 +              // nothing and their sheet is unchanged.
-+              [this]() { return shell_.settings_choices(); }})),
++              [this]() { return shell_.settings_choices(); },
++              // And whether the provider-permissions card applies to it at
++              // all. A product that never reaches a provider's approvals is
++              // not helped by being told they cannot be bypassed.
++              [this]() { return shell_.has_provider_permissions(); }})),
        publish_sheet_(
            [this]() -> std::optional<PublishSheet::Source> {
                // The generation worker owns shell source mutation until its
-@@ -1350,7 +1411,8 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
+@@ -1350,7 +1415,8 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
      // shell ships a lo-fi delay; the instrument shell a subtractive synth; the
      // MIDI-effect shell a pass-through transform chain). A generated build
      // overrides this with its own name at install.
@@ -753,7 +769,7 @@ index 1c3814e..d1d5657 100644
  }
  
  ForgeChrome::~ForgeChrome() {
-@@ -1420,7 +1482,19 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
+@@ -1420,7 +1486,19 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
          };
      root_ = root.get();
      root->set_background_color(kAppBg);
@@ -774,7 +790,7 @@ index 1c3814e..d1d5657 100644
  
      // A build restored from host state carries its own display name; without
      // it the shelf/header would fall back to the default-build title.
-@@ -1476,6 +1550,14 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
+@@ -1476,6 +1554,14 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
      settings_surface_->build(*root);  // above the confirm sheet
      audio_assets_surface_->build(*root);  // capability-aware asset authoring
      build_publish_sheet(*root);   // marketplace authoring is the topmost sheet
@@ -789,7 +805,7 @@ index 1c3814e..d1d5657 100644
      restore_open_state();
      // A terminal turn may predate this editor instance. Its transaction state
      // is shell-owned, so rematerialize the actions just as we rematerialize the
-@@ -1683,7 +1765,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1683,7 +1769,7 @@ void ForgeChrome::build_title_bar(View& parent) {
      player_title_ = title.get();
      title->flex().flex_shrink = 0;
      identity->add_child(std::move(title));
@@ -798,7 +814,7 @@ index 1c3814e..d1d5657 100644
                            kFaint, 0.8f);
      shell_kind_badge_ = tag.get();
      tag->set_border(kLine, 1, 5);
-@@ -1766,6 +1848,12 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1766,6 +1852,12 @@ void ForgeChrome::build_title_bar(View& parent) {
      size(*init, 52, 24);
      init->on_click = [this]() { save_player_state(); };
      utilities->add_child(std::move(init));
@@ -811,7 +827,7 @@ index 1c3814e..d1d5657 100644
      bar->add_child(std::move(utilities));
  
      parent.add_child(std::move(bar));
-@@ -1881,8 +1969,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1881,8 +1973,7 @@ void ForgeChrome::build_home(View& parent) {
  
      hero->add_child(make_spacer());
  
@@ -821,7 +837,7 @@ index 1c3814e..d1d5657 100644
                                kFontMono, 11, 400,
                                kMuted, 1.76f);
      home_eyebrow_ = eyebrow.get();
-@@ -1890,13 +1977,27 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1890,13 +1981,27 @@ void ForgeChrome::build_home(View& parent) {
      eyebrow->flex().flex_shrink = 0;
      hero->add_child(std::move(eyebrow));
  
@@ -850,7 +866,7 @@ index 1c3814e..d1d5657 100644
      // Prompt card: a writing row above the composer toolbar. The card has no
      // authored height — it is exactly as tall as the prompt, the attachment
      // strip, and the toolbar need, so it opens compact and grows around the
-@@ -1946,7 +2047,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1946,7 +2051,7 @@ void ForgeChrome::build_home(View& parent) {
          kHomePromptTextWidth, design::geometry::composer_max_text_lines,
          design::geometry::composer_text_line_height);
      prompt_input_ = input.get();
@@ -859,7 +875,7 @@ index 1c3814e..d1d5657 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -1993,6 +2094,29 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1993,6 +2098,29 @@ void ForgeChrome::build_home(View& parent) {
      actions->flex().align_items = FlexAlign::center;
      actions->flex().margin_top = 10;
      actions->flex().flex_shrink = 0;
@@ -889,7 +905,7 @@ index 1c3814e..d1d5657 100644
      auto attach = std::make_unique<TextButton>();
      home_attach_button_ = attach.get();
      attach->set_style(TextButton::Style::ghost);
-@@ -2047,6 +2171,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -2047,6 +2175,7 @@ void ForgeChrome::build_home(View& parent) {
      };
      actions->add_child(std::move(send));
      box->add_child(std::move(actions));
@@ -897,7 +913,7 @@ index 1c3814e..d1d5657 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3069,6 +3194,11 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3069,6 +3198,11 @@ void ForgeChrome::build_chat_rail(View& parent) {
  
      auto col = make_box(FlexDirection::column);
      chat_col_ = col.get();
@@ -909,7 +925,7 @@ index 1c3814e..d1d5657 100644
      col->flex().dim_width = {100, DimensionUnit::percent};
      col->flex().padding_left = kChatColumnInset;
      col->flex().padding_right = kChatColumnInset;
-@@ -3401,7 +3531,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3401,7 +3535,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -918,7 +934,7 @@ index 1c3814e..d1d5657 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -3484,7 +3614,9 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3484,7 +3618,9 @@ void ForgeChrome::build_stage(View& parent) {
          skeleton_bones_.push_back(bone_title.get());
          skel->add_child(std::move(bone_title));
  
@@ -928,7 +944,7 @@ index 1c3814e..d1d5657 100644
          bones->flex().gap = 30;
          for (int i = 0; i < 4; ++i) {
              auto cell = make_box(FlexDirection::column);
-@@ -3503,6 +3635,34 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3503,6 +3639,34 @@ void ForgeChrome::build_stage(View& parent) {
          }
          skel->add_child(std::move(bones));
  
@@ -963,7 +979,7 @@ index 1c3814e..d1d5657 100644
          auto caption = make_label("materializing…", kFontMono, 11, 500, kFaint, 1.5f);
          skeleton_caption_ = caption.get();
          skel->add_child(std::move(caption));
-@@ -3611,6 +3771,13 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3611,6 +3775,13 @@ void ForgeChrome::build_stage(View& parent) {
      scripted->set_visible(false);
      stage->add_child(std::move(scripted));
  
@@ -977,7 +993,7 @@ index 1c3814e..d1d5657 100644
      viewport->add_child(std::move(stage));
      viewport->set_content_size(
          {static_cast<float>(kDesignWidth), static_cast<float>(kDesignHeight)});
-@@ -3742,6 +3909,29 @@ void ForgeChrome::open_permissions_settings() {
+@@ -3742,6 +3913,29 @@ void ForgeChrome::open_permissions_settings() {
      settings_surface_->open_permissions();
  }
  
@@ -1007,7 +1023,7 @@ index 1c3814e..d1d5657 100644
  void ForgeChrome::close_settings() {
      settings_surface_->close();
  }
-@@ -4268,7 +4458,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4462,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -1016,7 +1032,7 @@ index 1c3814e..d1d5657 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -4327,6 +4517,104 @@ void ForgeChrome::enter_home() {
+@@ -4327,6 +4521,104 @@ void ForgeChrome::enter_home() {
      apply_modes();
  }
  
@@ -1121,7 +1137,7 @@ index 1c3814e..d1d5657 100644
  void ForgeChrome::enter_build() {
      // The shell's generated source is worker-owned until the exact terminal
      // event has been reduced. Build can become the visible destination now,
-@@ -5726,7 +6014,8 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +6018,8 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -1131,7 +1147,7 @@ index 1c3814e..d1d5657 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +6148,8 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +6152,8 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -1141,7 +1157,7 @@ index 1c3814e..d1d5657 100644
      enter_home();
  }
  
-@@ -5920,6 +6210,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -5920,6 +6214,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
      // reduced, so it owns the mutation transaction for that whole interval.
      if (marketplace_open_worker_.joinable()) return false;
      const std::string text = trim_copy(prompt);
@@ -1158,7 +1174,7 @@ index 1c3814e..d1d5657 100644
      std::optional<RecoverableTurn> pending_replay;
      bool replaying_pending_submission = false;
      const RecoverableTurn* pending_submission =
-@@ -6189,6 +6489,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -6189,6 +6493,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
  }
  
  void ForgeChrome::poll() {
@@ -1169,7 +1185,7 @@ index 1c3814e..d1d5657 100644
      // Publication callbacks may arrive on arbitrary provider threads. They
      // write only to a shared mailbox; the host's UI-thread tick owns every
      // ForgeChrome and widget mutation.
-@@ -6379,7 +6683,7 @@ void ForgeChrome::schedule_poll() {
+@@ -6379,7 +6687,7 @@ void ForgeChrome::schedule_poll() {
              if (!alive->load(std::memory_order_acquire)) return;
              poll_armed_ = false;
              poll();
@@ -1178,7 +1194,7 @@ index 1c3814e..d1d5657 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -6771,11 +7075,42 @@ void ForgeChrome::reset_chips() {
+@@ -6771,11 +7079,42 @@ void ForgeChrome::reset_chips() {
  // status card. Used when the shelf opens a DIFFERENT entry: the rail must show
  // the newly-opened build's conversation, not the previous one's.
  void ForgeChrome::clear_chat_rail() {
@@ -1222,7 +1238,7 @@ index 1c3814e..d1d5657 100644
          }
      }
      transcript_.clear();
-@@ -7989,6 +8324,11 @@ void ForgeChrome::replay_transcript_json(const std::string& hist) {
+@@ -7989,6 +8328,11 @@ void ForgeChrome::replay_transcript_json(const std::string& hist) {
  
  // ── Stage content ────────────────────────────────────────────────────────────
  
@@ -1234,7 +1250,7 @@ index 1c3814e..d1d5657 100644
  void ForgeChrome::show_skeleton(bool on) {
      // One choke point decides which waiting surface the pane shows. The chamber
      // is driven entirely by the host's frame clock, so without one it would
-@@ -8630,6 +8970,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8974,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -1254,7 +1270,7 @@ index 1c3814e..d1d5657 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9353,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9357,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -1269,7 +1285,7 @@ index 1c3814e..d1d5657 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9367,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9371,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -1280,7 +1296,7 @@ index 1c3814e..d1d5657 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9378,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9382,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
@@ -1289,7 +1305,7 @@ index 1c3814e..d1d5657 100644
              kFontMono, 9, 500, Color::rgba8(0xFF, 0xFF, 0xFF, 0xB3), 0.9f);
          art->add_child(std::move(format));
          tile->add_child(std::move(art));
-@@ -9151,4 +9510,12 @@ void ForgeChrome::refresh_shelf() {
+@@ -9151,4 +9514,12 @@ void ForgeChrome::refresh_shelf() {
      if (root_) root_->invalidate_layout();
  }
  
@@ -1303,7 +1319,7 @@ index 1c3814e..d1d5657 100644
 +
  }  // namespace forge
 diff --git a/src/settings_surface.cpp b/src/settings_surface.cpp
-index 7ef8a34..efb130b 100644
+index 7ef8a34..d8e186b 100644
 --- a/src/settings_surface.cpp
 +++ b/src/settings_surface.cpp
 @@ -61,6 +61,23 @@ void size(View& view, float width, float height) {
@@ -1364,10 +1380,30 @@ index 7ef8a34..efb130b 100644
      col->add_child(std::move(pending));
  
      auto row = make_box(FlexDirection::row);
-@@ -760,6 +791,96 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
+@@ -760,26 +791,184 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
      path_row->add_child(std::move(open_folder));
      col->add_child(std::move(path_row));
  
+-    auto permissions = make_box(FlexDirection::column);
+-    permissions->set_background_color(kRaised);
+-    permissions->set_border(kLine, 1, 12);
+-    permissions->flex().padding = 14;
+-    permissions->flex().gap = 6;
+-    permissions->add_child(
+-        make_label("Provider permissions", kFontDisplay, 14, 600,
+-                   kTextStrong));
+-    auto permissions_copy = make_label(
+-        "Permissions are managed by your selected local provider. " +
+-            std::string(brand::kProductName) +
+-            " cannot bypass provider approval prompts.",
+-        kFontDisplay, 12, 400, kMuted);
+-    permissions_copy->set_multi_line(true);
+-    permissions_copy->flex().dim_width = {100, DimensionUnit::percent};
+-    permissions_copy->flex().max_width = 620;
+-    permissions_copy->flex().flex_shrink = 0;
+-    permissions->add_child(std::move(permissions_copy));
+-    col->add_child(std::move(permissions));
+-    return col;
 +    // The product's own preferences, in this pane's row idiom -- title,
 +    // muted blurb, segmented choice styled like the effort buttons -- so a
 +    // product row is indistinguishable from a built-in one. Products that
@@ -1458,15 +1494,35 @@ index 7ef8a34..efb130b 100644
 +        col->add_child(std::move(status));
 +    }
 +
-     auto permissions = make_box(FlexDirection::column);
-     permissions->set_background_color(kRaised);
-     permissions->set_border(kLine, 1, 12);
-@@ -779,7 +900,66 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
-     permissions_copy->flex().flex_shrink = 0;
-     permissions->add_child(std::move(permissions_copy));
-     col->add_child(std::move(permissions));
--    return col;
-+    grew(96.0f);                           // the provider-permissions card
++    // Only for a product whose runs actually meet a provider's approvals.
++    //
++    // The words are true of Forge's own three and of nothing else: a product
++    // that asks a model one question and reads one answer never reaches that
++    // machinery, so the card warns about a prompt its user will never be
++    // shown. Copy that does not apply reads as a limitation of the product.
++    if (!callbacks_.has_provider_permissions ||
++        callbacks_.has_provider_permissions()) {
++        auto permissions = make_box(FlexDirection::column);
++        permissions->set_background_color(kRaised);
++        permissions->set_border(kLine, 1, 12);
++        permissions->flex().padding = 14;
++        permissions->flex().gap = 6;
++        permissions->add_child(
++            make_label("Provider permissions", kFontDisplay, 14, 600,
++                       kTextStrong));
++        auto permissions_copy = make_label(
++            "Permissions are managed by your selected local provider. " +
++                std::string(brand::kProductName) +
++                " cannot bypass provider approval prompts.",
++            kFontDisplay, 12, 400, kMuted);
++        permissions_copy->set_multi_line(true);
++        permissions_copy->flex().dim_width = {100, DimensionUnit::percent};
++        permissions_copy->flex().max_width = 620;
++        permissions_copy->flex().flex_shrink = 0;
++        permissions->add_child(std::move(permissions_copy));
++        col->add_child(std::move(permissions));
++        grew(96.0f);                       // the provider-permissions card
++    }
 +
 +    // The two built-in rows above the product rows: the build-files toggle and
 +    // its path line, and the row that holds them.
@@ -1529,7 +1585,7 @@ index 7ef8a34..efb130b 100644
  }
  
  std::unique_ptr<View> SettingsSurface::build_mcp_pane() {
-@@ -966,7 +1146,11 @@ void SettingsSurface::open_providers() {
+@@ -966,7 +1155,11 @@ void SettingsSurface::open_providers() {
  
  void SettingsSurface::open_permissions() {
      open();
@@ -1543,7 +1599,7 @@ index 7ef8a34..efb130b 100644
  
  void SettingsSurface::close() {
 diff --git a/src/settings_surface.hpp b/src/settings_surface.hpp
-index b60c17b..2a29a94 100644
+index b60c17b..1561fd0 100644
 --- a/src/settings_surface.hpp
 +++ b/src/settings_surface.hpp
 @@ -1,6 +1,7 @@
@@ -1554,7 +1610,7 @@ index b60c17b..2a29a94 100644
  
  #include <pulp/view/buttons.hpp>
  #include <pulp/view/text_editor.hpp>
-@@ -27,6 +28,10 @@ public:
+@@ -27,6 +28,15 @@ public:
          std::function<void()> model_selection_changed;
          std::function<void()> external_model_badges_changed;
          std::function<void(std::string)> transcript_error;
@@ -1562,10 +1618,15 @@ index b60c17b..2a29a94 100644
 +        /// Absent or empty means the sheet is exactly what it was before the
 +        /// hook existed -- no heading, no rows, no empty section.
 +        std::function<std::vector<ForgeShell::SettingsChoice>()> product_choices;
++        /// Whether this product's runs go through the provider's own
++        /// approvals, and so whether the card explaining them belongs on the
++        /// pane. Absent means yes, which is what the three original products
++        /// are and keeps their sheet as it was.
++        std::function<bool()> has_provider_permissions;
      };
  
      explicit SettingsSurface(Callbacks callbacks);
-@@ -70,6 +75,19 @@ public:
+@@ -70,6 +80,19 @@ public:
  
      pulp::view::TextButton* reasoning_effort_button(int effort) const;
  
@@ -1585,7 +1646,7 @@ index b60c17b..2a29a94 100644
  private:
      class Scrim;
  
-@@ -85,6 +103,7 @@ private:
+@@ -85,6 +108,7 @@ private:
      std::unique_ptr<pulp::view::View> build_provider_pane();
      std::unique_ptr<pulp::view::View> build_appearance_pane();
      std::unique_ptr<pulp::view::View> build_permissions_pane();
@@ -1593,7 +1654,7 @@ index b60c17b..2a29a94 100644
      std::unique_ptr<pulp::view::View> build_mcp_pane();
      void refresh_ai_controls();
      void refresh_provider_controls();
-@@ -130,6 +149,24 @@ private:
+@@ -130,6 +154,24 @@ private:
      pulp::view::TabPanel* tabs_ = nullptr;
      std::vector<ModelChoiceButton> model_choice_buttons_;
      std::vector<EffortButton> effort_buttons_;
