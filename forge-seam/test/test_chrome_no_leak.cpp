@@ -5782,11 +5782,16 @@ TEST_CASE("a running build shows a clock, not just a word", "[phase7][stage]") {
     shell.on_poll();
     CHECK(chrome->active_chip() == 2);
 
-    // A finished run stops claiming to be waiting on anything.
+    // A finished run stops claiming to be waiting on anything -- and says it
+    // finished, rather than going blank. Blank is also what a run that died
+    // quietly looks like, and the end is the moment being waited for.
     { std::ofstream f(log, std::ios::app); f << "  installed -> /tmp/x.vcvplugin\n"; }
     shell.on_poll();
     CHECK(shell.build_outcome() == forge_modular::BuildOutcome::done);
-    CHECK(chrome->status_activity_text().empty());
+    const auto ended = chrome->status_activity_text();
+    INFO("after: " << ended);
+    CHECK(ended.find("asking the model") == std::string::npos);
+    CHECK(ended.find("Built") != std::string::npos);
 
     std::filesystem::remove(log);
 }
@@ -5972,6 +5977,68 @@ TEST_CASE("a finished patch shows itself and can be opened", "[phase7][artifact]
     CHECK(shell.explanation()->line_count() > 0);
     REQUIRE(shell.rack_preview() != nullptr);
     CHECK(shell.rack_preview()->modules().size() > 0);
+
+    std::filesystem::remove(log);
+}
+
+TEST_CASE("a finished build says so, in the transcript and on the card",
+          "[artifact][seam]") {
+    // A REAL log, from a real generation, ending the way patch.py ends. The
+    // pieces here each have their own test; what none of them asserted is
+    // that a person is TOLD, which is the whole point of finishing.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_standalone(true);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    const std::string real = a_real_patch();
+    REQUIRE_FALSE(real.empty());
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-built-says-so.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+    const int before = chrome->chat_line_count();
+    {
+        std::ofstream f(log);
+        f << "  asking the model\xE2\x80\xA6\n"
+          << "  the model is answering \xC2\xB7 1,200 characters so far\n"
+          << "  audio out: MacBook Pro Speakers\n"
+          << "  built 6 modules, 8 cables \xE2\x86\x92 " << real << "\n";
+    }
+    shell.on_poll();
+
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+    // Said, not merely true. A run that ends with the screen unchanged is
+    // indistinguishable from one still going.
+    REQUIRE(chrome->chat_line_count() > before);
+    const auto words = flatten(rendered_text(view.get()));
+    INFO(words);
+    CHECK(words.find("Built") != std::string::npos);
+    // And the way in is offered, not just described.
+    CHECK(words.find("Open it in Rack") != std::string::npos);
+    CHECK(shell.artifact_path() == real);
+    CHECK(shell.open_in_rack().empty());
+
+    // And the status card states the outcome instead of going blank, which is
+    // what a run that died quietly also looks like.
+    const auto card = chrome->status_activity_text();
+    INFO("status card: " << card);
+    CHECK(card.find("Built") != std::string::npos);
+    CHECK(card.find("open in Rack") != std::string::npos);
+
+    // A streamed progress line is narration, not a verdict: it must not have
+    // ended the run early or been read as a failure.
+    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::done);
 
     std::filesystem::remove(log);
 }
