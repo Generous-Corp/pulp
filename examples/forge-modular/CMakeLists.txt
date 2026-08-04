@@ -45,6 +45,11 @@ add_custom_target(forge-modular-codegen DEPENDS "${_fm_generated}")
 # added after configure has to trigger a reconfigure, or the build carries on
 # with a source list from before it existed.
 file(GLOB _fm_module_srcs CONFIGURE_DEPENDS "${_fm_dir}/src/*.cpp")
+# Except the standalone programs. test_portmap_merge.cpp is a test with its own
+# `main`, and it sits in src/ because it exercises a header the modules use.
+# The plugin dylib tolerated it; anything that links these sources beside
+# another `main` does not. Same rule as generate.py's sources().
+list(FILTER _fm_module_srcs EXCLUDE REGEX "/(test_|_)[^/]*\\.cpp$")
 
 pulp_add_rack_plugin(forge-modular
     SLUG "ForgeModular"

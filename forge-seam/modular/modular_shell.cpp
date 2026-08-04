@@ -590,6 +590,21 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
     mentions_.set_source([](const std::string& query) {
         return search_modules(query);
     });
+    // AND THE INDEX THAT SOURCE READS HAS TO BE WRITTEN BY SOMEBODY.
+    //
+    // library_catalog.py could build it and nothing ever ran the script, so
+    // the list offered only what was already installed -- which made the whole
+    // download path unreachable, because you cannot mention what you do not
+    // already have. Asked for here, when an editor opens: that is a person
+    // looking at the app rather than a host scanning it, so a plugin scan
+    // never reaches the network.
+    //
+    // Detached and cheap to skip. It is two HTTP requests, it only runs when
+    // the index is missing or a week old, and search_modules picks the file up
+    // the moment it lands without waiting for a relaunch.
+    ensure_library_index(tools_dir(), [this](const std::string& command) {
+        run_detached(command);
+    });
     // Typing has to reach the list, or it never narrows. This was the whole
     // reason "@braids" appeared to do nothing: handle_text ran ONCE, when the
     // mention button was pressed, and every keystroke after it went only to

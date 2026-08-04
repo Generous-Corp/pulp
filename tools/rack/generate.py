@@ -80,6 +80,124 @@ PLUGIN_DIR = os.path.expanduser(
 INCLUDES = ["core/signal", "core/format", "core/audio", "core/state",
             "core/platform", "core/runtime"]
 
+# Where an installed toolchain lives. Nothing under Application Support is
+# gated by macOS's removable-volume consent modal, and unlike the app bundle it
+# is writable -- both of which this generator needs.
+INSTALLED_HOME = os.path.expanduser("~/Library/Application Support/Forge Modular")
+
+
+# ── Prerequisites ────────────────────────────────────────────────────────────
+#
+# THE GENERATOR IS NOT ONE DIRECTORY. It shells out to a panel shaper, loads a
+# font, extracts a DSP vocabulary from Pulp's headers and compiles the module
+# pack against those same headers. Shipping `tools/rack` alone produces a
+# generator that runs, calls the model, downloads a 40 MB SDK and *then* dies
+# on a FileNotFoundError -- the most expensive possible moment to learn a file
+# is missing. So everything is named here, checked before anything is spent,
+# and reported all at once rather than one failed run at a time.
+
+def _required_inputs(root: str) -> list:
+    """(path, what it is, how to get it) for everything outside tools/rack."""
+    out = [
+        (os.path.join(root, "tools", "dsp_vocabulary.py"),
+         "the DSP vocabulary the model is given",
+         "it ships in tools/; reinstall, or run tools/rack/install_toolchain.sh"),
+        (os.path.join(root, "build", "shape_text"),
+         "the panel shaper that outlines every label",
+         "build it with tools/rack/build_shape_text.sh"),
+        (os.path.join(root, "external", "fonts", "Inter-Regular.ttf"),
+         "the panel font",
+         "it ships in external/fonts/"),
+        (os.path.join(root, "examples", "forge-modular", "src"),
+         "the module pack's sources",
+         "it ships in examples/forge-modular/"),
+        (os.path.join(root, "examples", "forge-modular", "modules"),
+         "the module pack's manifests",
+         "it ships in examples/forge-modular/"),
+    ]
+    for d in INCLUDES:
+        out.append((os.path.join(root, d, "include"),
+                    f"Pulp's {d.split('/')[-1]} headers, which the module compiles against",
+                    "they ship in core/; reinstall the toolchain"))
+    return out
+
+
+def missing_inputs(root: str) -> list:
+    """Everything the generator reads and this tree does not have."""
+    gone = []
+    for path, what, fix in _required_inputs(root):
+        if not os.path.exists(path):
+            gone.append(f"  {what}\n      expected: {path}\n      {fix}")
+    return gone
+
+
+def preflight(root: str) -> None:
+    """Refuse before spending anything, naming every missing piece at once."""
+    gone = missing_inputs(root)
+    if not gone:
+        return
+    raise SystemExit(
+        "this copy of the generator is incomplete, so a module cannot be "
+        "built from it.\n" + "\n".join(gone) +
+        "\n  Nothing was downloaded and no model was called.")
+
+
+def _pack_is_writable() -> bool:
+    """Can a generation rewrite the module pack where it stands?"""
+    return all(os.access(os.path.join(PACK, sub), os.W_OK)
+               for sub in ("modules", "src"))
+
+
+def ensure_writable_toolchain(argv: list) -> None:
+    """Move to a writable copy of the toolchain, and re-run there.
+
+    A generation REWRITES the module pack: it writes a manifest, writes a C++
+    source, re-emits every panel SVG and repackages the plug-in. Inside an
+    installed app that pack is /Applications/Forge Modular.app/Contents/
+    Resources/... -- owned by root and sealed by the code signature. Writing
+    there raises PermissionError at best, and at worst breaks the signature of
+    the app that is running.
+
+    So the shipped copy is a SEED, not the working copy. install_toolchain.sh
+    is the one rule for laying that copy down (it also verifies it by emitting
+    a real panel rather than by listing files), and this re-runs the same
+    command there afterwards. Idempotent: the second run finds a writable pack
+    and returns immediately.
+    """
+    if os.environ.get("FORGE_TOOLCHAIN_SEEDED"):
+        # Already re-executed once. A second attempt would loop, so a pack that
+        # is still not writable is a real failure and says so.
+        if not _pack_is_writable():
+            raise SystemExit(
+                f"the module pack at {PACK} is not writable even after "
+                f"installing the toolchain to {INSTALLED_HOME}. Check the "
+                f"permissions on that directory.")
+        return
+    if _pack_is_writable():
+        return
+
+    installer = os.path.join(HERE, "install_toolchain.sh")
+    if not os.path.exists(installer):
+        raise SystemExit(
+            f"the module pack at {PACK} is read-only (this is the copy inside "
+            f"the application bundle) and {installer} is missing, so there is "
+            f"no way to lay down a writable one.")
+    log("first module build on this machine — installing the toolchain…")
+    r = subprocess.run(["/bin/bash", installer], capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).strip().splitlines():
+        log("    " + line)
+    if r.returncode != 0:
+        raise SystemExit(
+            "the toolchain could not be installed, so no module can be built. "
+            "The lines above say which part is missing.")
+    target = os.path.join(INSTALLED_HOME, "tools", "rack", "generate.py")
+    if not os.path.exists(target):
+        raise SystemExit(
+            f"the toolchain reported success but {target} is not there.")
+    log(f"running from {target}")
+    os.execve(sys.executable, [sys.executable, target] + argv[1:],
+              dict(os.environ, FORGE_TOOLCHAIN_SEEDED="1"))
+
 
 def log(msg):
     print(f"  {msg}", flush=True)
@@ -96,6 +214,18 @@ def dsp_vocabulary() -> str:
     """
     r = subprocess.run([sys.executable, os.path.join(HERE, "..", "dsp_vocabulary.py")],
                        capture_output=True, text=True)
+    # An EMPTY vocabulary is a silent failure with an expensive tail: the model
+    # gets a contract with no list of available DSP, invents headers that do
+    # not exist, and the run dies at the compiler three model calls later. The
+    # extractor reads Pulp's headers, so an incomplete install produces exactly
+    # this. Refuse here, where nothing has been spent yet.
+    if len(r.stdout.splitlines()) < 20:
+        raise SystemExit(
+            "the DSP vocabulary came back empty, so the model would be given "
+            "no list of available DSP and would hand-roll everything.\n"
+            f"  extractor: {os.path.join(HERE, '..', 'dsp_vocabulary.py')}\n"
+            f"  it reads Pulp's headers under {ROOT}\n"
+            + (f"  it said: {r.stderr.strip()[-300:]}" if r.stderr.strip() else ""))
     return r.stdout
 
 
@@ -147,8 +277,18 @@ def parse_blocks(text: str):
 # ── Build ────────────────────────────────────────────────────────────────────
 
 def sources():
+    """Every module source in the pack, and nothing that carries a `main`.
+
+    `test_portmap_merge.cpp` lives beside the modules and is a standalone
+    program. Compiling it in was harmless for the plugin dylib and FATAL for
+    the behavioural gate, which links these objects next to its own `main`:
+    every module build ended in `duplicate symbol '_main'`, three attempts and
+    three model calls later, with the linker's reason filtered out of the
+    message. The gate had therefore never passed for any generated module.
+    """
     return sorted(f for f in os.listdir(os.path.join(PACK, "src"))
-                  if f.endswith(".cpp") and not f.startswith("_"))
+                  if f.endswith(".cpp")
+                  and not f.startswith("_") and not f.startswith("test_"))
 
 
 def _includes():
@@ -342,6 +482,12 @@ def main(argv):
     if problem:
         raise SystemExit(problem)
 
+    # Then everything else this tree needs, all at once and before a byte is
+    # downloaded or a model is called. Both of these are free to check and both
+    # used to be discovered at the far end of an expensive run.
+    preflight(ROOT)
+    ensure_writable_toolchain(argv)
+
     # Resolve, and fetch when absent and permitted. This is the step that
     # used to be a SystemExit telling the user to go and download a zip by
     # hand; the errand is ours to run, and only a real failure is an error.
@@ -414,9 +560,24 @@ def main(argv):
             ok, gate_out = run_behaviour_gate(tmp, slug, mod, objs)
             if not ok:
                 log("behavioural gate failed:")
-                for line in gate_out.strip().split("\n"):
-                    if "FAIL" in line or "could not be built" in line:
-                        log("    " + line.strip()[:150])
+                # Two different failures print through here and only one of
+                # them says "FAIL". A gate that could not be COMPILED reported
+                # its heading and then filtered every compiler error out of
+                # its own explanation, so the run showed a bare colon and
+                # three minutes later gave up for no stated reason.
+                if "could not be built" in gate_out:
+                    log("    the gate itself did not compile:")
+                    # The TAIL, not the lines containing "error:". A link
+                    # failure's one error line is "linker command failed",
+                    # which says nothing at all; the symbol that could not be
+                    # resolved is in the lines above it.
+                    tail = [l for l in gate_out.strip().split("\n") if l.strip()]
+                    for line in tail[-8:]:
+                        log("    " + line.strip()[:170])
+                else:
+                    for line in gate_out.strip().split("\n"):
+                        if "FAIL" in line or "could not be built" in line:
+                            log("    " + line.strip()[:150])
                 ctx = ("The module compiled, but driving its process() showed "
                        "it does not behave correctly:\n" + gate_out)
                 if not a.keep_on_fail:

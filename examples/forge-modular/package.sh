@@ -106,12 +106,61 @@ done
 # Application Support instead -- see user_patches_dir() in patch.py.
 PACK_DEST="$APP/Contents/Resources/examples/forge-modular"
 mkdir -p "$PACK_DEST"
-for part in modules res design; do
+for part in modules res design src; do
     if [[ -d "$REPO/examples/forge-modular/$part" ]]; then
         ditto "$REPO/examples/forge-modular/$part" "$PACK_DEST/$part"
     fi
 done
+for part in plugin.json LICENSE.md LICENSE-MIT.txt; do
+    [[ -f "$REPO/examples/forge-modular/$part" ]] &&
+        ditto "$REPO/examples/forge-modular/$part" "$PACK_DEST/$part"
+done
+# AND THE REST OF WHAT MODULE GENERATION READS.
+#
+# `generate.py` is not one directory either. It extracts the DSP vocabulary the
+# model is given from Pulp's headers, compiles the generated module against
+# those same headers, and shells out to a panel shaper that loads a font. None
+# of that was staged, so Build on a fresh Mac died with an unhandled
+# FileNotFoundError -- AFTER downloading a 40 MB SDK, which is the most
+# expensive place a missing file can be discovered.
+#
+# The alternative was dropping the shaper, and it is not available: Rack draws
+# panels with nanosvg, which has no <text> support, so every label has to be an
+# outlined path and outlining needs a real shaping stack. 16 MB of statically
+# linked Skia is the price of lettering that exists.
+#
+# Everything here is read-only input. What a generation WRITES goes to
+# Application Support -- see ensure_writable_toolchain() in generate.py.
+ditto "$REPO/tools/dsp_vocabulary.py" "$APP/Contents/Resources/tools/dsp_vocabulary.py"
+mkdir -p "$APP/Contents/Resources/external/fonts"
+ditto "$REPO/external/fonts/Inter-Regular.ttf" \
+      "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf"
+mkdir -p "$APP/Contents/Resources/build"
+ditto "$REPO/build/shape_text" "$APP/Contents/Resources/build/shape_text"
+for mod in signal format audio state platform runtime; do
+    ditto "$REPO/core/$mod/include" "$APP/Contents/Resources/core/$mod/include"
+done
+
 [[ -f "$TOOLS_DEST/patch.py" ]] || { echo "staging failed: no patch.py" >&2; exit 1; }
+# IDENTITY, NOT PRESENCE. A shaper that is there and does not run empties every
+# label on every panel, and a vocabulary that is there and extracts nothing
+# hands the model a contract with no DSP in it. Both fail silently and both
+# surface as a failed generation minutes later, so both are exercised here.
+_fm_shaped=$("$APP/Contents/Resources/build/shape_text" Hg \
+    "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf" 3.0 center 2>/dev/null || true)
+case "$_fm_shaped" in
+    M*) : ;;
+    *)  echo "staging failed: the panel shaper produced no path for 'Hg'." >&2
+        echo "  Rebuild it: tools/rack/build_shape_text.sh" >&2
+        exit 1 ;;
+esac
+_fm_vocab=$(cd "$TOOLS_DEST" && /usr/bin/python3 ../dsp_vocabulary.py 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${_fm_vocab:-0}" -lt 20 ]]; then
+    echo "staging failed: the DSP vocabulary extracted $_fm_vocab lines from the" >&2
+    echo "  staged headers. The model would be given no DSP to use." >&2
+    exit 1
+fi
+echo "[installer] panel shaper runs, DSP vocabulary is $_fm_vocab lines"
 _fm_manifests=$(find "$PACK_DEST/modules" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
 [[ "${_fm_manifests:-0}" -gt 0 ]] || { echo "staging failed: no module manifests" >&2; exit 1; }
 echo "[installer] staged $_fm_manifests module manifests + panel artwork"
@@ -312,6 +361,14 @@ cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
 # cannot. ensure_signing_ready.sh puts them in the environment.
 : "${PULP_SIGN_IDENTITY_HASH:?set PULP_SIGN_IDENTITY_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 : "${PULP_SIGN_INSTALLER_HASH:?set PULP_SIGN_INSTALLER_HASH (see ~/.config/pulp/secrets/keychain.env)}"
+
+# The panel shaper is a Mach-O executable inside Resources, which codesign
+# treats as a resource and seals by hash rather than signing as code. Apple's
+# notary service scans every Mach-O in the payload regardless and rejects the
+# whole submission over an unsigned one, so it is signed here -- before the
+# bundle is sealed around it, or the seal would be invalidated by this.
+codesign --force --options runtime --timestamp \
+         -s "$PULP_SIGN_IDENTITY_HASH" "$APP/Contents/Resources/build/shape_text"
 
 ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
       --sign-identity "$PULP_SIGN_IDENTITY_HASH"

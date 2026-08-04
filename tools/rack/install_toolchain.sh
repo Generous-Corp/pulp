@@ -39,6 +39,14 @@ PARTS=(
   "core/runtime/include"
 )
 
+# A PREVIOUS install may have left an unwritable copy behind. This is not
+# hypothetical: before the chmod pass below existed, the first install on a clean
+# machine copied the read-only modes of the app bundle and then failed part way
+# through -- and every later attempt failed the same way, because rsync cannot
+# overwrite what it cannot write. Reclaiming the destination first makes the
+# fix arrive on machines that already have the broken copy.
+[ -d "$DEST" ] && chmod -R u+rwX "$DEST" 2>/dev/null
+
 echo "installing the Rack toolchain"
 echo "  from: $SRC"
 echo "  to:   $DEST"
@@ -72,6 +80,9 @@ for part in "${PARTS[@]}"; do
     # An exclude FILE rather than an array: macOS ships bash 3.2, where an
     # empty array expanded under `set -u` is an unbound variable and aborts the
     # install.
+    # The modes this produces are the SOURCE's, and the source is read-only:
+    # see the chmod pass after this loop, which is what makes the copy
+    # writable.
     exclude_file="$(mktemp)"
     printf '%s\n' __pycache__ '*.pyc' build '*.o' > "$exclude_file"
     if [ "$part" = "examples/forge-modular" ]; then
@@ -99,9 +110,25 @@ for part in "${PARTS[@]}"; do
     rm -f "$exclude_file"
   else
     cp "$SRC/$part" "$DEST/$part"
+    chmod u+rw "$DEST/$part"
   fi
   printf '  %-26s %s\n' "$part" "$(du -sh "$DEST/$part" | awk '{print $1}')"
 done
+
+# AND MAKE THE COPY WRITABLE, which is not what it was copied from.
+#
+# An installed app bundle is root-owned and sealed, and `rsync -a` faithfully
+# reproduces its read-only modes -- so on the first build on a clean machine
+# the working copy of the module pack arrived r--r--r-- and the panel emitter
+# died on `PermissionError: .../res/ATT.svg`, having installed everything and
+# verified nothing. This is the copy a generation REWRITES, so it has to be
+# writable whatever it came from.
+#
+# Done here rather than with rsync's --chmod, which macOS's openrsync ACCEPTS
+# AND IGNORES: the flag produced no error, no warning, and no change to a
+# single mode bit. A tool that does what it says, afterwards, is the only way
+# to know.
+chmod -R u+rwX "$DEST"
 
 # The acceptance test is a real panel, not a file listing. A complete-looking
 # tree that cannot emit an SVG is the failure this script exists to prevent.
@@ -133,6 +160,7 @@ fi
 if [ -x "$SRC/build/shape_text" ]; then
   mkdir -p "$DEST/build"
   cp "$SRC/build/shape_text" "$DEST/build/shape_text"
+  chmod u+rwx "$DEST/build/shape_text"
   echo "  copied the panel shaper"
 else
   echo "  FAILED: no panel shaper at $SRC/build/shape_text" >&2

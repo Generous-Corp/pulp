@@ -14,6 +14,7 @@
 //     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 // and commit the changed PNGs with the reason in the message.
 
+#include "forge/module_catalog.hpp"
 #include "forge/module_summary.hpp"
 #include "forge/patch_loader.hpp"
 #include "forge/portmap.hpp"
@@ -963,8 +964,10 @@ TEST_CASE("typing @ opens the mention list and typing filters it", "[mention]") 
     CHECK(overlay.candidates()[0].name == "VCO");
 }
 
-TEST_CASE("a space closes the mention list", "[mention]") {
-    // "@ " is somebody typing an address, not reaching for a module.
+TEST_CASE("a space that matches nothing closes the mention list", "[mention]") {
+    // "@ " is somebody typing an address, not reaching for a module, and the
+    // words after it are prose. That has to stay true — see the test below,
+    // which is the other half of the same rule.
     forge_modular::MentionOverlay overlay;
     auto view = overlay.build();
     overlay.set_source(test_library);
@@ -973,6 +976,271 @@ TEST_CASE("a space closes the mention list", "[mention]") {
     REQUIRE(overlay.is_open());
     overlay.handle_text("@vc ", 4);
     CHECK_FALSE(overlay.is_open());
+
+    // And prose after an address stays prose, rather than the list hanging
+    // around hoping a module is coming.
+    overlay.handle_text("write to @me and", 16);
+    CHECK_FALSE(overlay.is_open());
+}
+
+namespace {
+
+/// A maker with several modules, a maker whose name has a space in it, and a
+/// module whose common name is not its display name. Small enough to assert
+/// about, and shaped like the three cases that were broken.
+const std::vector<forge_modular::ModuleEntry>& space_library() {
+    static const std::vector<forge_modular::ModuleEntry> lib = {
+        // Deliberately FIRST, so insertion order alone would put this maker's
+        // modules above the module actually named "Sphinx".
+        {"Sphinx Modular", "Orbit", "SphinxModular/Orbit", false},
+        {"Sphinx Modular", "Perigee", "SphinxModular/Perigee", false},
+        {"CV funk", "Steps", "CVfunk/Steps", false},
+        {"CV funk", "Sphinx", "CVfunk/Sphinx", false},
+        {"CV funk", "Ouros", "CVfunk/Ouros", false},
+        {"Audible Instruments", "Macro Oscillator", "AudibleInstruments/Braids", false},
+        {"Audible Instruments", "Bernoulli Gate", "AudibleInstruments/Branches", false},
+        {"Fundamental", "VCO", "Fundamental/VCO", true},
+        // Longer name FIRST, so only the exact tier can put "Dunes" on top.
+        {"Grande", "Dunestomper", "Grande/Dunestomper", false},
+        {"Grande", "Dunes", "Grande/Dunes", false},
+    };
+    return lib;
+}
+
+std::vector<forge_modular::MentionCandidate> space_source(const std::string& q) {
+    return forge_modular::search_entries(space_library(), q);
+}
+
+std::vector<std::string> names_of(
+    const std::vector<forge_modular::MentionCandidate>& cs) {
+    std::vector<std::string> out;
+    for (const auto& c : cs) out.push_back(c.name);
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a maker's name finds that maker's modules", "[mention][catalog]") {
+    // Matching module NAMES only meant typing a manufacturer returned whichever
+    // handful of their modules happened to have those letters in them: "CV funk"
+    // found 2 of 50, and the other 48 could not be reached by any spelling.
+    using forge_modular::search_entries;
+
+    // A maker writes their own name three ways, and somebody types whichever
+    // they remember. All three have to land on the same three modules.
+    for (const auto& spelling : {"CV funk", "cvfunk", "CV Funk", "cv-funk"}) {
+        const auto hits = search_entries(space_library(), spelling);
+        INFO("spelling: " << spelling);
+        CHECK(hits.size() == 3);
+    }
+
+    // A DIRECT HIT IS NEVER BURIED BY A MAKER. There is a module called Sphinx
+    // and a maker called Sphinx Modular, and the maker's two modules are first
+    // in the list — so only the ranking can put the direct hit on top.
+    const auto sphinx = search_entries(space_library(), "sphinx");
+    REQUIRE(sphinx.size() == 3);
+    CHECK(sphinx[0].name == "Sphinx");
+
+    // Exact above prefix: a whole name that loses to a longer one containing
+    // it is the query being ignored.
+    const auto dunes = search_entries(space_library(), "Dunes");
+    REQUIRE(dunes.size() == 2);
+    CHECK(dunes[0].name == "Dunes");
+
+    // And the alias ranking survives all of it: "br" reaches Braids through
+    // the slug, above two brand matches and a name that merely contains it.
+    const auto br = search_entries(space_library(), "br");
+    REQUIRE_FALSE(br.empty());
+    CHECK(br[0].name == "Macro Oscillator");
+    CHECK(br[0].alias == "Braids");
+}
+
+TEST_CASE("a mention survives a space while it still matches", "[mention]") {
+    // "@CV funk" could not be typed at all: a space ended the mention
+    // unconditionally, which took Audible Instruments, Count Modula, Frozen
+    // Wasteland, Impromptu Modular and every module whose own name has a space
+    // in it with it.
+    //
+    // The rule that replaced it is a guess that resolves itself. A space
+    // extends the query speculatively, and the list stays open only while the
+    // longer query still matches something.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(space_source);
+
+    overlay.handle_text("@CV", 3);
+    REQUIRE(overlay.is_open());
+    overlay.handle_text("@CV ", 4);
+    CHECK(overlay.is_open());                      // the guess is still alive
+    overlay.handle_text("@CV funk", 8);
+    CHECK(overlay.is_open());
+    CHECK(overlay.candidates().size() == 3);
+
+    // A two-word module name, which is the other half of the same problem.
+    overlay.handle_text("@Bernoulli Gate", 15);
+    CHECK(overlay.is_open());
+    REQUIRE(overlay.candidates().size() == 1);
+    CHECK(overlay.candidates()[0].name == "Bernoulli Gate");
+
+    // And the guess collapses the moment it is wrong: this is prose, not a
+    // maker, and it has to become ordinary text again.
+    overlay.handle_text("@VCO and then", 13);
+    CHECK_FALSE(overlay.is_open());
+
+    // Bounded, so a mention cannot swallow a sentence: past the cap the words
+    // are prose whatever they say.
+    overlay.handle_text("@CV funk and more", 17);
+    CHECK_FALSE(overlay.is_open());
+}
+
+namespace {
+
+/// A HOME nothing else has written to, restored on the way out.
+///
+/// The library index is a per-user file, so a test that asserts anything about
+/// it against the developer's own HOME is asserting about that developer's
+/// machine.
+struct ScopedHome {
+    explicit ScopedHome(const std::string& name) {
+        if (const char* h = std::getenv("HOME")) previous = h;
+        dir = std::filesystem::temp_directory_path() / name;
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        ::setenv("HOME", dir.string().c_str(), 1);
+    }
+    ~ScopedHome() {
+        if (previous.empty()) ::unsetenv("HOME");
+        else ::setenv("HOME", previous.c_str(), 1);
+    }
+    std::filesystem::path dir;
+    std::string previous;
+};
+
+}  // namespace
+
+TEST_CASE("the library index is asked for when nothing has written one",
+          "[mention][catalog]") {
+    // library_catalog.py could build the index, module_catalog.cpp could read
+    // it, and no code path joined them. The list therefore offered only what
+    // was already installed — which makes the whole download capability
+    // unreachable, because you cannot mention what you do not already have.
+    ScopedHome home("forge-library-index");
+    const auto path = forge_modular::library_index_path();
+    // The clock is real because the files written below are: their mtime is
+    // now, so a fabricated "now" from years ago makes every one of them look
+    // like it was written in the future.
+    const std::time_t now = std::time(nullptr);
+
+    // Missing is the first-run case.
+    CHECK(forge_modular::library_index_needs_build(path, now));
+
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    std::ofstream(path) << R"({"CVfunk":{"modules":[]}})";
+    CHECK_FALSE(forge_modular::library_index_needs_build(path, now));
+
+    // An index built long enough ago is wrong: VCV publishes continuously.
+    CHECK(forge_modular::library_index_needs_build(path, now + 30 * 24 * 3600));
+
+    // An empty file is worse than none — it looks current and offers nothing.
+    std::ofstream(path, std::ios::trunc);
+    CHECK(forge_modular::library_index_needs_build(path, now));
+
+    // And the command names the script, runs in the toolchain directory, and
+    // keeps its output. A background job that fails in silence is how this
+    // file came to be read by something nothing ever wrote.
+    std::string issued;
+    const auto tools = std::string("/Applications/Forge Modular.app/Contents/"
+                                   "Resources/tools/rack");
+    const auto command = forge_modular::ensure_library_index(
+        tools, [&](const std::string& c) { issued = c; }, now);
+    INFO(command);
+    CHECK(command == issued);
+    CHECK(command.find("library_catalog.py index") != std::string::npos);
+    // The path has a space in it, so an unquoted `cd` reaches "Forge" and
+    // stops. Asserted through a real shell rather than by substring: the
+    // stub prints where it landed.
+    const auto probe = std::filesystem::temp_directory_path() /
+                       "forge-index-cmd";
+    std::filesystem::remove_all(probe);
+    std::filesystem::create_directories(probe / "Forge Modular.app" / "Contents" /
+                                        "Resources" / "tools" / "rack");
+    const auto stub = probe / "Forge Modular.app" / "Contents" / "Resources" /
+                      "tools" / "rack" / "library_catalog.py";
+    { std::ofstream f(stub); f << "import os, sys\n"
+                                 "open(os.environ['PROBE'],'w').write("
+                                 "os.getcwd() + '\\n' + ' '.join(sys.argv[1:]))\n"; }
+    const auto out = probe / "landed.txt";
+    const auto real = forge_modular::library_index_command(
+        (probe / "Forge Modular.app" / "Contents" / "Resources" / "tools" /
+         "rack").string());
+    // `export`, not a `VAR=x cmd` prefix: that form sets the variable for the
+    // FIRST command only, and the command under test is a chain.
+    std::system(("export PROBE=" + out.string() + "; " + real).c_str());
+    std::ifstream landed(out);
+    std::string where, args;
+    std::getline(landed, where);
+    std::getline(landed, args);
+    // Canonical on both sides: macOS's temp directory is a symlink, and the
+    // shell reports where it really landed.
+    CHECK(std::filesystem::weakly_canonical(where) ==
+          std::filesystem::weakly_canonical(
+              probe / "Forge Modular.app" / "Contents" / "Resources" /
+              "tools" / "rack"));
+    CHECK(args == "index");
+
+    // Nothing is asked for when the index is current, so opening the editor
+    // does not fire two HTTP requests a day for no reason.
+    std::ofstream(path) << R"({"CVfunk":{"modules":[]}})";
+    std::string second;
+    CHECK(forge_modular::ensure_library_index(
+              tools, [&](const std::string& c) { second = c; }, now).empty());
+    CHECK(second.empty());
+}
+
+TEST_CASE("what the @ list finds in the real library", "[.library-probe]") {
+    // Not run by default (the leading dot): it reads whatever library index
+    // this machine has, so it asserts nothing and reports. Run it by name to
+    // see the shipped search against the actual 4,000-odd published modules
+    // rather than against eight invented ones:
+    //
+    //     ./forge-test-chrome-no-leak "[.library-probe]" -s
+    const auto counts = forge_modular::catalog_counts();
+    WARN("installed " << counts.installed << ", catalogued " << counts.catalogued
+         << " (index: " << forge_modular::library_index_path() << ")");
+    for (const auto& q : {"CV funk", "cvfunk", "Audible Instruments", "br",
+                          "Frozen Wasteland", "Dunes"}) {
+        const auto hits = forge_modular::search_modules(q, 4);
+        std::string line = std::string(q) + " -> " +
+                           std::to_string(hits.size()) + ": ";
+        for (const auto& h : hits) line += h.brand + "/" + h.name + "  ";
+        WARN(line);
+    }
+}
+
+TEST_CASE("opening the editor asks for the library index", "[seam][catalog]") {
+    // The unit test above proves the decision. This proves it is REACHED:
+    // every defect in this list so far has been a finished feature that
+    // nothing called.
+    ScopedHome home("forge-library-index-shell");
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    bool asked = false;
+    for (const auto& command : shell.launched())
+        if (command.find("library_catalog.py index") != std::string::npos)
+            asked = true;
+    INFO("launched " << shell.launched().size() << " command(s)");
+    CHECK(asked);
 }
 
 TEST_CASE("the mention list is keyboard-first", "[mention]") {
@@ -5343,7 +5611,17 @@ TEST_CASE("Open in Rack refuses a patch this Rack cannot create",
     // the bug with an apology attached: Rack is already sitting on its dialog
     // by the time the sentence is read. `launched()` records every command the
     // shell decided to run, so this is the decision itself, not a guess.
-    CHECK(shell.launched().empty());
+    //
+    // Narrowed to the launches this case is about. Other things legitimately
+    // reach that record -- an editor asks for a library index when it opens --
+    // and counting every command would make this assertion depend on them.
+    const auto rack_launches = [&] {
+        std::vector<std::string> out;
+        for (const auto& c : shell.launched())
+            if (c.find("VCV Rack") != std::string::npos) out.push_back(c);
+        return out;
+    };
+    CHECK(rack_launches().empty());
 
     // And the gate is about THIS patch, not about refusing everything: a patch
     // whose modules all exist is still handed over. Without this, deleting the
@@ -5353,7 +5631,7 @@ TEST_CASE("Open in Rack refuses a patch this Rack cannot create",
     REQUIRE(shell.artifact_path() == present.string());
     const auto ok_why = shell.open_in_rack();
     INFO("second message was: " << ok_why);
-    CHECK(shell.launched().size() == 1);
+    CHECK(rack_launches().size() == 1);
 
     std::filesystem::remove_all(dir, ec);
 }

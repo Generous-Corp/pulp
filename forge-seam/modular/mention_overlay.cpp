@@ -52,19 +52,41 @@ constexpr int kKeyEscape = 53;
 constexpr int kKeyDown = 125;
 constexpr int kKeyUp = 126;
 
+/// How many spaces a mention may span. Nearly every two-word brand is two
+/// words ("CV funk", "Count Modula", "Frozen Wasteland"); three covers
+/// "Audible Instruments Macro Oscillator" and stops well short of swallowing a
+/// sentence.
+constexpr int kMaxTokenSpaces = 2;
+
 /// The word being typed after the most recent unclosed '@', or no value.
 ///
 /// Scanning back from the caret rather than forward from the start: a prompt can
 /// contain several mentions, and only the one under the caret is being edited.
+///
+/// A SPACE DOES NOT END IT. It used to, unconditionally, which meant "@CV funk"
+/// could never be typed — and with it went Audible Instruments, Count Modula,
+/// Frozen Wasteland, Impromptu Modular and every other brand whose name has a
+/// space in it. So the query is extended across a space and the caller decides:
+/// the list stays open while the longer query still matches something, and the
+/// moment it matches nothing the text goes back to being ordinary text.
 std::optional<std::string> active_token(const std::string& text, std::size_t caret) {
     if (caret > text.size()) caret = text.size();
+    int spaces = 0;
     for (std::size_t i = caret; i-- > 0;) {
         const char c = text[i];
         if (c == '@') return text.substr(i + 1, caret - i - 1);
-        // A space closes it: "@ " is somebody typing an address, not a mention.
-        if (c == ' ' || c == '\n') return std::nullopt;
+        // A newline is a hard boundary — nobody types a module name across
+        // two lines — and so is the third space, which is where "a mention
+        // with a space in it" becomes "a sentence after an email address".
+        if (c == '\n') return std::nullopt;
+        if (c == ' ' && ++spaces > kMaxTokenSpaces) return std::nullopt;
     }
     return std::nullopt;
+}
+
+/// Does this query span a space? Those are the ones the caller may abandon.
+bool spans_a_space(const std::string& query) {
+    return query.find(' ') != std::string::npos;
 }
 
 }  // namespace
@@ -323,16 +345,30 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     // raised: the message existed for one call and reached nobody, which is
     // the second time this exact message has failed to be seen. `inserting_`
     // is set for exactly the duration of the rewrite.
-    if (!inserting_ && !notice_text_.empty()) show_notice({});
+    // The rewrite a pick performs is not the user typing. Choosing a row calls
+    // set_text, which reports a change, which lands here — and a query that
+    // now ends in a space would re-open the list over the mention that was
+    // just inserted.
+    if (inserting_) return false;
+    if (!notice_text_.empty()) show_notice({});
     const auto token = active_token(text, caret);
     if (!token) {
+        if (open_) close();
+        return false;
+    }
+    refresh(*token);
+    // A query that reaches across a space is a GUESS that a two-word brand is
+    // being typed. It is right for "@CV funk" and wrong for "@vco into a
+    // filter", and the two are indistinguishable until the matches are in: no
+    // matches means the space really did end the mention, so the list closes
+    // and the words go back to being ordinary text.
+    if (candidates_.empty() && spans_a_space(*token)) {
         if (open_) close();
         return false;
     }
     open_ = true;
     if (list_) list_->set_visible(true);
     if (root_) root_->set_visible(true);
-    refresh(*token);
     // Opening on '@' does not consume the '@' itself -- the character belongs in
     // the prompt, and swallowing it would make the field feel broken.
     return false;

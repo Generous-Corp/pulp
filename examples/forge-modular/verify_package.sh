@@ -104,6 +104,48 @@ else
     say_bad "install_pack.sh is not executable, so the postinstall cannot run it"
 fi
 
+# ── what MODULE generation reads, by behaviour ───────────────────────────────
+# The generator reads four things outside tools/rack, and none of them shipped:
+# it called the model, downloaded a 40 MB SDK and then died on an unhandled
+# FileNotFoundError. Existence is checked for the cheap ones and BEHAVIOUR for
+# the two that can be present and useless.
+need_file "Contents/Resources/tools/dsp_vocabulary.py"        "the DSP vocabulary extractor ships"
+need_file "Contents/Resources/external/fonts/Inter-Regular.ttf" "the panel font ships"
+need_file "Contents/Resources/build/shape_text"               "the panel shaper ships"
+need_file "Contents/Resources/examples/forge-modular/plugin.json" "the module pack manifest ships"
+for mod in signal format audio state platform runtime; do
+    if [[ -d "$ROOT/Contents/Resources/core/$mod/include" ]]; then
+        say_ok "Pulp's $mod headers ship"
+    else
+        say_bad "Pulp's $mod headers are missing — a generated module cannot compile"
+    fi
+done
+if [[ -d "$ROOT/Contents/Resources/examples/forge-modular/src" ]]; then
+    say_ok "the module pack's sources ship"
+else
+    say_bad "the module pack has no src/ — there is nothing to compile"
+fi
+
+# A shaper that is present and produces nothing empties every label on every
+# panel, and it looks identical to one that works.
+shaped="$("$ROOT/Contents/Resources/build/shape_text" Hg \
+          "$ROOT/Contents/Resources/external/fonts/Inter-Regular.ttf" \
+          3.0 center 2>/dev/null || true)"
+case "$shaped" in
+    M*) say_ok "the shipped panel shaper actually shapes text" ;;
+    *)  say_bad "the shipped panel shaper produced no path for 'Hg'" ;;
+esac
+
+# An empty vocabulary hands the model a contract with no DSP in it, and the run
+# dies at the compiler three model calls later.
+vocab=$(cd "$ROOT/Contents/Resources/tools/rack" &&
+        /usr/bin/python3 ../dsp_vocabulary.py 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${vocab:-0}" -ge 20 ]]; then
+    say_ok "the shipped DSP vocabulary extracts $vocab lines"
+else
+    say_bad "the shipped DSP vocabulary extracts $vocab lines — the model would be given none"
+fi
+
 # ── the Rack pack, by content ────────────────────────────────────────────────
 PACK="$(find "$ROOT/Contents/Resources/rack" -maxdepth 1 -name '*.vcvplugin' \
         2>/dev/null | sort | tail -1)"

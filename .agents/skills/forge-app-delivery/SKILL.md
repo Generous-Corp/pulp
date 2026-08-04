@@ -122,6 +122,45 @@ Two design rules fell out of this:
   account owns and not its subscription level. Ownership is the better signal
   anyway: it is correct for a user on any plan who bought modules individually.
 
+## The bundle is read-only, and a copy of it inherits that
+
+The generator's working copy is laid down by `install_toolchain.sh` from
+`Contents/Resources`, and an installed bundle is root-owned and sealed. Two
+consequences, both of which stopped the first build on a genuinely clean
+machine dead:
+
+- **`rsync -a` reproduces the source's modes.** The module pack arrived
+  `r--r--r--` and the panel emitter died on `PermissionError: .../res/ATT.svg`
+  — after installing everything and verifying nothing. A copy that is going to
+  be *rewritten* must be made writable explicitly.
+- **macOS's `rsync` is openrsync, which ACCEPTS `--chmod` and ignores it.** No
+  error, no warning, not one mode bit changed. Set the modes afterwards with
+  `chmod -R u+rwX`, by a tool that does what it says.
+- A failed first install leaves an unwritable tree that every later attempt
+  also fails on, so reclaim the destination (`chmod -R u+rwX "$DEST"`) before
+  copying.
+
+Simulate this by making the staged bundle read-only (`chmod -R a-w`) before
+testing the install path. A writable copy of the app tests nothing.
+
+## A test program in the module pack breaks the behavioural gate
+
+`examples/forge-modular/src/` holds the modules AND `test_portmap_merge.cpp`,
+which has its own `main`. It compiled into the plugin dylib harmlessly for
+months. The behavioural gate links those same objects beside *its* `main`, so
+every module build ended in `duplicate symbol '_main'` — three attempts, three
+model calls, several minutes — and the gate had therefore never passed for any
+generated module.
+
+Two rules fall out of it:
+
+- Anything that links the pack's objects must exclude the standalone programs.
+  `generate.py`'s `sources()` and the CMake glob both skip `_*` and `test_*`.
+- **Print the tail of a link failure, not the lines containing `error:`.** The
+  only `error:` line a linker emits is "linker command failed", which says
+  nothing; the symbol is in the lines above it. The message read as a blank
+  refusal for exactly as long as that filter existed.
+
 ## Signals that have lied
 
 - **Exit code 0 from a backgrounded launcher** means the launcher exited, not

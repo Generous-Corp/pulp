@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import patch as patch_mod
 
@@ -1253,6 +1254,156 @@ def check_fresh_machine() -> tuple:
     return bad, ran
 
 
+def check_shipped_generator() -> tuple:
+    """What an incomplete copy of the generator does, and when it says so.
+
+    The generator is not one directory: it reads a DSP vocabulary, a panel
+    shaper, a font, the module pack and six trees of Pulp headers, none of
+    which live in tools/rack. A copy carrying only tools/rack ran, called the
+    model, downloaded a 40 MB SDK and THEN died on an unhandled
+    FileNotFoundError -- the most expensive moment available to discover that
+    a file is missing.
+    """
+    import subprocess
+    import tempfile
+
+    bad = 0
+    ran = 0
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    # 1. An incomplete tree is refused, by name, before anything is spent.
+    ran += 1
+    with tempfile.TemporaryDirectory() as tmp:
+        tools = os.path.join(tmp, "tools", "rack")
+        os.makedirs(os.path.dirname(tools))
+        subprocess.run(["/usr/bin/ditto", here, tools], check=True)
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        r = subprocess.run(
+            [sys.executable, os.path.join(tools, "generate.py"), "a 3HP thing"],
+            capture_output=True, text=True, timeout=180,
+            env={**os.environ, "HOME": home})
+        said = r.stdout + r.stderr
+        wanted = ["dsp_vocabulary.py", "shape_text", "Inter-Regular.ttf",
+                  "forge-modular/src", "forge-modular/modules",
+                  "core/signal/include"]
+        missing = [w for w in wanted if w not in said]
+        if r.returncode == 0:
+            bad += 1
+            print("  WRONG  a generator with none of its inputs reported success")
+        elif missing:
+            bad += 1
+            print(f"  WRONG  an incomplete generator did not name {missing}: "
+                  f"{said.strip()[-300:]}")
+        else:
+            print("  ok     an incomplete generator names every missing input")
+        # And it spent nothing doing it. A refusal that arrives after the
+        # download is the bug, not the message.
+        if os.path.exists(os.path.join(home, "Library", "Application Support",
+                                       "Forge Modular", "Rack-SDK")):
+            bad += 1
+            print("  WRONG  the SDK was downloaded before the inputs were checked")
+        else:
+            print("  ok     nothing was downloaded and no model was called")
+        ran += 1
+
+    # 2. The vocabulary is checked for CONTENT, not presence. An extractor that
+    #    returns nothing hands the model a contract with no DSP in it, and the
+    #    run dies at the compiler three model calls later.
+    ran += 1
+    probe = ("import sys; sys.path.insert(0, %r); import generate;"
+             "generate.subprocess.run = lambda *a, **k: type("
+             "'R', (), {'stdout': '', 'stderr': 'nothing here'})();"
+             "generate.dsp_vocabulary()" % here)
+    r = subprocess.run([sys.executable, "-c", probe], cwd=here,
+                       capture_output=True, text=True)
+    if r.returncode != 0 and "vocabulary came back empty" in (r.stdout + r.stderr):
+        print("  ok     an empty DSP vocabulary is refused where it is read")
+    else:
+        bad += 1
+        print(f"  WRONG  an empty DSP vocabulary was accepted: "
+              f"{(r.stdout + r.stderr).strip()[-200:]}")
+
+    # 3. Nothing with its own `main` reaches the compiler.
+    #
+    #    test_portmap_merge.cpp sits in the module pack's src/ and is a
+    #    standalone program. It compiled into the plugin dylib harmlessly and
+    #    broke the BEHAVIOURAL GATE, which links these same objects beside its
+    #    own main: every module build died on `duplicate symbol '_main'` after
+    #    three model calls, and the linker's reason was filtered out of the
+    #    message. No generated module had ever passed the gate.
+    ran += 1
+    sys.path.insert(0, here)
+    import generate                                              # noqa: E402
+    offenders = []
+    for name in generate.sources():
+        body = open(os.path.join(generate.PACK, "src", name)).read()
+        if re.search(r"^\s*int\s+main\s*\(", body, re.M):
+            offenders.append(name)
+    if offenders:
+        bad += 1
+        print(f"  WRONG  {offenders} define main() and are handed to the "
+              f"compiler — the behavioural gate cannot link")
+    else:
+        print(f"  ok     none of the {len(generate.sources())} compiled "
+              f"sources defines main()")
+
+    # 4. The library index lands where the @ list reads it, joins both public
+    #    sources, and leaves out anything it cannot say is free.
+    #
+    #    The script existed and nothing invoked it; the reader existed and
+    #    nothing wrote its file. Both halves are asserted here, against the
+    #    literal path, because "two writers of one resource" is exactly how a
+    #    fetched copy ends up invisible to its reader.
+    ran += 1
+    with tempfile.TemporaryDirectory() as home:
+        probe = (
+            "import sys, json, os\n"
+            "sys.path.insert(0, %r)\n"
+            "import patch, library_catalog\n"
+            "patch.catalog = lambda refresh=False, **kw: {\n"
+            "  'CVfunk': {'brand': 'CV funk', 'license': 'GPL-3.0-or-later',\n"
+            "             'version': '2.0.9'},\n"
+            "  'Vult': {'brand': 'Vult', 'license': 'proprietary',\n"
+            "           'premium': 'true'},\n"
+            "  'Mystery': {'brand': 'Mystery'}}\n"
+            "patch.module_index = lambda refresh=False, **kw: {\n"
+            "  'CVfunk': {'Sphinx': {'name': 'Sphinx', 'tags': ['Sequencer']}},\n"
+            "  'Vult': {'Freak': {'name': 'Freak'}},\n"
+            "  'Mystery': {'Thing': {'name': 'Thing'}}}\n"
+            "library_catalog.main(['library_catalog.py', 'index'])\n"
+            "print('INDEX', library_catalog.INDEX)\n" % here)
+        r = subprocess.run([sys.executable, "-c", probe], cwd=here,
+                           capture_output=True, text=True,
+                           env={**os.environ, "HOME": home})
+        where = os.path.join(home, "Library", "Application Support",
+                             "Forge Modular", "library", "index.json")
+        if not os.path.exists(where):
+            bad += 1
+            print(f"  WRONG  `library_catalog.py index` wrote no index at "
+                  f"{where}: {(r.stdout + r.stderr).strip()[-300:]}")
+        else:
+            got = json.load(open(where))
+            if "CVfunk" not in got:
+                bad += 1
+                print(f"  WRONG  the index has no free plugin in it: {got}")
+            elif got["CVfunk"]["brand"] != "CV funk":
+                bad += 1
+                print(f"  WRONG  the maker's name did not reach the index: {got}")
+            elif [m["name"] for m in got["CVfunk"]["modules"]] != ["Sphinx"]:
+                bad += 1
+                print(f"  WRONG  the modules did not reach the index: {got}")
+            elif "Vult" in got or "Mystery" in got:
+                bad += 1
+                print("  WRONG  a premium or unlicensed plugin was indexed as "
+                      "free — a row for it would claim it is free to get")
+            else:
+                print("  ok     the library index is written where the @ list "
+                      "reads it")
+
+    return bad, ran
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -1264,8 +1415,9 @@ def main():
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
     fresh_bad, fresh_ran = check_fresh_machine()
-    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad
-    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran
+    ship_bad, ship_ran = check_shipped_generator()
+    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad + ship_bad
+    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran + ship_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

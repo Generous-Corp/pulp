@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build a local catalog of the whole VCV library, without owning any of it.
 
-    library_catalog.py fetch     download and cache what is publicly available
+    library_catalog.py index     build the index the @ list reads (2 requests)
+    library_catalog.py fetch     enrich it from each plugin's own repository
     library_catalog.py report    what is covered, and what is missing
 
 Two kinds of metadata matter here, and only one of them needs the module.
@@ -158,6 +159,67 @@ def fetch(argv):
     return 0
 
 
+def index(argv):
+    """Write the whole-library index from the two cheap sources, in seconds.
+
+    `fetch` above asks every open-source plugin's repository for its own
+    plugin.json, which is 500-odd requests and several minutes. That is the
+    right shape for enriching an entry with descriptions, and the wrong shape
+    for the thing the @-mention list needs at startup: a name for every module
+    in the library, now.
+
+    patch.py already holds both halves and both are one request each -- VCV's
+    library repository as a 350 KB tarball (every manifest, 4,705 modules) and
+    the published plugin manifest (brand, licence, premium). This joins them.
+
+    THE SAME FILE, in the same shape, written by the same module. Two writers
+    of one resource is how a fetched copy ends up invisible to its reader, so
+    `fetch` and `index` are two ways of filling one index and not two indexes.
+
+    Premium plugins are left out, and so is anything with no licence recorded.
+    A row for an uninstalled module says "GET . FREE", which is a claim about
+    somebody's money; test_catalog_is_free.py holds this to it.
+    """
+    refresh = "--refresh" in argv
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import patch
+
+    cat = patch.catalog(refresh=refresh)
+    midx = patch.module_index(refresh=refresh)
+    out = {}
+    for pslug, mods in midx.items():
+        p = cat.get(pslug)
+        if not p:
+            continue                       # not published; nothing to say about it
+        if str(p.get("premium", "")).lower() == "true":
+            continue
+        if not p.get("license"):
+            continue
+        out[pslug] = {
+            "version": p.get("version", ""),
+            "brand": p.get("brand") or p.get("name", pslug),
+            "manualUrl": p.get("manualUrl", ""),
+            "sourceUrl": p.get("sourceUrl", ""),
+            "license": p.get("license", ""),
+            "modules": [{"slug": mslug,
+                         "name": m.get("name", mslug),
+                         "description": m.get("description", ""),
+                         "tags": m.get("tags", []),
+                         "manualUrl": ""}
+                        for mslug, m in sorted(mods.items())],
+        }
+    os.makedirs(CACHE, exist_ok=True)
+    # Written whole, then moved into place. The reader is a running app that
+    # re-reads this file when it changes, and a half-written one parses as
+    # nothing -- which would empty the list for as long as the write took.
+    tmp = INDEX + ".new"
+    json.dump(out, open(tmp, "w"), indent=1)
+    os.replace(tmp, INDEX)
+    modules = sum(len(v["modules"]) for v in out.values())
+    print(f"indexed {len(out)} free plugins, {modules} modules -> {INDEX}")
+    return 0
+
+
 def report(_argv):
     index = load_index()
     if not index:
@@ -185,7 +247,7 @@ def report(_argv):
 
 
 def main(argv):
-    cmds = {"fetch": fetch, "report": report}
+    cmds = {"fetch": fetch, "index": index, "report": report}
     if len(argv) < 2 or argv[1] not in cmds:
         print(__doc__)
         return 2
