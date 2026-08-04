@@ -308,9 +308,24 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                 if (!pw) continue;
                 if (!first) out += ",";
                 first = false;
-                std::string name;
-                if (rack::engine::ParamQuantity* q = pw->getParamQuantity())
+                std::string name, range;
+                if (rack::engine::ParamQuantity* q = pw->getParamQuantity()) {
                     name = q->getLabel();
+                    // The knob's bounds and default, in its native units.
+                    // A name alone lets a patch ADDRESS a vendor's param; the
+                    // range is what makes a written value meaningful rather
+                    // than a guess against invented bounds. Infinite bounds
+                    // exist (auto-sizing widgets taught this file that once,
+                    // at the cost of the whole map failing to parse), so a
+                    // non-finite range is omitted rather than written.
+                    if (finite(q->minValue) && finite(q->maxValue)) {
+                        range = ", \"minValue\": " + num(q->minValue) +
+                                ", \"maxValue\": " + num(q->maxValue);
+                        if (finite(q->defaultValue))
+                            range += ", \"defaultValue\": " +
+                                     num(q->defaultValue);
+                    }
+                }
                 // WHICH control, not just where. A fader, a switch and a
                 // knob occupy the same field in a manifest and look
                 // nothing alike, and guessing from the drawn aspect ratio
@@ -330,7 +345,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
                     !finite(pw->box.size.x) || !finite(pw->box.size.y))
                     continue;
                 out += "\n        {\"index\": " + std::to_string(pw->paramId) +
-                       ", \"name\": \"" + esc(name) + "\"" +
+                       ", \"name\": \"" + esc(name) + "\"" + range +
                        ", \"x\": " + std::to_string(cx) +
                        ", \"y\": " + std::to_string(cy) +
                        ", \"w\": " + std::to_string(pw->box.size.x) +

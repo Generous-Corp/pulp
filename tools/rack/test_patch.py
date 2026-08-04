@@ -2296,6 +2296,243 @@ def check_shipped_generator() -> tuple:
     return bad, ran
 
 
+def _melodic_inv():
+    """A CV funk-shaped inventory: a sequencer whose scanned params are known.
+
+    Synthetic, because the machine running this suite may not have CV funk
+    installed -- but shaped exactly like the inventory after the portmap fold,
+    which is what both the renderer and the written-melody check read.
+    """
+    return {
+        "CVfunk": {
+            "name": "CV funk", "brand": "CV funk", "version": "2.0",
+            "modules": {
+                "StepWave": {
+                    "name": "StepWave", "description": "", "tags": ["Sequencer"],
+                    "inputs": ["Clock"], "outputs": ["CV", "Gate"],
+                    "params": [
+                        {"id": 0, "name": "Step 1"},
+                        {"id": 1, "name": "Step 2"},
+                        {"id": 2, "name": "Step 3"},
+                        {"id": 3, "name": "Rate"},
+                    ]},
+                "Ouros": {
+                    "name": "Ouros", "description": "", "tags": ["Oscillator"],
+                    "inputs": ["1V/oct"], "outputs": ["Out"],
+                    "params": [{"id": 0, "name": "Frequency"}]},
+                "Hammer": {
+                    "name": "Hammer", "description": "",
+                    "tags": ["Clock generator"],
+                    "inputs": [], "outputs": ["Clock"], "params": []},
+            }}}
+
+
+def check_vendor_params_reach_model() -> tuple:
+    """CARTOG measures every knob on the machine; the inventory must not drop them.
+
+    Measured on a real generation: a request for a highly melodic CV funk
+    patch came back with EVERY module's param list empty, because the scan's
+    params never survived _add_portmap -- the fold read inputs, outputs and
+    panel size and discarded the rest. A sequencer's step values are the
+    melody; a model that cannot name them cannot write one, and the patch
+    played a single held note through perfect wiring.
+    """
+    import tempfile
+    import patch_lang
+    bad = 0
+    inv = {"CVfunk": {"name": "CV funk", "brand": "CV funk", "version": "2.0",
+                      "modules": {
+                          "StepWave": {"name": "StepWave", "description": "",
+                                       "tags": ["Sequencer"]}}},
+           "ForgeModular": {"name": "Forge", "brand": "Forge", "version": "2.0",
+                            "modules": {
+                                "VCO": {"name": "VCO", "description": "",
+                                        "tags": ["Oscillator"],
+                                        "params": [{"id": 0, "name": "Frequency",
+                                                    "min": -4.0, "max": 4.0,
+                                                    "default": 0.0}]}}}}
+    pm = {"modules": [
+        {"plugin": "CVfunk", "model": "StepWave", "pluginVersion": "2.0",
+         "scan": 3, "size": [210.0, 380.0],
+         # Deliberately out of id order, and with a range on only one param:
+         # the fold must sort by index and must not invent bounds nobody
+         # measured.
+         "params": [
+             {"index": 1, "name": "Step 2", "x": 30.0, "y": 100.0,
+              "w": 20.0, "h": 20.0, "kind": "slider"},
+             {"index": 0, "name": "Step 1", "x": 10.0, "y": 100.0,
+              "w": 20.0, "h": 20.0, "kind": "slider",
+              "minValue": 0.0, "maxValue": 2.0, "defaultValue": 0.5},
+         ],
+         "inputs": [{"index": 0, "name": "Clock", "x": 5.0, "y": 300.0}],
+         "outputs": [{"index": 0, "name": "CV", "x": 40.0, "y": 300.0}]},
+        {"plugin": "ForgeModular", "model": "VCO", "pluginVersion": "2.0",
+         "scan": 3, "size": [90.0, 380.0],
+         "params": [{"index": 0, "name": "FREQ", "x": 10.0, "y": 80.0,
+                     "w": 30.0, "h": 30.0, "kind": "knob"}],
+         "inputs": [], "outputs": [{"index": 0, "name": "Sine",
+                                    "x": 20.0, "y": 300.0}]},
+    ]}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(pm, f)
+        path = f.name
+    saved = P.PORTMAP
+    P.PORTMAP = path
+    try:
+        P._add_portmap(inv)
+    finally:
+        P.PORTMAP = saved
+        os.unlink(path)
+
+    got = inv["CVfunk"]["modules"]["StepWave"].get("params") or []
+    names = [q.get("name") for q in got if isinstance(q, dict)]
+    if names != ["Step 1", "Step 2"]:
+        bad += 1
+        print(f"  WRONG  scanned params did not reach the inventory in id "
+              f"order: {names}")
+    else:
+        print("  ok     scanned vendor params reach the inventory, in id order")
+
+    ranged = [q for q in got if isinstance(q, dict)
+              and isinstance(q.get("min"), (int, float))]
+    if (len(ranged) != 1 or ranged[0].get("name") != "Step 1"
+            or ranged[0].get("max") != 2.0 or ranged[0].get("default") != 0.5):
+        bad += 1
+        print(f"  WRONG  a measured range did not survive the fold, or one "
+              f"was invented: {got}")
+    else:
+        print("  ok     a measured range survives; an unmeasured one is "
+              "not invented")
+
+    ours = inv["ForgeModular"]["modules"]["VCO"].get("params") or []
+    if ours != [{"id": 0, "name": "Frequency", "min": -4.0, "max": 4.0,
+                 "default": 0.0}]:
+        bad += 1
+        print(f"  WRONG  the manifest's params were clobbered by the scan's "
+              f"poorer copy: {ours}")
+    else:
+        print("  ok     manifest params outrank the scan's rangeless copy")
+
+    text = P.render_inventory(inv)
+    if "Step 1" not in text or "Step 2" not in text:
+        bad += 1
+        print("  WRONG  the rendered inventory does not name the vendor's "
+              "params, so the model still cannot set them")
+    else:
+        print("  ok     the rendered inventory names the vendor's params")
+    if "native units" not in text:
+        bad += 1
+        print("  WRONG  a rangeless param renders with no note about its "
+              "units, so a written value is a blind guess")
+    else:
+        print("  ok     rangeless params carry the native-units note")
+
+    if patch_lang._params(inv, "CVfunk", "StepWave") != ["Step 1", "Step 2"]:
+        bad += 1
+        print("  WRONG  the patch language cannot address a scanned param "
+              "by name")
+    else:
+        print("  ok     the patch language addresses scanned params by name")
+    return bad, 6
+
+
+def check_melody_is_written() -> tuple:
+    """A melodic request must claim an idiom, and the melody must be WRITTEN.
+
+    The measured patch: Hammer -> StepWave -> Ouros -> EnvelopeArray ->
+    PressedDuck -> AudioInterface2. Eight cables, correct roles, zero params
+    anywhere. Structure perfect, sound one held note. Two gates were absent:
+    "highly melodic" resolved to NO idiom, so nothing was claimed, and
+    nothing anywhere asked whether the pattern exists.
+    """
+    import idiom_check
+    bad = 0
+    idioms = idiom_check.load_idioms()
+
+    got = idiom_check.resolve(
+        "simple highly melodic patch using only @CV funk modules", idioms)
+    if got != "sequenced-voice":
+        bad += 1
+        print(f"  WRONG  'highly melodic' resolves to {got!r}, not "
+              f"sequenced-voice, so no structure is claimed or checked")
+    else:
+        print("  ok     a melodic request claims the sequenced-voice idiom")
+
+    got = idiom_check.resolve("a melodic kick drum pattern", idioms)
+    if got != "kick-drum":
+        bad += 1
+        print(f"  WRONG  a named idiom lost to the melodic implication: {got!r}")
+    else:
+        print("  ok     a named idiom still outranks the word 'melodic'")
+
+    inv = _melodic_inv()
+    idiom = idioms["sequenced-voice"]
+
+    def seq_patch(params):
+        return {"version": "2.6.6",
+                "modules": [dict(mod(1, "CVfunk", "StepWave"), params=params),
+                            mod(2, "CVfunk", "Ouros", (10, 0)),
+                            mod(3, "Core", "AudioInterface2", (20, 0))],
+                "cables": [cable(1, 1, 0, 2, 0), cable(2, 2, 0, 3, 0)]}
+
+    probs = idiom_check.check_written(seq_patch([]), inv, idiom)
+    if not probs or "held note" not in " ".join(probs):
+        bad += 1
+        print(f"  WRONG  a melodic patch with UNSET steps passes, and that is "
+              f"this exact shipped bug: {probs}")
+    else:
+        print("  ok     unset sequencer steps are rejected, with the fix named")
+
+    flat = [{"id": 0, "value": 0.5}, {"id": 1, "value": 0.5},
+            {"id": 2, "value": 0.5}]
+    probs = idiom_check.check_written(seq_patch(flat), inv, idiom)
+    if not probs:
+        bad += 1
+        print("  WRONG  steps all written to ONE value pass as a melody")
+    else:
+        print("  ok     steps all written to one value are rejected")
+
+    melody = [{"id": 0, "value": 0.0}, {"id": 1, "value": 0.25},
+              {"id": 2, "value": 0.583}]
+    probs = idiom_check.check_written(seq_patch(melody), inv, idiom)
+    if probs:
+        bad += 1
+        print(f"  WRONG  a written melody is rejected: {probs}")
+    else:
+        print("  ok     a written melody passes")
+
+    # A sequencer nobody has measured proves nothing either way: the check
+    # must stay silent rather than reject what it cannot see. The listening
+    # gate is the layer that covers those.
+    blind = _melodic_inv()
+    blind["CVfunk"]["modules"]["StepWave"]["params"] = []
+    probs = idiom_check.check_written(seq_patch([]), blind, idiom)
+    if probs:
+        bad += 1
+        print(f"  WRONG  an unmeasured sequencer is rejected on a guess: {probs}")
+    else:
+        print("  ok     an unmeasured sequencer is left to the listening gate")
+
+    # A non-melodic idiom must not demand a melody of its sequencer.
+    probs = idiom_check.check_written(seq_patch([]), inv, idioms["drone-voice"])
+    if probs:
+        bad += 1
+        print(f"  WRONG  a drone is asked to write a melody: {probs}")
+    else:
+        print("  ok     a drone is not asked to write a melody")
+
+    # When nothing resolves, the gap must be SAID, not silently accepted.
+    said = []
+    claimed = P.claim_idiom("four bars of blorp", idioms, say=said.append)
+    if claimed is not None or not any("no idiom" in s for s in said):
+        bad += 1
+        print(f"  WRONG  an unmatched request claims {claimed!r} and says "
+              f"{said!r}; a silent coverage gap is how this shipped")
+    else:
+        print("  ok     an unmatched request says its checks are thinner")
+    return bad, 8
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -2316,10 +2553,14 @@ def main():
     fresh_bad, fresh_ran = check_fresh_machine()
     ship_bad, ship_ran = check_shipped_generator()
     ver_bad, ver_ran = check_version_stamping()
+    vp_bad, vp_ran = check_vendor_params_reach_model()
+    mel_bad, mel_ran = check_melody_is_written()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
+    acq_bad += vp_bad + mel_bad
+    acq_ran += vp_ran + mel_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

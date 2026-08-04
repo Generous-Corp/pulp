@@ -314,6 +314,70 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
     return problems
 
 
+# The words that mark a sequencer param as part of its PATTERN rather than
+# its transport: the values a person would program a melody into. Matched
+# against the names CARTOG measured, so a vendor's own spelling decides.
+PATTERN_PARAM_WORDS = ("STEP", "PITCH", "NOTE", "SEMITONE", "DEGREE", "CV")
+
+
+def pattern_param_ids(entry: dict) -> list:
+    """The param ids holding a sequencer's programmable pattern, by name."""
+    out = []
+    for q in (entry.get("params") or []):
+        if not isinstance(q, dict):
+            continue
+        name = str(q.get("name") or "").upper()
+        if any(w in name for w in PATTERN_PARAM_WORDS):
+            out.append(int(q.get("id", -1)))
+    return out
+
+
+def check_written(patch: dict, inv: dict, idiom: dict,
+                  roles: dict | None = None) -> list[str]:
+    """The values the idiom's behaviour needs WRITTEN, and the patch omits.
+
+    Topology says the right modules are wired the right way. It cannot say
+    whether the music exists: a sequencer can be clocked, reach the
+    oscillator and fire the envelope with every step still sitting at its
+    default, and the result is one held note through perfect wiring. That
+    patch shipped, passed every check it was given, and a person had to
+    listen to find out. For an idiom whose behaviour says `melodic`, the
+    melody lives in the sequencer's step values, so those must be written
+    and must differ.
+
+    Scoped honestly: a sequencer whose params nobody has measured, or whose
+    pattern lives in module data rather than params, proves nothing either
+    way and reports nothing here. The gate that listens to the rendered
+    signal is the layer that covers those.
+    """
+    if not (idiom.get("behaviour") or {}).get("melodic"):
+        return []
+    roles = roles if roles is not None else load_roles()
+    problems: list[str] = []
+    for m in patch.get("modules", []):
+        entry = _entry(inv, m)
+        if not _module_matches("sequencer", entry, roles):
+            continue
+        steps = pattern_param_ids(entry)
+        if len(steps) < 2:
+            continue                # no measured pattern; nothing provable
+        written = {int(p.get("id", -1)): p.get("value")
+                   for p in (m.get("params") or []) if isinstance(p, dict)}
+        values = [written[i] for i in steps if i in written]
+        distinct = {round(float(v), 6) for v in values
+                    if isinstance(v, (int, float))}
+        if len(distinct) >= 2:
+            continue
+        name = entry.get("name") or m.get("model") or "the sequencer"
+        what = ("writes none of them" if not values else
+                "writes them all to one value")
+        problems.append(
+            f"{name} has step params and the patch {what}, so every step "
+            f"sits at the same voltage and plays as one held note. Write "
+            f"the melody into its step values and make them differ.")
+    return problems
+
+
 # --------------------------------------------------------------------------
 # the negative controls
 
