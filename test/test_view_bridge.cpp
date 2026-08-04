@@ -28,6 +28,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -179,6 +180,13 @@ public:
     }
 
     std::unique_ptr<view::ScriptedUiSession> scripted_session;
+};
+
+class ThrowingInPlaceOptInProcessor final : public ScriptedCustomViewProcessor {
+public:
+    bool supports_in_place_scripted_ui_reload() const override {
+        throw std::runtime_error("fixture opt-in failure");
+    }
 };
 
 // Uses the AutoUi default editor with NO processor-declared size (unlike
@@ -390,6 +398,19 @@ TEST_CASE("ViewBridge detects processor-owned scripted custom views",
 
     const auto& const_bridge = bridge;
     REQUIRE(const_bridge.scripted_ui() == p.scripted_session.get());
+}
+
+TEST_CASE("ViewBridge contains throwing scripted reload opt-in callbacks",
+          "[view_bridge][scripted-ui][exceptions]") {
+    ThrowingInPlaceOptInProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.uses_script_ui());
+    REQUIRE(bridge.scripted_ui() == p.scripted_session.get());
 }
 
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {

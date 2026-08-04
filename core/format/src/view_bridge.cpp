@@ -20,6 +20,11 @@ view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept 
     PULP_CATCH_ALL { return nullptr; }
 }
 
+bool safe_supports_in_place_scripted_ui_reload(Processor& processor) noexcept {
+    PULP_TRY { return processor.supports_in_place_scripted_ui_reload(); }
+    PULP_CATCH_ALL { return false; }
+}
+
 ViewSize safe_view_size(Processor& processor) noexcept {
     PULP_TRY { return processor.view_size(); }
     PULP_CATCH_ALL { return {}; }
@@ -95,7 +100,7 @@ bool ViewBridge::open(std::string* error) {
         view_ = std::move(custom);
         if (safe_active_scripted_ui(processor_)) {
             in_place_scripted_ui_reload_ =
-                processor_.supports_in_place_scripted_ui_reload();
+                safe_supports_in_place_scripted_ui_reload(processor_);
             uses_script_ui_ = true;
         }
     } else {
