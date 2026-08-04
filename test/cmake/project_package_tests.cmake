@@ -133,3 +133,13 @@ add_test(NAME pulp-uninstaller-contract
 set_tests_properties(pulp-uninstaller-contract PROPERTIES
     LABELS "packaging;ship"
     TIMEOUT 120)
+
+# The desktop and web builds embed fonts from two separate lists, and
+# bundled_fonts.cpp names every blob symbol directly. A face in one list and not
+# the other is a COMPILE error in the web lane, which nobody runs locally.
+add_test(NAME bundled-font-lists-agree
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_bundled_font_lists.py")
+set_tests_properties(bundled-font-lists-agree PROPERTIES
+    LABELS "canvas;fonts;web"
+    TIMEOUT 60)
