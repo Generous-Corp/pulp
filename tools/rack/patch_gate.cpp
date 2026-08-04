@@ -20,6 +20,17 @@
 // be. What matters is the voltage arriving at its inputs, which is measured on
 // the cables that feed it.
 //
+// LOADING A PLUGIN IS NOT ENOUGH: THE RACK CONTEXT HAS TO EXIST FIRST.
+// `APP` is `rack::contextGet()`, and it is NULL until something calls
+// `contextSet()`. A great many third-party modules read the engine's sample
+// rate in their CONSTRUCTOR -- Bogaudio's base module does it for every one of
+// its 111 models -- so `APP->engine` dereferences NULL at offset 0x10 and the
+// whole gate dies on SIGSEGV before it prints a single line. Modules that
+// never touch `APP` are unaffected, which is why patches built only from this
+// project's own modules were the only ones that ever passed. Install the
+// context, an engine and the RNG before any plugin is loaded, in the order
+// Rack itself uses.
+//
 // Usage: patch-gate <patch.vcv> <plugin-dir>
 
 #include <rack.hpp>
@@ -112,6 +123,30 @@ std::vector<std::string> elements(const std::string& doc, const std::string& arr
     return out;
 }
 
+// ── the Rack context ────────────────────────────────────────────────────────
+
+/// Stand up the global state a module constructor is entitled to assume.
+///
+/// Rack does this before it loads a single plugin, and a module written
+/// against Rack is right to expect it. Without it `APP` is NULL and
+/// `APP->engine->getSampleRate()` -- an ordinary first line in a constructor --
+/// is a null dereference at offset 0x10, the offset of `Context::engine`.
+///
+/// The engine is set to the rate this harness actually steps at, so a module
+/// that caches coefficients at construction caches the right ones.
+void install_rack_context() {
+    // Deprecated only in the sense of "internal to Rack". This harness IS
+    // standing in for Rack, so it is the one caller entitled to use them.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    rack::random::init();
+    auto* ctx = new rack::Context;
+    rack::contextSet(ctx);
+    ctx->engine = new rack::engine::Engine;
+    ctx->engine->setSampleRate(kSr);
+#pragma clang diagnostic pop
+}
+
 // ── loading plugins ─────────────────────────────────────────────────────────
 
 std::map<std::string, rack::plugin::Plugin*> g_plugins;
@@ -140,6 +175,26 @@ rack::plugin::Plugin* load_plugin(const std::string& slug, const std::string& di
     init(p);
     g_plugins[slug] = p;
     return p;
+}
+
+/// Do to a freshly created module what `Engine::addModule` does to it.
+///
+/// A CONSTRUCTED MODULE IS NOT A RUNNING ONE. `createModule()` runs the
+/// constructor and stops; Rack then tells the module its sample rate and that
+/// it has been added, and a great many modules allocate their DSP state in
+/// exactly those callbacks. CV funk's Alloy sizes a delay line in
+/// `onSampleRateChange`, so calling `process()` straight after the constructor
+/// read through a null buffer pointer with a zero ring mask -- EXC_BAD_ACCESS
+/// at 0x0, a second and completely separate crash from the missing context.
+///
+/// Sample rate first, then the add event, which is the order Engine uses.
+void bring_up(rack::engine::Module* m) {
+    if (!m) return;
+    rack::engine::Module::SampleRateChangeEvent sr;
+    sr.sampleRate = kSr;
+    sr.sampleTime = 1.f / kSr;
+    m->onSampleRateChange(sr);
+    m->onAdd(rack::engine::Module::AddEvent{});
 }
 
 rack::plugin::Model* find_model(rack::plugin::Plugin* p, const std::string& slug) {
@@ -173,6 +228,9 @@ int main(int argc, char** argv) {
     const std::string doc = slurp(argv[1]);
     const std::string dir = argv[2];
 
+    // Before any dlopen: a plugin's own init() may touch APP too.
+    install_rack_context();
+
     std::vector<Node> nodes;
     for (const std::string& e : elements(doc, "modules")) {
         Node n;
@@ -194,6 +252,7 @@ int main(int argc, char** argv) {
                 std::printf("  ..    %s has no model %s (%zu models loaded)\n",
                             n.plugin.c_str(), n.model.c_str(), pl->models.size());
             if (m) n.mod = m->createModule();
+            bring_up(n.mod);
         }
         nodes.push_back(n);
     }

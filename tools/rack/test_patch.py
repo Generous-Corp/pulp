@@ -878,6 +878,163 @@ def check_gate_crash_is_not_silence() -> tuple:
     return bad, ran
 
 
+def check_gate_survives_third_party() -> tuple:
+    """The audibility gate must run a patch built from somebody else's modules.
+
+    It did not. `patch-gate` died on SIGSEGV, no stdout, no stderr, for every
+    patch built from third-party plugins; the only ones that ever passed were
+    built from this project's own modules. The crash report names the cause:
+    EXC_BAD_ACCESS at 0x10 inside `bogaudio::VCAmp::sampleRateChange()`, called
+    from the CONSTRUCTOR. `APP` is null until something calls `contextSet()`,
+    and `Context::engine` sits at offset 0x10 -- so a module reading the sample
+    rate while it is being built, which Bogaudio's base module does for all 111
+    of its models, dereferences null before the gate prints a line.
+
+    Fixing that uncovered a SECOND crash of the same shape and a different
+    cause: EXC_BAD_ACCESS at 0x0 inside `Alloy::process()`, because a
+    constructed module is not a running one. Rack tells a module its sample
+    rate and that it has been added before it ever calls `process()`, and CV
+    funk's Alloy sizes its delay line in that callback -- so a harness that
+    goes straight from the constructor to `process()` reads through a null
+    buffer with a zero ring mask.
+
+    Three halves, because none of them alone passes over both bugs: the source
+    has to stand the context up before it loads a plugin, it has to bring each
+    module up the way the engine does, and the BUILT gate has to survive a real
+    third-party patch.
+    """
+    bad, ran = 0, 1
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "patch_gate.cpp")).read()
+    body = src[src.find("int main("):]
+    at_ctx = body.find("install_rack_context()")
+    at_load = body.find("load_plugin(")
+    if "contextSet" not in src:
+        bad += 1
+        print("  WRONG  the gate never installs a Rack context, so every "
+              "module that reads the sample rate in its constructor takes it "
+              "down")
+    elif at_ctx < 0 or (at_load >= 0 and at_ctx > at_load):
+        bad += 1
+        print("  WRONG  the gate loads a plugin before the Rack context "
+              "exists; the context has to come first, as it does in Rack")
+    else:
+        print("  ok     the gate stands up a Rack context before it loads "
+              "anything")
+
+    ran += 1
+    at_up = body.find("bring_up(")
+    at_proc = body.find("->process(args)")
+    up = src[src.find("void bring_up("):src.find("void bring_up(") + 600]
+    if at_up < 0 or (at_proc >= 0 and at_up > at_proc):
+        bad += 1
+        print("  WRONG  the gate calls process() on a module the engine was "
+              "never told about, so anything allocating in a lifecycle "
+              "callback runs on null state")
+    elif "onSampleRateChange" not in up or "onAdd" not in up:
+        bad += 1
+        print("  WRONG  a module is brought up without the sample rate and "
+              "the add event Rack always sends it")
+    else:
+        print("  ok     each module is brought up the way the engine does it")
+
+    # The real thing. Skipped, loudly, rather than faked: a machine with no SDK
+    # or no third-party plugin cannot answer this question, and pretending
+    # otherwise is how a check that measures nothing comes to look perfect.
+    #
+    # Both plugins that produced a crash are tried when they are here.
+    # Bogaudio reads the sample rate in its CONSTRUCTOR (null context, 0x10)
+    # and CV funk's Alloy allocates in onSampleRateChange (null buffer, 0x0);
+    # each survives the other's fix, so one is not a proxy for the other.
+    gate = P._build_gate()
+    pdir = P._plugin_dir()
+    inv = P.inventory()
+    victims = [(p, m) for p, m in (("Bogaudio", None), ("CVfunk", "Alloy"),
+                                   ("Befaco", None), ("AudibleInstruments", None))
+               if p in inv and (m is None or m in inv[p]["modules"])]
+    if not gate or not pdir:
+        print("  --     no Rack SDK here, so the gate cannot be run")
+        return bad, ran
+    if not victims or "Core" not in inv:
+        print("  --     no third-party plugin installed to load, so the crash "
+              "cannot be reproduced")
+        return bad, ran
+    import subprocess
+    import tempfile
+    for plug, model in victims:
+        ran += 1
+        model = model or sorted(inv[plug]["modules"])[0]
+        pch = {"version": "2.6.6",
+               "modules": [mod(1, plug, model),
+                           mod(2, "Core", "AudioInterface2", (10, 0))],
+               "cables": [cable(1, 1, 0, 2, 0)]}
+        with tempfile.NamedTemporaryFile("w", suffix=".vcv", delete=False) as f:
+            json.dump(pch, f)
+            tmp = f.name
+        try:
+            r = subprocess.run([gate, tmp, pdir], capture_output=True,
+                               text=True, timeout=300,
+                               env=dict(os.environ, DYLD_LIBRARY_PATH=P.SDK))
+        finally:
+            os.unlink(tmp)
+        if r.returncode < 0:
+            bad += 1
+            print(f"  WRONG  the gate died on signal {-r.returncode} loading "
+                  f"{plug}/{model}. It cannot judge any patch built from "
+                  f"other people's modules, which is most of them")
+        else:
+            print(f"  ok     the gate ran {plug}/{model} without dying "
+                  f"(exit {r.returncode})")
+    return bad, ran
+
+
+def check_unjudged_patch_is_kept() -> tuple:
+    """A check that could not run must not throw the patch away.
+
+    Naming the crash was not enough. The retry context said "structurally
+    valid but SILENT when run" whatever had happened, so on a crash the model
+    was sent to fix a fault nobody had measured, and three attempts later the
+    run ended "gave up after 3 attempts" with the patch discarded. A patch that
+    lints clean and whose audibility is UNKNOWN is worth more than no patch.
+    """
+    import stat
+    import tempfile
+    bad, ran = 0, 1
+    home = tempfile.mkdtemp()
+    stub = os.path.join(home, "claude")
+    reply = json.dumps(voice())
+    with open(stub, "w") as f:
+        f.write("#!/bin/sh\ncat <<'EOF'\n```json patch\n" + reply +
+                "\n```\nEOF\n")
+    os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+    saved = (P.find_claude, P.sounds, P.lint, P.reflow, P.configure_audio)
+    P.find_claude = lambda: stub
+    P.sounds = lambda pch: (False, P.gate_crash_report(11, pch))
+    P.lint = lambda pch, inv: []
+    P.reflow = lambda pch, inv: pch
+    P.configure_audio = lambda pch: None
+    try:
+        got, _ = P.generate("a plain drone, nothing clever", {}, None)
+    except SystemExit as exc:
+        got = None
+        why = str(exc)
+    finally:
+        (P.find_claude, P.sounds, P.lint, P.reflow,
+         P.configure_audio) = saved
+    if got is None:
+        bad += 1
+        print(f"  WRONG  a patch the gate could not judge was discarded: "
+              f"{why!r}")
+    elif len(got.get("modules") or []) != 3:
+        bad += 1
+        print(f"  WRONG  the patch that came back is not the one that was "
+              f"built: {got}")
+    else:
+        print("  ok     a patch the gate could not judge is kept, not thrown "
+              "away")
+    return bad, ran
+
+
 def check_brand_targeting() -> tuple:
     """Naming a maker is a preference, not a manifest.
 
@@ -1050,6 +1207,275 @@ def check_brand_targeting() -> tuple:
             print("  ok     the patch is measured against the makers named")
     finally:
         P.entitlements_cached = saved
+    return bad, ran
+
+
+#: An invented library for the fetch planner, kept apart from BRAND_CAT so
+#: that adding a plugin here to test a bound cannot quietly change what the
+#: expansion tests above are counting.
+FETCH_CAT = {
+    "AcmeOne": {"brand": "Acme Audio", "arches": ["mac-arm64"], "version": "2.1"},
+    "AcmeTwo": {"brand": "Acme Audio", "arches": ["mac-arm64"], "version": "2.2"},
+    "AcmeThree": {"brand": "Acme Audio", "arches": ["mac-arm64"], "version": "2.3"},
+    "AcmePaid": {"brand": "Acme Audio", "arches": ["mac-arm64"], "version": "2.4",
+                 "premium": True},
+    "AcmeOld": {"brand": "Acme Audio", "arches": ["win-x64"], "version": "1.0"},
+    "Zephyr": {"brand": "Zephyr", "arches": ["mac-arm64"], "version": "3.0"},
+}
+
+FETCH_MIDX = {
+    "AcmeOne": {"Pulse": {"name": "Pulse", "tags": ["Clock"], "description": ""}},
+    "AcmeTwo": {"Basin": {"name": "Basin", "tags": ["Reverb"],
+                          "description": "A plate reverb"}},
+    "AcmeThree": {"Wire": {"name": "Wire", "tags": ["Utility"], "description": ""}},
+    "AcmePaid": {"Gold": {"name": "Gold", "tags": ["Filter"], "description": ""}},
+    "AcmeOld": {"Relic": {"name": "Relic", "tags": ["Mixer"], "description": ""}},
+    # A module called exactly "Acme", published by somebody who is not Acme.
+    # "@Acme Audio" is one maker written in two words, and reading it a word at
+    # a time fetched this stranger's plugin as well.
+    "Zephyr": {"Wavelet": {"name": "Wavelet", "tags": ["Oscillator"],
+                           "description": ""},
+               "Acme": {"name": "Acme", "tags": ["Blank"], "description": ""}},
+}
+
+
+def check_named_is_fetched() -> tuple:
+    """Naming something must guarantee it is here before generation.
+
+    Measured: "@CV funk make a simple patch using just these modules" produced
+    a patch with no CV funk module in it. Every part behaved as written -- the
+    expansion reached the prompt, the model reached for CV funk and was told
+    the plugin was not installed, and the count at the end read "CV funk: 0
+    module(s) drawn from this maker". Nothing fetched, because the download
+    path was reachable only from a missing-capability gap in preflight and a
+    mention was never a trigger at all.
+
+    All of this runs against an invented library and a stubbed settings file:
+    no account, no network, no installed Rack.
+    """
+    bad, ran = 0, 0
+    # Ranking consults entitlements. Stubbed so this reads an invented library
+    # rather than whichever VCV account happens to be signed in on the machine
+    # running the tests.
+    saved_ent = P.entitlements_cached
+    P.entitlements_cached = lambda *a, **k: set()
+
+    def plan(prompt, inv=None, download="entitled", owned=frozenset()):
+        st = dict(P.SETTINGS_DEFAULTS, auto_download=download)
+        return P.named_fetch_plan(prompt, inv or {}, FETCH_CAT, FETCH_MIDX,
+                                  P.brand_mentions(prompt, FETCH_CAT), st,
+                                  set(owned))
+
+    def slugs(p):
+        return [f["plugin"] for f in p["fetch"]]
+
+    # ── a maker with nothing installed is fetched, and BOUNDED ───────────────
+    # Against the CATALOGUE, not only against the constant. Asserting
+    # `len <= BRAND_FETCH_PLUGIN_LIMIT` is satisfied by raising the constant,
+    # so the same case also has to fetch fewer than every plugin this maker
+    # has that could be fetched — which is the behaviour, rather than its
+    # current number.
+    ran += 1
+    obtainable = [s for s, e in FETCH_CAT.items()
+                  if e["brand"] == "Acme Audio" and "mac-arm64" in e["arches"]
+                  and not e.get("premium")]
+    got = plan("a drone from Acme Audio")
+    if not got["fetch"]:
+        bad += 1
+        print("  WRONG  naming a maker with nothing installed fetched nothing "
+              "— the mention is decoration again")
+    elif (len(got["fetch"]) > P.BRAND_FETCH_PLUGIN_LIMIT or
+          len(got["fetch"]) >= len(obtainable)):
+        bad += 1
+        print(f"  WRONG  naming a maker fetched {len(got['fetch'])} of this "
+              f"maker's {len(obtainable)} obtainable plugins. A preference is "
+              f"not a licence to download a catalogue: {slugs(got)}")
+    else:
+        print(f"  ok     a named maker is fetched, bounded to "
+              f"{len(got['fetch'])} of {len(obtainable)} plugin(s)")
+
+    # ── never_buy, and never a plugin this machine cannot load ───────────────
+    #
+    # Asked with a prompt the PAID plugin answers best, so it is first in the
+    # ranking and would be fetched by anything that did not refuse it. Asking
+    # with a prompt that ranks it last proves nothing: the bound alone would
+    # keep it out, and a broken never_buy would still score a pass.
+    ran += 2
+    paid = plan("a filter from Acme Audio")
+    if "AcmePaid" in slugs(paid):
+        bad += 1
+        print("  WRONG  a paid plugin this account does not own was fetched — "
+              "that is a purchase")
+    elif not any("AcmePaid" in b for b in paid["blocked"]):
+        bad += 1
+        print(f"  WRONG  the paid plugin was skipped in silence: "
+              f"{paid['blocked']}")
+    else:
+        print("  ok     a paid, unowned plugin is named and never bought")
+    if "AcmeOld" in slugs(got) or "AcmeOld" in slugs(plan(
+            "a mixer from Acme Audio")):
+        bad += 1
+        print("  WRONG  a plugin with no build for this machine was fetched")
+    else:
+        print("  ok     a plugin with no build here is never fetched")
+
+    # ── owned is not the same as paid ────────────────────────────────────────
+    ran += 1
+    owned_plan = plan("a filter from Acme Audio", owned={"AcmePaid"})
+    if "AcmePaid" not in slugs(owned_plan):
+        bad += 1
+        print(f"  WRONG  a premium plugin this account OWNS was not fetched: "
+              f"{slugs(owned_plan)}. Downloading something already paid for "
+              f"is not a purchase")
+    else:
+        print("  ok     a premium plugin the account owns is fetched")
+
+    # ── ranked by the request, never by the alphabet ─────────────────────────
+    ran += 1
+    rev = plan("a plate reverb from Acme Audio")
+    if not slugs(rev) or slugs(rev)[0] != "AcmeTwo":
+        bad += 1
+        print(f"  WRONG  a reverb request fetched {slugs(rev)} first; the "
+              f"maker's reverb is in AcmeTwo")
+    else:
+        print("  ok     what is fetched is ranked by the request")
+
+    # ── exhaustive is a different intent, and lifts the bound ────────────────
+    ran += 1
+    every = plan("use all modules from Acme Audio")
+    if len(every["fetch"]) <= P.BRAND_FETCH_PLUGIN_LIMIT:
+        bad += 1
+        print(f"  WRONG  'all modules from Acme Audio' was still capped at "
+              f"{len(every['fetch'])}")
+    elif "AcmePaid" in slugs(every):
+        bad += 1
+        print("  WRONG  'all modules' was read as permission to buy one")
+    else:
+        print(f"  ok     an exhaustive request lifts the cap "
+              f"({len(every['fetch'])} plugins) and still buys nothing")
+
+    # ── a module named outright brings its plugin ────────────────────────────
+    ran += 1
+    one = plan("something around @Wavelet")
+    if slugs(one) != ["Zephyr"]:
+        bad += 1
+        print(f"  WRONG  naming a module did not fetch the plugin carrying "
+              f"it: {slugs(one)}")
+    else:
+        print("  ok     a module named outright fetches the plugin that has it")
+
+    # ── the maker's own first word is not a stranger's module ────────────────
+    ran += 1
+    two_words = plan("@Acme Audio, a drone")
+    if "Zephyr" in slugs(two_words):
+        bad += 1
+        print(f"  WRONG  '@Acme Audio' fetched Zephyr, because a module called "
+              f"Acme matched the maker's first word: {slugs(two_words)}")
+    else:
+        print("  ok     a maker written in two words stays one mention")
+
+    # ── the settings contract ────────────────────────────────────────────────
+    ran += 1
+    off = plan("a drone from Acme Audio", download="none")
+    if off["fetch"]:
+        bad += 1
+        print(f"  WRONG  auto_download=none still fetched {slugs(off)}")
+    elif not any("switched off" in b for b in off["blocked"]):
+        bad += 1
+        print(f"  WRONG  nothing was fetched and nothing said why: "
+              f"{off['blocked']}")
+    else:
+        print("  ok     downloads switched off fetch nothing, and say so")
+
+    # ── what is already here is not fetched again ────────────────────────────
+    ran += 1
+    have = {s: {"name": s, "modules": dict(FETCH_MIDX[s])}
+            for s in ("AcmeOne", "AcmeTwo", "AcmeThree")}
+    quiet = plan("a drone from Acme Audio", inv=have)
+    if slugs(quiet):
+        bad += 1
+        print(f"  WRONG  an installed maker was fetched again: {slugs(quiet)}")
+    else:
+        print("  ok     an installed maker costs no download")
+
+    # ── AND IT IS WIRED INTO `build`, WHICH IS THE HALF THAT KEEPS MISSING ───
+    #
+    # Every defect in this file's history was a finished function nothing
+    # called. So this drives main() itself and asserts the fetch happens
+    # BEFORE the model call, with the prompt the user typed.
+    ran += 1
+    import toolpaths
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_ensure(prompt, inv, cat, midx, mentions):
+        seen["prompt"] = prompt
+        seen["mentions"] = dict(mentions)
+        return inv, ["AcmeOne"]
+
+    def fake_generate(*a, **k):
+        seen["generated"] = True
+        raise Stop()
+
+    saved = (P.inventory, P.catalog, P.module_index, P.ensure_named_installed,
+             P.generate, P.preflight, P.restart_rack, P.settings,
+             toolpaths.missing_prerequisites)
+    P.inventory = lambda: {}
+    P.catalog = lambda *a, **k: FETCH_CAT
+    P.module_index = lambda *a, **k: FETCH_MIDX
+    P.ensure_named_installed = fake_ensure
+    P.generate = fake_generate
+    P.preflight = lambda *a, **k: {"ok": True, "missing": {}, "omitted": {}}
+    P.restart_rack = lambda: (True, "restarted (stub)")
+    P.settings = lambda: dict(P.SETTINGS_DEFAULTS)
+    toolpaths.missing_prerequisites = lambda: []
+    try:
+        P.main(["patch.py", "build", "@Acme Audio a drone", "--out",
+                os.path.join(os.sep, "dev", "null")])
+    except Stop:
+        pass
+    except SystemExit:
+        pass
+    finally:
+        (P.inventory, P.catalog, P.module_index, P.ensure_named_installed,
+         P.generate, P.preflight, P.restart_rack, P.settings,
+         toolpaths.missing_prerequisites) = saved
+    if "prompt" not in seen:
+        bad += 1
+        print("  WRONG  `build` never asked what the prompt named, so a "
+              "mention still fetches nothing")
+    elif seen["prompt"] != "@Acme Audio a drone":
+        bad += 1
+        print(f"  WRONG  `build` asked about {seen['prompt']!r} rather than "
+              f"the prompt the user typed")
+    elif "Acme Audio" not in seen.get("mentions", {}):
+        bad += 1
+        print(f"  WRONG  the maker never reached the fetch: "
+              f"{seen.get('mentions')}")
+    elif not seen.get("generated"):
+        bad += 1
+        print("  WRONG  the fetch ran but generation never followed it")
+    else:
+        print("  ok     `build` fetches what the prompt named, then generates")
+
+    # ── what was left out is COUNTED, not listed one line at a time ──────────
+    ran += 1
+    left = plan("a drone from Acme Audio")
+    per_plugin = [b for b in left["blocked"] if "left for now" in b]
+    counted = [b for b in left["blocked"] if "more of Acme Audio" in b]
+    if per_plugin:
+        bad += 1
+        print(f"  WRONG  every skipped plugin got its own line: {per_plugin}")
+    elif not counted:
+        bad += 1
+        print(f"  WRONG  the bound was applied in silence, so nobody can tell "
+              f"a fetched maker from a capped one: {left['blocked']}")
+    else:
+        print("  ok     the plugins the bound left out are counted, not listed")
+
+    P.entitlements_cached = saved_ent
     return bad, ran
 
 
@@ -1714,7 +2140,10 @@ def main():
     acq_bad, acq_ran = check_acquisition()
     lb_bad, lb_ran = check_library_brief()
     br_bad, br_ran = check_brand_targeting()
+    nf_bad, nf_ran = check_named_is_fetched()
     gc_bad, gc_ran = check_gate_crash_is_not_silence()
+    gs_bad, gs_ran = check_gate_survives_third_party()
+    uk_bad, uk_ran = check_unjudged_patch_is_kept()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
     fresh_bad, fresh_ran = check_fresh_machine()
@@ -1722,6 +2151,8 @@ def main():
     ver_bad, ver_ran = check_version_stamping()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
+    acq_bad += nf_bad + gs_bad + uk_bad
+    acq_ran += nf_ran + gs_ran + uk_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

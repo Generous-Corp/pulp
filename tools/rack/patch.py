@@ -2183,6 +2183,14 @@ BRAND_BARE_FOLD = 6
 BRAND_MODULE_LIMIT = 24
 BRAND_TOTAL_LIMIT = 72
 
+#: How many of a maker's PLUGINS may be fetched because the maker was named,
+#: and how many across every maker in one request. Naming a maker has to
+#: guarantee that maker is usable; it must not authorise 59 downloads. The cap
+#: is lifted only by an exhaustive request ("all modules from CV funk"), which
+#: is somebody asking for the whole catalogue outright.
+BRAND_FETCH_PLUGIN_LIMIT = 2
+BRAND_FETCH_TOTAL_LIMIT = 4
+
 
 def fold_name(text: str) -> str:
     """Case and separators removed, which is how a maker spells their own name.
@@ -2500,6 +2508,229 @@ def brand_report(patch: dict, mentions: dict) -> list:
     return lines
 
 
+# ── naming something must guarantee it is here ───────────────────────────────
+#
+# A MENTION THAT DOES NOT FETCH WHAT IT NAMES IS DECORATION.
+#
+# Measured: "@CV funk make a simple patch using just these modules" produced a
+# patch with no CV funk module in it. Every part behaved as written -- the
+# expansion reached the prompt, the model reached for CV funk four times and
+# was told each time that the plugin was not installed, it substituted and said
+# so honestly, and the count at the end read "CV funk: 0 module(s) drawn from
+# this maker." Nothing was broken; nothing fetched, either, because the
+# download path was reachable only from a missing-CAPABILITY gap in preflight.
+# Naming a maker or a module was not a trigger at all.
+#
+# So it is one here, at the point where a patch is about to be built, and for
+# BOTH shapes of mention: a maker named as a token or as prose, and a module
+# named outright. Everything about the settings contract still holds -- nothing
+# is fetched while auto_download is "none", and never_buy means a premium
+# plugin this account does not own is named up front and never acquired.
+
+#: How much of a name an @ has to carry before it may fetch a plugin. "@CV" is
+#: the first word of "@CV funk" and there is a module called exactly CV, so a
+#: shorter bar made naming a maker fetch a stranger's plugin as well.
+MODULE_MENTION_FOLD = 3
+
+
+def module_mentions(prompt: str, cat: dict, midx: dict, inv: dict,
+                    mentions: dict | None = None) -> dict:
+    """The MODULES a prompt names outright: plugin slug -> "Plugin/Module".
+
+    A module is named with an @ ("@Plaits"), or in slug form
+    ("CVfunk/Sphinx"), which is unambiguous with or without one. Bare prose is
+    deliberately NOT read as a module: "sand", "edge" and "plateau" are
+    ordinary words, whereas a maker's name at least has to look like a name
+    (see BRAND_BARE_FOLD). Being wrong here would fetch a plugin nobody asked
+    for.
+
+    `mentions` is what the same prompt said about MAKERS, and it is here to
+    stop the two readings fighting. "@CV funk" is one maker written in two
+    words; read a word at a time it also matches a module called CV, published
+    by somebody else entirely -- so a word that begins a maker this prompt
+    names is that maker's, and not a module.
+    """
+    named: dict = {}
+    starts: set = set()
+    for brand in (mentions or {}):
+        key = fold_name(brand)
+        for n in range(1, len(key) + 1):
+            starts.add(key[:n])
+
+    def carriers(pslug: str, mslug: str) -> None:
+        if pslug in cat or pslug in inv:
+            named.setdefault(pslug, f"{pslug}/{mslug}")
+
+    # module name/slug -> (plugin, module), library and installed alike. Built
+    # once per call; the index is a few thousand entries and this runs once a
+    # build.
+    by_name: dict = {}
+    sources = [(p, m) for p, m in midx.items()]
+    sources += [(p, {s: {"name": e.get("name", s)}
+                     for s, e in (v.get("modules") or {}).items()})
+                for p, v in inv.items()]
+    for pslug, mods in sources:
+        for mslug, m in (mods or {}).items():
+            for key in (fold_name(mslug), fold_name(m.get("name") or "")):
+                if key:
+                    by_name.setdefault(key, (pslug, mslug))
+
+    for raw in prompt.split():
+        word = raw.strip(",.;:()[]\"'!?")
+        at = word.startswith("@")
+        word = word.lstrip("@")
+        if "/" in word:
+            pslug, _, mslug = word.partition("/")
+            mods = midx.get(pslug) or (inv.get(pslug, {}).get("modules") or {})
+            if mods and mslug in mods:
+                carriers(pslug, mslug)
+            continue
+        if not at:
+            continue
+        key = fold_name(word)
+        if len(key) < MODULE_MENTION_FOLD or key in starts:
+            continue
+        hit = by_name.get(key)
+        if hit:
+            carriers(*hit)
+    return named
+
+
+def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
+                     mentions: dict, st: dict, owned: set) -> dict:
+    """What has to be installed because the request NAMED it.
+
+    Decides, and installs nothing: the plan is a function of the inventory, the
+    catalogue and the preferences, so the settings contract can be asserted
+    without an account or a network, and `blocked` says why anything was left
+    out. (Ranking asks `entitlements_cached()`, which answers from its own cache
+    and falls back to "free plugins only" when there is nobody to ask.)
+
+    Returns {"fetch": [entry…], "blocked": [line…]}, where an entry carries the
+    plugin slug, its version, whether it is premium and owned, how many modules
+    it brings and which mention asked for it.
+    """
+    plan: dict = {"fetch": [], "blocked": []}
+    may = st.get("auto_download", "entitled") != "none"
+    seen: set = set()
+
+    def consider(pslug: str, why: str, budget: list | None) -> bool:
+        """True when it was added to the fetch list."""
+        if pslug in inv or pslug in seen:
+            return False
+        entry = cat.get(pslug)
+        if not entry:
+            return False
+        seen.add(pslug)
+        premium = bool(entry.get("premium"))
+        n = len(midx.get(pslug) or {})
+        if not installable_here(entry):
+            plan["blocked"].append(
+                f"{pslug} has no build for this machine, so it cannot be "
+                f"installed at any price.")
+            return False
+        if premium and pslug not in owned:
+            # never_buy. Named up front, never acquired.
+            plan["blocked"].append(
+                f"{pslug} ({n} modules) is paid and not on this VCV account — "
+                f"naming it, not buying it.")
+            return False
+        if not may:
+            plan["blocked"].append(
+                f"{pslug} ({n} modules) is not installed, and module "
+                f"downloads are switched off in Settings, on the Permissions "
+                f"tab.")
+            return False
+        if budget is not None and not budget[0]:
+            # Counted, not listed. A maker with 43 plugins would otherwise
+            # print 41 lines saying the same thing, and the one line that
+            # matters — how many were left — would be buried in them.
+            budget[1] += 1
+            seen.discard(pslug)
+            return False
+        if budget is not None:
+            budget[0] -= 1
+        plan["fetch"].append({"plugin": pslug, "version": entry.get("version") or "",
+                              "premium": premium, "owned": pslug in owned,
+                              "modules": n, "why": why})
+        return True
+
+    # A module named outright is exact: one plugin carries it and there is
+    # nothing to rank or bound.
+    for pslug, what in module_mentions(prompt, cat, midx, inv,
+                                       mentions).items():
+        consider(pslug, what, None)
+
+    # A maker is a preference over a range, so the fetch is bounded and ranked
+    # by the same relevance the prompt expansion uses -- never the alphabet,
+    # and never "all of them".
+    total = [BRAND_FETCH_TOTAL_LIMIT]
+    for brand, state in mentions.items():
+        rows, _ = brand_module_rows(state["slugs"], prompt, inv, cat, midx,
+                                    10 ** 6)
+        want: list = []
+        for r in rows:
+            if r["plugin"] in inv or r["plugin"] in want:
+                continue
+            want.append(r["plugin"])
+        cap = len(want) if state["exhaustive"] else BRAND_FETCH_PLUGIN_LIMIT
+        room = [min(cap, total[0]), 0]
+        for pslug in want:
+            before = len(plan["fetch"])
+            consider(pslug, brand, room)
+            total[0] -= len(plan["fetch"]) - before
+        if room[1]:
+            plan["blocked"].append(
+                f"{room[1]} more of {brand}'s plugins were not fetched. "
+                f"Naming a maker prefers their modules; it does not download "
+                f"their catalogue. Ask for all of them if that is what you "
+                f"want.")
+    return plan
+
+
+def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
+                           mentions: dict) -> tuple:
+    """Install what the request named, before a word of it reaches the model.
+
+    Returns (inventory, fetched plugin slugs). The inventory is re-read after a
+    successful fetch, because a plugin downloaded a second ago is invisible to
+    the copy that was read before it -- and an inventory that does not have it
+    is an inventory the generator may not build with.
+
+    Rack itself is a separate question. `inventory()` reads a `.vcvplugin`
+    archive directly and the audibility gate unpacks one, so a fetch is usable
+    by THIS build immediately; the running Rack loads plugins only at startup,
+    which is what auto_restart_rack is for and what the note says when it is
+    off.
+    """
+    st = settings()
+    plan = named_fetch_plan(prompt, inv, cat, midx, mentions, st,
+                            entitlements_cached())
+    if not plan["fetch"] and not plan["blocked"]:
+        return inv, []
+    for line in plan["blocked"]:
+        print(f"  {line}", flush=True)
+    fetched = []
+    for item in plan["fetch"]:
+        print(f"  you named {item['why']} and it is not installed — fetching "
+              f"{item['plugin']} ({item['modules']} modules)…", flush=True)
+        ok, msg = install_module(item["plugin"], item["version"],
+                                 item["premium"], item["owned"])
+        print(f"    {msg}", flush=True)
+        if ok:
+            fetched.append(item["plugin"])
+        elif "not signed in" in msg:
+            break                       # saying it once is enough
+    if fetched:
+        inv = inventory()
+        # SAY HOW MANY. "Downloaded" without a number leaves nobody able to
+        # tell one plugin from a maker's whole catalogue.
+        got = sum(len(inv.get(s, {}).get("modules") or {}) for s in fetched)
+        print(f"  {len(fetched)} plugin(s), {got} module(s) now available to "
+              f"this patch.", flush=True)
+    return inv, fetched
+
+
 def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
     """What this machine can actually use, written for the model.
 
@@ -2769,7 +3000,24 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             print(f"  audio out: {device}", flush=True)
 
         ok, report = sounds(patch)
-        if ok:
+        # A CHECK THAT COULD NOT RUN IS NOT A VERDICT, AND NOT A REASON TO
+        # THROW A PATCH AWAY. The crash was named here before it was fixed, and
+        # naming it was still not enough: the retry context said "structurally
+        # valid but SILENT when run" whatever had happened, so the model was
+        # sent to fix a fault nobody had measured, and three attempts later the
+        # run ended "gave up after 3 attempts" with the patch discarded. A
+        # patch that lints clean and whose audibility is UNKNOWN is worth more
+        # than no patch at all, so it is kept and the doubt is said out loud.
+        crashed = (not ok) and GATE_CRASHED in report
+        if crashed:
+            keep_attempt(patch, report, attempt + 1, "gate-crashed")
+            print(f"  the audibility check could not run (attempt "
+                  f"{attempt + 1}):", flush=True)
+            for line in report.splitlines():
+                print(f"    {line.strip()}", flush=True)
+            print("    keeping the patch anyway: it is structurally sound, "
+                  "and nothing here says it is silent.", flush=True)
+        if ok or crashed:
             if claimed:
                 missing = idiom_check.check(patch, inv, idioms[claimed])
                 if missing:
@@ -2792,23 +3040,13 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     continue
                 print(f"  idiom holds: {claimed}")
             return patch, why
-        # A crash and a silent patch are different failures and only one of
-        # them is about the patch. Saying "makes no sound" over a dead process
-        # sends the next hour to the wrong place.
-        crashed = GATE_CRASHED in report
-        keep_attempt(patch, report, attempt + 1,
-                     "gate-crashed" if crashed else "silent")
-        if crashed:
-            print(f"  the audibility check could not run (attempt "
-                  f"{attempt + 1}):", flush=True)
-            for line in report.splitlines():
+        # Silence, measured. A crash never reaches here.
+        keep_attempt(patch, report, attempt + 1, "silent")
+        print(f"  builds, but makes no sound (attempt {attempt + 1}):",
+              flush=True)
+        for line in report.splitlines():
+            if "FAIL" in line or "silent" in line:
                 print(f"    {line.strip()}", flush=True)
-        else:
-            print(f"  builds, but makes no sound (attempt {attempt + 1}):",
-                  flush=True)
-            for line in report.splitlines():
-                if "FAIL" in line or "silent" in line:
-                    print(f"    {line.strip()}", flush=True)
         # The measured output of EVERY module is in the report, so the reason
         # can be pointed at rather than guessed. A VCA reading exactly 0.000 is
         # not a level set too low -- a low level still passes something. It is
@@ -3029,7 +3267,16 @@ def main(argv):
         # Named, because the fetch path below needs the catalog to look up a
         # plugin's version and re-runs preflight after installing.
         cat = catalog()
-        pf = preflight(argv[2], inv, module_index(), cat)
+        midx = module_index()
+        # NAMING SOMETHING HAS TO GUARANTEE IT IS HERE. Before the capability
+        # preflight, because a maker's own module is a better answer to a gap
+        # than the best free stranger, and before the model call, because a
+        # plugin that is not installed cannot appear in a patch however hard
+        # the prompt asks for it.
+        mentions = brand_mentions(argv[2], cat)
+        inv, fetched_named = ensure_named_installed(argv[2], inv, cat, midx,
+                                                    mentions)
+        pf = preflight(argv[2], inv, midx, cat)
         if not pf["ok"] and "--anyway" not in argv:
             # Free first, and with the link. A refusal whose remedy is a free
             # download should cost one click, not a search: the options were
@@ -3069,16 +3316,30 @@ def main(argv):
                     elif "not signed in" in msg:
                         break            # saying it once is enough
             if fetched:
-                if st["auto_restart_rack"]:
-                    ok_rs, msg = restart_rack()
-                    print(f"  {msg}")
                 # The inventory was read before the download; re-read it, or
                 # the very module just installed is still missing to the
                 # generator that is about to run.
                 inv = inventory()
-                pf = preflight(argv[2], inv, module_index(), cat)
+                pf = preflight(argv[2], inv, midx, cat)
             if pf["ok"]:
                 print("  gap closed — building.\n")
+            fetched_named += fetched
+        # ONE restart, after everything that could install something.
+        #
+        # Two fetch paths now run before a build -- what the request NAMED and
+        # what the capability preflight found missing -- and each restarting on
+        # its own would quit Rack twice in one generation. Neither path needs
+        # the restart to succeed: inventory() reads a .vcvplugin archive and
+        # the gate unpacks one, so this build already has the modules. It is
+        # the RUNNING Rack that loads plugins only at startup, which is the
+        # only thing being fixed here.
+        if fetched_named:
+            if settings()["auto_restart_rack"]:
+                _, msg = restart_rack()
+                print(f"  {msg}", flush=True)
+            else:
+                print("  Restart Rack to see the new modules there. This "
+                      "patch already has them.", flush=True)
         if not pf["ok"] and "--anyway" not in argv:
             print("  hold on — this asks for something you don't have installed:\n")
             only_paid = True
@@ -3157,7 +3418,7 @@ def main(argv):
         # What the patch did with the makers that were named. Reported, never
         # enforced: a patch is not worse for using six of a maker's modules
         # than for using seven, and the count is the only way to know which.
-        for line in brand_report(patch, brand_mentions(argv[2], cat)):
+        for line in brand_report(patch, mentions):
             print(line)
         # What was asked for and left out, said AFTER the patch exists.
         #
