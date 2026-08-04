@@ -596,6 +596,16 @@
       "paths": [
         "examples/webview-*/**"
       ]
+    },
+    "forge-app-delivery": {
+      "paths": [
+        "examples/forge-modular/package.sh",
+        "examples/forge-modular/uninstall.sh",
+        "examples/forge-modular/LICENSE-INSTALLER.txt",
+        "forge-seam/populate.sh",
+        "forge-seam/sync.sh",
+        "tools/rack/fetch_sdk.py"
+      ]
     }
   }
 }
