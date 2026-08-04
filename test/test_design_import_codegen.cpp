@@ -3986,3 +3986,50 @@ TEST_CASE("the JS emitter carries background-size, after the shorthand",
     // never tiles.
     CHECK(gradient_at < size_at);
 }
+
+// The colour the DESIGN drew a control in. Without it the widget falls back to
+// the host theme's accent, so a panel whose author chose lilac renders its knobs
+// in whatever the surrounding app uses — the palette reaches the panel and stops
+// at its controls. Observed as the same ui.js rendering periwinkle in one host
+// and mint in another.
+//
+// The IR carries this per control and the native lane already consumed it; only
+// the web-compat lane was silent.
+TEST_CASE("the web-compat lane emits the design's accent for a control",
+          "[view][import][codegen][design-accent]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "CUTOFF";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.attributes["binding"] = "param_1";
+    knob.attributes["design_accent"] = "#d6b8ff";
+    ir.root.children.push_back(std::move(knob));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setAccentColor(") != std::string::npos);
+    CHECK(js.find("#d6b8ff") != std::string::npos);
+}
+
+// A control with no design accent must NOT be forced to one: the host theme is
+// the correct fallback, and emitting an empty colour would blank the widget.
+TEST_CASE("a control with no design accent is left to the theme",
+          "[view][import][codegen][design-accent]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode knob;
+    knob.type = "frame";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.attributes["binding"] = "param_1";
+    ir.root.children.push_back(std::move(knob));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setAccentColor(") == std::string::npos);
+}

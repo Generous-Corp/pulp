@@ -320,6 +320,21 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             // turn a user gesture back into a parameter write. Emit the reverse
             // change path alongside it or the imported control looks live while
             // dragging it changes no audio or host automation.
+            // The colour the DESIGN drew this control in. Without it the widget
+            // falls back to the host theme's accent, so a panel whose author
+            // chose lilac renders its knobs in whatever mint the surrounding
+            // app happens to use — the design's own palette reaches the panel
+            // and stops at its controls.
+            //
+            // The IR carries this per control and the native lane already
+            // consumes it (apply_designed_body_skin); only this lane was
+            // silent, which is why the same ui.js renders differently in two
+            // hosts.
+            if (const auto accent = node.attributes.find("design_accent");
+                accent != node.attributes.end() && !accent->second.empty()) {
+                ss << ind << "setAccentColor(" << var << "._id, '"
+                   << js_single_quote_escape(accent->second) << "');\n";
+            }
             if (const auto binding = node.attributes.find("binding");
                 binding != node.attributes.end() && !binding->second.empty()) {
                 const std::string escaped =
