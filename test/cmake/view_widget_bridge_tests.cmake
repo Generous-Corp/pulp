@@ -262,14 +262,25 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
 endif()
 endif()
 
-# An ordinary pulp-format consumer is the inspector-stripped artifact fixture.
+# An ordinary pulp::standalone consumer is the inspector-stripped artifact fixture.
 # The post-build scan is non-vacuous when inspector components are present:
 # it first proves their archive contains pulp::inspect symbols, then rejects
 # every defined pulp::inspect symbol in this consumer.
 add_executable(pulp-test-inspector-stripped-artifact
     fixtures/inspector_stripped_artifact.cpp)
 target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
-    pulp::format)
+    pulp::standalone)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_CAPABILITIES "")
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_MANIFEST_DIRECTORY
+    "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+_pulp_configure_inspector_shipping(
+    pulp-test-inspector-stripped-artifact
+    "com.pulp.test.inspector-stripped"
+    "Inspector Stripped Artifact")
+_pulp_attach_inspector_shipping(
+    pulp-test-inspector-stripped-artifact pulp-test-inspector-stripped-artifact)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
 unset(_pulp_inspector_symbol_tool)
@@ -302,7 +313,7 @@ else()
             "-DSTRIPPED_ARTIFACT=$<TARGET_FILE:pulp-test-inspector-stripped-artifact>"
             "-DINSPECTOR_ARCHIVE=${_pulp_inspector_archive}"
             -P "${CMAKE_CURRENT_LIST_DIR}/check_inspector_stripped_artifact.cmake"
-        COMMENT "Checking ordinary format consumers contain no inspector symbols")
+        COMMENT "Checking ordinary standalone consumers contain no inspector symbols")
     unset(_pulp_inspector_archive)
 endif()
 unset(_pulp_compiler_dir)

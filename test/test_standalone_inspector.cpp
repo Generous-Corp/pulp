@@ -41,6 +41,21 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 using namespace pulp::test::standalone_inspector;
 
+#if PULP_TEST_STANDALONE_INSPECTOR
+// Production executables receive this link declaration only from the generated
+// product shipping marker. Unit tests exercise the composition root directly.
+extern "C" void pulp_inspector_shipping_declaration_v1() {}
+#endif
+
+namespace {
+
+struct ScopedShippingCapabilitiesReset {
+    ~ScopedShippingCapabilitiesReset() {
+        set_standalone_inspector_shipping_capabilities({});
+    }
+};
+
+} // namespace
 
 #if PULP_TEST_STANDALONE_INSPECTOR
 TEST_CASE("Standalone inspector off mode creates no runtime, hook, endpoint, or artifact",
@@ -326,6 +341,26 @@ TEST_CASE("Standalone inspector does not advertise capture for a native-overlay 
         app, processor, bridge, root, window, "custom",
         {"session.describe", "capture.image"});
     REQUIRE(runtime == nullptr);
+}
+
+TEST_CASE("shipping-bounded profiles omit unavailable capture",
+          "[standalone][inspect][capabilities][shipping]") {
+    ScopedShippingCapabilitiesReset reset;
+    set_standalone_inspector_shipping_capabilities(
+        {"session.describe", "capture.image"});
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    auto native_overlay = std::make_unique<View>();
+    native_overlay->set_contains_native_overlay(true);
+    root.add_child(std::move(native_overlay));
+    StubWindowHost window;
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "observe", {});
+    REQUIRE(runtime != nullptr);
+    runtime->stop();
 }
 
 TEST_CASE("Standalone inspector rejects a non-blocking window event loop",

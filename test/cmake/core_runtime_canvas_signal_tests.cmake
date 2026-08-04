@@ -1,6 +1,8 @@
 # Core runtime, canvas, scheduler, and signal-graph test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake)
+
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
@@ -328,12 +330,14 @@ pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # hazard as pulp-test-audio above, so they get the same PROCESSORS reservation.
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
-pulp_add_test_suite(pulp-test-standalone-inspector
-    SOURCES test_standalone_inspector.cpp
-    LIBRARIES pulp::standalone
-    PROPERTIES PROCESSORS 8)
 if(TARGET pulp::inspect AND NOT IOS)
-    target_compile_definitions(pulp-standalone PRIVATE
+    pulp_add_test_suite(pulp-test-standalone-inspector
+        SOURCES test_standalone_inspector.cpp
+        LIBRARIES pulp::standalone-inspector-runtime-eval
+        PROPERTIES PROCESSORS 8)
+    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_compile_definitions(pulp-standalone-inspector PRIVATE
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=1
@@ -343,12 +347,16 @@ if(TARGET pulp::inspect AND NOT IOS)
 
     pulp_add_test_suite(pulp-test-standalone-runtime-eval
         SOURCES test_standalone_runtime_eval.cpp
-        LIBRARIES pulp::standalone pulp::inspect-client
+        LIBRARIES pulp::standalone-inspector-runtime-eval pulp::inspect-client
         PROPERTIES PROCESSORS 8)
     target_compile_definitions(pulp-test-standalone-runtime-eval PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=1
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
 else()
+    pulp_add_test_suite(pulp-test-standalone-inspector
+        SOURCES test_standalone_inspector.cpp
+        LIBRARIES pulp::standalone
+        PROPERTIES PROCESSORS 8)
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=0)
 endif()
@@ -359,10 +367,24 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect
         PROPERTIES LANGUAGE OBJCXX)
     add_executable(pulp-standalone-inspector-process-fixture
         fixtures/standalone_inspector_process_fixture.cpp)
+    set(PULP_pulp-standalone-inspector-process-fixture_SHIP_INSPECTOR TRUE)
+    set(PULP_pulp-standalone-inspector-process-fixture_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
+    set(PULP_pulp-standalone-inspector-process-fixture_INSPECTOR_CAPABILITIES
+        session.describe state.read ui.read diagnostics.read logs.read
+        capture.image telemetry.stream)
+    set(PULP_pulp-standalone-inspector-process-fixture_INSPECTOR_MANIFEST_DIRECTORY
+        "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+    _pulp_configure_inspector_shipping(
+        pulp-standalone-inspector-process-fixture
+        "com.pulp.test.inspector-developer-edition"
+        "Inspector Developer Edition")
     target_compile_definitions(pulp-standalone-inspector-process-fixture PRIVATE
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_link_libraries(pulp-standalone-inspector-process-fixture PRIVATE
-        pulp::standalone)
+        pulp::standalone-inspector)
+    _pulp_attach_inspector_shipping(
+        pulp-standalone-inspector-process-fixture
+        pulp-standalone-inspector-process-fixture)
 
     pulp_add_test_suite(pulp-test-standalone-inspector-process
         SOURCES test_standalone_inspector_process.cpp

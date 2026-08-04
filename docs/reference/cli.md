@@ -298,6 +298,11 @@ when the pixels themselves must show live signal.
 
 #### Development Inspector profiles
 
+Shipping is a separate build/package decision from these runtime profiles. See
+[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
+for the exact target manifest, binary proof, and the separate unsafe
+`runtime.eval` acknowledgement.
+
 Standalone inspector activation requires a GPU-enabled desktop build and a
 window host that can drain accepted owning-thread work while its event loop
 exits and defer a startup-failure close to a later native event turn. Pulp
@@ -1044,7 +1049,12 @@ and are only notarized + verified.
 
 For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
 instead of `artifacts/`, and `--entitlements <plist>` to override the default
-app-signing entitlements.
+app-signing entitlements. Inspector-capable apps must also pass
+`--ship-inspector`; apps that include `runtime.eval` additionally require the
+distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
+app executable against its adjacent capability sidecar before signing. For a
+prebuilt `.dmg` or `.pkg`, it mounts or expands the container and applies the
+same scan to every contained standalone app before accepting the flags.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
