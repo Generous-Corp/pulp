@@ -927,6 +927,15 @@ TEST_CASE("shaped width follows the requested weight",
     // entirely, costs 2% and ~10% respectively on this corpus — both an order
     // of magnitude outside a residual of this size. A tighter absolute bound
     // would encode the unexplained offset as if it were understood.
+    //
+    // macOS only, because the oracle is: these numbers were measured from
+    // Chrome ON macOS, and they are fractional. FreeType rounds each glyph
+    // advance to a whole pixel, so the same string in the same face measures
+    // 156.0 / 160.0 on a Linux runner — about 3.4% wider, which is per-glyph
+    // rounding accumulated over fourteen glyphs, not a different face. The
+    // invariants above (bold wider than regular, the weight recorded) are the
+    // cross-platform claim; pixel agreement with Chrome is not.
+#if defined(__APPLE__)
     CHECK_THAT(regular.total_width(),
                Catch::Matchers::WithinRel(kChromeRegularWidth, 0.01f));
     CHECK_THAT(bold.total_width(),
@@ -937,6 +946,7 @@ TEST_CASE("shaped width follows the requested weight",
     CHECK_THAT(bold.total_width() - regular.total_width(),
                Catch::Matchers::WithinAbs(
                    kChromeBoldWidth - kChromeRegularWidth, 0.05));
+#endif  // __APPLE__
 
     CHECK(regular.font_weight() == 400);
     CHECK(bold.font_weight() == 700);
