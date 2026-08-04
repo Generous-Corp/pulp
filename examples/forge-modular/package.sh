@@ -62,6 +62,30 @@ else
     APP="$BUILD_DIR/examples/forge-modular/Forge Modular.app"
 fi
 echo "[installer] app: $APP"
+
+# THE GENERATOR MUST SHIP. The 0.12.1 package carried the app, the plugins and
+# the Rack modules, and ZERO python -- so on a machine that had never seen the
+# source, Build did nothing. It only ever worked on the build machine because a
+# manual step had written the tools into Application Support by hand.
+#
+# Staged into a COPY of the bundle, before signing, so the signature covers
+# them and the source tree is never mutated by packaging.
+STAGED_ROOT="$(mktemp -d)"
+trap 'rm -rf "$STAGED_ROOT"' EXIT
+ditto "$APP" "$STAGED_ROOT/$(basename "$APP")"
+APP="$STAGED_ROOT/$(basename "$APP")"
+TOOLS_DEST="$APP/Contents/Resources/tools/rack"
+mkdir -p "$TOOLS_DEST"
+ditto "$REPO/tools/rack" "$TOOLS_DEST"
+# The uninstaller and the SDK fetch live beside the app that offers them.
+for helper in uninstall.sh fetch_rack_sdk.sh; do
+    if [[ -f "$REPO/examples/forge-modular/$helper" ]]; then
+        ditto "$REPO/examples/forge-modular/$helper" "$APP/Contents/Resources/$helper"
+        chmod +x "$APP/Contents/Resources/$helper"
+    fi
+done
+[[ -f "$TOOLS_DEST/patch.py" ]] || { echo "staging failed: no patch.py" >&2; exit 1; }
+echo "[installer] staged $(ls "$TOOLS_DEST"/*.py | wc -l | tr -d ' ') generator files + helpers"
 AU="$BUILD_DIR/AU/Forge Modular.component"
 VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
 CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"

@@ -16,6 +16,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
+#include <mach-o/dyld.h>
 #include <thread>
 
 #include <cstdlib>
@@ -32,6 +34,27 @@ namespace forge_modular {
 
 namespace {
 
+/// The generator shipped inside whatever bundle is running us, or "".
+///
+/// Walks up from the executable to the .app/.component/.vst3/.clap and looks
+/// in its Resources. All four formats are built from the same sources and are
+/// staged the same way, so one walk serves them all rather than four guesses.
+std::string bundle_tools_dir() {
+    char buf[4096];
+    std::uint32_t size = sizeof buf;
+    if (_NSGetExecutablePath(buf, &size) != 0) return {};
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::weakly_canonical(
+        std::filesystem::path(buf), ec);
+    // …/Foo.app/Contents/MacOS/Foo -> …/Foo.app/Contents/Resources/tools/rack
+    for (int up = 0; up < 6 && !p.empty(); ++up) {
+        p = p.parent_path();
+        if (p.filename() == "Contents")
+            return (p / "Resources" / "tools" / "rack").string();
+    }
+    return {};
+}
+
 /// Where the generator lives. A source checkout wins when present so a
 /// developer's edits are what runs; the bundle's own copy is the fallback.
 std::string tools_dir() {
@@ -47,6 +70,17 @@ std::string tools_dir() {
     std::error_code ec;
     if (std::filesystem::exists(std::filesystem::path(installed) / "patch.py", ec))
         return installed;
+    // THE BUNDLE'S OWN COPY. Without this the installer is not a product: the
+    // .pkg carried the app and no generator, so on a machine that had never
+    // seen the source, Build did nothing. It only ever worked here because a
+    // manual step had written the tools into Application Support by hand.
+    //
+    // Second, not first, so the Application Support copy still wins -- that is
+    // the one a user or a future updater can replace without reinstalling.
+    if (const std::string own = bundle_tools_dir(); !own.empty()) {
+        if (std::filesystem::exists(std::filesystem::path(own) / "patch.py", ec))
+            return own;
+    }
     // A developer with no installed copy can still point at their checkout,
     // consent once, and carry on.
     return "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
