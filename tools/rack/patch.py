@@ -1404,6 +1404,7 @@ def rack_entitlements() -> set:
 
 
 _ENTITLEMENTS_CACHE = {}
+_SAID_UNAVAILABLE = False
 ENTITLEMENTS = os.path.join(CACHE_DIR, "entitlements.json")
 ENTITLEMENTS_MAX_AGE_DAYS = 1
 
@@ -2076,6 +2077,19 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
     out.append(block("NOT available", unavailable,
                      "Paid plugins this user does not own. Do not use them; "
                      "nothing here will buy a plugin."))
+
+    # SAY IT TO THE PERSON, not only to the model. The model is told which
+    # modules are unavailable and quietly routes around them, so a user who
+    # named one never learns why it is missing from the patch they asked for.
+    # Printed once per run rather than per retry: generate() calls this again
+    # on every attempt, and repeating it would read as three separate faults.
+    global _SAID_UNAVAILABLE
+    if unavailable and not _SAID_UNAVAILABLE:
+        _SAID_UNAVAILABLE = True
+        named = ", ".join(sorted(set(unavailable))[:6])
+        print(f"  note: {named} {'is' if len(set(unavailable)) == 1 else 'are'} "
+              f"paid and not on this VCV account, so the patch will use "
+              f"something else. Nothing here buys a module.", flush=True)
 
     st = settings()
     policy = {
