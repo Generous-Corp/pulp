@@ -1303,10 +1303,68 @@ index 1c3814e..d1d5657 100644
 +
  }  // namespace forge
 diff --git a/src/settings_surface.cpp b/src/settings_surface.cpp
-index 7ef8a34..70cce8c 100644
+index 7ef8a34..efb130b 100644
 --- a/src/settings_surface.cpp
 +++ b/src/settings_surface.cpp
-@@ -760,6 +760,96 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
+@@ -61,6 +61,23 @@ void size(View& view, float width, float height) {
+     view.flex().flex_shrink = 0;
+ }
+ 
++/// Reserve the room a wrapped paragraph actually needs.
++///
++/// Yoga's measure callback asks a Label for its INTRINSIC width first, and a
++/// paragraph's intrinsic width is the whole thing on one line -- so the height
++/// it measures at that width is one line, and every sibling below it is drawn
++/// on top of the rest. Measuring at the width the label is actually bounded to
++/// is what makes the reserved box match the painted one.
++float fit_multiline(Label& label, float width) {
++    label.set_multi_line(true);
++    label.flex().max_width = width;
++    label.flex().dim_width = {width, DimensionUnit::px};
++    const float height = label.measured_height(width);
++    if (height > 0.0f) label.flex().preferred_height = height;
++    label.flex().flex_shrink = 0;
++    return height > 0.0f ? height : 0.0f;
++}
++
+ std::unique_ptr<View> make_spacer() {
+     auto view = std::make_unique<View>();
+     view->flex().flex_grow = 1;
+@@ -695,17 +712,31 @@ std::unique_ptr<View> SettingsSurface::build_appearance_pane() {
+ }
+ 
+ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
++    // THIS PANE SCROLLS, for the same reason the AI pane does.
++    //
++    // The settings card is a fixed 660 tall. A pane taller than that does not
++    // clip -- flex shrinks whatever it can, so captions collapse to nothing
++    // and every row is drawn on top of the one below it. Adding a product row
++    // made that unmistakable; it was already true of the built-in ones.
++    //
++    // The height is accumulated as the rows are built rather than authored,
++    // because a product contributes rows whose text this file has never seen.
++    auto scroll = std::make_unique<ScrollView>();
++    scroll->flex().flex_grow = 1;
++    float used = 44.0f;                    // the column's own padding
++    const auto grew = [&used](float h) { used += h + 12.0f; };  // + the gap
++
+     auto col = make_box(FlexDirection::column);
+     col->flex().padding = 22;
+     col->flex().gap = 12;
+     col->add_child(make_label("Permissions & local records", kFontDisplay,
+                               18, 700, kTextStrong));
++    grew(24.0f);
+     auto pending = make_label(
+         "Granular agent permissions and notifications are present by design "
+         "but remain inactive until their product semantics are settled.",
+         kFontDisplay, 13, 400, kMuted);
+-    pending->set_multi_line(true);
+-    pending->flex().max_width = 650;
++    grew(fit_multiline(*pending, 650));
+     col->add_child(std::move(pending));
+ 
+     auto row = make_box(FlexDirection::row);
+@@ -760,6 +791,96 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
      path_row->add_child(std::move(open_folder));
      col->add_child(std::move(path_row));
  
@@ -1330,11 +1388,11 @@ index 7ef8a34..70cce8c 100644
 +        if (!choice.detail.empty()) {
 +            auto note = make_label(choice.detail, kFontDisplay, 12, 400,
 +                                   kMuted);
-+            note->set_multi_line(true);
-+            note->flex().max_width = 560;
++            grew(fit_multiline(*note, 560));
 +            text_column->add_child(std::move(note));
 +        }
 +        col->add_child(std::move(text_column));
++        grew(22.0f);                       // the caption above the blurb
 +
 +        auto options = make_box(FlexDirection::row);
 +        options->flex().gap = 6;
@@ -1388,13 +1446,13 @@ index 7ef8a34..70cce8c 100644
 +            options->add_child(std::move(button));
 +        }
 +        col->add_child(std::move(options));
++        grew(34.0f);                       // the button row
 +
 +        // AND WHAT HAPPENED. Always mounted, even when the text is empty, so
 +        // a later report has a label to land in -- a status that only exists
 +        // once there is something to say cannot say the first thing.
 +        auto status = make_label(choice.status, kFontDisplay, 12, 400, kMuted);
-+        status->set_multi_line(true);
-+        status->flex().max_width = 560;
++        grew(fit_multiline(*status, 560));
 +        status->set_visible(!choice.status.empty());
 +        product_status_labels_.push_back(status.get());
 +        col->add_child(std::move(status));
@@ -1403,10 +1461,24 @@ index 7ef8a34..70cce8c 100644
      auto permissions = make_box(FlexDirection::column);
      permissions->set_background_color(kRaised);
      permissions->set_border(kLine, 1, 12);
-@@ -782,6 +872,55 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
-     return col;
- }
- 
+@@ -779,7 +900,66 @@ std::unique_ptr<View> SettingsSurface::build_permissions_pane() {
+     permissions_copy->flex().flex_shrink = 0;
+     permissions->add_child(std::move(permissions_copy));
+     col->add_child(std::move(permissions));
+-    return col;
++    grew(96.0f);                           // the provider-permissions card
++
++    // The two built-in rows above the product rows: the build-files toggle and
++    // its path line, and the row that holds them.
++    used += 120.0f;
++    col->flex().preferred_height = used;
++    col->flex().flex_shrink = 0;
++    col->flex().dim_width = {100, DimensionUnit::percent};
++    scroll->set_content_size({720, used});
++    scroll->add_child(std::move(col));
++    return scroll;
++}
++
 +void SettingsSurface::refresh_product_choice_styles() {
 +    for (const auto& entry : product_buttons_) {
 +        if (!entry.button || entry.choice >= product_choices_.size()) continue;
@@ -1454,12 +1526,10 @@ index 7ef8a34..70cce8c 100644
 +        if (seen++ == option) return entry.button;
 +    }
 +    return nullptr;
-+}
-+
+ }
+ 
  std::unique_ptr<View> SettingsSurface::build_mcp_pane() {
-     auto col = make_box(FlexDirection::column);
-     col->flex().padding = 22;
-@@ -966,7 +1105,11 @@ void SettingsSurface::open_providers() {
+@@ -966,7 +1146,11 @@ void SettingsSurface::open_providers() {
  
  void SettingsSurface::open_permissions() {
      open();

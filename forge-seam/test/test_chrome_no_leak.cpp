@@ -2167,6 +2167,14 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
     chrome->settings_product_choice_button(1, 0)->on_click();
     CHECK(shell.launched().size() == before + 2);
 
+    // The two ACTION rows are reachable too: refresh the index, and copy the
+    // build report. A row that exists and cannot be pressed is the shape of
+    // half the defects in this product's history.
+    REQUIRE(chrome->settings_product_action_button(2) != nullptr);
+    REQUIRE(chrome->settings_product_action_button(2)->on_click);
+    REQUIRE(chrome->settings_product_action_button(3) != nullptr);
+    REQUIRE(chrome->settings_product_action_button(3)->on_click);
+
     // The visual proof: the sheet, open on Permissions, rendered headlessly.
     // Kept in temp for a human to look at; the render succeeding is also the
     // layout pass that would catch a row that cannot fit its pane.

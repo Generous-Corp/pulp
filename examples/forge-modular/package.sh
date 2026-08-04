@@ -424,4 +424,4 @@ export PKG_LICENSE_FILE="${PKG_LICENSE_FILE:-$REPO/examples/forge-modular/LICENS
 "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
 
 PKG="$OUT_DIR/Forge Modular-$VERSION.pkg"
-"$REPO/examples/forge-modular/verify_package.sh" "$PKG"
+"$REPO/examples/forge-modular/verify_package.sh" "$PKG" "$VERSION"

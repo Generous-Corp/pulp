@@ -23,6 +23,14 @@ set -uo pipefail
 
 PKG="${1:-}"
 [[ -n "$PKG" ]] || { echo "usage: verify_package.sh <path to .pkg>" >&2; exit 2; }
+# The version this package claims to be. Taken from the file name when not
+# given, because that is the one place the released version has always been
+# right -- it is everywhere else it was wrong.
+WANT_VERSION="${2:-}"
+if [[ -z "$WANT_VERSION" ]]; then
+    _base="${PKG##*/}"; _base="${_base%.pkg}"
+    WANT_VERSION="${_base##*-}"
+fi
 [[ -f "$PKG" ]] || { echo "no such package: $PKG" >&2; exit 2; }
 
 # The one string that exists in the current shell and cannot exist in the older
@@ -87,6 +95,26 @@ need_file() {   # $1 = path under the bundle  $2 = what it is for
         say_bad "$2 — missing $1"
     fi
 }
+
+# WHICH BUILD IS THIS. An installed 0.12.7 answered 0.11.0, so nothing on the
+# machine could tell 12.6 from 12.7 -- which is how a generator from an older
+# release shadowed a newer one's fixes for four days. Read out of the EXPANDED
+# payload, not out of the build script that claims to have written it.
+_got=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+       "$ROOT/Contents/Info.plist" 2>/dev/null || echo "")
+if [[ "$_got" == "$WANT_VERSION" ]]; then
+    say_ok "the app reports $WANT_VERSION"
+else
+    say_bad "the app reports \"$_got\", not $WANT_VERSION"
+fi
+# And the toolchain inside it says which release laid it down, which is what
+# lets the app refuse to run an older copy from Application Support.
+_stamp=$(sed -n 1p "$ROOT/Contents/Resources/tools/rack/VERSION" 2>/dev/null || echo "")
+if [[ "$_stamp" == "$WANT_VERSION" ]]; then
+    say_ok "the shipped generator is stamped $WANT_VERSION"
+else
+    say_bad "the shipped generator's stamp is \"$_stamp\", not $WANT_VERSION"
+fi
 
 need_file "Contents/Resources/tools/rack/patch.py"     "the patch generator ships"
 need_file "Contents/Resources/tools/rack/generate.py"  "the module generator ships"
@@ -207,6 +235,17 @@ for kind in au vst3 clap; do
         else
             say_ok "$kind carries a real binary ($((psize / 1048576)) MB)"
         fi
+    fi
+    # A DAW showing 0.11.0 beside an app showing 0.12.8 is the same
+    # unanswerable question in a worse place.
+    pplist="$WORK/$kind/Contents/Info.plist"
+    [[ -f "$pplist" ]] || pplist="$WORK/$kind/$sub/Contents/Info.plist"
+    kgot=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+           "$pplist" 2>/dev/null || echo "")
+    if [[ "$kgot" == "$WANT_VERSION" ]]; then
+        say_ok "$kind reports $WANT_VERSION"
+    else
+        say_bad "$kind reports \"$kgot\", not $WANT_VERSION"
     fi
 done
 
