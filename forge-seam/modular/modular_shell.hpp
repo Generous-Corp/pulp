@@ -189,6 +189,7 @@ public:
     /// What the controls currently show, for tests.
     const std::string& module_source_shown() const { return module_source_; }
     const std::string& auto_download_shown() const { return auto_download_; }
+    int generation_minutes_shown() const { return generation_minutes_; }
 
     /// What this build is and what it is running: version, packaged date, the
     /// LIVE generator path and its stamp, the index, the Rack SDK and whether
@@ -207,7 +208,7 @@ public:
     /// Which settings row the library-index status belongs to. The order in
     /// settings_choices() is the contract between the two, so it is named
     /// once rather than counted twice.
-    static constexpr std::size_t kLibraryIndexRow = 2;
+    static constexpr std::size_t kLibraryIndexRow = 3;
 
     /// Adopt a preference and hand the write to patch.py, the one validated
     /// writer of the settings file. A no-op when the value is already
@@ -501,6 +502,9 @@ private:
     /// answer from a stale file.
     std::string module_source_ = "prefer_existing";
     std::string auto_download_ = "entitled";
+    /// The same default patch.py carries, so the two cannot disagree about
+    /// how long a generation is allowed to take.
+    int generation_minutes_ = 10;
     /// What the index held when Refresh was pressed, so the row can report a
     /// before and an after rather than a number with nothing to compare to.
     std::string refresh_before_;

@@ -2266,12 +2266,13 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
     REQUIRE(chrome != nullptr);
 
     // Both controls are in the live sheet, every option present and handled.
-    // Four rows now: the two choices, the library-index action and the
+    // Five rows now: three choices, the library-index action and the
     // build-details report, all through the same settings_choices() hook.
-    REQUIRE(chrome->settings_product_choice_count() == 4);
+    REQUIRE(chrome->settings_product_choice_count() == 5);
     REQUIRE(options_of(*chrome, 0) == 3);
     REQUIRE(options_of(*chrome, 1) == 2);
-    for (std::size_t c = 0; c < 2; ++c)
+    REQUIRE(options_of(*chrome, 2) == 4);      // 10, 15, 20 and 25 minutes
+    for (std::size_t c = 0; c < 3; ++c)
         for (int i = 0; auto* b = chrome->settings_product_choice_button(c, i);
              ++i)
             REQUIRE(b->on_click);
@@ -2321,10 +2322,10 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
     // The two ACTION rows are reachable too: refresh the index, and copy the
     // build report. A row that exists and cannot be pressed is the shape of
     // half the defects in this product's history.
-    REQUIRE(chrome->settings_product_action_button(2) != nullptr);
-    REQUIRE(chrome->settings_product_action_button(2)->on_click);
     REQUIRE(chrome->settings_product_action_button(3) != nullptr);
     REQUIRE(chrome->settings_product_action_button(3)->on_click);
+    REQUIRE(chrome->settings_product_action_button(4) != nullptr);
+    REQUIRE(chrome->settings_product_action_button(4)->on_click);
 
     // The visual proof: the sheet, open on Permissions, rendered headlessly.
     // Kept in temp for a human to look at; the render succeeding is also the
@@ -2341,6 +2342,49 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
         pulp::view::ScreenshotBackend::skia));
     view->set_frame_clock(nullptr);
     shell.on_view_closed(*view);
+}
+
+TEST_CASE("the generation time limit is a row, and it persists",
+          "[prefs][seam]") {
+    // Ten minutes was a constant inside the generator, so a rack too big to
+    // build in ten could not be built at all without editing a JSON file
+    // nobody knows the path of.
+    ScratchHome home;
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    shell.set_launcher([](const std::string& command) {
+        std::string out;
+        forge_modular::ProcessEngine::run(command, out);
+    });
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    REQUIRE(shell.chrome() != nullptr);
+    CHECK(shell.generation_minutes_shown() == 10);      // the default
+    CHECK(chosen_of(*shell.chrome(), 2) == std::pair{1, 0});
+
+    // 25 minutes, through the real button, written by the real patch.py.
+    shell.chrome()->settings_product_choice_button(2, 3)->on_click();
+    CHECK(shell.generation_minutes_shown() == 25);
+    REQUIRE(std::filesystem::exists(home.settings()));
+
+    // Read back into a fresh editor. A NUMBER is the case that broke here:
+    // the settings reader looked for a quoted string, and asked for an
+    // unquoted number it returned the next key's value instead.
+    shell.on_view_closed(*view);
+    view.reset();
+    auto reopened = shell.create_view();
+    REQUIRE(reopened != nullptr);
+    CHECK(shell.generation_minutes_shown() == 25);
+    CHECK(chosen_of(*shell.chrome(), 2) == std::pair{1, 3});
+    shell.on_view_closed(*reopened);
 }
 
 TEST_CASE("the provider-permissions card is only shown where it applies",
@@ -2452,7 +2496,7 @@ TEST_CASE("a preference chosen in one editor survives into the next",
     auto reopened = shell.create_view();
     REQUIRE(reopened != nullptr);
     REQUIRE(shell.chrome() != nullptr);
-    REQUIRE(shell.chrome()->settings_product_choice_count() == 4);
+    REQUIRE(shell.chrome()->settings_product_choice_count() == 5);
     // The fresh sheet paints the persisted choice, not the default.
     CHECK(chosen_of(*shell.chrome(), 0) == std::pair{1, 2});
     shell.on_view_closed(*reopened);

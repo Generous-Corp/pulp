@@ -1353,6 +1353,15 @@ SETTINGS_DEFAULTS = {
     # fetched, the same courtesy auto_download="none" extends to modules, for
     # anyone who wants this machine to download nothing on its own.
     "auto_fetch_sdk": True,
+    # How long ONE model call may take, in minutes, before it is given up on.
+    #
+    # Ten is what this ran at before the number was reachable, and it covers
+    # the ordinary case with room: about seven minutes builds forty modules.
+    # A big rack asked for in one sentence can want longer, and the only
+    # remedy used to be editing this file. The ceiling exists because a call
+    # that has been quiet for half an hour is not slow, it is stuck, and a
+    # limit nobody would ever hit is not a limit.
+    "generation_minutes": 10,
     # Fetch a FREE module from the VCV library when one would close the gap.
     # Needs a Rack account token, which Rack stores in its own settings after
     # you sign in to the library; without one this is inert and says so. We
@@ -1640,7 +1649,22 @@ SETTING_CHOICES = {
     "auto_download_free": (True, False),
     "auto_restart_rack": (True, False),
     "auto_fetch_sdk": (True, False),
+    "generation_minutes": (10, 15, 20, 25),
 }
+
+
+def generation_seconds() -> float:
+    """The model-call time limit, in seconds, whatever the file says.
+
+    Clamped rather than trusted: the file is editable by hand, and a zero or a
+    negative there would turn every generation into an instant failure with
+    nothing on screen to explain it.
+    """
+    try:
+        minutes = float(settings().get("generation_minutes", 10))
+    except (TypeError, ValueError):
+        minutes = 10.0
+    return max(10.0, min(25.0, minutes)) * 60.0
 
 
 def write_setting(key: str, value) -> None:
@@ -2107,6 +2131,112 @@ def sounds(patch: dict) -> tuple[bool, str]:
         return False, "the patch did not finish running within 300 s"
     finally:
         os.unlink(tmp)
+
+
+def ask_model(claude: str, prompt: str, seconds: float, tick: float = 8.0):
+    """Run the model and NARRATE it while it runs. -> (code, text, stderr).
+
+    The model call is the longest step in a generation by a wide margin --
+    minutes of it, all network -- and it used to be one blocking read. Nothing
+    was printed until it finished, so a healthy seven-minute call and a wedged
+    one produced exactly the same screen: a stage chip and a clock. A clock
+    counts whether or not anything is happening, which is the one thing the
+    watcher needs to know.
+
+    `--output-format=stream-json --include-partial-messages` turns that call
+    into a line of JSON per event, so the answer can be counted as it arrives.
+    (`--verbose` is not optional: the CLI refuses stream-json without it.)
+    Each tick prints how much has come back, which is a fact about THIS run --
+    a number that stops moving says something a clock cannot.
+
+    Plain text on stdout is still accepted and returned as-is: a caller that
+    stubs the CLI with a script that prints the answer is testing the parsing
+    around it, and should not have to imitate a stream to do so.
+    """
+    import json as _json
+    import subprocess
+    import threading
+    import time
+
+    import toolpaths
+
+    proc = subprocess.Popen(
+        [claude, "-p", "--strict-mcp-config", "--verbose",
+         "--output-format=stream-json", "--include-partial-messages", prompt],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+        env=toolpaths.tool_env())
+
+    # A wedged call produces no lines at all, and a blocking read on a pipe
+    # cannot time itself out -- so the deadline is a timer that kills the
+    # process, which ends the read.
+    killed = threading.Event()
+
+    def give_up():
+        killed.set()
+        try:
+            proc.kill()
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    timer = threading.Timer(max(1.0, seconds), give_up)
+    timer.daemon = True
+    timer.start()
+
+    started = time.monotonic()
+    last_said = started
+    answer, plain, characters, thinking = [], [], 0, 0
+    try:
+        for raw in proc.stdout:
+            line = raw.rstrip("\n")
+            event = None
+            if line.startswith("{"):
+                try:
+                    event = _json.loads(line)
+                except ValueError:
+                    event = None
+            if not isinstance(event, dict) or "type" not in event:
+                plain.append(line)                  # not a stream: keep it
+                continue
+
+            kind = event.get("type")
+            if kind == "stream_event":
+                delta = (event.get("event") or {}).get("delta") or {}
+                text = delta.get("text") or ""
+                characters += len(text)
+                thinking += len(delta.get("thinking") or "")
+            elif kind == "assistant":
+                for block in (event.get("message") or {}).get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        answer.append(block.get("text") or "")
+            elif kind == "result":
+                # The whole answer, assembled by the CLI. Preferred over the
+                # blocks above when both are there: one authority for what was
+                # said beats two that can disagree.
+                if isinstance(event.get("result"), str):
+                    answer = [event["result"]]
+
+            now = time.monotonic()
+            if now - last_said >= tick and (characters or thinking):
+                last_said = now
+                # Deliberately not a percentage. Nothing here knows how long
+                # the answer will be, and a made-up denominator is worse than
+                # an honest count.
+                what = (f"{characters:,} characters" if characters
+                        else f"{thinking:,} characters of thinking")
+                print(f"  the model is answering · {what} so far",
+                      flush=True)
+    finally:
+        timer.cancel()
+
+    stderr = proc.stderr.read() if proc.stderr else ""
+    proc.wait()
+    text = "".join(answer) if answer else "\n".join(plain)
+    if killed.is_set():
+        minutes = seconds / 60.0
+        return 1, text, (
+            f"the model call passed its {minutes:g} minute limit and was "
+            f"stopped. Raise it in Settings, on the Permissions tab.")
+    return proc.returncode, text, stderr
 
 
 def model_failure(stdout: str, stderr: str) -> str:
@@ -2943,14 +3073,12 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # both with and without the flag. What it buys is that a generation
         # does not depend on which MCP servers the operator happens to have
         # configured, or on whether one of them is broken today.
-        r = subprocess.run([claude, "-p", "--strict-mcp-config",
-                            "\n".join(parts)],
-                           capture_output=True, text=True, timeout=600,
-                           env=toolpaths.tool_env())
-        if r.returncode != 0:
-            raise SystemExit(model_failure(r.stdout, r.stderr))
-        pj = re.search(r"```(?:json patch|json)\s*\n(.*?)```", r.stdout, re.S)
-        wj = re.search(r"```json why\s*\n(.*?)```", r.stdout, re.S)
+        code, said, errors = ask_model(claude, "\n".join(parts),
+                                       generation_seconds())
+        if code != 0:
+            raise SystemExit(model_failure(said, errors))
+        pj = re.search(r"```(?:json patch|json)\s*\n(.*?)```", said, re.S)
+        wj = re.search(r"```json why\s*\n(.*?)```", said, re.S)
         if not pj:
             ctx = "Your reply did not contain a ```json patch block."
             continue
@@ -3091,6 +3219,10 @@ def main(argv):
             return 2
         raw = argv[3]
         value = {"true": True, "false": False}.get(raw.lower(), raw)
+        # A number arrives as a string like every other argument, and a
+        # setting whose choices are numbers would reject its own values.
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
         write_setting(argv[2], value)
         print(f"{argv[2]} = {raw}")
         return 0
