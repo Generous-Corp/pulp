@@ -396,3 +396,55 @@ Use the exit code. `tools/rack/sign_bundles.sh` signs (inner dylibs first),
 notarizes, staples and re-reports all four bundles; `--check` reports without
 changing anything, and names an ad-hoc signature as ad-hoc rather than printing
 an empty authority that skims past as fine.
+
+## A module's WIDTH is knowable from its artwork, and from nowhere else
+
+Four things could say how wide a third-party module is and, for a plugin
+fetched five minutes ago, none of them does: a `.vcv` records no width, a
+`plugin.json` carries none, the port map has an entry only for modules CARTOG
+has scanned, and the generated `.why.json` sidecar copies its `hp` from the
+inventory, which copies it from the port map. So a fresh maker's modules all
+arrive at the fallback of 8 HP, and the preview drew a 30 HP sequencer squeezed
+into a quarter of its width. That does not read as "we do not know how wide this
+is"; it reads as panels stretched to the ceiling, which is how it was reported.
+
+The panel SVG is a picture of the module at its true size, and every 3U panel is
+128.5 mm tall, so the root tag's own aspect IS the width — in whatever units the
+vendor drew it. `panel_hp_from_artwork()` reads it; `RackModule::width_measured`
+is what distinguishes a measurement from the fallback, so the preview knows when
+to go and look.
+
+Two things follow:
+
+- **True widths overlap.** The positions in a patch were written by something
+  that did not know the widths either — five modules spaced 8 HP apart turning
+  out to be 15, 30, 14, 15 and 24 — so drawing them at their real size stacks
+  them. `layout_rack` walks each row left to right and moves anything that would
+  start inside its neighbour to just after it.
+- **Assert the drawn pixels, not the layout.** The arithmetic in `rack_layout`
+  was right the whole time and the render was still wrong, because the numbers
+  fed into it were a guess. A geometry test that reads `layout_rack`'s output
+  cannot see that. Render with the Skia backend, find the panel's ink, and check
+  `width / height` against `hp * 5.08 / 128.5`.
+
+## The settings reader is string-only, and a number reads as the next key
+
+`modular_setting()` finds the next QUOTED string after a key's colon. A JSON
+number is not quoted, so asking it for one returns the FOLLOWING key's value —
+confidently, in the right shape, with nothing to suggest anything went wrong.
+`modular_setting_int()` exists for numbers. Anything numeric added to
+`SETTINGS_DEFAULTS` needs it, and `patch.py setting KEY VALUE` has to convert
+the argument, or the writer refuses its own choices for not being in the list.
+
+## Streaming the model call
+
+`--output-format=stream-json` is refused without `--verbose`. Events arrive one
+JSON object per line: `stream_event` carries the partial deltas (only with
+`--include-partial-messages`), `assistant` carries whole blocks, and `result`
+carries the finished answer — prefer it, so there is one authority for what was
+said. A blocking read on a pipe cannot time itself out and a wedged call emits
+no lines at all, so the deadline has to be a timer that kills the process.
+
+`ask_model()` still accepts plain text on stdout: most checks here stub the CLI
+with a script that prints an answer, and making each one imitate a stream to
+test the code AROUND the model would be work for nothing.
