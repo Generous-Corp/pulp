@@ -169,6 +169,18 @@ one, and each was found by a user rather than a test:
 Before claiming a capability works, trace it end to end from the surface the user
 touches. "The function exists" is not the claim being made.
 
+The most recent entry is the subtlest, because every part of it behaved as
+specified: **naming something did not fetch it.** A prompt that named a maker
+expanded correctly into the model's brief, the model reached for that maker four
+times, was told each time that the plugin was not installed, substituted
+something else and said so honestly, and the count at the end read "0 module(s)
+drawn from this maker". The download machinery worked and had one trigger — a
+missing-CAPABILITY gap in preflight. A mention was not a trigger at all. **If a
+surface lets somebody name a thing, naming it has to guarantee it is there before
+the thing that consumes the name runs.** Bound what a *category* fetches (a maker
+is a preference, so rank by the request and cap it) and keep the exactness for
+what was named outright.
+
 Two design rules fell out of this:
 
 - **One resolver per resource.** Three components disagreeing about where the
@@ -240,13 +252,35 @@ Two rules fall out of it:
   16 builds" passed while measuring zero activity. Assert the work happened
   (`REQUIRE(cache.stats().builds > 0)`) before asserting it was cheap.
 - **`sample` and other profilers fail silently over SSH** (TCC is per-process).
-- **A CRASHED SUBPROCESS READ AS A VERDICT.** The audibility gate segfaults
-  loading some third-party Rack plugins. `returncode != 0` was taken to mean
-  "this patch makes no sound", so six generations in a row ended "gave up after
-  3 attempts" with an empty explanation and nothing anywhere saying a process
-  had died. A negative return code is a signal, not an answer: check
+- **A CRASHED SUBPROCESS READ AS A VERDICT.** The audibility gate segfaulted
+  loading third-party Rack plugins. `returncode != 0` was taken to mean "this
+  patch makes no sound", so six generations in a row ended "gave up after 3
+  attempts" with an empty explanation and nothing anywhere saying a process had
+  died. A negative return code is a signal, not an answer: check
   `returncode < 0` separately and say which signal and what it was loading.
   The same shape applies to any gate that shells out.
+  **Naming it is only half.** The retry context still said "structurally valid
+  but SILENT when run" whatever had happened, so the model was sent to fix a
+  fault nobody had measured and the patch was discarded at the end anyway. A
+  check that could not run must not feed the verdict path at all: keep the
+  artifact, say the doubt out loud.
+- **A HARNESS THAT STANDS IN FOR A FRAMEWORK MUST DO WHAT THE FRAMEWORK DOES,
+  IN ITS ORDER.** Both of the gate's crashes were that, and both were found from
+  a real backtrace (`~/Library/Logs/DiagnosticReports/*.ips`, or lldb with
+  `settings set target.env-vars DYLD_LIBRARY_PATH=…` — the env var is stripped
+  from a debugged process, so a run under lldb otherwise dies in dyld and looks
+  like a different bug):
+  - `EXC_BAD_ACCESS at 0x10` in a module's *constructor*. `APP` is
+    `rack::contextGet()` and is null until something calls `contextSet()`;
+    `Context::engine` sits at offset 0x10, so any module reading the sample rate
+    while being built dies. Bogaudio's base module does it for all 111 models.
+  - `EXC_BAD_ACCESS at 0x0` in a module's `process()`. **A constructed module is
+    not a running one.** Rack sends `onSampleRateChange` then `onAdd` before it
+    ever calls `process()`, and modules allocate their DSP buffers there — CV
+    funk's Alloy sizes a delay line in it, so the harness read through a null
+    pointer with a zero ring mask.
+  Fixing the first uncovered the second, and each survives the other's fix, so
+  one plugin is not a proxy for the other in a regression test.
 - **The staging output directory may be left read-only.** Testing the install
   path with `chmod -R a-w` (above) leaves `--out` unwritable, and the next
   `package.sh` run dies in a wall of `rm: Permission denied` that reads like a
@@ -281,6 +315,30 @@ been tested. State the mutation and its result when reporting.
   licence follows if it is distributed.
 - The **`.vcvplugin` is the only artifact linking the SDK.** Keeping it a
   separate payload from the app preserves that boundary; merging them blurs it.
+
+## A Forge shell is a bigger view tree than a plugin editor
+
+Two per-frame walks in Pulp were written for a plugin editor's tens of views and
+each asked libc++abi a question per node: `needs_continuous_frames` tried six
+`dynamic_cast`s (three of them through multiple inheritance, so each miss walked
+`__vmi_class_type_info`), and the host-parameter pump asked "is this a
+DesignFrameView". Sampled on an idle Forge Modular window on an M3 Ultra those
+two were **~29% of the process** — more than the Skia drawing and the Yoga layout
+they were gating. Both are now a virtual call and a bool.
+
+The general rule: **anything that runs over the whole view tree every frame must
+not use RTTI**. A shell's tree is thousands of views, and 120 Hz multiplies
+whatever a node costs by four or five orders of magnitude.
+
+Measuring it: no `PULP_TRACING` in these builds, so `sample <pid> 10 -f out.txt`.
+It fails silently over SSH (TCC is per-process), so run it from a window on the
+machine. Read it by attributing each libc++abi run to its nearest non-libc++abi
+ancestor, or the cost hides inside `dyn_cast_slow` where no Pulp symbol appears.
+Thread count is not a smell by itself: an idle window here was 20 threads, all
+accounted — main, CVDisplayLink, NSEventThread, four CoreAudio (`caulk*` +
+`IOThread.client`, because the standalone opens a device), eight Dawn
+`AsyncWorkerThreadPool` workers, one `BackgroundJobService`, four libdispatch
+workers serving Metal/CoreAnimation queues.
 
 ## Notes for future Forge apps
 

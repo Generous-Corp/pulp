@@ -272,6 +272,9 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
                                  float panel_x, float panel_y, float panel_w, float panel_h)
     : binding_(std::make_unique<DesignParamBinding>(*this)) {
+    // So the host-parameter pump can find this without asking libc++abi about
+    // every view in the tree on every pump.
+    mark_design_frame();
     frames_.push_back(build_frame(std::move(svg), std::move(elements),
                                   panel_x, panel_y, panel_w, panel_h));
     activate_frame(0);
