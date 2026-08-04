@@ -479,10 +479,13 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 : 0;
             refresh_scripted_source(scripted, generation);
             refresh_runtime_eval_realm(scripted);
-            auto evaluator = scripted
-                ? inspect::make_script_runtime_evaluator(
-                      scripted->script_inspector())
-                : nullptr;
+            std::unique_ptr<inspect::RuntimeEvaluator> evaluator;
+#if PULP_STANDALONE_RUNTIME_EVAL_COMPONENT
+            if (scripted) {
+                evaluator = inspect::make_script_runtime_evaluator(
+                    scripted->script_inspector());
+            }
+#endif
             response = runtime_eval_dispatch_.with_evaluator(
                 request, evaluator.get(), [this, &request](auto* active) {
                     return domains_.handle_runtime_with_evaluator(request, active);
@@ -886,7 +889,7 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
                 continue;
             const auto parsed_capability = inspect::capability_from_id(capability);
             if (!strict_custom_profile && parsed_capability &&
-                !standalone_capability_available(
+                !standalone_inspector_capability_available(
                     *parsed_capability, window.supports_compositor_capture(),
                     runtime_eval_enabled))
                 continue;
