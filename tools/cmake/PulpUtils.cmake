@@ -624,9 +624,9 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        "ACCEPTS_MIDI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
-        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES"
+        "ACCEPTS_MIDI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE"
+        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
     )
     if("PRODUCES_MIDI" IN_LIST PLUGIN_UNPARSED_ARGUMENTS)
@@ -670,6 +670,47 @@ function(pulp_add_plugin target)
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS "${PLUGIN_CONTENT_MANUAL_RESCAN_KINDS}" CACHE INTERNAL "")
+    if((PLUGIN_CONTROL_PROFILE OR PLUGIN_CONTROL_CAPABILITIES OR
+        PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL) AND
+       (PLUGIN_SHIP_INSPECTOR OR PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL OR
+        PLUGIN_INSPECTOR_CAPABILITIES))
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_* declarations cannot be mixed with legacy SHIP_INSPECTOR/INSPECTOR_CAPABILITIES declarations")
+    endif()
+
+    if(PLUGIN_CONTROL_CAPABILITIES AND NOT PLUGIN_CONTROL_PROFILE)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires an explicit CONTROL_PROFILE")
+    endif()
+
+    if(PLUGIN_CONTROL_PROFILE)
+        set(_control_profiles
+            production-stripped developer-local test-deterministic
+            support-diagnostics research-unsafe)
+        if(NOT PLUGIN_CONTROL_PROFILE IN_LIST _control_profiles)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): unknown CONTROL_PROFILE '${PLUGIN_CONTROL_PROFILE}'")
+        endif()
+        set(_pulp_control_profile "${PLUGIN_CONTROL_PROFILE}")
+        set(_pulp_control_capabilities "${PLUGIN_CONTROL_CAPABILITIES}")
+        set(_pulp_control_eval_ack "${PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL}")
+    elseif(PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
+        set(_pulp_control_profile "research-unsafe")
+        set(_pulp_control_capabilities "")
+        set(_pulp_control_eval_ack "")
+    elseif(PLUGIN_SHIP_INSPECTOR)
+        set(_pulp_control_profile "developer-local")
+        set(_pulp_control_capabilities "")
+        set(_pulp_control_eval_ack "")
+    else()
+        set(_pulp_control_profile "production-stripped")
+        set(_pulp_control_capabilities "")
+        set(_pulp_control_eval_ack "")
+    endif()
+    _pulp_cache_control_declarations(${target}
+        "${_pulp_control_profile}"
+        "${_pulp_control_capabilities}"
+        "${_pulp_control_eval_ack}")
     if(PLUGIN_INSPECTOR_CAPABILITIES AND NOT PLUGIN_SHIP_INSPECTOR)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): INSPECTOR_CAPABILITIES requires the deliberate SHIP_INSPECTOR acknowledgement")
@@ -678,9 +719,10 @@ function(pulp_add_plugin target)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): SHIP_INSPECTOR requires an explicit INSPECTOR_CAPABILITIES list")
     endif()
-    if(PLUGIN_SHIP_INSPECTOR AND NOT "Standalone" IN_LIST PLUGIN_FORMATS)
+    if((PLUGIN_SHIP_INSPECTOR OR PLUGIN_CONTROL_CAPABILITIES) AND
+       NOT "Standalone" IN_LIST PLUGIN_FORMATS)
         message(FATAL_ERROR
-            "pulp_add_plugin(${target}): shipping inspector endpoints are supported only for Standalone targets")
+            "pulp_add_plugin(${target}): control endpoints are supported only for Standalone targets")
     endif()
     if("runtime.eval" IN_LIST PLUGIN_INSPECTOR_CAPABILITIES AND
        NOT PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL)
@@ -703,9 +745,19 @@ function(pulp_add_plugin target)
     endforeach()
     unset(_inspector_capability)
     unset(_inspector_controller_capabilities)
-    set(PULP_${target}_SHIP_INSPECTOR "${PLUGIN_SHIP_INSPECTOR}" CACHE INTERNAL "")
-    set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}" CACHE INTERNAL "")
-    set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "")
+    if(PLUGIN_CONTROL_CAPABILITIES)
+        set(_pulp_control_endpoint TRUE)
+    else()
+        set(_pulp_control_endpoint "${PLUGIN_SHIP_INSPECTOR}")
+    endif()
+    if(PLUGIN_ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL)
+        set(_pulp_control_eval TRUE)
+    else()
+        set(_pulp_control_eval "${PLUGIN_SHIP_INSPECTOR_RUNTIME_EVAL}")
+    endif()
+    set(PULP_${target}_SHIP_INSPECTOR "${_pulp_control_endpoint}" CACHE INTERNAL "" FORCE)
+    set(PULP_${target}_SHIP_INSPECTOR_RUNTIME_EVAL "${_pulp_control_eval}" CACHE INTERNAL "" FORCE)
+    set(PULP_${target}_INSPECTOR_CAPABILITIES "${PLUGIN_INSPECTOR_CAPABILITIES}" CACHE INTERNAL "" FORCE)
     _pulp_configure_inspector_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 

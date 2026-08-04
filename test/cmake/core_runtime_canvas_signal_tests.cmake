@@ -367,11 +367,13 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect
         PROPERTIES LANGUAGE OBJCXX)
     add_executable(pulp-standalone-inspector-process-fixture
         fixtures/standalone_inspector_process_fixture.cpp)
-    set(PULP_pulp-standalone-inspector-process-fixture_SHIP_INSPECTOR TRUE)
-    set(PULP_pulp-standalone-inspector-process-fixture_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
-    set(PULP_pulp-standalone-inspector-process-fixture_INSPECTOR_CAPABILITIES
-        session.describe state.read ui.read diagnostics.read logs.read
-        capture.image telemetry.stream)
+    set(PULP_pulp-standalone-inspector-process-fixture_CONTROL_PROFILE
+        developer-local)
+    set(PULP_pulp-standalone-inspector-process-fixture_CONTROL_CAPABILITIES
+        dev.pulp.instance/read@1 dev.pulp.state/read@1
+        dev.pulp.ui/observe@1 dev.pulp.diagnostics/read@1
+        dev.pulp.logs/read@1 dev.pulp.ui/capture@1
+        dev.pulp.telemetry/subscribe@1)
     set(PULP_pulp-standalone-inspector-process-fixture_INSPECTOR_MANIFEST_DIRECTORY
         "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
     _pulp_configure_inspector_shipping(

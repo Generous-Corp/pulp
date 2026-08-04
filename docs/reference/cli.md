@@ -1316,9 +1316,14 @@ plugin-format launches start no endpoint. The client reads
 owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
+The offline `audit` subcommand is the exception: it ships even when
+`PULP_ENABLE_INSPECTOR=OFF`, never connects to a session, and blocks empty or
+unauditable targets. Artifact and manifest symlinks are rejected rather than
+followed, so an audit cannot escape the directory containing its evidence.
 
 ```bash
 pulp inspect profiles --json
+pulp inspect audit path/to/MyProduct --json
 pulp inspect doctor --json
 pulp inspect list --json
 pulp inspect capabilities --json \
@@ -1339,6 +1344,7 @@ The named commands are the stable orientation surface:
 | Command | Result |
 |---|---|
 | `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `audit ARTIFACT` | Read-only artifact check: canonical control manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
 | `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
 | `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
 | `doctor` | Discovery runtime directory, live-session count, and issues. |
@@ -1368,6 +1374,21 @@ Options:
   `inject-midi` fields; note-on duration is 1 through 2000 ms
 - `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
 - `--json` - stable JSON for named commands
+
+`audit` is the Phase 1 authoring spelling; it needs only an artifact path and
+does not use live-session options. It exits 0 for `pass`, 1 for `block`, and 2
+for invalid invocation. JSON uses `pulp.control.audit.v1`. A later `pulp
+control audit` command may become the canonical spelling; this command remains
+the no-activation developer preflight. Sidecars are capped at 1 MiB. Directory
+mode rejects absolute or traversing artifact identities and reads each candidate
+executable once; direct-file mode applies the same safe-identity rules and
+requires an exact-named sidecar's target or product identity to match the
+artifact filename. Canonical directory sidecars must also use the manifest
+target as their stem and cannot fall back to a uniquely marker-bearing renamed
+sibling. Plugin-format subtrees never count as standalone evidence. The same
+immutable bytes are used for selection,
+known-surface detection, marker verification, `artifactDigest`, and
+`consentIdentity`.
 
 Typed parameter, MIDI, and transport mutations require the exact three-part
 publication identity and a same-connection controller lease. `inject-midi`

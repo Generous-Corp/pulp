@@ -11,6 +11,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <exception>
 #include <string>
 #include <type_traits>
@@ -23,6 +24,21 @@
 namespace pulp::inspect {
 
 using namespace pulp::view;
+
+namespace {
+
+bool valid_authoring_anchor(choc::value::ValueView value) {
+    if (!value.isString()) return false;
+    const std::string_view anchor = value.getString();
+    if (anchor.empty()) return false;
+    const auto codepoints = std::count_if(
+        anchor.begin(), anchor.end(), [](unsigned char byte) {
+            return (byte & 0xc0u) != 0x80u;
+        });
+    return codepoints <= 256;
+}
+
+}  // namespace
 
 InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
     if (req.method == methods::kInspectorEnable) {
@@ -412,6 +428,12 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_error(req.id, "No tweak store attached");
         try {
             auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() || !params.hasObjectMember("anchorId") ||
+                !valid_authoring_anchor(params["anchorId"]))
+                return make_error(
+                    req.id,
+                    "Inspector.setBypass requires `anchorId` with 1 to 256 Unicode characters",
+                    "invalid_params");
             auto anchor = std::string(params["anchorId"].getString());
             // Value can be `true`/`false` (whole-anchor) or an array of
             // dotted paths (path-scoped). Empty array / false clears.
@@ -442,6 +464,12 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_error(req.id, "No tweak store attached");
         try {
             auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() || !params.hasObjectMember("anchorId") ||
+                !valid_authoring_anchor(params["anchorId"]))
+                return make_error(
+                    req.id,
+                    "Inspector.setLocked requires `anchorId` with 1 to 256 Unicode characters",
+                    "invalid_params");
             auto anchor = std::string(params["anchorId"].getString());
             if (!params.hasObjectMember("value") || !params["value"].isBool()) {
                 return make_error(req.id, "Inspector.setLocked requires `value` as bool");

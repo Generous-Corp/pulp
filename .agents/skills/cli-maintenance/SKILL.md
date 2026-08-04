@@ -222,6 +222,26 @@ surface as an installed-user or ordinary `pulp run` workflow. Keep
 client-description claims, including these shipped agent workflows, but does
 not prove runtime construction sites.
 
+**`pulp inspect audit ARTIFACT` is different from every live Inspector
+subcommand.** It is a read-only Phase 1 artifact preflight and must never load,
+execute, connect to, or activate the target. It reads the canonical
+`dev.pulp.control/artifact-manifest@1` sidecar and verifies its profile,
+build ID, frozen-registry digest, SHA-256 binary marker, declared capability markers, endpoint/eval boundaries,
+and known external-surface markers. JSON is `pulp.control.audit.v1`; exit 0 is
+pass, 1 is a fail-closed block, and 2 is invocation error. It remains compiled
+when `PULP_ENABLE_INSPECTOR=OFF`; live commands still report unavailable. Keep
+directory and direct-file identity checks equivalent: target and product names
+must be safe sibling basenames, and an exact-named sidecar must still match the
+artifact filename (with the supported `.exe` form) before consent is bound. Keep
+canonical sidecar stems equal to their manifest target, never use a
+marker-bearing sibling fallback for canonical evidence, and exclude
+plugin-format subtrees from standalone scanning in every traversal. Keep
+`cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
+`docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
+`docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
+the shared Product A client and canonical control-audit namespace land; do not wrap
+the CLI as an MCP side door.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s

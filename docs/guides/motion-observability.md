@@ -409,6 +409,13 @@ Protocol requests:
 | `Motion.play` | `{}` | `{playing, emitted_count, playhead_frame}` |
 | `Motion.pause` | `{}` | `{playing:false, playhead_frame}` |
 
+`Motion.startTrace` is validated as a closed, bounded request before any trace
+is created. View and metric names are 1–128 Unicode codepoints, node IDs are
+1–256, geometry properties are unique members of the eight-property enum, and
+scroll properties are unique members of the fourteen-property enum. Unknown
+fields, invalid property names, geometry spaces or sources, and malformed
+arrays fail with `invalid_params` without leaving a trace behind.
+
 The server broadcasts `Motion.start`, `Motion.sample`, and `Motion.end` events
 to all connected clients as samples are emitted. Subscribing clients receive a
 clean stream for the trace they registered — concurrent unrelated animations

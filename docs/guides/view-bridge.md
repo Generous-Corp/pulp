@@ -269,4 +269,6 @@ secondary.
 There is no public `attach_remote_view(url)` convenience helper. Callers that
 need WebSocket transport should connect the channel first, then pass it to
 `attach_remote_channel(...)`. Paint-op streaming remains a follow-up; today's
-remote session covers metadata, parameter sync, input forwarding, and close.
+remote session covers metadata, read-only parameter observation, and close.
+It deliberately accepts no remote parameter writes; writable automation must
+use Pulp's capability-controlled control surface rather than Remote View.

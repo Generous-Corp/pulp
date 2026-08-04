@@ -159,11 +159,35 @@ InspectorMessage DomainHandler::handle_dom(const InspectorMessage& req) {
         }
     }
     if (req.method == methods::kDOMHighlightNode) {
-        // Highlighting is handled by the overlay — we'd need to find the view and set it
-        // For now, return success (the CLI can highlight via the overlay)
+        if (!overlay_)
+            return make_error(req.id, "DOM.highlightNode: no overlay attached");
+        try {
+            const auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() || !params.hasObjectMember("id") ||
+                !params["id"].isString())
+                return make_error(req.id,
+                                  "DOM.highlightNode requires string 'id'",
+                                  "invalid_params");
+            const auto node_id = std::string(params["id"].getString());
+            if (node_id.empty() || node_id.size() > 256)
+                return make_error(req.id,
+                                  "DOM.highlightNode id must be 1..256 bytes",
+                                  "invalid_params");
+            auto* found = ViewInspector::find_by_id(*root_, node_id);
+            if (!found)
+                return make_error(req.id, "View not found: " + node_id,
+                                  "invalid_params");
+            overlay_->set_selected_view(found);
+        } catch (...) {
+            return make_error(req.id, "Invalid params for DOM.highlightNode",
+                              "invalid_params");
+        }
         return make_response(req.id, R"({"ok":true})");
     }
     if (req.method == methods::kDOMClearHighlight) {
+        if (!overlay_)
+            return make_error(req.id, "DOM.clearHighlight: no overlay attached");
+        overlay_->set_selected_view(nullptr);
         return make_response(req.id, R"({"ok":true})");
     }
     if (req.method == methods::kDOMSearch) {

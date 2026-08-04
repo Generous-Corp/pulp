@@ -9,7 +9,7 @@ target_include_directories(pulp-test-inspector-shipping-report PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include
     ${choc_SOURCE_DIR})
 target_link_libraries(pulp-test-inspector-shipping-report PRIVATE
-    Catch2::Catch2WithMain)
+    pulp::inspect-protocol Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-shipping-report
     PROPERTIES LABELS "inspect;ship;cli")
 

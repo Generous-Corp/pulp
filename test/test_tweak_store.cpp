@@ -610,6 +610,23 @@ TEST_CASE("Inspector.setBypass with non-bool/non-array value errors",
     REQUIRE(resp.is_error);
 }
 
+TEST_CASE("Inspector.setBypass rejects invalid anchors without mutation",
+          "[inspect][protocol][setBypass][control-contract]") {
+    Fixture f;
+    for (const auto& params : {
+             std::string(R"({"anchorId":"","value":true})"),
+             std::string(R"({"anchorId":7,"value":true})"),
+             "{\"anchorId\":\"" + std::string(257, 'x') +
+                 R"(","value":true})",
+         }) {
+        const auto response =
+            f.handler.handle(req(methods::kInspectorSetBypass, params));
+        REQUIRE(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+        CHECK(f.store.bypassed_anchors().empty());
+    }
+}
+
 // ── Inspector.setLocked protocol ────────────────────────────────────────
 
 TEST_CASE("Inspector.setLocked with value=true locks the anchor",
@@ -642,6 +659,42 @@ TEST_CASE("Inspector.setLocked with a non-bool value errors cleanly",
     auto resp = f.handler.handle(req(methods::kInspectorSetLocked,
         R"({"anchorId":"a","value":"yes"})"));
     REQUIRE(resp.is_error);
+}
+
+TEST_CASE("Inspector.setLocked rejects invalid anchors without mutation",
+          "[inspect][protocol][setLocked][control-contract]") {
+    Fixture f;
+    for (const auto& params : {
+             std::string(R"({"anchorId":"","value":true})"),
+             std::string(R"({"anchorId":7,"value":true})"),
+             "{\"anchorId\":\"" + std::string(257, 'x') +
+                 R"(","value":true})",
+         }) {
+        const auto response =
+            f.handler.handle(req(methods::kInspectorSetLocked, params));
+        REQUIRE(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+        CHECK(f.store.locked_anchors().empty());
+    }
+}
+
+TEST_CASE("Inspector authoring anchor bounds count Unicode codepoints",
+          "[inspect][protocol][control-contract]") {
+    Fixture f;
+    std::string anchor;
+    for (int index = 0; index < 256; ++index) anchor += "\xc3\xa9";
+
+    const auto bypass = f.handler.handle(req(
+        methods::kInspectorSetBypass,
+        "{\"anchorId\":\"" + anchor + "\",\"value\":true}"));
+    REQUIRE_FALSE(bypass.is_error);
+    CHECK(f.store.is_bypassed(anchor, "any.path"));
+
+    const auto locked = f.handler.handle(req(
+        methods::kInspectorSetLocked,
+        "{\"anchorId\":\"" + anchor + "\",\"value\":true}"));
+    REQUIRE_FALSE(locked.is_error);
+    CHECK(f.store.is_locked(anchor));
 }
 
 TEST_CASE("Inspector.setLocked without a tweak store errors cleanly",

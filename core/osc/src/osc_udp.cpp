@@ -7,6 +7,15 @@
 #include <cstring>
 #include <utility>
 
+#if defined(_MSC_VER)
+#define PULP_CONTROL_SURFACE_MARKER
+#else
+#define PULP_CONTROL_SURFACE_MARKER __attribute__((used, visibility("default")))
+#endif
+extern "C" PULP_CONTROL_SURFACE_MARKER const volatile char
+    pulp_osc_udp_network_surface_v1[] = "PULP_OSC_UDP_NETWORK_SURFACE_V1";
+#undef PULP_CONTROL_SURFACE_MARKER
+
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
