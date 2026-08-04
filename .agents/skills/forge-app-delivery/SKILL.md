@@ -240,6 +240,17 @@ Two rules fall out of it:
   16 builds" passed while measuring zero activity. Assert the work happened
   (`REQUIRE(cache.stats().builds > 0)`) before asserting it was cheap.
 - **`sample` and other profilers fail silently over SSH** (TCC is per-process).
+- **A CRASHED SUBPROCESS READ AS A VERDICT.** The audibility gate segfaults
+  loading some third-party Rack plugins. `returncode != 0` was taken to mean
+  "this patch makes no sound", so six generations in a row ended "gave up after
+  3 attempts" with an empty explanation and nothing anywhere saying a process
+  had died. A negative return code is a signal, not an answer: check
+  `returncode < 0` separately and say which signal and what it was loading.
+  The same shape applies to any gate that shells out.
+- **The staging output directory may be left read-only.** Testing the install
+  path with `chmod -R a-w` (above) leaves `--out` unwritable, and the next
+  `package.sh` run dies in a wall of `rm: Permission denied` that reads like a
+  packaging bug. `chmod -R u+rwX "$OUT_DIR"` before removing it.
 
 **Every test ships broken-on-purpose once.** A test that has never failed has not
 been tested. State the mutation and its result when reporting.
