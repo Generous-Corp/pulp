@@ -104,6 +104,11 @@ else()
     set(PULP_TEXT_ACCESSIBILITY_SOURCE src/text_accessibility.cpp)
 endif()
 
+# The pure UIA tree topology builder is compiled everywhere for normal
+# macOS/Linux unit-test coverage. Provider ownership remains Windows-private.
+target_sources(pulp-view-core PRIVATE
+    platform/win/accessibility_win_fragment_topology.cpp)
+
 # Source ownership is declarative and intentionally separate from platform/link
 # policy below. Keep this include at directory scope so engine and accessibility
 # source selections flow into the target manifests.
@@ -292,6 +297,7 @@ if(APPLE)
             platform/mac/plugin_view_host_mac_text_input.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
+            platform/mac/accessibility_mac_host_lifetime.mm
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
@@ -329,6 +335,8 @@ elseif(WIN32)
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
         platform/win/accessibility_win.cpp
+        platform/win/accessibility_win_events.cpp
+        platform/win/accessibility_win_fragment_lifecycle.cpp
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
         # Standalone outbound file-drag backend (free begin_file_drag via OLE).

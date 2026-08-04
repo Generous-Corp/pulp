@@ -84,6 +84,18 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     return make_error(req.id, "Unknown domain: " + domain);
 }
 
+InspectorMessage DomainHandler::handle_runtime_with_evaluator(
+    const InspectorMessage& request, RuntimeEvaluator* evaluator) {
+    auto* previous = runtime_evaluator_;
+    runtime_evaluator_ = evaluator;
+    struct RestoreBinding {
+        RuntimeEvaluator*& slot;
+        RuntimeEvaluator* previous;
+        ~RestoreBinding() { slot = previous; }
+    } restore{runtime_evaluator_, previous};
+    return handle_runtime(request);
+}
+
 InspectorMessage DomainHandler::handle_test(const InspectorMessage& req) {
     return test_input_.handle(req);
 }

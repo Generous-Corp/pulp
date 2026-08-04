@@ -125,7 +125,9 @@ pulp_add_test_suite(pulp-test-xml-zip LIBRARIES pulp::runtime)
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
 # Drag-and-drop tests
-pulp_add_test_suite(pulp-test-dnd SOURCES test_drag_drop.cpp LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-dnd
+    SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp
+    LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-musical-typing SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
 
 # OSC tests
@@ -338,6 +340,14 @@ if(TARGET pulp::inspect AND NOT IOS)
         PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_link_libraries(pulp-test-standalone-inspector PRIVATE
         pulp::inspect-client)
+
+    pulp_add_test_suite(pulp-test-standalone-runtime-eval
+        SOURCES test_standalone_runtime_eval.cpp
+        LIBRARIES pulp::standalone pulp::inspect-client
+        PROPERTIES PROCESSORS 8)
+    target_compile_definitions(pulp-test-standalone-runtime-eval PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=1
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
 else()
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=0)

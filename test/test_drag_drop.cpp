@@ -5,6 +5,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_pool.hpp>
 
 // XDND payload-parsing + coordinate-mapping helpers (Linux X11 producer). These
 // are pure (X11-free) free functions, so the cross-platform dnd suite exercises
@@ -247,6 +248,7 @@ TEST_CASE("drag enter/exit toggles FileDropZone hover state", "[view][dnd]") {
     dispatch_drag_exit(root, session);
     CHECK_FALSE(zone->is_drag_over());
 }
+
 
 TEST_CASE("drag enter over an invalid extension marks the zone invalid",
           "[view][dnd]") {

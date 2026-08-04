@@ -1,7 +1,7 @@
 #include <pulp/format/detail/standalone_inspector.hpp>
-
 #include "standalone_inspector_capture.hpp"
-
+#include "standalone_inspector_policy.hpp"
+#include "standalone_runtime_eval_dispatch.hpp"
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
@@ -17,6 +17,7 @@
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/main_thread_rpc.hpp>
+#include <pulp/inspect/runtime_eval_component.hpp>
 #include <pulp/inspect/session.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/test_input.hpp>
@@ -117,32 +118,6 @@ std::int64_t mtime_unix_ms(const std::filesystem::path& path) {
     return system_time.time_since_epoch().count();
 }
 
-std::optional<inspect::InspectorProfile> parse_profile(std::string_view profile) {
-    if (profile.empty() || profile == "off")
-        return inspect::InspectorProfile::Off;
-    return inspect::profile_from_id(profile);
-}
-
-std::vector<inspect::InspectorCapability>
-standalone_capabilities(bool back_buffer_capture) {
-    using C = inspect::InspectorCapability;
-    std::vector<inspect::InspectorCapability> result{
-        C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
-        C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::TestInput,
-        C::AuthoringTweaks, C::TelemetryStream};
-    if (back_buffer_capture)
-        result.push_back(C::CaptureImage);
-    return result;
-}
-
-bool standalone_capability_available(inspect::InspectorCapability capability,
-                                     bool back_buffer_capture) {
-    const auto available = standalone_capabilities(back_buffer_capture);
-    return std::find(available.begin(), available.end(), capability) != available.end();
-}
-
-
-
 } // namespace
 
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
@@ -158,7 +133,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     Impl(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
          view::WindowHost& window, inspect::InspectorOverlay* overlay,
          inspect::InspectorProfile profile, std::vector<inspect::InspectorCapability> custom,
-         std::string session_id, std::string instance_id)
+         bool runtime_eval_enabled, std::string session_id, std::string instance_id)
         : app_(app), processor_(processor), bridge_(bridge), root_(root), window_(window),
           overlay_(overlay), profile_(profile),
           telemetry_enabled_(
@@ -167,6 +142,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                std::find(custom.begin(), custom.end(),
                          inspect::InspectorCapability::TelemetryStream) !=
                    custom.end())),
+          runtime_eval_requested_(runtime_eval_enabled),
           session_id_(std::move(session_id)),
           instance_id_(std::move(instance_id)), executable_(executable_path()), state_(app.state()),
           telemetry_(inspect::ValueChannelTelemetryBroker::Config{},
@@ -176,7 +152,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                      {}),
 #endif
           rpc_(std::make_shared<inspect::InspectorMainThreadRpc>(
-              inspect::InspectorMainThreadRpc::Config{},
+              inspect::InspectorMainThreadRpc::Config{
+                  .timeout = inspect::kRuntimeEvalDeadline + std::chrono::seconds(1)},
               [](std::function<void()> task) {
 #if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
                   if (const auto post_override = current_rpc_post_override()) {
@@ -190,17 +167,24 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
           session_(inspect::InspectorSessionInfo{session_id_, instance_id_,
                                                  processor.descriptor().bundle_id, "1"},
                    make_policy(profile, std::move(custom),
-                               standalone_capture_available(root, window)),
+                               standalone_capture_available(root, window),
+                               runtime_eval_enabled),
                    [this](const inspect::InspectorRequestContext& context,
                           const inspect::InspectorMessage& request) {
                        refresh_live_state();
-                       if (request.method.rfind("Telemetry.", 0) == 0)
-                           return telemetry_.handle(context, request);
                        if (request.method.rfind("Runtime.", 0) == 0)
                            return handle_runtime_request(request);
+                       refresh_scripted_sources();
+                       if (request.method.rfind("Telemetry.", 0) == 0)
+                           return telemetry_.handle(context, request);
                        return domains_.handle(request);
                    }) {
         session_.set_audit_log(audit_log_);
+        runtime_eval_dispatch_.install(
+            session_, rpc_, [this](const inspect::InspectorMessage& request) {
+                return handle_runtime_request(request);
+            });
+        domains_.set_runtime_eval_enabled(runtime_eval_requested_);
         telemetry_.set_event_sink(
             [this](std::string_view client_id,
                    const inspect::InspectorMessage& event,
@@ -262,6 +246,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         config.max_clients = 16;
         config.domain_bindings = &domains_;
         config.main_thread_rpc = rpc_;
+        config.asynchronous_methods = {std::string(inspect::methods::kRuntimeEvaluate)};
+        config.max_asynchronous_requests = 1;
         if (!server_->start_authenticated(std::move(config))) {
             return false;
         }
@@ -344,10 +330,11 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         state_.set_value_channels(
             std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
-        domains_.set_script_inspector(nullptr);
+        domains_.set_runtime_evaluator(nullptr);
         log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel);
         bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
-            if (current && log_subscription_ != 0 && log_subscription_session_identity_
+            if (current && log_subscription_ != 0
+                && log_subscription_session_identity_
                 && *log_subscription_session_identity_ == current->identity()) {
                 current->remove_log_callback(log_subscription_);
             }
@@ -476,18 +463,25 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         bridge_.visit_scripted_ui([this, &request, &response, &visited](
                                       view::ScriptedUiSession* scripted) {
             visited = true;
-            domains_.set_script_inspector(
-                scripted ? scripted->script_inspector() : nullptr);
-            struct ResetScriptInspector {
-                inspect::DomainHandler& domains;
-                ~ResetScriptInspector() { domains.set_script_inspector(nullptr); }
-            } reset{domains_};
-            response = domains_.handle(request);
+            const auto generation = processor_.supports_editor_reload()
+                ? processor_.editor_reload_generation()
+                : 0;
+            refresh_scripted_source(scripted, generation);
+            refresh_runtime_eval_realm(scripted);
+            auto evaluator = scripted
+                ? inspect::make_script_runtime_evaluator(
+                      scripted->script_inspector())
+                : nullptr;
+            response = runtime_eval_dispatch_.with_evaluator(
+                request, evaluator.get(), [this, &request](auto* active) {
+                    return domains_.handle_runtime_with_evaluator(request, active);
+                });
         });
-        if (!visited) {
-            domains_.set_script_inspector(nullptr);
-            response = domains_.handle(request);
-        }
+        if (!visited)
+            response = runtime_eval_dispatch_.with_evaluator(
+                request, nullptr, [this, &request](auto* active) {
+                    return domains_.handle_runtime_with_evaluator(request, active);
+                });
         return response;
     }
 
@@ -502,6 +496,9 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
     void refresh_value_channel_sources(bool force) {
+        // Scripted-UI replacement is independent of value-channel generation.
+        // Re-evaluate live-realm authority on every pump before an early return.
+        refresh_scripted_sources();
         bool attachment_ready = !telemetry_enabled_;
         std::uint64_t source_identity = 0;
         processor_.visit_value_channels([this, &attachment_ready, &source_identity,
@@ -552,7 +549,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 }
             }
         });
-        refresh_scripted_sources();
         if (attachment_ready) {
             value_channel_source_identity_ = source_identity;
             failed_value_channel_source_identity_.reset();
@@ -565,48 +561,64 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         const auto generation = processor_.supports_editor_reload()
             ? processor_.editor_reload_generation()
             : 0;
+        bridge_.visit_scripted_ui([this, generation](view::ScriptedUiSession* current) {
+            refresh_scripted_source(current, generation);
+        });
+    }
+
+    void refresh_scripted_source(view::ScriptedUiSession* current,
+                                 std::uint64_t generation) {
+        const auto current_identity = current
+            ? std::optional<std::uint64_t>{current->identity()}
+            : std::nullopt;
         if (log_subscription_generation_
-            && *log_subscription_generation_ == generation) {
+            && *log_subscription_generation_ == generation
+            && log_subscription_session_identity_ == current_identity) {
+            return;
+        }
+        const auto callback_epoch =
+            log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
+        refresh_runtime_eval_realm(current);
+        if (!current) {
+            log_subscription_ = 0;
+            log_subscription_session_identity_.reset();
             return;
         }
 
-        const auto callback_epoch =
-            log_callback_epoch_->fetch_add(1, std::memory_order_acq_rel) + 1;
-        bridge_.visit_scripted_ui([this, callback_epoch, generation](
-                                      view::ScriptedUiSession* current) {
-            if (!current) {
-                log_subscription_ = 0;
-                log_subscription_session_identity_.reset();
-                return;
-            }
+        // A generation may reload the same session in place. Retire its old
+        // token before replacing it. A different or temporarily unavailable
+        // session is covered by the epoch guard, so any retained observer is
+        // inert even when its session outlives this runtime.
+        if (log_subscription_ != 0 && log_subscription_session_identity_
+            && *log_subscription_session_identity_ == current->identity()) {
+            current->remove_log_callback(log_subscription_);
+        }
 
-            // A generation may reload the same session in place. Retire its old
-            // token before replacing it. A different or temporarily unavailable
-            // session is covered by the epoch guard, so any retained observer is
-            // inert even when its session outlives this runtime.
-            if (log_subscription_ != 0 && log_subscription_session_identity_
-                && *log_subscription_session_identity_ == current->identity()) {
-                current->remove_log_callback(log_subscription_);
-            }
+        auto callback = console_->callback();
+        std::weak_ptr<inspect::ConsoleCapture> capture = console_;
+        auto epoch = log_callback_epoch_;
+        log_subscription_ = current->add_log_callback(
+            [capture = std::move(capture), epoch = std::move(epoch),
+             callback_epoch, callback = std::move(callback)](
+                std::string_view level, std::string_view message) {
+                if (epoch->load(std::memory_order_acquire) == callback_epoch
+                    && capture.lock()) {
+                    callback(level, message);
+                }
+            });
+        log_subscription_session_identity_ = current->identity();
+        log_subscription_generation_ = generation;
+    }
 
-            auto callback = console_->callback();
-            std::weak_ptr<inspect::ConsoleCapture> capture = console_;
-            auto epoch = log_callback_epoch_;
-            log_subscription_ = current->add_log_callback(
-                [capture = std::move(capture), epoch = std::move(epoch),
-                 callback_epoch, callback = std::move(callback)](
-                    std::string_view level, std::string_view message) {
-                    // A retained but no-longer-active session may outlive the
-                    // inspector runtime. Never let its observer dereference the
-                    // destroyed composition root.
-                    if (epoch->load(std::memory_order_acquire) == callback_epoch
-                        && capture.lock()) {
-                        callback(level, message);
-                    }
-                });
-            log_subscription_session_identity_ = current->identity();
-            log_subscription_generation_ = generation;
-        });
+    void refresh_runtime_eval_realm(view::ScriptedUiSession* current) {
+        if (runtime_eval_requested_) {
+            if (auto denial = standalone_runtime_eval_realm_denial(current))
+                domains_.set_runtime_eval_denied(std::move(*denial));
+            else
+                domains_.set_runtime_eval_enabled(true);
+        } else {
+            domains_.set_runtime_eval_enabled(false);
+        }
     }
 
     void refresh_live_state() {
@@ -620,11 +632,14 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     static inspect::InspectorPolicyConfig
     make_policy(inspect::InspectorProfile profile,
                 std::vector<inspect::InspectorCapability> custom,
-                bool back_buffer_capture) {
+                bool back_buffer_capture,
+                bool runtime_eval_enabled) {
         inspect::InspectorPolicyConfig policy;
         policy.profile = profile;
         policy.custom_capabilities = std::move(custom);
-        policy.available_capabilities = standalone_capabilities(back_buffer_capture);
+        policy.available_capabilities = standalone_inspector_capabilities(
+            back_buffer_capture, runtime_eval_enabled);
+        policy.runtime_eval_enabled = runtime_eval_enabled;
         return policy;
     }
 
@@ -636,11 +651,13 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::InspectorOverlay* overlay_ = nullptr;
     inspect::InspectorProfile profile_ = inspect::InspectorProfile::Off;
     bool telemetry_enabled_ = false;
+    bool runtime_eval_requested_ = false;
     std::string session_id_;
     std::string instance_id_;
     std::filesystem::path executable_;
     inspect::InspectorDiscoveryPublisher publisher_;
     inspect::DomainHandler domains_;
+    StandaloneRuntimeEvalDispatch runtime_eval_dispatch_;
     inspect::StateInspector state_;
     std::shared_ptr<inspect::ConsoleCapture> console_ =
         std::make_shared<inspect::ConsoleCapture>();
@@ -803,7 +820,9 @@ StandaloneInspectorRuntime::~StandaloneInspectorRuntime() {
 }
 
 bool StandaloneInspectorRuntime::profile_is_off(std::string_view profile) {
-    const auto parsed_profile = parse_profile(profile);
+    if (profile == "local")
+        return false;
+    const auto parsed_profile = parse_standalone_inspector_profile(profile);
     return parsed_profile && *parsed_profile == inspect::InspectorProfile::Off;
 }
 
@@ -811,14 +830,31 @@ std::unique_ptr<StandaloneInspectorRuntime>
 StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, ViewBridge& bridge,
                                    view::View& root, view::WindowHost& window,
                                    std::string profile,
-                                   std::vector<std::string> custom_capabilities) {
+                                   std::vector<std::string> custom_capabilities,
+                                   bool runtime_eval_enabled) {
     const bool local_only = profile == "local";
-    const auto parsed_profile = parse_profile(profile);
+    const auto parsed_profile = parse_standalone_inspector_profile(profile);
     if (!local_only && !parsed_profile)
         return nullptr;
     if (!local_only && *parsed_profile == inspect::InspectorProfile::Off)
         return nullptr;
-
+    if (runtime_eval_enabled &&
+        (local_only || (*parsed_profile != inspect::InspectorProfile::Develop &&
+                        *parsed_profile != inspect::InspectorProfile::Custom))) {
+        runtime::log_error(
+            "Standalone: runtime evaluation requires the develop or custom inspector profile");
+        return nullptr;
+    }
+    if (runtime_eval_enabled) {
+        std::optional<std::string> denial;
+        bridge.visit_scripted_ui([&denial](const view::ScriptedUiSession* current) {
+            denial = standalone_runtime_eval_realm_denial(current);
+        });
+        if (denial) {
+            runtime::log_error("Standalone: {}", *denial);
+            return nullptr;
+        }
+    }
     auto overlay = std::make_shared<inspect::InspectorOverlay>(root);
     inspect::install_inspector_hooks(*overlay);
     if (local_only) {
@@ -847,24 +883,33 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     std::vector<inspect::InspectorCapability> custom;
     if (*parsed_profile == inspect::InspectorProfile::Custom) {
         bool has_session_control = false;
+        bool has_runtime_eval = false;
         bool needs_session_control = false;
         for (const auto& id : custom_capabilities) {
             const auto capability = inspect::capability_from_id(id);
             if (!capability || !inspect::capability_is_grantable(*capability) ||
-                !standalone_capability_available(
-                    *capability, standalone_capture_available(root, window))) {
+                !standalone_inspector_capability_available(
+                    *capability, standalone_capture_available(root, window),
+                    runtime_eval_enabled)) {
                 runtime::log_error("Standalone: invalid custom inspector capability '{}'", id);
                 return nullptr;
             }
             custom.push_back(*capability);
             has_session_control |=
                 *capability == inspect::InspectorCapability::SessionControl;
+            has_runtime_eval |=
+                *capability == inspect::InspectorCapability::RuntimeEval;
             needs_session_control |=
                 *capability != inspect::InspectorCapability::SessionControl
                 && inspect::capability_requires_controller_lease(*capability);
         }
         if (custom.empty()) {
             runtime::log_error("Standalone: custom inspector profile requires capabilities");
+            return nullptr;
+        }
+        if (runtime_eval_enabled && !has_runtime_eval) {
+            runtime::log_error(
+                "Standalone: custom inspector runtime evaluation requires runtime.eval");
             return nullptr;
         }
         if (needs_session_control && !has_session_control) {
@@ -887,7 +932,8 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     }
     auto impl =
         std::make_shared<Impl>(app, processor, bridge, root, window, overlay.get(), *parsed_profile,
-                               std::move(custom), std::move(*session_id), std::move(*instance_id));
+                               std::move(custom), runtime_eval_enabled,
+                               std::move(*session_id), std::move(*instance_id));
     return std::unique_ptr<StandaloneInspectorRuntime>(
         new StandaloneInspectorRuntime(std::move(overlay), std::move(impl),
                                        std::move(*token), root, window));

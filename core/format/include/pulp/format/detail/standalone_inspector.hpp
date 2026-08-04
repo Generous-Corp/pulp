@@ -16,6 +16,7 @@ class Processor;
 class ViewBridge;
 } // namespace pulp::format
 namespace pulp::view {
+class ScriptedUiSession;
 class View;
 class WindowHost;
 } // namespace pulp::view
@@ -24,6 +25,11 @@ class InspectorOverlay;
 }
 
 namespace pulp::format::detail {
+
+/// Return the exact fail-closed diagnostic when the attached live scripted-UI
+/// realm exposes any effectful native bridge capability.
+std::optional<std::string>
+standalone_runtime_eval_realm_denial(const view::ScriptedUiSession* scripted_ui);
 
 struct StandaloneInspectorLifecycleState {
     bool rpc_accepting = false;
@@ -78,7 +84,8 @@ class StandaloneInspectorRuntime {
     static std::unique_ptr<StandaloneInspectorRuntime>
     create(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
            view::WindowHost& window, std::string profile,
-           std::vector<std::string> custom_capabilities);
+           std::vector<std::string> custom_capabilities,
+           bool runtime_eval_enabled = false);
 
     ~StandaloneInspectorRuntime();
     StandaloneInspectorRuntime(const StandaloneInspectorRuntime&) = delete;

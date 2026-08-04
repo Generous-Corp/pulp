@@ -6,7 +6,6 @@
 
 #include <pulp/inspect/domain_handler.hpp>
 #include <pulp/inspect/console_capture.hpp>
-#include <pulp/view/script_inspector_bridge.hpp>
 
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
@@ -71,30 +70,43 @@ InspectorMessage DomainHandler::handle_console(const InspectorMessage& req) {
 
 InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
     if (req.method == methods::kRuntimeEvaluate) {
-        if (!runtime_eval_enabled_)
-            return make_error(req.id, "Runtime.evaluate disabled (host has not opted into runtime eval)");
-        if (!script_inspector_)
+        if (!runtime_eval_enabled_) {
+            return make_error(
+                req.id,
+                runtime_eval_denial_.empty()
+                    ? "Runtime.evaluate disabled (host has not opted into runtime eval)"
+                    : runtime_eval_denial_);
+        }
+        if (!runtime_evaluator_)
             return make_error(req.id, "Runtime.evaluate unavailable: no scripted-UI engine attached");
         std::string code;
         try {
             auto params = choc::json::parse(req.params_json);
-            if (params.isObject()) {
-                if (params.hasObjectMember("code"))
-                    code = params["code"].getWithDefault(std::string{});
-                else if (params.hasObjectMember("expression"))  // CDP-compatible alias
-                    code = params["expression"].getWithDefault(std::string{});
-            }
+            if (!params.isObject())
+                return make_error(req.id, "Invalid params for Runtime.evaluate");
+            if (params.hasObjectMember("code"))
+                code = params["code"].getWithDefault(std::string{});
+            else if (params.hasObjectMember("expression"))  // CDP-compatible alias
+                code = params["expression"].getWithDefault(std::string{});
         } catch (...) {
             return make_error(req.id, "Invalid params for Runtime.evaluate");
         }
         if (code.empty())
             return make_error(req.id, "Runtime.evaluate requires a non-empty 'code'");
+        if (code.size() > kRuntimeEvalMaxCodeBytes)
+            return make_error(req.id, "Runtime.evaluate code exceeds the 65536-byte limit");
+        if (code.find('\0') != std::string::npos)
+            return make_error(req.id, "Runtime.evaluate code contains a NUL byte");
 
-        auto result = script_inspector_->evaluate(code);
+        auto result = runtime_evaluator_->evaluate(code);
         if (result.ok) {
             // `result` is already a JSON value; embed it raw so numbers/objects
             // stay typed rather than getting re-stringified.
-            return make_response(req.id, "{\"result\":" + result.json + "}");
+            auto response = make_response(req.id, "{\"result\":" + result.json + "}");
+            if (encode_message(response).size() <= kRuntimeEvalMaxResponseBytes)
+                return response;
+            return make_error(req.id,
+                              "Runtime.evaluate response exceeds the 1048576-byte limit");
         }
         if (result.detached)
             return make_error(req.id, "Runtime.evaluate unavailable: engine detached");
@@ -102,18 +114,26 @@ InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
             return make_error(req.id, "Runtime.evaluate busy: another evaluation is in flight");
         if (result.timed_out)
             return make_error(req.id, "Runtime.evaluate timed out (evaluation interrupted)");
-        return make_error(req.id, result.error.empty() ? "Runtime.evaluate failed" : result.error);
+        auto response = make_error(
+            req.id, result.error.empty() ? "Runtime.evaluate failed" : result.error);
+        if (encode_message(response).size() <= kRuntimeEvalMaxResponseBytes)
+            return response;
+        return make_error(req.id,
+                          "Runtime.evaluate response exceeds the 1048576-byte limit");
     }
     if (req.method == methods::kRuntimeGetCapabilities) {
-        view::ScriptInspectorBridge::Capabilities caps;
-        if (script_inspector_) caps = script_inspector_->capabilities();
+        RuntimeEvaluatorCapabilities caps;
+        if (runtime_evaluator_) caps = runtime_evaluator_->capabilities();
         auto obj = choc::value::createObject("");
         obj.addMember("engine", choc::value::createString(caps.engine));
-        obj.addMember("attached", choc::value::createBool(script_inspector_ != nullptr && !caps.engine.empty()));
+        obj.addMember("attached", choc::value::createBool(runtime_evaluator_ != nullptr && !caps.engine.empty()));
         // canEvaluate reflects BOTH the engine capability and the host opt-in —
         // a client must not attempt eval when the host hasn't enabled it.
         obj.addMember("canEvaluate", choc::value::createBool(caps.can_evaluate && runtime_eval_enabled_));
         obj.addMember("canInterrupt", choc::value::createBool(caps.can_interrupt && runtime_eval_enabled_));
+        if (!runtime_eval_denial_.empty())
+            obj.addMember("evaluateDeniedReason",
+                          choc::value::createString(runtime_eval_denial_));
         // Honest: mainline QuickJS has no source-line debug protocol, so these
         // stay false. A future debugger-enabled engine backend flips them.
         obj.addMember("canBreak", choc::value::createBool(caps.can_break));
@@ -122,7 +142,7 @@ InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
         return make_response(req.id, choc::json::toString(obj, false));
     }
     if (req.method == methods::kRuntimeInterrupt) {
-        bool interrupted = runtime_eval_enabled_ && script_inspector_ && script_inspector_->interrupt();
+        bool interrupted = runtime_eval_enabled_ && runtime_evaluator_ && runtime_evaluator_->interrupt();
         auto obj = choc::value::createObject("");
         obj.addMember("interrupted", choc::value::createBool(interrupted));
         return make_response(req.id, choc::json::toString(obj, false));

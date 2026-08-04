@@ -41,11 +41,15 @@ trip.
 | `test.input` | no | yes | `Test.injectMidi` accepts bounded note-on/off events and `Test.setTransport` applies coherent standalone play/position/tempo updates through the normal host path |
 | `authoring.tweaks` | no | yes | Transient tweaks, highlight, bypass, lock, live constants, editor URL templates, and repaint flashing stay in this capability; filesystem and editor-launch methods remain unavailable |
 | `telemetry.stream` | no | yes | The standalone owner claims the value-channel telemetry sidecars only when this capability is effective, then provides bounded contextual snapshots and per-client targeted subscriptions |
-| `runtime.eval` | no | no | High-risk separate opt-in; no standalone profile enables it |
+| `runtime.eval` | no | no | High-risk separate opt-in; `--inspect-runtime-eval` is required in addition to a controller-capable develop/custom selection |
 | `unavailable` | no | no | Filesystem-backed tweak/fixture operations and editor launch are classified unavailable for the future policy |
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. These are
 enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
+The launcher can add it only through the literal `--inspect-runtime-eval`
+acknowledgement; custom also has to name `runtime.eval` and `session.control`.
+The acknowledgement is one-run state and is not part of standalone persisted
+preferences.
 
 ## Checked implementation matrix
 
@@ -84,6 +88,41 @@ late response cannot be mistaken for a safe retry boundary.
 Build presence, host wiring, profile allowance, and current enablement are
 separate facts. `Session.getCapabilities` reports the available and effective
 sets for an authenticated session; no client should infer one from another.
+
+### Live-realm runtime evaluation boundary
+
+`runtime.eval` is refused when the attached `ScriptedUiSession` has any
+effectful `ReloadCapability`: `exec`, `clipboard`, `filesystem`, `storage`,
+`ai`, `runtime_import`, or `network`. The inspector reads the immutable grant
+set installed in the live `WidgetBridge`; it does not mask names in
+`globalThis`, because hiding names inside the same reachable realm is not a
+security boundary. `Runtime.getCapabilities` reports `canEvaluate:false` and
+an exact `evaluateDeniedReason` after an unsafe session is attached.
+
+The framework-owned `build_editor_ui` path retains its historical
+`CapabilitySet::all()` posture and therefore rejects `--inspect-runtime-eval`.
+A production host or custom processor that needs evaluation must explicitly
+construct `ScriptedUiSession` with an empty
+`ScriptedUiOptions::granted_capabilities` set. That reviewed set is retained
+across hot reloads and checked again whenever the standalone host binds a
+replacement scripted-UI session.
+
+The arbitrary-execution adapter is compiled into the separate
+`pulp-inspect-runtime-eval` archive and injected through the narrow
+`RuntimeEvaluator` interface. The base inspector, protocol, transport, client,
+and ordinary format archives do not depend on that component or contain its
+high-risk binary marker. Requests are limited to 64 KiB of decoded code, use a
+fixed two-second deadline, and reject serialized results or encoded responses
+over 1 MiB. Result bytes, nesting depth, and cycles are bounded during QuickJS
+traversal. The scripted realm is rebuilt from source after each evaluation,
+preserving widget values but discarding deferred callbacks and global
+mutations before the next frame pump. That rebuild has a fixed 500 ms cleanup
+grace inside a three-second outer RPC fence; a failed rebuild destroys the
+engine fail-closed. One owned, bounded server worker keeps the controller's
+authenticated connection free to send `Runtime.interrupt` while evaluation is
+in flight, and is included in the server's module-unload shutdown fence. These
+limits compose with the bridge's single-flight, cooperative interrupt,
+engine-detach, and teardown fences.
 
 ## Typed test input and authoring boundary
 
