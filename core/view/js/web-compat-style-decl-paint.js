@@ -42,6 +42,39 @@ function _resolveGradientStopColors(text) {
         });
 }
 
+// Split a single box-shadow into [whole, x, y, blur, spread, colour].
+//
+// CSS allows the colour on EITHER side of the offsets, and Chrome serializes it
+// FIRST: `oklab(0.97 0.008 -0.014 / 0.18) 0px 1px 0px 0px inset`. Matching
+// colour-last only meant a computed shadow did not match AT ALL and fell
+// through — leaving a card ringed by a bright halo, which reads as a rendering
+// bug rather than an unparsed declaration.
+//
+// Function colours resolve to hex before any split, because every offset match
+// here divides on whitespace and `oklab(...)` carries spaces and a slash. That
+// tears the colour apart in either ordering, so it has to happen first.
+//
+// Returns null when the text is not a single well-formed shadow. Named and
+// exported rather than inlined so it can be tested: reading `el.style.boxShadow`
+// back returns whatever string was assigned whether or not it parsed, so a
+// round-trip assertion passes against a shadow that never reached the renderer.
+function _parseBoxShadowOffsets(text) {
+    var work = _resolveGradientStopColors(String(text));
+    var OFFSETS =
+        "(-?[\\d.]+)px\\s+(-?[\\d.]+)px\\s+([\\d.]+)px(?:\\s+(-?[\\d.]+)px)?";
+    // Anchored. Unanchored, this matches INSIDE a colour-first shadow: given
+    // `#f7f3ff2e 0px 1px 3px 0px` it starts at the offsets and takes the
+    // trailing `0px` as the colour, yielding a shadow that parses "successfully"
+    // with garbage in it — worse than not matching, because the colour-first
+    // branch below never gets a chance to run.
+    var m = work.match(new RegExp("^" + OFFSETS + "\\s+(.*)$"));
+    if (m) return m;
+    var first = work.match(new RegExp("^(\\S+)\\s+" + OFFSETS + "\\s*$"));
+    // Re-ordered into the colour-last shape so callers have one layout to read.
+    if (first) return [first[0], first[2], first[3], first[4], first[5], first[1]];
+    return null;
+}
+
 function _applyPaintProp(decl, id, key, resolved, value) {
     switch (key) {
         // Colors
@@ -209,7 +242,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
                 inset = true;
                 work = work.replace(/\s+inset\s*$/i, "");
             }
-            var sm = work.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(.*)/);
+            var sm = _parseBoxShadowOffsets(work);
             if (sm) {
                 var sc = parseCSSColor(sm[5].trim());
                 setBoxShadow(id, parseFloat(sm[1]), parseFloat(sm[2]),
