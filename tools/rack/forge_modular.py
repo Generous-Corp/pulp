@@ -395,12 +395,23 @@ def emit_panel(mod: dict, theme: str) -> str:
     if jacks:
         field_top = max(min(j["y_mm"] for j in jacks) - JACK_R - LABEL_CAP - LABEL_GAP - 1.5,
                         ACCENT_Y + ACCENT_H + 2.0)
+    # A section is named after what is in it, so a divider labelled MASTER over
+    # a knob labelled MASTER prints the word twice, one above the other, with
+    # nothing between them -- which reads as a mistake in the artwork rather
+    # than as a heading. SIXMIX did exactly this. The divider LINE is the part
+    # that does the work; the repeated word is dropped, and nothing is lost
+    # because the control still says it.
+    named_by_a_control = {str(it.get("label") or "").strip().upper()
+                          for it, _ in _labelled(mod)}
+    named_by_a_control.discard("")
     for sec in mod.get("sections", []):
         y = sec["y_mm"]
         # The knockout behind a section label has to match whatever is actually
         # behind it, or the label sits in a visibly wrong-coloured box.
         knock = t["raised"] if (field_top is not None and y >= field_top) else t["plate"]
         o.append(f'<rect x="3.0" y="{y:.3f}" width="{w-6.0:.4f}" height="0.25" fill="{t["border"]}"/>')
+        if str(sec.get("label") or "").strip().upper() in named_by_a_control:
+            continue
         if sec.get("label"):
             d, sw = text_path(sec["label"], LABEL_CAP * 0.85, w / 2.0, y - 1.4)
             o.append(f'<rect x="{(w-sw)/2-1.6:.3f}" y="{y-1.4-LABEL_CAP:.3f}" '

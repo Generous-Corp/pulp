@@ -1748,6 +1748,59 @@ def check_setting_writer() -> tuple:
     return bad, 5
 
 
+def check_panel_labels() -> tuple:
+    """A word is printed once on a panel, however many things want to say it.
+
+    SIXMIX has a section divider labelled MASTER and, immediately under it, a
+    knob labelled MASTER. Both were drawn, so the panel read MASTER twice with
+    nothing between them -- which looks like a fault in the artwork.
+    """
+    import forge_modular as FM
+
+    bad, ran = 0, 2
+    here = os.path.dirname(os.path.abspath(__file__))
+    manifest = os.path.join(here, "..", "..", "examples", "forge-modular",
+                            "modules", "sixmix.json")
+    if not os.path.exists(manifest):
+        print("  SKIP   sixmix.json is not in this checkout")
+        return 0, 0
+    mod = json.load(open(manifest))["modules"][0]
+    if "MASTER" not in [s.get("label") for s in mod.get("sections", [])]:
+        print("  SKIP   sixmix no longer has a MASTER section to duplicate")
+        return 0, 0
+
+    # Counted at the one place every word on the panel goes through, because
+    # the words are emitted as PATHS: nothing in the finished SVG can be
+    # searched for "MASTER".
+    drawn = []
+    real = FM.text_path
+    FM.text_path = lambda s, cap, cx, cy: (drawn.append(s), real(s, cap, cx, cy))[1]
+    try:
+        FM.emit_panel(mod, "light")
+    finally:
+        FM.text_path = real
+
+    said = [w for w in drawn if w.strip().upper() == "MASTER"]
+    if len(said) != 1:
+        bad += 1
+        print(f"  WRONG  MASTER is printed {len(said)} times on the panel")
+    else:
+        print("  ok     a section and a control of the same name print once")
+
+    # The divider itself is still drawn: it is the part that does the work,
+    # and dropping the row would lose the grouping rather than the repeat.
+    mod_wide = json.loads(json.dumps(mod))
+    with_rule = FM.emit_panel(mod_wide, "light")
+    mod_wide["sections"] = []
+    without = FM.emit_panel(mod_wide, "light")
+    if with_rule == without:
+        bad += 1
+        print("  WRONG  dropping the repeated word dropped the divider too")
+    else:
+        print("  ok     the section divider survives its label being dropped")
+    return bad, ran
+
+
 def check_streamed_model_call() -> tuple:
     """A long model call has to look different from a wedged one.
 
@@ -2259,13 +2312,14 @@ def main():
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
     stream_bad, stream_ran = check_streamed_model_call()
+    panel_bad, panel_ran = check_panel_labels()
     fresh_bad, fresh_ran = check_fresh_machine()
     ship_bad, ship_ran = check_shipped_generator()
     ver_bad, ver_ran = check_version_stamping()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
-    acq_bad += nf_bad + gs_bad + uk_bad + stream_bad
-    acq_ran += nf_ran + gs_ran + uk_ran + stream_ran
+    acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
+    acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
