@@ -91,6 +91,67 @@ you are exercising the fallback that hides the bug:
 mv ~/Library/Application\ Support/<app>/tools{,.bak}
 ```
 
+## An installer must be able to update what it installs
+
+The app's working copy of the generator lives in Application Support and the
+shipped one lives in the bundle. Preferring Application Support
+*unconditionally* means a toolchain written by an older release shadows every
+fix a newer one ships — and it fails **silently**, because the shadowed script
+is old enough to reject a subcommand the new app calls.
+
+That is exactly what happened: `library_catalog.py index` did not exist in the
+August 1st copy, so the app asked for a library index on every launch, the
+script printed its usage, exited 2, and four days passed with a 200-plugin
+index nobody could explain.
+
+- **Compare a version stamp written at package time, never an mtime.** Every
+  path here is a copy and a copy rewrites mtimes. `package.sh` writes
+  `Contents/Resources/tools/rack/VERSION` (version, then packaged-at);
+  `choose_toolchain()` prefers the bundle only when it is **strictly** newer, so
+  an equal stamp leaves the installed copy in charge and hand-editing it still
+  works for development. An **unstamped** directory is the oldest thing there
+  is, which is what every pre-stamp machine looks like.
+- **`install_toolchain.sh` must not strip that stamp.** It `rsync --delete`s
+  from its source, and a source *checkout* has no `VERSION` — so a developer's
+  install would make the destination look older than the release and lose to it
+  forever. Exclude `VERSION` when the source lacks one.
+- **Anything spawned in the background must record its exit status**, somewhere
+  the app reads. `library_index_command()` writes `runs/library-status`; the
+  settings row turns that into "the refresh failed (exit 2), see …". A log
+  nobody opens is the same as no report at all.
+
+## The app must be able to say what it is
+
+`package.sh --version` named the .pkg and nothing else, so an installed 0.12.7
+answered `CFBundleShortVersionString` **0.11.0** and 12.6 was indistinguishable
+from 12.7 on the machine. Stamp the version into the app **and all three
+plug-in bundles** (staged copies, before signing, so the signature covers it),
+then **read it back out of the expanded package** and refuse the release when
+it disagrees.
+
+Ship a details surface with it. The field that matters most is the **live
+toolchain path** — had it been visible, a day of shadowed fixes would have been
+obvious in seconds. Version, packaged date, that path and its stamp, index
+count and age, Rack SDK location, and whether a VCV sign-in was found — never
+the token. A `Label` cannot be selected with a mouse, so a Copy button is the
+affordance; promising selectable text you do not have is the same kind of claim
+as an installer promising modules it lacks.
+
+## The settings pane does not clip, it collapses
+
+Forge's settings card is a fixed 660 tall and the Permissions pane was not a
+scroll view. A pane taller than the card therefore did not clip — flex shrank
+whatever it could, captions collapsed to zero height, and every row drew on top
+of the one below it. Adding one product row made it unmistakable; it was
+already true of the built-in ones.
+
+There is a second, independent cause worth knowing anywhere in Pulp: **Yoga's
+measure callback asks a `Label` for its INTRINSIC width first**, and a
+paragraph's intrinsic width is the whole thing on one line — so the height it
+measures is one line however narrow the label is bounded to. Reserve the real
+height explicitly with `label.measured_height(bound)` when you bound a
+multi-line label's width.
+
 ## Present but unreachable is the most expensive defect class
 
 Every one of these was a *finished* feature that behaved exactly like a missing
