@@ -22,7 +22,11 @@ A module you build links the Rack SDK, so it inherits the GPLv3. That is fine fo
 
 REMOVING IT
 
-An uninstaller ships inside the app. It removes the app, the plug-ins, the Rack modules and the downloaded SDK, and it keeps the patches you have made unless you ask it not to.
+An uninstaller ships inside the app. It removes the app, the plug-ins, the Rack modules and the downloaded SDK, and it keeps the patches you have made unless you ask it not to. Run it from Terminal, with the quotes:
+
+  "/Applications/Forge Modular.app/Contents/Resources/uninstall.sh"
+
+The quotes matter. There is a space in the name, and without them the shell reads the path as far as "Forge" and reports that no such file exists. Add --all to remove your patches too, or --dry-run to see what would go without removing anything.
 
 THIS IS A BETA
 
