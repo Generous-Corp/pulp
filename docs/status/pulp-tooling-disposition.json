@@ -3032,6 +3032,10 @@
             "kind": "option"
           },
           {
+            "name": "--inspect-runtime-eval",
+            "kind": "flag"
+          },
+          {
             "name": "--audio-inspector",
             "kind": "flag"
           },
