@@ -423,10 +423,33 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend does not honor CSS filter color ops; "
                     "filter chain collapses to blur/opacity only");
             }
+            // A node may carry BOTH, and the branch below is an `else if`, so
+            // taking this one used to drop the blend mode entirely. That is
+            // not a subtle loss: the idiom it breaks is a blurred bloom set to
+            // `screen` or `plus-lighter` over a dark panel, which is how these
+            // designs make light. Composited with plain source-over instead,
+            // the bloom stops adding light and simply paints over everything —
+            // a big soft WHITE blob across the artwork. It reads as a broken
+            // renderer, and it is the single most destructive thing that can
+            // happen to a dark panel.
+            //
+            // Two layers, in the order CSS defines: filter applies to the
+            // element, THEN the filtered result is blended with the backdrop.
+            // So the blend layer is the outer one. `layers_pushed` is what the
+            // restore below pops, so counting both keeps the stack balanced.
+            if (needs_blend_layer) {
+                canvas.save_layer_with_blend(
+                    -blur_pad, -blur_pad,
+                    bounds_.width + blur_pad * 2.0f,
+                    bounds_.height + blur_pad * 2.0f,
+                    1.0f, 0.0f, mix_blend_mode_);
+                ++layers_pushed;
+            }
             const auto chain = to_canvas_filter_chain(filter_chain_);
             canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
+            ++layers_pushed;
         } else if (needs_blend_layer) {
             // saveLayer with explicit blend mode for CSS / RN `mix-blend-mode`.
             canvas.save_layer_with_blend(-blur_pad, -blur_pad,
@@ -439,7 +462,8 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                               bounds_.height + blur_pad * 2.0f,
                               opacity_, filter_blur_);
         }
-        // Every non-effect branch above pushes exactly one layer.
+        // Every branch above except the effect chain and the filter branch
+        // pushes exactly one layer, and those two count their own.
         if (layers_pushed == 0) layers_pushed = 1;
     }
     state.layers_pushed = layers_pushed;
