@@ -307,7 +307,7 @@ def exercise_clients(
 
     listed_result = run_cli(["inspect", "list", "--json"])
     listed = parse_json_output(listed_result, "packaged Rust inspect list")
-    require(listed.get("schemaVersion") == "pulp.inspect.sessions.v1", str(listed))
+    require(listed.get("schemaVersion") == 1, str(listed))
     require(len(listed.get("sessions", [])) == 2, f"unexpected sessions: {listed!r}")
     session = next(
         item for item in listed["sessions"] if item.get("sessionId") == ready["session_id"]
@@ -348,12 +348,10 @@ def exercise_clients(
         ]
     )
     capabilities = parse_json_output(capabilities_result, "packaged CLI capabilities")
-    require(capabilities.get("schemaVersion") == "pulp.inspect.capabilities.v1", str(capabilities))
-    capability_session = capabilities.get("session", {})
-    require(capability_session.get("sessionId") == ready["session_id"], str(capabilities))
-    require(capability_session.get("instanceId") == ready["instance_id"], str(capabilities))
-    require(capability_session.get("publicationId") == ready["publication_id"], str(capabilities))
-    require("state.write" in capabilities.get("policy", {}).get("effective", []), str(capabilities))
+    require(capabilities.get("schemaVersion") == 1, str(capabilities))
+    require(capabilities.get("sessionId") == ready["session_id"], str(capabilities))
+    require(capabilities.get("publicationId") == ready["publication_id"], str(capabilities))
+    require("state.write" in capabilities.get("effective", []), str(capabilities))
 
     parameters_result = run_cli(
         ["inspect", "--json", *exact_selector, "--command", "State.getParameters"]
@@ -415,6 +413,8 @@ def exercise_clients(
             "64",
             "--velocity",
             "99",
+            "--duration-ms",
+            "40",
             "--json",
             *exact_selector,
         ]
@@ -473,7 +473,7 @@ def exercise_clients(
         ),
         mcp_request(2, "pulp_inspect_list", {}),
         mcp_request(3, "pulp_inspect_capabilities", selector),
-        mcp_request(4, "pulp_inspect_context", selector),
+        mcp_request(4, "pulp_inspect_audio", selector),
         mcp_request(5, "pulp_inspect_params", selector),
         mcp_request(
             6,
@@ -491,9 +491,16 @@ def exercise_clients(
         mcp_request(
             11,
             "pulp_inspect_inject_midi",
-            {**selector, "kind": "note_on", "channel": 3, "note": 64, "velocity": 99},
+            {
+                **selector,
+                "kind": "note_on",
+                "channel": 3,
+                "note": 64,
+                "velocity": 99,
+                "duration_ms": 40,
+            },
         ),
-        mcp_request(12, "pulp_inspect_context", selector_object(observe_ready)),
+        mcp_request(12, "pulp_inspect_audio", selector_object(observe_ready)),
         mcp_request(13, "pulp_inspect_params", selector_object(observe_ready)),
     ]
     mcp_env = env.copy()
@@ -529,13 +536,18 @@ def exercise_clients(
         require(isinstance(payload, dict), f"MCP response {request_id} lacks structured content: {by_id[request_id]!r}")
         require(payload.get("ok") is True, f"MCP response {request_id} failed: {payload!r}")
 
-    mcp_sessions = structured[2].get("sessions", [])
+    mcp_sessions = structured[2].get("result", {}).get("sessions", [])
     require(len(mcp_sessions) == 2, str(structured[2]))
     require(
-        {item.get("sessionId") for item in mcp_sessions}
+        {item.get("session_id") for item in mcp_sessions}
         == {ready["session_id"], observe_ready["session_id"]},
         str(structured[2]),
     )
+    listed_develop = next(
+        item for item in mcp_sessions if item.get("session_id") == ready["session_id"]
+    )
+    require_selected_session(listed_develop, ready)
+    require(listed_develop.get("plugin_id") == ready["plugin_id"], str(listed_develop))
 
     for request_id in range(3, 12):
         identity = structured[request_id].get("session", {})
@@ -547,9 +559,7 @@ def exercise_clients(
 
     capability_policy = structured[3].get("result", {})
     require("state.write" in capability_policy.get("effective", []), str(structured[3]))
-    require(ready["plugin_id"] in json.dumps(structured[3]), str(structured[3]))
     require(ready["session_id"] in json.dumps(structured[4]), str(structured[4]))
-    require(ready["plugin_id"] in json.dumps(structured[4]), str(structured[4]))
 
     require(
         abs(parameter_value(structured[5].get("result")) - RESET_PARAMETER_VALUE) < 0.001,

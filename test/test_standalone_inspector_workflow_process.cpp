@@ -1,7 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/inspect/client.hpp>
-#include <pulp/inspect/client_session.hpp>
 #include <pulp/inspect/discovery.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -98,6 +97,18 @@ bool runtime_contains_only_inert_locks(
         }
     }
     return !error;
+}
+
+pulp::inspect::InspectorMessage controlled_request(
+    pulp::inspect::InspectorClient& client, std::string method,
+    std::string params_json = "{}") {
+    const auto timeout = std::chrono::seconds(2);
+    const auto lease = client.request("Session.acquireController", "{}", timeout);
+    if (lease.is_error) return lease;
+    auto response = client.request(std::move(method), std::move(params_json), timeout);
+    const auto release = client.request("Session.releaseController", "{}", timeout);
+    if (!response.is_error && release.is_error) return release;
+    return response;
 }
 
 } // namespace
@@ -247,11 +258,11 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     REQUIRE(ready_json["runtime_dir"].getString()
             == runtime_path.generic_string());
 
-    pulp::inspect::InspectorClientFailure ambiguous_failure;
-    REQUIRE(pulp::inspect::InspectorClientSession::connect(
-                {}, &ambiguous_failure, std::chrono::seconds(2), runtime_path)
-            == nullptr);
-    REQUIRE(ambiguous_failure.code == "session_selection_failed");
+    std::string ambiguous_error;
+    REQUIRE_FALSE(pulp::inspect::select_inspector_session(
+        records, {}, {}, {}, &ambiguous_error));
+    REQUIRE(ambiguous_error
+            == "Multiple inspector sessions are live; specify a session ID");
 
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(develop_record, reader));
@@ -271,15 +282,9 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     REQUIRE(observe_eval_denial.is_error);
     REQUIRE(observe_eval_denial.error_code == "capability_unavailable");
 
-    pulp::inspect::InspectorClientSelection eval_selection;
-    eval_selection.session_id = eval_record.session_id;
-    eval_selection.instance_id = eval_record.instance_id;
-    eval_selection.publication_id = eval_record.publication_id;
-    pulp::inspect::InspectorClientFailure eval_failure;
-    auto eval_client = pulp::inspect::InspectorClientSession::connect(
-        eval_selection, &eval_failure, std::chrono::seconds(2), runtime_path);
-    REQUIRE(eval_client);
-    const auto eval_capabilities = eval_client->request(
+    pulp::inspect::InspectorClient eval_client;
+    REQUIRE(eval_client.connect(eval_record, reader));
+    const auto eval_capabilities = eval_client.request(
         "Session.getCapabilities", "{}", std::chrono::seconds(2));
     REQUIRE_FALSE(eval_capabilities.is_error);
     const auto eval_capabilities_json =
@@ -298,16 +303,16 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     REQUIRE(eval_has_describe);
     REQUIRE(eval_has_control);
     REQUIRE(eval_has_runtime);
-    const auto eval_controller = eval_client->request(
+    const auto eval_controller = eval_client.request(
         "Session.acquireController", "{}", std::chrono::seconds(2));
     REQUIRE_FALSE(eval_controller.is_error);
-    const auto evaluated = eval_client->request(
+    const auto evaluated = eval_client.request(
         "Runtime.evaluate", R"({"code":"6 * 7"})", std::chrono::seconds(2));
     REQUIRE_FALSE(evaluated.is_error);
     REQUIRE(choc::json::parse(evaluated.params_json)
                 ["result"].getWithDefault<std::int64_t>(0) == 42);
     const std::string oversized_code(65'537, 'a');
-    const auto oversized_eval = eval_client->request(
+    const auto oversized_eval = eval_client.request(
         "Runtime.evaluate", "{\"code\":\"" + oversized_code + "\"}",
         std::chrono::seconds(2));
     REQUIRE(oversized_eval.is_error);
@@ -356,23 +361,18 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     const double target = minimum + ((maximum - minimum) * 0.73);
     REQUIRE(target != Catch::Approx(original));
 
-    pulp::inspect::InspectorClientSelection selection;
-    selection.session_id = develop_record.session_id;
-    selection.instance_id = develop_record.instance_id;
-    selection.publication_id = develop_record.publication_id;
-    pulp::inspect::InspectorClientFailure typed_connect_failure;
-    auto typed_client = pulp::inspect::InspectorClientSession::connect(
-        selection, &typed_connect_failure, std::chrono::seconds(2), runtime_path);
-    INFO("typed client failure=" << typed_connect_failure.code << ": "
-                                  << typed_connect_failure.message);
-    REQUIRE(typed_client);
-
-    const auto set_result = typed_client->set_parameter_typed(
-        parameter_id, target, false, std::chrono::seconds(2));
-    INFO("typed set failure=" << set_result.failure.code << ": "
-                               << set_result.failure.message);
-    REQUIRE(set_result);
-    REQUIRE(set_result.value->applied);
+    pulp::inspect::InspectorClient workflow_client;
+    REQUIRE(workflow_client.connect(develop_record, reader));
+    auto set_params = choc::value::createObject("");
+    set_params.addMember("id", choc::value::createInt64(parameter_id));
+    set_params.addMember("value", choc::value::createFloat64(target));
+    set_params.addMember("normalized", choc::value::createBool(false));
+    const auto set_result = controlled_request(
+        workflow_client, "State.setParameter",
+        choc::json::toString(set_params, false));
+    INFO("set response=" << set_result.params_json);
+    REQUIRE_FALSE(set_result.is_error);
+    REQUIRE(choc::json::parse(set_result.params_json)["ok"].getBool());
     const double expected_normalized = (target - minimum) / (maximum - minimum);
     std::optional<double> mutated_dom;
     const auto mutated_dom_deadline =
@@ -395,7 +395,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     REQUIRE(*mutated_dom
             == Catch::Approx(expected_normalized).margin(0.001));
 
-    const auto value_channels = typed_client->request(
+    const auto value_channels = workflow_client.request(
         "State.getValueChannels", "{}", std::chrono::seconds(2));
     REQUIRE_FALSE(value_channels.is_error);
     const auto value_channel_catalog = choc::json::parse(value_channels.params_json);
@@ -411,7 +411,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
         std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (!(saw_scalar && saw_vector && saw_events && saw_stale)
            && std::chrono::steady_clock::now() < telemetry_ready_deadline) {
-        const auto telemetry_snapshot = typed_client->request(
+        const auto telemetry_snapshot = workflow_client.request(
             "Telemetry.getSnapshot", "{}", std::chrono::seconds(2));
         REQUIRE_FALSE(telemetry_snapshot.is_error);
         const auto telemetry_snapshot_json = choc::json::parse(
@@ -438,7 +438,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     std::mutex telemetry_mutex;
     std::condition_variable telemetry_cv;
     std::vector<std::string> telemetry_samples;
-    typed_client->set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
+    workflow_client.set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
         if (event.method != "Telemetry.sample") return;
         {
             std::lock_guard lock(telemetry_mutex);
@@ -446,7 +446,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
         }
         telemetry_cv.notify_all();
     });
-    const auto subscription = typed_client->request(
+    const auto subscription = workflow_client.request(
         "Telemetry.subscribe",
         R"({"channels":["workflow_scalar","workflow_vector","workflow_events","workflow_stale"],"rateHz":1,"maxVectorValues":4})",
         std::chrono::seconds(2));
@@ -523,22 +523,30 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
         std::ofstream reload(reload_path);
         reload << "reload\n";
     }
-    std::string reattached_sample_json;
+    const auto pre_reload_attempt_sequence =
+        slow_sample["attemptSequence"].getInt64();
+    const auto pre_reload_source_generation =
+        slow_sample["sourceGeneration"].getInt64();
+    std::string post_reload_sample_json;
     {
         std::unique_lock lock(telemetry_mutex);
         REQUIRE(telemetry_cv.wait_for(lock, std::chrono::seconds(4), [&] {
             for (const auto& sample : telemetry_samples) {
-                if (choc::json::parse(sample)["reattached"].getWithDefault(false)) {
-                    reattached_sample_json = sample;
+                if (choc::json::parse(sample)["attemptSequence"]
+                        .getWithDefault<std::int64_t>(0)
+                    > pre_reload_attempt_sequence) {
+                    post_reload_sample_json = sample;
                     return true;
                 }
             }
             return false;
         }));
     }
-    const auto reattached_sample = choc::json::parse(reattached_sample_json);
-    REQUIRE(reattached_sample["sourceGeneration"].getInt64() > 1);
-    REQUIRE(reattached_sample["channels"].size() == 4);
+    const auto post_reload_sample = choc::json::parse(post_reload_sample_json);
+    REQUIRE_FALSE(post_reload_sample["reattached"].getWithDefault(false));
+    REQUIRE(post_reload_sample["sourceGeneration"].getInt64()
+            == pre_reload_source_generation);
+    REQUIRE(post_reload_sample["channels"].size() == 4);
 
     const auto runtime_after_reload = client.request(
         "Runtime.getCapabilities", "{}", std::chrono::seconds(2));
@@ -587,23 +595,28 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     transport_input.playing = false;
     transport_input.position_samples = 96'000;
     transport_input.tempo_bpm = 90.0;
-    const auto transport_result = typed_client->set_transport_typed(
-        transport_input, std::chrono::seconds(2));
-    INFO("typed transport failure=" << transport_result.failure.code << ": "
-                                     << transport_result.failure.message);
-    REQUIRE(transport_result);
-    REQUIRE(transport_result.value->applied);
+    auto transport_params = choc::value::createObject("");
+    transport_params.addMember("playing", choc::value::createBool(false));
+    transport_params.addMember("position_samples", choc::value::createInt64(96'000));
+    transport_params.addMember("tempo_bpm", choc::value::createFloat64(90.0));
+    const auto transport_result = controlled_request(
+        workflow_client, "Test.setTransport",
+        choc::json::toString(transport_params, false));
+    INFO("transport response=" << transport_result.params_json);
+    REQUIRE_FALSE(transport_result.is_error);
+    REQUIRE(choc::json::parse(transport_result.params_json)["applied"].getBool());
 
-    const auto midi_result = typed_client->inject_midi_typed(
-        {.kind = pulp::inspect::MidiTestInputKind::NoteOn,
-         .channel = 2,
-         .note = 64,
-         .velocity = 99},
-        std::chrono::seconds(2));
-    INFO("typed MIDI failure=" << midi_result.failure.code << ": "
-                                << midi_result.failure.message);
-    REQUIRE(midi_result);
-    REQUIRE(midi_result.value->accepted);
+    auto midi_params = choc::value::createObject("");
+    midi_params.addMember("kind", choc::value::createString("note_on"));
+    midi_params.addMember("channel", choc::value::createInt32(3));
+    midi_params.addMember("note", choc::value::createInt32(64));
+    midi_params.addMember("velocity", choc::value::createInt32(99));
+    const auto midi_result = controlled_request(
+        workflow_client, "Test.injectMidi",
+        choc::json::toString(midi_params, false));
+    INFO("MIDI response=" << midi_result.params_json);
+    REQUIRE_FALSE(midi_result.is_error);
+    REQUIRE(choc::json::parse(midi_result.params_json)["accepted"].getBool());
 
     const auto observation_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -645,10 +658,10 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     const auto eval_credential_path = eval_record.credential_path;
     auto eval_ownership_path = eval_record_path;
     eval_ownership_path.replace_extension(".lock");
-    typed_client.reset();
+    workflow_client.disconnect();
     client.disconnect();
     observe_client.disconnect();
-    eval_client.reset();
+    eval_client.disconnect();
     {
         std::ofstream stop(stop_path);
         stop << "stop\n";

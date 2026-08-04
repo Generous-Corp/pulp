@@ -96,11 +96,16 @@ public:
         const std::array<float, 4> vector_values{
             scalar_value, -scalar_value, scalar_value * 0.5f, -scalar_value * 0.5f};
         vector_->publish(vector_values.data(), static_cast<int>(vector_values.size()));
-        const pulp::view::ValueEvent occurrence{
-            .frame_index = static_cast<std::uint32_t>(publication % 256),
-            .value = scalar_value,
-        };
-        events_->publish(&occurrence, 1);
+        // Four occurrences per audio block deliberately outrun the bounded
+        // telemetry batch retained for a 1 Hz subscriber. This makes the
+        // slow-consumer loss proof deterministic across device buffer sizes.
+        const std::array<pulp::view::ValueEvent, 4> occurrences{{
+            {.frame_index = 0, .value = scalar_value},
+            {.frame_index = 64, .value = scalar_value},
+            {.frame_index = 128, .value = scalar_value},
+            {.frame_index = 192, .value = scalar_value},
+        }};
+        events_->publish(occurrences.data(), static_cast<int>(occurrences.size()));
         output.clear();
     }
 
@@ -115,8 +120,8 @@ public:
             *root, *store_,
             pulp::view::ScriptedUiOptions{
                 .script_path = g_script_path,
-                .granted_capabilities = {},
                 .value_channels = g_expose_value_channels ? &channels_ : nullptr,
+                .granted_capabilities = {},
             });
         std::string error;
         if (!scripted_->load(&error)) {
@@ -386,6 +391,7 @@ setTextColor("workflow-status", "#ffffff");
     config.headless = true;
     config.screenshot_path = ready_path.string() + ".hidden.png";
     config.screenshot_frame_delay = std::numeric_limits<int>::max();
+    config.screenshot_keeps_audio = true;
     config.inspector_profile = inspector_profile;
     config.inspector_capabilities = std::move(inspector_capabilities);
     config.inspector_runtime_eval = runtime_eval;
