@@ -1291,3 +1291,28 @@ Every shell-out in `tools/cli/cmd_ship.cpp` goes through `shell_quote()` from
 lambda, and ~18 naive `'"' + path + '"'` splices — including on the signing-keychain reload
 and `gh secret set` paths, so identically-shaped paths behaved differently per call site.
 Adding a subcommand: quote with `shell_quote()`, do not copy whichever idiom is nearest.
+
+## A required component, and consent before installing
+
+`build_combined_installer.sh`'s `add_ref()` takes a fifth argument,
+`required`. It emits `enabled="false" selected="true"` on the choice, which
+is how macOS expresses "this ships, and you cannot untick it". Use it for the
+payload the others depend on — for Forge Modular that is the app, because the
+Rack modules and the uninstaller live inside its bundle, so an install that
+skipped it would produce plugins with no way to generate anything and no way
+to remove them.
+
+Set `PKG_LICENSE_FILE` to put a consent pane in front of the install. It maps
+to `productbuild --resources` plus a `<license>` line in the distribution XML.
+
+**Do not hard-wrap the licence text.** macOS rewraps it to the pane width, so
+pre-wrapped lines come out ragged and broken-looking. Write each paragraph as
+one long line and let the installer wrap it; keep blank lines between
+paragraphs, and keep indented list items indented, since those are preserved.
+
+**Verify a built PKG by component payload size, never by signature.** A
+staging directory assembled with symlinks instead of real copies produces a
+292-byte package that signs, notarizes, staples and passes Gatekeeper while
+containing nothing. `pkgutil --payload-files` does NOT enumerate nested
+component payloads either — `pkgutil --expand` and check each component's size.
+Use `ditto` for staging copies.
