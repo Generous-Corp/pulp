@@ -1698,6 +1698,15 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   logic whose `create_view()` returns a custom `View` **subclass** with root-level
   paint gets children+bg refreshed but not the subclass identity (fine for the
   common container-root editor).
+- **Processor-owned scripted sessions reload themselves.** When `create_view()`
+  returns a custom root while `active_scripted_ui()` also exposes the processor's
+  live `ScriptedUiSession`, `ViewBridge` caches that ownership mode at `open()`
+  and calls `Processor::reload_active_scripted_ui_in_place()` on a generation
+  change. Do not call `create_view()` again in this mode: it would replace the
+  session and strand the root's raw host subscriptions on the destroyed
+  instance. The override owns its locking protocol and must retain both the
+  original session and root; returning false leaves the generation pending so
+  the next UI tick retries the same in-place path.
 - **Repaint after rebuild.** The CPU (CoreGraphics) mac host only repaints on
   `setNeedsDisplay`, so `make_editor_idle_pump` calls `View::request_repaint()`
   after a rebuild. Mutating the tree alone does NOT repaint on CPU.
@@ -1708,8 +1717,10 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   tick on CPU editors.
 
 Test: `test_view_bridge.cpp` `[reload]` cases — a reloadable stub rebuilds into
-the same root object with new content/bg, is idempotent, and is inert for a normal
-processor. `examples/hot-reload-morph` exercises it end-to-end.
+the same root object with new content/bg, a processor-owned scripted session
+keeps both its root and session identity across a failed retry and successful
+reload, and a normal processor remains inert. `examples/hot-reload-morph`
+exercises the ordinary transplant path end-to-end.
 
 ## Standalone is a transport — it must derive the same playhead change flags
 
