@@ -109,8 +109,40 @@ fi
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
-  find "$b/Contents/MacOS" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
-    codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done
+  # An ABSOLUTE rpath in anything the bundle carries is a build-machine leak,
+  # and it fails in two different ways that both look like a broken feature
+  # rather than a packaging mistake. Where the path is missing, dyld reports
+  # "Library not loaded" and the helper dies. Where it EXISTS -- any machine
+  # that has also built the framework, which is precisely who tests a build --
+  # dyld loads that copy instead, its signature carries a different Team ID
+  # from this notarized bundle, and the kernel refuses the mapping. The second
+  # case cannot be fixed by shipping the library alongside: the bundled copy is
+  # never consulted while an absolute rpath still resolves.
+  #
+  # Checked here because this runs AFTER every helper has been staged. A
+  # relocatability check that runs at link time cannot see a tool copied in
+  # afterwards, which is how one shipped.
+  local _leaked=0
+  while IFS= read -r -d '' _macho; do
+    file -b "$_macho" 2>/dev/null | grep -q "Mach-O" || continue
+    while read -r _rp; do
+      [[ "$_rp" == /* ]] || continue
+      echo "  ABSOLUTE rpath in ${_macho#"$b/"}: $_rp" >&2
+      _leaked=1
+    done < <(otool -l "$_macho" 2>/dev/null |
+             awk '/LC_RPATH/ {f=1; next} f && $1 == "path" {print $2; f=0}')
+  done < <(find "$b" -type f -perm +111 -not -name "*.sh" -print0 2>/dev/null || true)
+  if [[ "$_leaked" -ne 0 ]]; then
+    echo "error: $b carries an absolute rpath; it will not run off this machine." >&2
+    exit 2
+  fi
+  # Contents/lib too: a staged helper's rpath can point outside MacOS/, and an
+  # unsigned dylib anywhere in the bundle fails notarization.
+  for _libdir in "$b/Contents/MacOS" "$b/Contents/lib" "$b/Contents/Frameworks"; do
+    [[ -d "$_libdir" ]] || continue
+    find "$_libdir" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
+      codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done
+  done
   # Helper EXECUTABLES the app carries (a CLI tool staged into Resources, a
   # sidecar in MacOS/ that is not the main binary). Signing the bundle does not
   # sign them, and notarization rejects the whole archive when it finds one:
