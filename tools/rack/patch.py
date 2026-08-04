@@ -194,6 +194,32 @@ def _add_portmap(inv: dict) -> None:
             mod[key + "_xy"] = coords
         mod["panel"] = entry.get("size")
 
+        # Params too — CARTOG has always measured them (index, name, kind),
+        # and this reader folded in the ports and dropped the params on the
+        # floor. So every vendor module reached the model with named jacks
+        # and not one named knob, and a model that cannot name a sequencer's
+        # steps cannot write a melody into them: the patch it produces is a
+        # wiring diagram that plays one held note. Manifest-sourced params
+        # win where they exist (ours carry real ranges); a scan carries
+        # minValue/maxValue/defaultValue only when the scanner was new
+        # enough to record them, so absent bounds stay absent rather than
+        # being invented.
+        if not mod.get("params"):
+            folded = []
+            for q in (entry.get("params") or []):
+                if not isinstance(q, dict):
+                    continue
+                idx = q.get("index", len(folded))
+                one = {"id": idx, "name": q.get("name") or f"p{idx}"}
+                for src, dst in (("minValue", "min"), ("maxValue", "max"),
+                                 ("defaultValue", "default")):
+                    if isinstance(q.get(src), (int, float)):
+                        one[dst] = q[src]
+                folded.append(one)
+            if folded:
+                folded.sort(key=lambda q: q["id"])
+                mod["params"] = folded
+
 
 # Panel geometry, shared with the preview: 15 points per HP across, 380 points
 # for a 3U panel down. A Eurorack HP is 5.08mm and 3U is 128.5mm, so the two
@@ -1236,11 +1262,31 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
             # default; a param written blindly does not, and the difference
             # between those two is a level knob at 0 and a patch that makes
             # no sound.
+            #
+            # A scanned vendor param may carry a name and no bounds — the
+            # scanner that measured it predates range recording. Printing
+            # the name alone still beats omitting the param (which is how a
+            # sequencer's steps became unwritable and a melody became one
+            # held note), but the missing range has to be SAID: a value
+            # written against invented bounds is as wrong as a cable to the
+            # wrong jack.
             if m.get("params"):
-                ps = ", ".join(
-                    f"{q['id']}={q['name']}[{q['min']:g}..{q['max']:g}"
-                    f", default {q['default']:g}]" for q in m["params"])
+                def _one(q):
+                    if isinstance(q.get("min"), (int, float)) and \
+                            isinstance(q.get("max"), (int, float)):
+                        s = f"{q['id']}={q['name']}[{q['min']:g}..{q['max']:g}"
+                        if isinstance(q.get("default"), (int, float)):
+                            s += f", default {q['default']:g}"
+                        return s + "]"
+                    return f"{q['id']}={q['name']}"
+                ps = ", ".join(_one(q) for q in m["params"])
                 out.append(f"    params: {ps}")
+                if any(not isinstance(q.get("min"), (int, float))
+                       for q in m["params"]):
+                    out.append("    (params shown without a range are in that "
+                               "knob's native units; pitch and step values are "
+                               "volts on a 1V/oct scale unless the panel says "
+                               "otherwise)")
         out.append("")
     return "\n".join(out)
 
@@ -2993,6 +3039,25 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
     return "".join(out)
 
 
+def claim_idiom(prompt: str, idioms: dict, say=None):
+    """Which idiom this request claims, with the gap SAID when none does.
+
+    resolve() returning None is not an error, but it thins the checks down
+    to wiring and audibility, and that thinning used to be invisible:
+    "highly melodic" matched no idiom, so no structure was claimed, and a
+    patch that droned one held note passed every check it was given. A
+    coverage gap the transcript never mentions is one nobody notices until
+    a human listens.
+    """
+    import idiom_check
+    claimed = idiom_check.resolve(prompt, idioms)
+    if not claimed:
+        (say or (lambda m: print(m, flush=True)))(
+            "  no idiom matched this request; only the wiring and "
+            "audibility of the patch will be checked")
+    return claimed
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     """Prompt -> a patch that lints clean and makes a sound."""
     import re
@@ -3007,7 +3072,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     import idiom_check
     import patch_vocabulary
     idioms = idiom_check.load_idioms()
-    claimed = idiom_check.resolve(prompt, idioms)
+    claimed = claim_idiom(prompt, idioms)
     contract = contract.replace(
         patch_vocabulary.MARKER,
         patch_vocabulary.for_prompt(prompt, idioms) if claimed
@@ -3165,6 +3230,25 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     keep_attempt(patch, "not the claimed idiom:\n" +
                                  "\n".join(f"  - {m}" for m in missing),
                                  attempt + 1, "wrong-idiom")
+                    continue
+                # Topology can hold while the music does not exist: the
+                # sequencer can be clocked, reach the oscillator and fire the
+                # envelope with every step still sitting at its default —
+                # one held note through perfect wiring, which is the shipped
+                # bug this check exists to catch before anyone listens.
+                unwritten = idiom_check.check_written(patch, inv,
+                                                      idioms[claimed])
+                if unwritten:
+                    print(f"  wired as a {claimed}, but the music is not "
+                          f"written:")
+                    for m in unwritten:
+                        print(f"    - {m}")
+                    ctx = (f"The wiring is right for a {claimed} patch, but "
+                           "the values that make it MUSIC are missing:\n" +
+                           "\n".join(f"  - {m}" for m in unwritten))
+                    keep_attempt(patch, "music not written:\n" +
+                                 "\n".join(f"  - {m}" for m in unwritten),
+                                 attempt + 1, "music-not-written")
                     continue
                 print(f"  idiom holds: {claimed}")
             return patch, why

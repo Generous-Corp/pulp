@@ -93,6 +93,16 @@ rejection will name the connection you left out.
    0 on the reasoning that the envelope now controls the level. It does not:
    it scales what the knob already lets through.
 
+8. **A melody must be WRITTEN, not implied by the wiring.** When the request
+   asks for a melody or a sequenced line, the sequencer's step values ARE the
+   melody: set them in `params`, and give the steps DIFFERENT values. A
+   perfectly wired sequencer whose steps are all left at their default plays
+   one held note. Pitch and step values are volts on a 1V/oct scale unless
+   the listed range says otherwise (0.583 V above a root is a fifth; small
+   simple fractions of a volt are notes). A param listed without a range is
+   in that knob's native units; stay conservative and prefer values near the
+   scale its name suggests.
+
 ## Available modules
 
 Only these. Where port indices are listed, they are exact — use them. Where a

@@ -36,6 +36,12 @@ UNREAD_BY_DESIGN = {
     "lights":   "measured for a future light-drawing pass; nothing draws them",
     "displays": "same — a screen's rectangle, with nothing drawing screens yet",
     "type":     "the widget's class name, kept for diagnosing a bad scan",
+    # The app draws geometry and never needs a knob's bounds; the generator's
+    # inventory (patch.py) is the reader, so the model can write a param
+    # value against the knob's real range instead of a guess.
+    "minValue":     "a knob's lower bound, read by patch.py, not drawn",
+    "maxValue":     "a knob's upper bound, read by patch.py, not drawn",
+    "defaultValue": "a knob's default, read by patch.py, not drawn",
 }
 
 

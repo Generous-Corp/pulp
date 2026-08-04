@@ -149,7 +149,10 @@
    "implies": [
     "a sequencer playing a melody",
     "16 step sequence",
-    "sequenced bassline"
+    "sequenced bassline",
+    "melodic",
+    "melody",
+    "a tune"
    ],
    "is": "A sequencer supplying both pitch and gate to a voice, so the pattern plays itself in time.",
    "sounds_right_when": "the same phrase repeats in time, with each step clearly articulated.",
@@ -185,7 +188,8 @@
    ],
    "behaviour": {
     "keeps_going": true,
-    "rhythmic": true
+    "rhythmic": true,
+    "melodic": true
    },
    "common_mistakes": [
     {
