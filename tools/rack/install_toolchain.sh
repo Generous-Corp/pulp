@@ -85,6 +85,18 @@ for part in "${PARTS[@]}"; do
     # writable.
     exclude_file="$(mktemp)"
     printf '%s\n' __pycache__ '*.pyc' build '*.o' > "$exclude_file"
+    # THE VERSION STAMP IS NOT ORDINARY CONTENT.
+    #
+    # It says which release laid this toolchain down, and the app compares it
+    # against the one inside the bundle to decide which copy runs. A source
+    # CHECKOUT has no stamp, so a --delete sync from one would remove the
+    # destination's -- which would make a developer's hand-installed copy look
+    # older than the release and lose to it. So: copy a stamp when the source
+    # has one (an install from inside the bundle), and leave the destination's
+    # alone when it does not.
+    if [ "$part" = "tools/rack" ] && [ ! -f "$SRC/$part/VERSION" ]; then
+      printf '%s\n' VERSION >> "$exclude_file"
+    fi
     if [ "$part" = "examples/forge-modular" ]; then
       printf '%s\n' 'modules/' 'patches/' 'plugin.json' \
         'src/generated_modules.hpp' 'src/*.cpp' 'res/' >> "$exclude_file"

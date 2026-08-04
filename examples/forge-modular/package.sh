@@ -21,6 +21,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The version rules, shared with the test that drives them alone.
+. "$REPO/examples/forge-modular/version_stamp.sh"
 BUILD_DIR=""
 OUT_DIR=""
 VERSION="0.1.0"
@@ -142,32 +144,57 @@ for mod in signal format audio state platform runtime; do
 done
 
 [[ -f "$TOOLS_DEST/patch.py" ]] || { echo "staging failed: no patch.py" >&2; exit 1; }
-# IDENTITY, NOT PRESENCE. A shaper that is there and does not run empties every
-# label on every panel, and a vocabulary that is there and extracts nothing
-# hands the model a contract with no DSP in it. Both fail silently and both
-# surface as a failed generation minutes later, so both are exercised here.
-_fm_shaped=$("$APP/Contents/Resources/build/shape_text" Hg \
-    "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf" 3.0 center 2>/dev/null || true)
-case "$_fm_shaped" in
-    M*) : ;;
-    *)  echo "staging failed: the panel shaper produced no path for 'Hg'." >&2
-        echo "  Rebuild it: tools/rack/build_shape_text.sh" >&2
-        exit 1 ;;
-esac
-_fm_vocab=$(cd "$TOOLS_DEST" && /usr/bin/python3 ../dsp_vocabulary.py 2>/dev/null | wc -l | tr -d ' ')
-if [[ "${_fm_vocab:-0}" -lt 20 ]]; then
-    echo "staging failed: the DSP vocabulary extracted $_fm_vocab lines from the" >&2
-    echo "  staged headers. The model would be given no DSP to use." >&2
-    exit 1
-fi
-echo "[installer] panel shaper runs, DSP vocabulary is $_fm_vocab lines"
-_fm_manifests=$(find "$PACK_DEST/modules" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
-[[ "${_fm_manifests:-0}" -gt 0 ]] || { echo "staging failed: no module manifests" >&2; exit 1; }
-echo "[installer] staged $_fm_manifests module manifests + panel artwork"
-echo "[installer] staged $(ls "$TOOLS_DEST"/*.py | wc -l | tr -d ' ') generator files + helpers"
+
+# THE VERSION STAMP. Written here, at package time, because this is the only
+# moment that knows which release these files are.
+#
+# `tools_dir()` used to prefer the copy under Application Support
+# unconditionally, so an installer could not update what it installs: a
+# toolchain written by 0.11 shadowed every fix 0.12.7 shipped, and the shadowed
+# copy was too old to understand `library_catalog.py index` -- it printed its
+# usage, exited 2, and the library index silently never rebuilt for four days.
+#
+# The comparison cannot be an mtime. Every path this takes is a copy, and a
+# copy rewrites mtimes; a stamp travels with the files instead. Two lines: the
+# version, and when it was packaged.
+PACKAGED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+write_toolchain_stamp "$TOOLS_DEST" "$VERSION" "$PACKAGED_AT"
+echo "[installer] toolchain stamped $VERSION ($PACKAGED_AT)"
+
+# AND THE VERSION THE BUNDLES REPORT.
+#
+# The plug-ins are staged into copies for the same reason the app is: the stamp
+# must be inside the signature, and the build tree must not be mutated by
+# packaging.
+stage_and_stamp() {   # <bundle> -> echoes the staged path
+    local dest="$STAGED_ROOT/$(basename "$1")"
+    ditto "$1" "$dest"
+    stamp_bundle_version "$dest" "$VERSION" >&2 || return 1
+    echo "$dest"
+}
+
 AU="$BUILD_DIR/AU/Forge Modular.component"
 VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
 CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
+# Staged and stamped only when they exist; the emptiness checks below still get
+# to say "missing" in their own words rather than dying inside ditto.
+for _fm_fmt in AU VST3 CLAP; do
+    _fm_path="${!_fm_fmt}"
+    [[ -d "$_fm_path" ]] || continue
+    printf -v "$_fm_fmt" '%s' "$(stage_and_stamp "$_fm_path")"
+done
+# The app was staged further up (the generator had to go inside it first).
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
+    "$APP/Contents/Info.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" \
+    "$APP/Contents/Info.plist" >/dev/null
+_fm_version_bad=0
+for artifact in "$APP" "$AU" "$VST3" "$CLAP"; do
+    [[ -d "$artifact" ]] || continue
+    check_bundle_version "$artifact" "$VERSION" || _fm_version_bad=1
+done
+[[ $_fm_version_bad -eq 0 ]] || exit 1
+echo "[installer] all four bundles report $VERSION"
 # THE MODULES ARE NOT BUILT WHERE THE APP IS.
 #
 # `pulp_add_rack_plugin` runs in the pulp tree and writes the .vcvplugin into

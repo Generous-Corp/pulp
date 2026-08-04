@@ -16,6 +16,7 @@
 #include "forge/shell.hpp"
 
 #include "forge/build_monitor.hpp"
+#include "forge/installation.hpp"
 #include "forge/mention_overlay.hpp"
 #include "forge/patch_explanation.hpp"
 #include "forge/rack_preview.hpp"
@@ -180,6 +181,25 @@ public:
     const std::string& module_source_shown() const { return module_source_; }
     const std::string& auto_download_shown() const { return auto_download_; }
 
+    /// What this build is and what it is running: version, packaged date, the
+    /// LIVE generator path and its stamp, the index, the Rack SDK and whether
+    /// a VCV sign-in was found. Gathered here so the details row and a test
+    /// read the same facts.
+    AppDetails gather_details();
+
+    /// The line under the library-index row: what is in the index, how old it
+    /// is, and how the last refresh went. Shown when idle too, because "it
+    /// says nothing" and "it did nothing" were indistinguishable.
+    std::string library_status_line();
+
+    /// Rebuild the index now, whatever its state. What the Refresh control does.
+    void refresh_library_index();
+
+    /// Which settings row the library-index status belongs to. The order in
+    /// settings_choices() is the contract between the two, so it is named
+    /// once rather than counted twice.
+    static constexpr std::size_t kLibraryIndexRow = 2;
+
     /// Adopt a preference and hand the write to patch.py, the one validated
     /// writer of the settings file. A no-op when the value is already
     /// current, so re-clicking the chosen option does not spawn a process to
@@ -327,6 +347,11 @@ public:
 
     void on_poll() override;
 
+    /// The parts of on_poll that keep a surface honest: where the composer
+    /// is, how a module download ended, and what the library-index row says.
+    /// Public so a test can tick them without a window or a host clock.
+    void poll_surfaces();
+
     /// Forget every pointer into the editor's view tree.
     ///
     /// This shell IS the processor: it outlives every editor its host opens.
@@ -467,6 +492,16 @@ private:
     /// answer from a stale file.
     std::string module_source_ = "prefer_existing";
     std::string auto_download_ = "entitled";
+    /// What the index held when Refresh was pressed, so the row can report a
+    /// before and an after rather than a number with nothing to compare to.
+    std::string refresh_before_;
+    bool refreshing_ = false;
+    /// The module a download is running for, so its outcome can be reported
+    /// rather than leaving "Downloading…" as the last word on the subject.
+    std::string install_pending_;
+    /// The status line last pushed to the settings sheet, so the poll tick
+    /// only touches the label when the words have actually changed.
+    std::string pushed_status_;
     void write_pref(const std::string& key, const std::string& value);
     pulp::view::TextButton* open_button_ = nullptr;
     Launcher launcher_;

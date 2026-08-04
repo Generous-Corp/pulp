@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 namespace forge_modular {
@@ -219,6 +221,16 @@ std::string shell_quoted(const std::string& text) {
 
 }  // namespace
 
+std::string module_label(const std::string& brand, const std::string& name) {
+    if (brand.empty()) return name;
+    if (name.empty()) return brand;
+    // Folded, so "CVfunk Blank 8HP" and "CV funk Blank 8HP" are both already
+    // led by the maker: the slug and the panel spell the same name three ways
+    // and only one of them matches character for character.
+    if (starts_fold(name, brand)) return name;
+    return brand + " " + name;
+}
+
 std::vector<MentionCandidate> search_entries(const std::vector<ModuleEntry>& entries,
                                              const std::string& query,
                                              std::size_t limit) {
@@ -275,6 +287,53 @@ std::string library_index_path() {
            "/Library/Application Support/Forge Modular/library/index.json";
 }
 
+IndexCounts count_index_text(const std::string& text) {
+    IndexCounts n;
+    if (text.size() < 2) return n;
+    try {
+        const auto doc = choc::json::parse(text);
+        n.plugins = doc.size();
+        for (uint32_t i = 0; i < doc.size(); ++i) {
+            const auto plug = doc[i];
+            if (plug.hasObjectMember("modules")) n.modules += plug["modules"].size();
+        }
+    } catch (...) {
+        // Unparseable counts as nothing, which is the honest answer and the
+        // one that provokes a rebuild.
+        return IndexCounts{};
+    }
+    return n;
+}
+
+bool index_is_plausible(const IndexCounts& counts) {
+    return counts.plugins >= kMinPlausiblePlugins &&
+           counts.modules >= kMinPlausibleModules;
+}
+
+LibraryIndexState library_index_state() {
+    static LibraryIndexState state;
+    static std::uintmax_t seen_size = 0;
+    static std::time_t seen_time = 0;
+
+    const auto path = library_index_path();
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0) {
+        state = LibraryIndexState{};
+        seen_size = 0;
+        seen_time = 0;
+        return state;
+    }
+    if (state.present && st.st_size == static_cast<off_t>(seen_size) &&
+        st.st_mtime == seen_time)
+        return state;
+    state.present = true;
+    state.counts = count_index_text(read_file(path));
+    state.written = st.st_mtime;
+    seen_size = static_cast<std::uintmax_t>(st.st_size);
+    seen_time = st.st_mtime;
+    return state;
+}
+
 bool library_index_needs_build(const std::string& path, std::time_t now,
                                int max_age_days) {
     // stat rather than std::filesystem::last_write_time: the standard one
@@ -286,24 +345,62 @@ bool library_index_needs_build(const std::string& path, std::time_t now,
     // An index that parsed as nothing is worse than none: it looks current and
     // offers nothing, which is exactly the state this whole path exists to end.
     if (st.st_size < 2) return true;
+    // PLAUSIBILITY, not just age. A 200-plugin file with no CV funk in it was
+    // four days old and therefore "fresh", and it is what the whole @ list and
+    // every prompt inventory was built from. Size on disk is not the test:
+    // count what is actually in it.
+    if (!index_is_plausible(count_index_text(read_file(path)))) return true;
     return now - st.st_mtime >
            static_cast<std::time_t>(max_age_days) * 24 * 60 * 60;
 }
 
+std::string library_index_status_path() {
+    return home_dir() +
+           "/Library/Application Support/Forge Modular/runs/library-status";
+}
+
 std::string library_index_command(const std::string& tools_dir) {
-    // Output kept, not discarded. A background job that fails silently is how
-    // this file came to be read by something nothing ever wrote.
+    // Output kept, not discarded, AND THE EXIT STATUS RECORDED. A background
+    // job that fails silently is how this file came to be read by something
+    // nothing ever wrote -- and then, once it was written, how a toolchain too
+    // old to understand `index` printed its usage into the log and exited 2
+    // for four days without a word reaching the app.
+    //
+    // Wrapped in a subshell so that a caller appending `&` backgrounds the
+    // WHOLE sequence. Without the parentheses the `&` would attach to the
+    // final command alone and the fetch would run in the foreground of
+    // whatever launched it.
     const std::string runs = home_dir() +
         "/Library/Application Support/Forge Modular/runs";
-    return "mkdir -p " + shell_quoted(runs) + " && cd " + shell_quoted(tools_dir) +
+    // The old status goes first, so "no status file" means a build is in
+    // flight rather than "the last one is still whatever it was".
+    return "( mkdir -p " + shell_quoted(runs) + " && rm -f " +
+           shell_quoted(library_index_status_path()) + " && cd " +
+           shell_quoted(tools_dir) +
            " && python3 library_catalog.py index >> " +
-           shell_quoted(runs + "/library.log") + " 2>&1";
+           shell_quoted(runs + "/library.log") + " 2>&1; printf '%s' \"$?\" > " +
+           shell_quoted(library_index_status_path()) + " )";
+}
+
+std::optional<int> library_index_last_status() {
+    const auto text = read_file(library_index_status_path());
+    if (text.empty()) return std::nullopt;
+    try {
+        return std::stoi(text);
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::string ensure_library_index(const std::string& tools_dir,
                                  const std::function<void(const std::string&)>& run,
                                  std::time_t now) {
     if (!library_index_needs_build(library_index_path(), now)) return {};
+    return build_library_index(tools_dir, run);
+}
+
+std::string build_library_index(const std::string& tools_dir,
+                                const std::function<void(const std::string&)>& run) {
     const auto command = library_index_command(tools_dir);
     if (run) run(command);
     return command;

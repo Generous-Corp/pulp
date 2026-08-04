@@ -1,5 +1,6 @@
 #include "forge/modular_shell.hpp"
 
+#include "forge/installation.hpp"
 #include "forge/module_catalog.hpp"
 #include "forge/portmap.hpp"
 
@@ -56,36 +57,60 @@ std::string bundle_tools_dir() {
     return {};
 }
 
-/// Where the generator lives. A source checkout wins when present so a
-/// developer's edits are what runs; the bundle's own copy is the fallback.
-std::string tools_dir() {
-    if (const char* env = std::getenv("FORGE_MODULAR_TOOLS"); env && *env) return env;
-    const char* home = std::getenv("HOME");
-    // Application Support first, and deliberately NOT a source checkout on an
-    // external volume. macOS gates removable-volume access behind a MODAL
-    // consent dialog; touching such a path from the UI thread parks the whole
-    // app behind that modal, which is what read as a freeze on Build. Nothing
-    // under Application Support is gated.
-    const std::string installed = std::string(home ? home : ".") +
-        "/Library/Application Support/Forge Modular/tools/rack";
+/// A toolchain directory as a candidate: is it usable, and what laid it down?
+ToolchainCandidate candidate(const std::string& path) {
+    ToolchainCandidate c;
+    c.path = path;
+    if (path.empty()) return c;
     std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::path(installed) / "patch.py", ec))
-        return installed;
-    // THE BUNDLE'S OWN COPY. Without this the installer is not a product: the
-    // .pkg carried the app and no generator, so on a machine that had never
-    // seen the source, Build did nothing. It only ever worked here because a
-    // manual step had written the tools into Application Support by hand.
-    //
-    // Second, not first, so the Application Support copy still wins -- that is
-    // the one a user or a future updater can replace without reinstalling.
-    if (const std::string own = bundle_tools_dir(); !own.empty()) {
-        if (std::filesystem::exists(std::filesystem::path(own) / "patch.py", ec))
-            return own;
+    const std::filesystem::path dir(path);
+    c.usable = std::filesystem::exists(dir / "patch.py", ec);
+    if (!c.usable) return c;
+    std::FILE* f = std::fopen((dir / stamp_file_name()).string().c_str(), "rb");
+    if (f) {
+        char buf[256];
+        const std::size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+        std::fclose(f);
+        buf[n] = '\0';
+        c.stamp = parse_stamp(std::string(buf)).first;
     }
-    // A developer with no installed copy can still point at their checkout,
-    // consent once, and carry on.
-    return "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
+    return c;
 }
+
+/// The four places the generator can be, in standing order.
+///
+/// Application Support before the bundle, and deliberately NOT a source
+/// checkout on an external volume: macOS gates removable-volume access behind
+/// a MODAL consent dialog, and touching such a path from the UI thread parks
+/// the whole app behind that modal, which is what read as a freeze on Build.
+/// Nothing under Application Support is gated.
+///
+/// THE BUNDLE'S OWN COPY has to be in the list at all, or the installer is not
+/// a product: the .pkg once carried the app and no generator, so on a machine
+/// that had never seen the source, Build did nothing.
+///
+/// And the bundle has to be able to WIN. Preferring Application Support
+/// unconditionally meant an installer could not update what it installs: a
+/// toolchain written by an older release shadowed every fix a newer one
+/// shipped, and one shadowed script -- too old to understand
+/// `library_catalog.py index` -- printed its usage and exited 2 on every
+/// launch for four days while the app said nothing.
+ToolchainPick pick_toolchain() {
+    const char* env = std::getenv("FORGE_MODULAR_TOOLS");
+    const char* home = std::getenv("HOME");
+    return choose_toolchain(
+        candidate(env ? env : ""),
+        candidate(std::string(home ? home : ".") +
+                  "/Library/Application Support/Forge Modular/tools/rack"),
+        candidate(bundle_tools_dir()),
+        // A developer with no installed copy can still point at their
+        // checkout, consent once, and carry on.
+        ToolchainCandidate{"/Volumes/Workshop/Code/pulp-modular-rack/tools/rack",
+                           true, {}});
+}
+
+std::string tools_dir() { return pick_toolchain().path; }
+
 
 
 /// Read a whole small file, or "" when it is not there. cstdio rather than
@@ -106,6 +131,88 @@ std::string slurp(const std::string& path) {
     std::fclose(f);
     return all;
 }
+
+/// When a toolchain directory was stamped, or "".
+std::string stamp_packaged_at(const std::string& dir) {
+    std::FILE* f = std::fopen(
+        (std::filesystem::path(dir) / stamp_file_name()).string().c_str(), "rb");
+    if (!f) return {};
+    char buf[256];
+    const std::size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+    std::fclose(f);
+    buf[n] = '\0';
+    return parse_stamp(std::string(buf)).second;
+}
+
+/// What this bundle says it is. Read from the Info.plist beside the running
+/// executable rather than from a compiled-in constant, because the compiled-in
+/// one is precisely what was wrong: an installed 0.12.7 reported 0.11.0
+/// because `--version` reached the package name and nothing else.
+///
+/// Parsed by hand rather than through CoreFoundation: a plug-in's main bundle
+/// is the HOST's, so CFBundleGetMainBundle would answer for Logic.
+std::string bundle_short_version() {
+    char buf[4096];
+    std::uint32_t size = sizeof buf;
+    if (_NSGetExecutablePath(buf, &size) != 0) return {};
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::weakly_canonical(
+        std::filesystem::path(buf), ec);
+    std::string plist;
+    for (int up = 0; up < 6 && !p.empty(); ++up) {
+        p = p.parent_path();
+        if (p.filename() == "Contents") {
+            plist = slurp((p / "Info.plist").string());
+            break;
+        }
+    }
+    if (plist.empty()) return {};
+    const auto key = plist.find("CFBundleShortVersionString");
+    if (key == std::string::npos) return {};
+    const auto open = plist.find("<string>", key);
+    if (open == std::string::npos) return {};
+    const auto close = plist.find("</string>", open);
+    if (close == std::string::npos) return {};
+    return plist.substr(open + 8, close - open - 8);
+}
+
+/// An SDK this machine can build modules against, or "".
+///
+/// fetch_sdk.py's `installed_at()` is the authority and does the fetching;
+/// this only REPORTS, in the same order, so the details surface names the copy
+/// that would actually be used.
+std::string rack_sdk_dir() {
+    const char* home = std::getenv("HOME");
+    const std::string h = home ? home : ".";
+    std::error_code ec;
+    for (const auto& cand : {std::getenv("RACK_SDK_DIR"),
+                             std::getenv("PULP_RACK_SDK_DIR")}) {
+        if (cand && *cand &&
+            std::filesystem::exists(std::filesystem::path(cand) / "include" /
+                                        "rack.hpp", ec))
+            return cand;
+    }
+    for (const std::string& cand :
+         {h + "/Library/Application Support/Forge Modular/Rack-SDK",
+          h + "/SDKs/Rack-SDK"}) {
+        if (std::filesystem::exists(std::filesystem::path(cand) / "include" /
+                                        "rack.hpp", ec))
+            return cand;
+    }
+    return {};
+}
+
+std::string runs_dir() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") +
+           "/Library/Application Support/Forge Modular/runs";
+}
+
+std::string library_log_path() { return runs_dir() + "/library.log"; }
+std::string install_log_path() { return runs_dir() + "/install.log"; }
+/// Where a module download records how it went, so "Downloading…" can become
+/// "Downloaded." rather than being the last thing anybody is ever told.
+std::string install_status_path() { return runs_dir() + "/install-status"; }
 
 }  // namespace
 
@@ -515,7 +622,112 @@ ForgeModularShell::settings_choices() {
     downloads.value = auto_download_;
     downloads.on_choose = [this](const std::string& v) { choose_auto_download(v); };
 
-    return {std::move(source), std::move(downloads)};
+    // THE ONE THING THAT COULD NOT BE ASKED FOR. The index the @ list and
+    // every prompt inventory are built from rebuilt itself only when it was
+    // missing or a week old, and there was no way to say "do it now" -- so a
+    // truncated index sat there being wrong, and the only remedy was an SSH
+    // session and a python command.
+    //
+    // An action rather than a choice, using the same mechanism as the two rows
+    // above rather than a second one, and it REPORTS ITS OUTCOME: what is in
+    // the index, how old it is, and whether the last build failed. A refresh
+    // that silently does nothing is exactly the defect being fixed.
+    forge::ForgeShell::SettingsChoice refresh;
+    refresh.caption = "Module library index";
+    refresh.detail =
+        "The catalogue of every published VCV module, which is what the @ list "
+        "offers and what a prompt is given to choose from. Rebuilt "
+        "automatically when it is missing, implausibly small or a week old; "
+        "this does it now.";
+    refresh.action_label = "Refresh";
+    refresh.status = library_status_line();
+    refresh.on_action = [this] { refresh_library_index(); };
+
+    // WHICH BUILD IS THIS, AND WHAT IS IT RUNNING. An installed 0.12.7
+    // reported 0.11.0 and ran a generator from August 1st, and nothing on the
+    // machine could be asked either question. The live generator path is the
+    // field that matters: had it been visible, a day of shadowed fixes would
+    // have been obvious in seconds.
+    forge::ForgeShell::SettingsChoice about;
+    about.caption = "This build";
+    about.detail = details_text(gather_details(), std::time(nullptr));
+    // A Label cannot be selected with a mouse, so Copy is what makes the
+    // report reportable. Promising selectable text we do not have would be
+    // the same kind of claim as an installer promising modules it lacks.
+    about.action_label = "Copy";
+    about.on_action = [this] {
+        pulp::platform::Clipboard::set_text(
+            details_text(gather_details(), std::time(nullptr)));
+    };
+
+    return {std::move(source), std::move(downloads), std::move(refresh),
+            std::move(about)};
+}
+
+AppDetails ForgeModularShell::gather_details() {
+    AppDetails d;
+    const auto pick = pick_toolchain();
+    d.toolchain_path = pick.path;
+    d.toolchain_stamp = pick.stamp;
+    d.toolchain_reason = pick.reason;
+    d.app_version = bundle_short_version();
+    // The date the LIVE toolchain was stamped, which is the same packaging run
+    // that produced the app around it.
+    d.packaged_at = stamp_packaged_at(pick.path);
+    const auto index = library_index_state();
+    d.index_plugins = index.counts.plugins;
+    d.index_modules = index.counts.modules;
+    d.index_written = index.written;
+    d.sdk_path = rack_sdk_dir();
+    d.signed_in = rack_signed_in();
+    return d;
+}
+
+std::string ForgeModularShell::library_status_line() {
+    const auto index = library_index_state();
+    const auto now = std::time(nullptr);
+    std::string line;
+    if (!index.present) {
+        line = "No index on this machine yet.";
+    } else {
+        line = std::to_string(index.counts.plugins) + " plugins, " +
+               std::to_string(index.counts.modules) + " modules, built " +
+               describe_age(index.written, now) + ".";
+        if (!index_is_plausible(index.counts))
+            line += " That is far below the published library, so it will be "
+                    "rebuilt.";
+    }
+    // BEFORE AND AFTER. A refresh that changed nothing and a refresh that
+    // never ran look identical without this.
+    if (!refresh_before_.empty()) line = refresh_before_ + " → " + line;
+    // Read only while one is actually running: this line is recomputed on
+    // every poll tick, and a file opened 8 times a second for no reason is a
+    // cost nobody asked for.
+    if (refreshing_) {
+        const auto status = library_index_last_status();
+        if (!status) {
+            line += "  Refreshing…";
+        } else if (*status == 0) {
+            line += "  Refreshed.";
+            refreshing_ = false;
+        } else {
+            line += "  The refresh failed (exit " + std::to_string(*status) +
+                    "). See " + library_log_path() + ".";
+            refreshing_ = false;
+        }
+    }
+    return line;
+}
+
+void ForgeModularShell::refresh_library_index() {
+    const auto before = library_index_state();
+    refresh_before_ = before.present
+                          ? std::to_string(before.counts.plugins) + " plugins, " +
+                                std::to_string(before.counts.modules) + " modules"
+                          : std::string("no index");
+    refreshing_ = true;
+    build_library_index(tools_dir(),
+                        [this](const std::string& c) { run_detached(c); });
 }
 
 void ForgeModularShell::write_pref(const std::string& key,
@@ -644,28 +856,39 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
     // typing, so the message reached nobody and the pick looked like it had
     // done nothing at all.
     mentions_.on_refused = [this](const MentionCandidate& what) {
-        const std::string who = what.brand.empty()
-                                    ? what.name
-                                    : what.brand + " " + what.name;
+        const std::string who = module_label(what.brand, what.name);
         const MentionFetch plan =
             plan_mention_fetch(what.state, rack_signed_in(), auto_download_pref());
         if (!plan.fetch) {
-            mentions_.show_notice(who + plan.why);
+            // A genuine block: not signed in, or paid and unowned. Amber is
+            // the right colour for exactly these.
+            mentions_.show_notice(who + plan.why, MentionOverlay::Tone::blocked);
             return;
         }
         // FETCH IT. Telling somebody to go to Rack's Library, install a free
         // module by hand and come back to rescan is handing them a chore we
         // can do in about ten seconds — and it is the reason a patch that
         // asked for Surge XT got a lookalike instead.
-        mentions_.show_notice("fetching " + who + "… it will be usable after "
-                              "Rack restarts.");
+        // Ordinary progress, so muted rather than amber: colouring a download
+        // like a warning tells somebody something is wrong when nothing is.
+        mentions_.show_notice("Downloading " + who + "…",
+                              MentionOverlay::Tone::progress);
         // The row knows a module; patch.py resolves which plugin carries it.
-        // Output is kept rather than discarded: a silent background fetch that
-        // fails leaves somebody staring at a module that never arrives.
-        const std::string log = std::string(std::getenv("HOME") ? std::getenv("HOME") : ".") +
-            "/Library/Application Support/Forge Modular/runs/install.log";
-        run_detached("cd " + quoted(tools_dir()) + " && python3 patch.py install " +
-                     quoted(what.slug) + " >> " + quoted(log) + " 2>&1");
+        // Output is kept rather than discarded, AND SO IS THE EXIT STATUS: a
+        // silent background fetch that fails leaves somebody staring at a
+        // module that never arrives, and "fetching…" as the last word said is
+        // indistinguishable from a download that has been finished for
+        // minutes.
+        //
+        // Wrapped in a subshell so that run_detached's trailing `&`
+        // backgrounds the whole sequence rather than only the last command.
+        install_pending_ = who;
+        std::error_code ec;
+        std::filesystem::remove(install_status_path(), ec);
+        run_detached("( cd " + quoted(tools_dir()) +
+                     " && python3 patch.py install " + quoted(what.slug) +
+                     " >> " + quoted(install_log_path()) + " 2>&1; printf '%s' \"$?\" > " +
+                     quoted(install_status_path()) + " )");
     };
     mentions_.on_choose = [this](const std::string& slug) {
         if (auto* c = chrome()) {
@@ -1495,7 +1718,53 @@ std::string ForgeModularShell::ask() {
     return {};
 }
 
+void ForgeModularShell::poll_surfaces() {
+    auto* c = chrome();
+    if (!c) return;
+
+    // WHERE THE COMPOSER ACTUALLY IS. Measured from the laid-out tree rather
+    // than assumed, so the notice hangs under the card at the card's own inset
+    // and width instead of at the dropdown's narrower one.
+    if (auto* card = c->composer_card()) {
+        float left = 0;
+        for (const pulp::view::View* v = card; v; v = v->parent())
+            left += v->bounds().x;
+        if (card->bounds().width > 0)
+            mentions_.set_composer_frame(left, card->bounds().width);
+    }
+
+    // "Downloading…" has to become something. A progress message that is the
+    // last word said is how a finished download looks identical to a stuck one.
+    if (!install_pending_.empty()) {
+        const auto text = slurp(install_status_path());
+        if (!text.empty()) {
+            int code = -1;
+            try { code = std::stoi(text); } catch (...) { code = -1; }
+            if (code == 0) {
+                // Outcome first, remedy second. Rack loads its plug-ins once,
+                // at startup, so a module that just arrived is not there yet.
+                mentions_.show_notice("Downloaded " + install_pending_ +
+                                      ". Restart Rack to use it.",
+                                      MentionOverlay::Tone::progress);
+            } else {
+                mentions_.show_notice(
+                    "Could not download " + install_pending_ + ". See " +
+                    install_log_path() + ".", MentionOverlay::Tone::blocked);
+            }
+            install_pending_.clear();
+        }
+    }
+
+    // The library-index row reports what is in the index and how the last
+    // refresh went, and it has to keep reporting while one runs.
+    if (auto line = library_status_line(); line != pushed_status_) {
+        pushed_status_ = line;
+        c->set_product_settings_status(kLibraryIndexRow, line);
+    }
+}
+
 void ForgeModularShell::on_poll() {
+    poll_surfaces();
     // A way to ask for a build from OUTSIDE the window, for proving that a
     // generation works when it is spawned from inside a host.
     //

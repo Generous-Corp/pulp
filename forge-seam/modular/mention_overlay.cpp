@@ -45,6 +45,11 @@ constexpr int kMaxRows = 6;
 /// at 380 the list sat ON the card, hiding the search and Random buttons,
 /// which is its own kind of broken even though the rows were visible.
 constexpr float kListTopMargin = 448.0f;
+/// Where the dropdown itself hangs, and how wide it is. Named because the
+/// panel takes the COMPOSER's inset and width instead when it is carrying a
+/// notice rather than rows, and something has to restore these.
+constexpr float kListLeftMargin = 300.0f;
+constexpr float kListWidth = 380.0f;
 
 // Key codes, matching the platform's. Named so the handler reads as intent.
 constexpr int kKeyReturn = 36;
@@ -115,9 +120,9 @@ std::unique_ptr<View> MentionOverlay::build() {
     //
     // Absolute placement here is margin-driven, the same as every other
     // absolutely-placed view in the chrome.
-    root->flex().margin_left = 300;
+    root->flex().margin_left = kListLeftMargin;
     root->flex().margin_top = kListTopMargin;
-    root->flex().preferred_width = 380;
+    root->flex().preferred_width = kListWidth;
     root->set_background_color(surface_panel);
     root->set_border(line, 1, forge::design::radius::medium);
     root->set_visible(false);
@@ -136,7 +141,9 @@ std::unique_ptr<View> MentionOverlay::build() {
     notice->set_font_family(forge::design::type::mono);
     notice->set_font_size(10);
     notice->set_multi_line(true);
-    notice->set_text_color(forge::design::color::amber);
+    // Muted by default. Amber is what a person should look at, and spending it
+    // on "a download started" is how it stops meaning anything.
+    notice->set_text_color(text_muted);
     notice->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
     notice->flex().padding_left = 10;
     notice->flex().padding_right = 10;
@@ -369,6 +376,7 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     open_ = true;
     if (list_) list_->set_visible(true);
     if (root_) root_->set_visible(true);
+    apply_panel_frame();   // rows: back to the dropdown's own geometry
     // Opening on '@' does not consume the '@' itself -- the character belongs in
     // the prompt, and swallowing it would make the field feel broken.
     return false;
@@ -425,6 +433,7 @@ void MentionOverlay::close() {
     // the pick that just closed the list, so hiding it with the rows would
     // take the message away in the same frame it appeared.
     if (root_) root_->set_visible(!notice_text_.empty());
+    apply_panel_frame();   // a notice left behind takes the composer's frame
     // Same reason as show_notice: visibility is layout, not paint, and the
     // panel that stays up for the notice has to be re-measured now that the
     // rows it was sized around are gone.
@@ -444,7 +453,30 @@ void MentionOverlay::attach_notice(pulp::view::Label* label) {
     }
 }
 
-void MentionOverlay::show_notice(const std::string& text) {
+pulp::canvas::Color MentionOverlay::notice_color() const {
+    return notice_ ? notice_->text_color() : pulp::canvas::Color{};
+}
+
+void MentionOverlay::set_composer_frame(float left, float width) {
+    if (composer_left_ == left && composer_width_ == width) return;
+    composer_left_ = left;
+    composer_width_ = width;
+    apply_panel_frame();
+}
+
+void MentionOverlay::apply_panel_frame() {
+    if (!root_) return;
+    // The ROWS keep the dropdown's own geometry -- a 680-wide list of 34-tall
+    // rows is a lot of empty space. A NOTICE takes the composer's, because it
+    // is a sentence about what was just typed there.
+    const bool as_notice = !open_ && !notice_text_.empty() &&
+                           composer_width_ > 0;
+    root_->flex().margin_left = as_notice ? composer_left_ : kListLeftMargin;
+    root_->flex().preferred_width = as_notice ? composer_width_ : kListWidth;
+    root_->invalidate_layout();
+}
+
+void MentionOverlay::show_notice(const std::string& text, Tone tone) {
     // Its OWN strip, not the list's and not the status card's.
     //
     // The first attempt at this wrote to the status card, which lives on the
@@ -456,9 +488,13 @@ void MentionOverlay::show_notice(const std::string& text) {
     // disappears with it. This sits beside the list and stays until the next
     // keystroke.
     notice_text_ = text;
+    notice_tone_ = tone;
+    apply_panel_frame();
     if (!notice_) return;
     notice_->set_text(text);
     notice_->set_visible(!text.empty());
+    notice_->set_text_color(tone == Tone::blocked ? forge::design::color::amber
+                                                  : text_muted);
     // The panel carries it, so the panel has to be up even with the rows gone.
     if (root_ && !open_) root_->set_visible(!text.empty());
     // Showing a view is a LAYOUT change, not a paint change. A repaint alone

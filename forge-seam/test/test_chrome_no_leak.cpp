@@ -14,6 +14,7 @@
 //     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 // and commit the changed PNGs with the reason in the message.
 
+#include "forge/installation.hpp"
 #include "forge/module_catalog.hpp"
 #include "forge/module_summary.hpp"
 #include "forge/patch_loader.hpp"
@@ -1117,6 +1118,25 @@ struct ScopedHome {
     std::string previous;
 };
 
+/// An index document of a given shape: `plugins` plugins, `per` modules each.
+/// The shape is what the plausibility floor judges, so a test needs to be able
+/// to write a truncated one and a full one on demand.
+std::string fake_index(int plugins, int per) {
+    std::string out = "{";
+    for (int p = 0; p < plugins; ++p) {
+        if (p) out += ",";
+        const auto slug = "Maker" + std::to_string(p);
+        out += "\"" + slug + "\":{\"brand\":\"" + slug + "\",\"modules\":[";
+        for (int m = 0; m < per; ++m) {
+            if (m) out += ",";
+            out += "{\"slug\":\"" + slug + "/M" + std::to_string(m) +
+                   "\",\"name\":\"M" + std::to_string(m) + "\"}";
+        }
+        out += "]}";
+    }
+    return out + "}";
+}
+
 }  // namespace
 
 TEST_CASE("the library index is asked for when nothing has written one",
@@ -1136,7 +1156,7 @@ TEST_CASE("the library index is asked for when nothing has written one",
     CHECK(forge_modular::library_index_needs_build(path, now));
 
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-    std::ofstream(path) << R"({"CVfunk":{"modules":[]}})";
+    std::ofstream(path) << fake_index(500, 12);
     CHECK_FALSE(forge_modular::library_index_needs_build(path, now));
 
     // An index built long enough ago is wrong: VCV publishes continuously.
@@ -1146,10 +1166,28 @@ TEST_CASE("the library index is asked for when nothing has written one",
     std::ofstream(path, std::ios::trunc);
     CHECK(forge_modular::library_index_needs_build(path, now));
 
+    // AND SO IS A SMALL ONE. This is the assertion this test used to get
+    // wrong: it wrote a one-plugin index and required that no rebuild was
+    // needed, which is exactly the rule that let a 200-plugin file with no CV
+    // funk in it sit on a machine for four days looking current. The published
+    // library is ~420 plugins and ~4,300 modules; anything near 200 is a
+    // truncated fetch whatever its mtime says.
+    std::ofstream(path, std::ios::trunc) << fake_index(200, 12);
+    CHECK(forge_modular::library_index_needs_build(path, now));
+    std::ofstream(path, std::ios::trunc) << R"({"CVfunk":{"modules":[]}})";
+    CHECK(forge_modular::library_index_needs_build(path, now));
+    // Counted, not guessed from the file size: an index of 260 plugins that
+    // somehow lists no modules is broken too.
+    std::ofstream(path, std::ios::trunc) << fake_index(260, 0);
+    CHECK(forge_modular::library_index_needs_build(path, now));
+    std::ofstream(path, std::ios::trunc) << fake_index(500, 12);
+    CHECK_FALSE(forge_modular::library_index_needs_build(path, now));
+
     // And the command names the script, runs in the toolchain directory, and
     // keeps its output. A background job that fails in silence is how this
     // file came to be read by something nothing ever wrote.
     std::string issued;
+    std::filesystem::remove(path);   // asking again needs there to be a reason
     const auto tools = std::string("/Applications/Forge Modular.app/Contents/"
                                    "Resources/tools/rack");
     const auto command = forge_modular::ensure_library_index(
@@ -1191,7 +1229,7 @@ TEST_CASE("the library index is asked for when nothing has written one",
 
     // Nothing is asked for when the index is current, so opening the editor
     // does not fire two HTTP requests a day for no reason.
-    std::ofstream(path) << R"({"CVfunk":{"modules":[]}})";
+    std::ofstream(path, std::ios::trunc) << fake_index(500, 12);
     std::string second;
     CHECK(forge_modular::ensure_library_index(
               tools, [&](const std::string& c) { second = c; }, now).empty());
@@ -1241,6 +1279,439 @@ TEST_CASE("opening the editor asks for the library index", "[seam][catalog]") {
             asked = true;
     INFO("launched " << shell.launched().size() << " command(s)");
     CHECK(asked);
+}
+
+namespace {
+
+/// Open an editor under the current HOME and say whether it asked for an
+/// index. The whole point is to go through the app's own path -- create_view()
+/// -> overlay_accessory() -> ensure_library_index() -- rather than to call the
+/// decision function directly, because every defect in this list so far has
+/// been a finished feature that nothing called.
+bool editor_asks_for_index() {
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    if (!view) return false;
+    bool asked = false;
+    for (const auto& command : shell.launched())
+        if (command.find("library_catalog.py index") != std::string::npos)
+            asked = true;
+    shell.on_view_closed(*view);
+    return asked;
+}
+
+}  // namespace
+
+TEST_CASE("the editor rebuilds a missing or truncated index and leaves a good "
+          "one alone", "[mention][catalog][seam]") {
+    // THE THREE STARTING STATES, each through the real editor path.
+    //
+    // Measured on a beta machine: the index file was deleted, the app
+    // relaunched, and the directory stayed empty. And a four-day-old
+    // 200-plugin file -- a truncated fetch with no CV funk in it -- passed the
+    // freshness check for four days, because the check only looked at the
+    // clock.
+    ScopedHome home("forge-index-three-states");
+    const auto path = forge_modular::library_index_path();
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+
+    // 1. No file at all: the first-run case, and the one that stayed empty.
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    CHECK(editor_asks_for_index());
+
+    // 2. A truncated file, freshly written so no age rule can catch it.
+    std::ofstream(path, std::ios::trunc) << fake_index(200, 12);
+    CHECK(editor_asks_for_index());
+
+    // 3. A full one: nothing is asked for, so opening an editor does not fire
+    //    two HTTP requests every time somebody looks at the app.
+    std::ofstream(path, std::ios::trunc) << fake_index(500, 12);
+    CHECK_FALSE(editor_asks_for_index());
+}
+
+TEST_CASE("a library index build that fails says so", "[catalog][seam]") {
+    // The failure this whole path exists to end. The command ran, a toolchain
+    // too old to understand `index` printed its usage and exited 2, and the
+    // only trace was a log nobody opens. Nothing on the machine could be asked
+    // whether the last refresh had worked.
+    ScopedHome home("forge-index-status");
+    const auto tools = home.dir / "tools";
+    std::filesystem::create_directories(tools);
+
+    // A stand-in for the stale generator: it rejects `index` exactly as the
+    // shipped one did, printing its usage and exiting 2.
+    {
+        std::ofstream f(tools / "library_catalog.py");
+        f << "import sys\n"
+             "print('usage: fetch | report')\n"
+             "sys.exit(2)\n";
+    }
+    CHECK_FALSE(forge_modular::library_index_last_status().has_value());
+    std::system(forge_modular::library_index_command(tools.string()).c_str());
+    auto status = forge_modular::library_index_last_status();
+    REQUIRE(status.has_value());
+    CHECK(*status == 2);
+
+    // And a generator that CAN build one reports zero, so the two outcomes are
+    // distinguishable rather than both being silence.
+    {
+        std::ofstream f(tools / "library_catalog.py");
+        f << "print('indexed')\n";
+    }
+    std::system(forge_modular::library_index_command(tools.string()).c_str());
+    status = forge_modular::library_index_last_status();
+    REQUIRE(status.has_value());
+    CHECK(*status == 0);
+}
+
+TEST_CASE("the library index can be refreshed from Settings, and it reports "
+          "what happened", "[catalog][prefs][seam]") {
+    // Asked for directly. There was no way to say "do it now", so the only
+    // remedy for a wrong index was an SSH session and a python command -- and
+    // a refresh that says nothing is indistinguishable from one that did
+    // nothing, which is how an hour went.
+    ScopedHome home("forge-index-refresh");
+    HermeticProjects isolated;
+    const auto path = forge_modular::library_index_path();
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    std::ofstream(path, std::ios::trunc) << fake_index(300, 10);
+
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+
+    // The control is REACHABLE, on the same rows as the two preferences.
+    auto* refresh = chrome->settings_product_action_button(
+        forge_modular::ForgeModularShell::kLibraryIndexRow);
+    REQUIRE(refresh != nullptr);
+    REQUIRE(refresh->on_click);
+
+    // It reports the index WHEN IDLE, before anything is pressed.
+    const auto idle = chrome->product_settings_status(
+        forge_modular::ForgeModularShell::kLibraryIndexRow);
+    INFO(idle);
+    CHECK(idle.find("300 plugins") != std::string::npos);
+    CHECK(idle.find("3000 modules") != std::string::npos);
+
+    // Pressing it asks for a build.
+    const auto before = shell.launched().size();
+    refresh->on_click();
+    REQUIRE(shell.launched().size() == before + 1);
+    CHECK(shell.launched().back().find("library_catalog.py index") !=
+          std::string::npos);
+
+    // And the row now carries a before, and says a refresh is running. The
+    // bare shell launched nothing, so no status file exists yet -- which is
+    // exactly the in-flight state.
+    shell.poll_surfaces();
+    const auto running = chrome->product_settings_status(
+        forge_modular::ForgeModularShell::kLibraryIndexRow);
+    INFO(running);
+    CHECK(running.find("300 plugins, 3000 modules →") != std::string::npos);
+    CHECK(running.find("Refreshing") != std::string::npos);
+
+    // A failed build is REPORTED, with its exit code and where to look.
+    std::filesystem::create_directories(
+        std::filesystem::path(forge_modular::library_index_status_path())
+            .parent_path());
+    { std::ofstream f(forge_modular::library_index_status_path()); f << "2"; }
+    shell.poll_surfaces();
+    const auto failed = chrome->product_settings_status(
+        forge_modular::ForgeModularShell::kLibraryIndexRow);
+    INFO(failed);
+    CHECK(failed.find("failed (exit 2)") != std::string::npos);
+    CHECK(failed.find("library.log") != std::string::npos);
+
+    // And a successful one is reported as an after, not as silence.
+    refresh->on_click();
+    std::ofstream(path, std::ios::trunc) << fake_index(500, 12);
+    { std::ofstream f(forge_modular::library_index_status_path()); f << "0"; }
+    shell.poll_surfaces();
+    const auto done = chrome->product_settings_status(
+        forge_modular::ForgeModularShell::kLibraryIndexRow);
+    INFO(done);
+    CHECK(done.find("→ 500 plugins, 6000 modules") != std::string::npos);
+    CHECK(done.find("Refreshed.") != std::string::npos);
+    shell.on_view_closed(*view);
+}
+
+TEST_CASE("a newer release outranks an older installed toolchain",
+          "[toolchain][installation]") {
+    // The precedence that made an installer unable to update what it
+    // installs. Application Support was preferred unconditionally, so a
+    // toolchain written by 0.11 shadowed every fix 0.12.7 shipped -- and the
+    // shadowed copy was too old to understand `library_catalog.py index`, so
+    // the library index silently never rebuilt.
+    //
+    // mtime cannot decide this: every path here is a copy, and a copy rewrites
+    // mtimes. The stamp is written at package time and travels with the files.
+    using forge_modular::ToolchainCandidate;
+    const ToolchainCandidate none{"/nowhere", false, {}};
+    const ToolchainCandidate checkout{"/checkout", true, {}};
+
+    // Older installed copy loses to the release inside the bundle.
+    auto pick = forge_modular::choose_toolchain(
+        none, {"/installed", true, "0.11.0"}, {"/bundle", true, "0.12.8"},
+        checkout);
+    CHECK(pick.path == "/bundle");
+    INFO(pick.reason);
+    CHECK(pick.reason.find("0.12.8") != std::string::npos);
+
+    // An UNSTAMPED installed copy cannot outrank a release either -- that is
+    // what every machine carrying a pre-stamp toolchain looks like.
+    CHECK(forge_modular::choose_toolchain(
+              none, {"/installed", true, ""}, {"/bundle", true, "0.12.8"},
+              checkout).path == "/bundle");
+
+    // Equal stamps leave the installed copy in charge, which is what keeps
+    // hand-editing it working: editing a file does not change the stamp.
+    CHECK(forge_modular::choose_toolchain(
+              none, {"/installed", true, "0.12.8"}, {"/bundle", true, "0.12.8"},
+              checkout).path == "/installed");
+    // And a NEWER installed copy stays in charge, so a user who updates the
+    // generator without reinstalling the app is not overruled.
+    CHECK(forge_modular::choose_toolchain(
+              none, {"/installed", true, "0.13.0"}, {"/bundle", true, "0.12.8"},
+              checkout).path == "/installed");
+
+    // An explicit override beats all of it. A developer who names a directory
+    // means it.
+    CHECK(forge_modular::choose_toolchain(
+              {"/env", true, {}}, {"/installed", true, "9.9.9"},
+              {"/bundle", true, "0.12.8"}, checkout).path == "/env");
+
+    // Fallbacks: the bundle when nothing is installed, the checkout when there
+    // is no bundle either.
+    CHECK(forge_modular::choose_toolchain(none, none, {"/bundle", true, "0.12.8"},
+                                          checkout).path == "/bundle");
+    CHECK(forge_modular::choose_toolchain(none, none, none, checkout).path ==
+          "/checkout");
+
+    // The ordering itself, including the shapes a version string arrives in.
+    CHECK(forge_modular::compare_stamps("0.12.8", "0.12.7") > 0);
+    CHECK(forge_modular::compare_stamps("0.12.7", "0.12.10") < 0);
+    CHECK(forge_modular::compare_stamps("1.0", "1.0.0") == 0);
+    CHECK(forge_modular::compare_stamps("", "0.0.1") < 0);
+    CHECK(forge_modular::compare_stamps("", "") == 0);
+    // A release candidate must not sort above the release it precedes.
+    CHECK(forge_modular::compare_stamps("0.13.0-rc1", "0.13.0") == 0);
+
+    // The stamp file itself: a version, and when it was packaged.
+    const auto parsed = forge_modular::parse_stamp("0.12.8\n2026-08-04T10:00:00Z\n");
+    CHECK(parsed.first == "0.12.8");
+    CHECK(parsed.second == "2026-08-04T10:00:00Z");
+    CHECK(forge_modular::parse_stamp("0.12.8").second.empty());
+}
+
+TEST_CASE("the app can say what it is and what it is running",
+          "[installation][seam]") {
+    // An installed 0.12.7 reported 0.11.0 and ran a generator laid down three
+    // days earlier, and nothing on the machine could be asked either
+    // question -- which is how the shadowed toolchain stayed hidden.
+    forge_modular::AppDetails d;
+    d.app_version = "0.12.8";
+    d.packaged_at = "2026-08-04T10:00:00Z";
+    d.toolchain_path = "/Applications/Forge Modular.app/Contents/Resources/tools/rack";
+    d.toolchain_stamp = "0.12.8";
+    d.toolchain_reason = "this release (0.12.8) is newer than the installed copy (0.11.0)";
+    d.index_plugins = 417;
+    d.index_modules = 4299;
+    d.index_written = 1000;
+    d.sdk_path = "/Users/x/Library/Application Support/Forge Modular/Rack-SDK";
+    d.signed_in = true;
+
+    const auto rows = forge_modular::details_rows(d, 1000 + 4 * 24 * 3600);
+    std::string joined;
+    for (const auto& [label, value] : rows) joined += label + "=" + value + "\n";
+    INFO(joined);
+    // THE LIVE GENERATOR PATH. The field that matters, and the one that would
+    // have made a day of shadowed fixes obvious in seconds.
+    CHECK(joined.find("Generator in use=/Applications/Forge Modular.app") !=
+          std::string::npos);
+    CHECK(joined.find("Version=0.12.8") != std::string::npos);
+    CHECK(joined.find("417 plugins, 4299 modules, 4 days ago") !=
+          std::string::npos);
+    CHECK(joined.find("Rack SDK=/Users/x/Library") != std::string::npos);
+    CHECK(joined.find("VCV library sign-in=found") != std::string::npos);
+    // Never the token itself, only that one was found.
+    CHECK(joined.find("token") == std::string::npos);
+
+    // The unknowns read as unknown rather than as blanks.
+    forge_modular::AppDetails empty;
+    empty.toolchain_path = "/x";
+    const auto plain = forge_modular::details_text(empty, 0);
+    INFO(plain);
+    CHECK(plain.find("Version: unknown") != std::string::npos);
+    CHECK(plain.find("Library index: never built") != std::string::npos);
+    CHECK(plain.find("Rack SDK: not installed") != std::string::npos);
+    CHECK(plain.find("unstamped") != std::string::npos);
+
+    CHECK(forge_modular::describe_age(0, 100) == "never built");
+    CHECK(forge_modular::describe_age(100, 130) == "just now");
+    CHECK(forge_modular::describe_age(0 + 1, 1 + 4 * 24 * 3600) == "4 days ago");
+    CHECK(forge_modular::describe_age(1, 1 + 26 * 3600) == "26 hours ago");
+    CHECK(forge_modular::describe_age(1, 1 + 40 * 3600) == "1 day ago");
+}
+
+TEST_CASE("a module is named once, not twice", "[mention][copy]") {
+    // The notice read "CV funk CV funk Blank 8HP". The label was brand + " " +
+    // name, and VCV module names very often already lead with the maker.
+    CHECK(forge_modular::module_label("CV funk", "CV funk Blank 8HP") ==
+          "CV funk Blank 8HP");
+    // Spelled differently in the slug and on the panel, and still one name.
+    CHECK(forge_modular::module_label("CV funk", "CVfunk Blank 8HP") ==
+          "CVfunk Blank 8HP");
+    // A name that does NOT lead with the maker still gets one.
+    CHECK(forge_modular::module_label("Audible Instruments", "Macro Oscillator") ==
+          "Audible Instruments Macro Oscillator");
+    // A brand that merely appears later in the name is not a prefix.
+    CHECK(forge_modular::module_label("Valley", "Plateau Valley") ==
+          "Valley Plateau Valley");
+    CHECK(forge_modular::module_label("", "VCO") == "VCO");
+    CHECK(forge_modular::module_label("Valley", "") == "Valley");
+}
+
+TEST_CASE("the mention notice hangs under the composer, and is amber only for "
+          "a real block", "[mention][seam]") {
+    // It sat at the dropdown's narrower inset while the composer was centred,
+    // so it read as a detached box; and it was amber, which says warning when
+    // a download starting is ordinary progress.
+    ScopedHome home("forge-notice-frame");
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+
+    // Lay the tree out, or nothing has bounds to compare.
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth,
+        forge::ForgeChrome::kDesignHeight,
+        (std::filesystem::temp_directory_path() / "modular-notice-frame.png").string(),
+        1.0f, pulp::view::ScreenshotBackend::skia));
+
+    auto* card = chrome->composer_card();
+    REQUIRE(card != nullptr);
+    REQUIRE(card->bounds().width > 0);
+    shell.poll_surfaces();
+
+    shell.mentions().show_notice("Downloading CV funk Blank 8HP…",
+                                 forge_modular::MentionOverlay::Tone::progress);
+    CHECK(shell.mentions().notice_tone() ==
+          forge_modular::MentionOverlay::Tone::progress);
+    // THE COLOUR ACTUALLY APPLIED, not the tone that was asked for. Asserting
+    // only the stored enum cannot see a notice that is amber whatever it is
+    // told, which is precisely what it was.
+    CHECK(shell.mentions().notice_color().to_argb32() ==
+          forge::design::color::text_muted.to_argb32());
+    auto* panel = shell.mentions().panel();
+    REQUIRE(panel != nullptr);
+    // SAME INSET, SAME WIDTH as the card it is a message about.
+    CHECK(panel->flex().preferred_width == card->bounds().width);
+    float card_left = 0;
+    for (const pulp::view::View* v = card; v; v = v->parent())
+        card_left += v->bounds().x;
+    CHECK(panel->flex().margin_left == card_left);
+
+    // A genuine block earns amber; ordinary progress does not.
+    shell.mentions().show_notice("needs a sign-in",
+                                 forge_modular::MentionOverlay::Tone::blocked);
+    CHECK(shell.mentions().notice_tone() ==
+          forge_modular::MentionOverlay::Tone::blocked);
+    CHECK(shell.mentions().notice_color().to_argb32() ==
+          forge::design::color::amber.to_argb32());
+
+    // The ROWS keep the dropdown's own geometry: a 680-wide list of six rows
+    // is mostly empty space.
+    shell.mentions().handle_text("@", 1);
+    CHECK(panel->flex().preferred_width < card->bounds().width);
+    shell.on_view_closed(*view);
+}
+
+TEST_CASE("a download says how it ended, not only that it started",
+          "[mention][seam]") {
+    // "fetching…" was the last word said on the subject, so a finished
+    // download and a stuck one looked identical.
+    ScopedHome home("forge-download-outcome");
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // Signed in, downloads on: a free module is fetched rather than refused.
+    {
+        std::filesystem::create_directories(
+            home.dir / "Library" / "Application Support" / "Rack2");
+        std::ofstream f(home.dir / "Library" / "Application Support" / "Rack2" /
+                        "settings.json");
+        f << R"({"token": "not-a-real-token"})";
+    }
+    forge_modular::MentionCandidate what;
+    what.brand = "CV funk";
+    what.name = "CV funk Blank 8HP";
+    what.slug = "CVfunk/Blank8HP";
+    what.state = forge_modular::MentionCandidate::Availability::available;
+    REQUIRE(shell.mentions().on_refused);
+    shell.mentions().on_refused(what);
+    INFO(shell.mentions().notice());
+    // Named ONCE, and as progress rather than as a warning.
+    CHECK(shell.mentions().notice() == "Downloading CV funk Blank 8HP…");
+
+    // Outcome first, remedy second.
+    const auto status = home.dir / "Library" / "Application Support" /
+                        "Forge Modular" / "runs" / "install-status";
+    std::filesystem::create_directories(status.parent_path());
+    { std::ofstream f(status); f << "0"; }
+    shell.poll_surfaces();
+    CHECK(shell.mentions().notice() ==
+          "Downloaded CV funk Blank 8HP. Restart Rack to use it.");
+    CHECK(shell.mentions().notice_tone() ==
+          forge_modular::MentionOverlay::Tone::progress);
+
+    // And a failure is a failure, in amber, naming where to look.
+    shell.mentions().on_refused(what);
+    { std::ofstream f(status); f << "1"; }
+    shell.poll_surfaces();
+    INFO(shell.mentions().notice());
+    CHECK(shell.mentions().notice().find("Could not download CV funk Blank 8HP")
+          == 0);
+    CHECK(shell.mentions().notice().find("install.log") != std::string::npos);
+    CHECK(shell.mentions().notice_tone() ==
+          forge_modular::MentionOverlay::Tone::blocked);
+    shell.on_view_closed(*view);
 }
 
 TEST_CASE("the mention list is keyboard-first", "[mention]") {
@@ -1644,7 +2115,9 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
     REQUIRE(chrome != nullptr);
 
     // Both controls are in the live sheet, every option present and handled.
-    REQUIRE(chrome->settings_product_choice_count() == 2);
+    // Four rows now: the two choices, the library-index action and the
+    // build-details report, all through the same settings_choices() hook.
+    REQUIRE(chrome->settings_product_choice_count() == 4);
     REQUIRE(options_of(*chrome, 0) == 3);
     REQUIRE(options_of(*chrome, 1) == 2);
     for (std::size_t c = 0; c < 2; ++c)
@@ -1766,7 +2239,7 @@ TEST_CASE("a preference chosen in one editor survives into the next",
     auto reopened = shell.create_view();
     REQUIRE(reopened != nullptr);
     REQUIRE(shell.chrome() != nullptr);
-    REQUIRE(shell.chrome()->settings_product_choice_count() == 2);
+    REQUIRE(shell.chrome()->settings_product_choice_count() == 4);
     // The fresh sheet paints the persisted choice, not the default.
     CHECK(chosen_of(*shell.chrome(), 0) == std::pair{1, 2});
     shell.on_view_closed(*reopened);

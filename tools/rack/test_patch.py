@@ -1254,6 +1254,38 @@ def check_fresh_machine() -> tuple:
     return bad, ran
 
 
+def check_version_stamping() -> tuple:
+    """Whether a release can say which release it is.
+
+    An installed 0.12.7 reported CFBundleShortVersionString 0.11.0, because
+    package.sh took --version and used it for the .pkg name and nothing else.
+    Nothing on the machine could then answer "which build is this", which is
+    how a generator from an older release shadowed a newer one's fixes for
+    four days without a word.
+
+    Driven as a subprocess because the rule is shell -- the same shell
+    package.sh sources -- and running it here means it runs with everything
+    else rather than in a script somebody has to remember.
+    """
+    import subprocess
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(here, "..", "..", "examples", "forge-modular",
+                          "test_version_stamp.sh")
+    script = os.path.normpath(script)
+    if not os.path.exists(script):
+        print("  SKIP   version stamping (no test_version_stamp.sh here)")
+        return 0, 0
+    r = subprocess.run(["/bin/bash", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        print("  WRONG  version stamping")
+        for line in (r.stdout + r.stderr).strip().splitlines():
+            print("         " + line)
+        return 1, 1
+    print("  ok     a release stamps its version onto every bundle it ships")
+    return 0, 1
+
+
 def check_shipped_generator() -> tuple:
     """What an incomplete copy of the generator does, and when it says so.
 
@@ -1416,8 +1448,9 @@ def main():
     set_bad, set_ran = check_setting_writer()
     fresh_bad, fresh_ran = check_fresh_machine()
     ship_bad, ship_ran = check_shipped_generator()
-    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad + ship_bad
-    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran + ship_ran
+    ver_bad, ver_ran = check_version_stamping()
+    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
+    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

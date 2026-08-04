@@ -88,12 +88,40 @@ public:
     /// here is what to do about it."
     std::function<void(const MentionCandidate& what)> on_refused;
 
+    /// What a notice MEANS, which is what decides its colour.
+    ///
+    /// Amber says "something is wrong". A download starting is not wrong, and
+    /// colouring ordinary progress as a warning spends the one colour that
+    /// should make somebody look. Only a genuine block -- not signed in, or
+    /// paid and unowned -- earns it.
+    enum class Tone { progress, blocked };
+
     /// Say something beside the composer that outlives the list closing.
     ///
     /// The list is hidden the moment a row is chosen, and the run card does
     /// not exist until a build starts, so neither can carry a message about
     /// the pick that just happened.
-    void show_notice(const std::string& text);
+    void show_notice(const std::string& text, Tone tone = Tone::progress);
+    Tone notice_tone() const { return notice_tone_; }
+    /// The colour the notice is ACTUALLY drawn in.
+    ///
+    /// Not the same question as notice_tone(): the tone is what was asked for
+    /// and this is what was done about it, and a test that only reads the
+    /// former cannot notice a notice that is amber whatever it is told.
+    pulp::canvas::Color notice_color() const;
+
+    /// Where the composer is, in root coordinates.
+    ///
+    /// A notice about a pick belongs under the thing that was being typed
+    /// into, at its inset and its width. Hard-coding the dropdown's own
+    /// narrower geometry made the message read as a detached box floating
+    /// beside the card. The shell measures the card and tells us, because only
+    /// it can see the laid-out tree.
+    void set_composer_frame(float left, float width);
+
+    /// The panel the rows and the notice are drawn on, for a test that asserts
+    /// what a person is actually shown lines up with the composer.
+    pulp::view::View* panel() { return root_; }
     /// The label the notice is drawn into. Owned by the shell, because it
     /// has to survive the list being hidden.
     void attach_notice(pulp::view::Label* label);
@@ -174,6 +202,13 @@ private:
     bool open_ = false;
     pulp::view::Label* notice_ = nullptr;
     std::string notice_text_;
+    Tone notice_tone_ = Tone::progress;
+    /// The composer's measured inset and width, or 0 before anything has
+    /// measured it. Applied whenever the panel is carrying a notice with the
+    /// rows gone; the rows keep the dropdown's own narrower geometry.
+    float composer_left_ = 0;
+    float composer_width_ = 0;
+    void apply_panel_frame();
     /// True only while choose() is rewriting the field, so the change that
     /// rewrite provokes is not mistaken for the user typing.
     bool inserting_ = false;
