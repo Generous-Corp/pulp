@@ -47,10 +47,51 @@ VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
 CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
 RACK_PLUGIN=$(ls "$BUILD_DIR"/rack/ForgeModular-*.vcvplugin 2>/dev/null | head -1 || true)
 
+# A bundle EXISTING is not a bundle with anything in it.
+#
+# CMake creates the .component/.vst3/.clap directory tree -- Info.plist,
+# Resources, an empty Contents/MacOS -- as soon as the target is configured,
+# whether or not it was ever built. `-e` is true for that husk, so packaging a
+# build dir where the plugin targets had never run produced three 72 KB
+# payloads that signed, notarized and installed while containing no code at
+# all. The app was 17 MB and the plugins were empty, and nothing said so:
+# check_bundle_relocatable reported "self-contained OK" for all three, because
+# a bundle with no binary has no dangling links either.
+#
+# So the test is the binary, and its size. Skia and Dawn link statically into
+# each of these; a real one is ~19 MB, and anything under a megabyte means the
+# link never happened.
+MIN_BINARY_BYTES=1000000
+
+check_has_binary() {
+    local bundle="$1" macos="$1/Contents/MacOS" binary size
+    if [[ ! -d "$macos" ]]; then
+        echo "missing: $bundle/Contents/MacOS -- not a bundle" >&2
+        return 1
+    fi
+    binary=$(find "$macos" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)
+    if [[ -z "$binary" ]]; then
+        echo "EMPTY BUNDLE: $bundle has no executable in Contents/MacOS." >&2
+        echo "  Its target was configured but never built. Build it first:" >&2
+        echo "  cmake --build \"$BUILD_DIR\" --target ForgeModularApp_AU \\" >&2
+        echo "      ForgeModularApp_VST3 ForgeModularApp_CLAP ForgeModularApp_Standalone -j8" >&2
+        return 1
+    fi
+    size=$(stat -f%z "$binary" 2>/dev/null || stat -c%s "$binary" 2>/dev/null || echo 0)
+    if (( size < MIN_BINARY_BYTES )); then
+        echo "STUB BINARY: $binary is ${size} bytes (expected >= ${MIN_BINARY_BYTES})." >&2
+        echo "  A real build links Skia and Dawn statically and is far larger." >&2
+        return 1
+    fi
+    return 0
+}
+
 missing=0
 for artifact in "$APP" "$AU" "$VST3" "$CLAP"; do
     if [[ ! -e "$artifact" ]]; then
         echo "missing: $artifact" >&2
+        missing=1
+    elif ! check_has_binary "$artifact"; then
         missing=1
     fi
 done
