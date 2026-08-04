@@ -141,7 +141,10 @@ TEST_CASE("Runtime eval component interrupts a hung evaluation and recovers",
     std::atomic<bool> audio_running{true};
     std::atomic<std::uint64_t> audio_ticks{0};
     std::thread audio([&] {
-        while (audio_running.load(std::memory_order_acquire))
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (audio_running.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline)
             audio_ticks.fetch_add(1, std::memory_order_relaxed);
     });
     std::thread client([&] { hung = evaluator->evaluate("while (true) {}"); });

@@ -62,7 +62,9 @@ TEST_CASE("reentrant RPC destruction waits for its causal concurrent dispatch",
                 std::unique_lock lock(mutex);
                 concurrent_rpc_returned = true;
                 cv.notify_all();
-                cv.wait(lock, [&] { return release_concurrent_dispatch; });
+                cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                    return release_concurrent_dispatch;
+                });
             }
             concurrent_dispatch_returned.store(true, std::memory_order_release);
             return response;
@@ -171,7 +173,9 @@ TEST_CASE("asynchronous executor atomically defers cleanup after dequeue",
             std::unique_lock lock(mutex);
             iteration_acquired = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release_iteration; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_iteration;
+            });
             return std::make_shared<int>(1);
         },
         .execute = [&](const auto&) {
@@ -245,7 +249,9 @@ TEST_CASE("asynchronous server dispatch rejects work beyond its configured cap",
             std::unique_lock lock(mutex);
             handler_entered = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release_handler; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_handler;
+            });
             return make_response(request.id, R"({"completed":true})");
         });
     InspectorServer server;
@@ -372,7 +378,9 @@ TEST_CASE("asynchronous queue rejection suppresses zero-id responses",
             std::unique_lock lock(mutex);
             handler_entered = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release_handler; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_handler;
+            });
             return make_response(request.id, R"({"completed":true})");
         });
     InspectorServer server;
@@ -448,7 +456,9 @@ TEST_CASE("disconnect cancels queued asynchronous work before client cleanup",
             std::unique_lock lock(mutex);
             handler_entered = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release_handler; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_handler;
+            });
             const bool should_stop = stop_reentrantly;
             lock.unlock();
             if (should_stop)
@@ -589,7 +599,9 @@ TEST_CASE("shutdown fence retains an active asynchronous server worker",
             std::unique_lock lock(mutex);
             handler_entered = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release_handler; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release_handler;
+            });
             return make_response(request.id, R"({"completed":true})");
         });
     auto server = std::make_unique<InspectorServer>();

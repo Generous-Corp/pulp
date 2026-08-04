@@ -676,7 +676,9 @@ TEST_CASE("InspectorSession closes concurrent admission before draining active w
             std::unique_lock lock(mutex);
             entered = true;
             cv.notify_all();
-            cv.wait(lock, [&] { return release; });
+            cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return release;
+            });
             return make_response(request.id, R"({"interrupted":true})");
         });
     REQUIRE_FALSE(
