@@ -111,6 +111,34 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
   find "$b/Contents/MacOS" -name "*.dylib" -print0 2>/dev/null | while IFS= read -r -d '' d; do
     codesign --force --options runtime --timestamp -s "$APP_ID" "$d"; done
+  # Helper EXECUTABLES the app carries (a CLI tool staged into Resources, a
+  # sidecar in MacOS/ that is not the main binary). Signing the bundle does not
+  # sign them, and notarization rejects the whole archive when it finds one:
+  #
+  #   The binary is not signed with a valid Developer ID certificate
+  #   The signature does not include a secure timestamp
+  #   The executable does not have the hardened runtime enabled
+  #
+  # naming a path inside Contents/Resources. They must be signed BEFORE the
+  # bundle, or sealing captures an unsigned nested binary.
+  # Only search directories that exist: `find` on a missing path exits nonzero,
+  # and under `set -euo pipefail` that aborts the whole build for a bundle that
+  # simply has no Resources directory.
+  local _scan=()
+  [[ -d "$b/Contents/Resources" ]] && _scan+=("$b/Contents/Resources")
+  [[ -d "$b/Contents/MacOS" ]] && _scan+=("$b/Contents/MacOS")
+  { [[ ${#_scan[@]} -gt 0 ]] &&
+      find "${_scan[@]}" -type f -perm +111 \
+           -not -name "*.dylib" -not -name "*.sh" -print0 2>/dev/null || true; } |
+    while IFS= read -r -d '' x; do
+      # Mach-O only: a shell script or a data file with the execute bit is not
+      # something codesign should be handed.
+      if file -b "$x" 2>/dev/null | grep -q "Mach-O"; then
+        [[ "$x" == "$b/Contents/MacOS/$(basename "$b" .app)" ]] && continue
+        echo "  signing nested executable: ${x#"$b/"}"
+        codesign --force --options runtime --timestamp -s "$APP_ID" "$x"
+      fi
+    done
   if [[ -n "$ent" ]]; then codesign --force --options runtime --timestamp --entitlements "$ent" -s "$APP_ID" "$b"
   else codesign --force --options runtime --timestamp -s "$APP_ID" "$b"; fi
   codesign --verify --deep --strict "$b"
