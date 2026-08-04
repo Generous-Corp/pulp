@@ -1953,6 +1953,11 @@ void ForgeModularShell::on_poll() {
     // "materializing…" under a transcript that had already printed
     // "gave up after 3 attempts" -- the screen contradicting itself.
     const auto outcome = monitor_.outcome();
+    // Whether THIS shell was waiting on the run that just ended, captured
+    // before the flag is cleared: a log tailed at startup belongs to a
+    // previous session, and timing it from when this window opened would put
+    // an invented duration on the card.
+    const bool ours = in_flight_;
     if (watching_ && outcome != BuildOutcome::running)
         in_flight_ = false;
     if (watching_ && outcome != BuildOutcome::running &&
@@ -1964,7 +1969,19 @@ void ForgeModularShell::on_poll() {
             // coming back later.
             switch (outcome) {
                 case BuildOutcome::done: {
-                    c->set_status_activity({});
+                    // The card SAYS IT IS DONE rather than going blank.
+                    //
+                    // It was cleared here, so the one moment a person is
+                    // waiting for -- the end -- was marked by the status line
+                    // disappearing, which is what a run that died quietly also
+                    // looks like. The elapsed time is the proof that it ran,
+                    // and it is only ours to state when we were the ones
+                    // waiting on it.
+                    const auto took = ours ? format_elapsed(run_started_)
+                                           : std::string{};
+                    std::string finished = took.empty()
+                                               ? std::string("Built")
+                                               : "Built in " + took;
                     // Show what was built. A finished patch that leaves the
                     // materializing skeleton up has produced something the
                     // user cannot see, and the preview is the whole reason
@@ -1975,6 +1992,8 @@ void ForgeModularShell::on_poll() {
                     if (!shown) c->set_skeleton_caption("built");
                     save_project_for(artifact);
                     // Only offer to open it if there is something to open.
+                    if (!artifact.empty()) finished += " \u00b7 ready to open in Rack";
+                    c->set_status_activity(finished + ".");
                     c->narrate(artifact.empty()
                                    ? std::string("Built.")
                                    : std::string("Built. Open it in Rack to play it."));
