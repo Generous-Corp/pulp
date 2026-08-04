@@ -57,6 +57,14 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
         Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect-runtime)
+        target_link_libraries(pulp-test-mcp-server PRIVATE pulp::inspect-runtime)
+        target_compile_definitions(pulp-test-mcp-server PRIVATE
+            PULP_TEST_INSPECTOR_RUNTIME=1)
+    else()
+        target_compile_definitions(pulp-test-mcp-server PRIVATE
+            PULP_TEST_INSPECTOR_RUNTIME=0)
+    endif()
     target_compile_definitions(pulp-test-mcp-server PRIVATE
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_include_directories(pulp-test-mcp-server PRIVATE

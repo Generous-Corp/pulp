@@ -6,6 +6,7 @@
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/publication_binding.hpp>
+#include <pulp/inspect/test_input.hpp>
 
 #include <memory>
 #include <utility>
@@ -76,6 +77,15 @@ public:
     publication_bindings() const override;
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
     void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
+    void set_test_input_source(InspectorTestInputSource* source) {
+        test_input_.set_source(source);
+    }
+    InspectorTestInputSource* test_input_source() const {
+        return test_input_.source();
+    }
+    void release_test_input(TestInputReleaseReason reason) noexcept {
+        test_input_.release(reason);
+    }
 
     /// Wire the per-frame dirty tracker so the inspector's Performance
     /// tab can toggle `DirtyTracker::set_debug_overlay()` at runtime.
@@ -114,6 +124,7 @@ private:
     render::RenderPassManager* rpm_ = nullptr;
     render::DirtyTracker* dirty_ = nullptr;
     TweakStore* tweak_store_ = nullptr;
+    TestInputDomain test_input_;
     InspectorConfig config_{};
 
     // Domain handlers
@@ -122,6 +133,7 @@ private:
     InspectorMessage handle_css(const InspectorMessage& req);
     InspectorMessage handle_performance(const InspectorMessage& req);
     InspectorMessage handle_state(const InspectorMessage& req);
+    InspectorMessage handle_test(const InspectorMessage& req);
     InspectorMessage handle_console(const InspectorMessage& req);
     InspectorMessage handle_runtime(const InspectorMessage& req);
     InspectorMessage handle_audio(const InspectorMessage& req);

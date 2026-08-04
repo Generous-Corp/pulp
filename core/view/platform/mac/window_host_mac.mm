@@ -1599,6 +1599,7 @@ public:
     std::vector<uint8_t> capture_back_buffer_png() override {
         return pulp::view::mac_capture::capture_window_content_png(window_, view_);
     }
+    bool supports_back_buffer_capture() const override { return true; }
 
     void invalidate_input_state() override { [view_ clearInteractionState]; }
     void request_close() override {
@@ -1965,6 +1966,7 @@ public:
                                   pixel_h,
                                   static_cast<size_t>(pixel_w) * 4u);
     }
+    bool supports_back_buffer_capture() const override { return true; }
 
     void invalidate_input_state() override {
         [metal_view_ clearInteractionState];

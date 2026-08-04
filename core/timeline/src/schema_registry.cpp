@@ -498,6 +498,16 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement_velocity", SchemaValueKind::U32},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    // Every field is required. This type names no envelope written before it
+    // existed, so unlike a widened schema it has nothing to keep decoding: an
+    // omitted array here is a payload that cannot be paired, not an older
+    // spelling of an empty one.
+    schemas.push_back(builtin("pulp.timeline.command.set_note_events", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Array},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     // The modifier arrays are optional at the current version because a command
     // schema has no migration edges to walk: decode gates on exact version
     // equality, so raising the version would reject every envelope already

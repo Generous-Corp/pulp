@@ -1,7 +1,9 @@
 #pragma once
 
+#include <pulp/inspect/audit.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/test_input.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -63,6 +65,13 @@ enum class ControllerLeaseResult {
     InvalidOwner,
 };
 
+struct InspectorControllerScopeEnd {
+    std::string session_id;
+    std::string instance_id;
+    std::string client_id;
+    TestInputReleaseReason reason = TestInputReleaseReason::ControllerReleased;
+};
+
 /// One-controller lease for mutating inspector operations. The injected clock
 /// keeps expiry deterministic in tests and avoids wall-clock jumps.
 class InspectorControllerLease {
@@ -85,9 +94,22 @@ public:
 private:
     friend class InspectorSession;
 
+public:
+    struct EndedScope {
+        std::string owner;
+        TestInputReleaseReason reason;
+    };
+
+private:
+
     void expire_if_needed();
     bool begin_operation(std::string_view owner);
     void end_operation(std::string_view owner);
+    bool release_with_reason(std::string_view owner,
+                             TestInputReleaseReason reason);
+    void terminate();
+    std::vector<EndedScope> take_ended_scopes();
+    void finish_scope(TestInputReleaseReason reason);
 
     std::chrono::milliseconds ttl_;
     Clock clock_;
@@ -95,6 +117,9 @@ private:
     std::chrono::steady_clock::time_point expires_at_{};
     std::size_t active_operations_ = 0;
     bool release_pending_ = false;
+    TestInputReleaseReason pending_reason_ =
+        TestInputReleaseReason::ControllerReleased;
+    std::vector<EndedScope> ended_scopes_;
 };
 
 struct InspectorSessionInfo {
@@ -102,6 +127,17 @@ struct InspectorSessionInfo {
     std::string instance_id;
     std::string plugin_id;
     std::string protocol_version = "1";
+};
+
+/// Authenticated transport identity attached to a domain request.
+///
+/// Domain handlers that own per-client state (for example, telemetry
+/// subscriptions) must key it from this context instead of trusting a client
+/// identifier supplied in request JSON.
+struct InspectorRequestContext {
+    /// Borrowed for the duration of the handler call; copy it when retaining
+    /// per-client state beyond the request.
+    std::string_view client_id;
 };
 
 /// Capability-enforcing dispatch facade. Transport supplies an authenticated
@@ -112,6 +148,13 @@ class InspectorSession {
 public:
     using RequestHandler =
         std::function<InspectorMessage(const InspectorMessage& request)>;
+    using ContextRequestHandler = std::function<InspectorMessage(
+        const InspectorRequestContext& context,
+        const InspectorMessage& request)>;
+    using ControllerScopeEndHandler =
+        std::function<void(const InspectorControllerScopeEnd& event)>;
+    using ClientDisconnectHandler =
+        std::function<void(std::string_view client_id)>;
 
     InspectorSession(InspectorSessionInfo info,
                      InspectorPolicyConfig policy,
@@ -120,12 +163,29 @@ public:
                          std::chrono::seconds(15),
                      InspectorControllerLease::Clock clock =
                          [] { return std::chrono::steady_clock::now(); });
+    InspectorSession(InspectorSessionInfo info,
+                     InspectorPolicyConfig policy,
+                     ContextRequestHandler handler,
+                     std::chrono::milliseconds lease_ttl =
+                         std::chrono::seconds(15),
+                     InspectorControllerLease::Clock clock =
+                         [] { return std::chrono::steady_clock::now(); });
+    ~InspectorSession();
 
     InspectorMessage handle(std::string_view client_id,
                             const InspectorMessage& request);
     /// Install the generation-scoped main-thread handoff used for domain
     /// requests. Session control methods remain synchronous on their caller.
     void set_main_thread_rpc(std::shared_ptr<InspectorMainThreadRpc> rpc);
+    /// Install the host cleanup hook for controller-scoped test input. The
+    /// callback runs outside session locks and must transfer work to the host's
+    /// owning thread when the caller is not already on it.
+    void set_controller_scope_end_handler(ControllerScopeEndHandler handler);
+    /// Install generation-scoped cleanup for per-client domain state. The
+    /// callback runs outside session locks and may be called from a transport
+    /// callback thread; it must hand off to its owner when necessary.
+    void set_client_disconnect_handler(ClientDisconnectHandler handler);
+    void set_audit_log(std::shared_ptr<InspectorAuditLog> audit_log);
     void disconnect(std::string_view client_id);
     /// Cancel queued domain handlers and reject new ones during server teardown.
     /// The handler already executing on the dispatch owner may finish.

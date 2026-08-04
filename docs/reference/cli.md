@@ -318,7 +318,7 @@ even when the protocol/client SDK components are present.
 - `--inspect=observe|develop` selects a named capability set.
 - `--inspect=custom --inspect-capability <id>...` selects an explicit,
   nonempty capability set; the capability option is repeatable. A custom set
-  containing `state.write` or `authoring.tweaks` must also contain
+  containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
   `session.control`, because mutations require a controller lease.
 - `--inspect=off` is the default and starts no listener or discovery artifact.
 
@@ -1302,12 +1302,38 @@ an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
 ```bash
-pulp inspect
-pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect --port 49152
-pulp inspect --command DOM.getDocument
-pulp inspect --command State.getParameters
+pulp inspect profiles --json
+pulp inspect doctor --json
+pulp inspect list --json
+pulp inspect capabilities --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.getParameters
+pulp inspect set-parameter --id 7 --value 0.75 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect inject-midi --kind note_on --channel 1 --note 60 --velocity 100 \
+  --duration-ms 250 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+pulp inspect set-transport --playing true --position-samples 0 --tempo-bpm 120 --json \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 ```
+
+The named commands are the stable orientation surface:
+
+| Command | Result |
+|---|---|
+| `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
+| `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
+| `doctor` | Discovery runtime directory, live-session count, and issues. |
+| `screenshot` | Decode and save the selected standalone's in-process whole-window PNG. Missing host capability is an explicit unsupported result (exit 3), never an empty file. |
+| `set-parameter` | One bounded numeric parameter mutation under `state.write`. |
+| `inject-midi` | One bounded note-on/off event under `test.input`. |
+| `set-transport` | One idempotent partial standalone transport update under `test.input`. |
+
+Each supports human output and `--json`; JSON includes `schemaVersion: 1`.
+The installed Rust `pulp` forwards `inspect` to its installed sibling
+`pulp-cpp`, so these commands do not require source-build paths.
 
 Options:
 
@@ -1320,6 +1346,28 @@ Options:
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
+- `--out FILE` - write decoded PNG bytes for `screenshot`
+- `--id`, `--value`, `--normalized` - typed `set-parameter` fields
+- `--kind`, `--channel`, `--note`, `--velocity`, `--duration-ms` - bounded
+  `inject-midi` fields; note-on duration is 1 through 2000 ms
+- `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
+- `--json` - stable JSON for named commands
+
+Typed parameter, MIDI, and transport mutations require the exact three-part
+publication identity and a same-connection controller lease. `inject-midi`
+accepts only note-on/off events on public channels 1–16 with byte-range note
+and velocity values. A note-on requires a bounded duration and the client sends
+the matching note-off on the same connection before releasing its lease; a
+separate note-off is only an individual cleanup event. `set-transport` requires at least one of play state,
+nonnegative sample position, or finite tempo from 20 through 400 BPM. Their
+schema versions are `pulp.inspect.set-parameter.v1`,
+`pulp.inspect.inject-midi.v1`, and `pulp.inspect.set-transport.v1`.
+
+This is not a preset/filesystem or raw-event API. Parameter writes remain under
+`state.write`; transient authoring controls remain under `authoring.tweaks`;
+generic preset/filesystem operations, raw MIDI, and arbitrary scripting remain
+unavailable. Injected notes are released on lease loss, disconnect, or teardown.
+None of these typed commands routes through `Runtime.evaluate`.
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.
@@ -1328,14 +1376,47 @@ response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
 the connection. Do not automatically retry that operation: the server may
 already have executed it.
 
-`Capture.screenshot` returns a base64 PNG plus the selected standalone window's
-dimensions. Screenshot-capable sessions and clients use a bounded 16 MiB
-message ceiling (large enough for ordinary multi-megabyte compositor PNGs);
-larger responses fail explicitly. `Capture.screenshotNode` remains explicitly
-unavailable.
+Use the named capture command when the artifact itself is wanted:
+
+```bash
+pulp inspect screenshot --out artifacts/live.png
+# Pin a specific publication when more than one app is live:
+pulp inspect screenshot --out artifacts/live.png \
+  --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
+```
+
+The command requests `Capture.screenshot` inside the running app, decodes the
+base64 response, verifies the PNG signature and dimensions, and atomically
+writes the output. It therefore works from an SSH shell without granting the
+shell or `sshd` macOS Screen Recording permission. It prefers the selected
+Pulp standalone's readable back buffer and otherwise uses Pulp's in-process
+`capture_view()` renderer (portable Skia/GPU or a registered provider). It does
+not capture a plugin editor as composited by Logic, REAPER, or another external
+host. An active design viewport requires live back-buffer capture; Pulp does not
+re-layout that live tree at window size and mislabel the result as the visible
+frame. If neither capture route is available, or the view contains an
+OS-composited native overlay, the app does not advertise `capture.image`; the
+command reports `unsupported`, exits 3, and writes nothing. `--json` uses the
+`pulp.inspect.screenshot.v1` schema. Capability publication reflects the initial
+tree. If an in-place UI reload later introduces a native overlay or another
+unsupported requirement, the existing session remains stable but the request
+returns `capture_unavailable` instead of emitting an incomplete frame.
+
+The underlying `Capture.screenshot` response contains a base64 PNG plus the
+selected standalone window's dimensions. Screenshot-capable sessions and
+clients use a bounded 16 MiB message ceiling (large enough for ordinary
+multi-megabyte window PNGs); larger responses fail explicitly.
+`Capture.screenshotNode` remains explicitly unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.
+
+Installed `pulp-mcp` uses the same in-process typed client rather than spawning
+the CLI. Its `pulp_inspect_profiles`, `pulp_inspect_list`,
+`pulp_inspect_capabilities`, and `pulp_inspect_doctor` tools provide orientation;
+operational tools require the exact identity returned by `list`. Success
+payloads include that identity, and errors use
+`structuredContent: {ok:false,error:{code,message,data}}`.
 
 ### motion
 

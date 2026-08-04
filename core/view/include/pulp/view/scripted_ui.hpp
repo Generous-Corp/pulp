@@ -29,10 +29,12 @@ struct ScriptedUiOptions {
     std::vector<std::filesystem::path> asset_roots;
     bool enable_hot_reload = false;
     bool enable_theme_reload = true;
-    /// Named value channels the hosting processor publishes, for `value:` binds.
-    /// Non-owning: must outlive the session. Null means the processor declares
-    /// none, and `value:` binds simply fail to resolve.
+    /// Compatibility adapter for stable, non-reloadable processors. Converted
+    /// to ValueChannelAccess during construction and never retained directly.
     ValueChannelSet* value_channels = nullptr;
+    /// Leased access to the hosting processor's named value channels. The
+    /// visitor must not retain a set or source after its callback returns.
+    ValueChannelAccess value_channel_access;
 };
 
 // Manages a JS-driven widget tree, optional theme.json overrides, and
@@ -120,18 +122,19 @@ public:
         return reloader_ && reloader_->has_pending_reload();
     }
     bool theme_reload_enabled() const { return theme_reload_enabled_; }
+    /// Stable identity for this session object, including across in-place JS reloads.
+    std::uint64_t identity() const noexcept { return identity_; }
 
 private:
     View& root_;
     state::StateStore& store_;
+    const std::uint64_t identity_;
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
     std::vector<std::filesystem::path> asset_roots_;
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
-    // Non-owning; owned by the processor and re-attached to each rebuilt
-    // bridge, exactly like gpu_surface_.
-    ValueChannelSet* value_channels_ = nullptr;
+    ValueChannelAccess value_channel_access_;
 
     std::unique_ptr<ScriptEngine> engine_;
     std::unique_ptr<WidgetBridge> bridge_;

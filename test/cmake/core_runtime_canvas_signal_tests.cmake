@@ -342,7 +342,8 @@ else()
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=0)
 endif()
-if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
+if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect
+   AND PROJECT_IS_TOP_LEVEL)
     set_source_files_properties(
         fixtures/standalone_inspector_process_fixture.cpp
         PROPERTIES LANGUAGE OBJCXX)

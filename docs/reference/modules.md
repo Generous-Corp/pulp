@@ -300,6 +300,14 @@ config.buffer_size = 256;
 
 auto device = system->create_device(devices[0].id);
 device->open(config);
+if (auto timing = query_audio_io_timing(*device)) {
+    // Consume the graph's already-computed PDC total; this does not recompute it.
+    auto latency = make_latency_snapshot(
+        *timing, graph.latency_samples(), device->sample_rate());
+    if (latency && latency->output_scheduling_offset_frames) {
+        schedule_output_early_by(*latency->output_scheduling_offset_frames);
+    }
+}
 device->start([](const auto& input, auto& output, const auto& ctx) {
     // Real-time audio callback — no allocation, no locks
     process(input, output, ctx.buffer_size);
@@ -307,6 +315,25 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 ```
 
 **Device backends:** CoreAudio (macOS), WASAPI (Windows), ALSA + JACK (Linux), Web Audio (browser)
+
+`AudioIoTiming` reports present input/output latency, safety-offset, and I/O
+buffer properties in device-rate sample frames, together with the exact sample rate, timestamp
+provenance, confidence, and a calibration generation. `LatencySnapshot` is a
+control-thread value that composes this with the graph's reported total latency
+for input placement, monitoring, and output scheduling. Each directional result
+is optional: an output-only route still supports output scheduling, while live
+monitoring requires complete input and output properties. Composition refuses a
+graph/device rate mismatch. CoreAudio publishes this contract today; other
+desktop and mobile backends currently return no timing value rather than guessed
+magnitudes.
+
+Snapshot composition fails closed when timestamp domain/source is unspecified
+or confidence is unavailable; provenance-free values are not scheduling data.
+
+For CoreAudio, a complete directional presentation path is device latency plus
+the directional safety offset plus one I/O buffer. Input placement and output
+scheduling each count that buffer once; live monitoring composes both paths and
+therefore counts it twice.
 
 ### Audio file format support
 
@@ -1397,6 +1424,32 @@ and velocity edits carry both snapshots with the same note identity.
 have no transaction lowerer yet: granular
 note commands own that later boundary, so this editor API does not disguise an
 O(clip) `ReplaceNoteContent` rewrite as an interactive note edit.
+
+`undo_gesture_budget` answers how long a gesture can stream before the document
+refuses it, which an editor needs *before* it opens one. A gesture coalesces
+every `Update` into a single undo group, that group stays open until its `End`,
+and only closed groups are evictable — so the charge accumulates with nothing
+able to reclaim it, and past `UndoLimits::max_retained_bytes` the next step comes
+back `ConflictCode::UndoFull`: a drag that stops responding rather than one that
+degrades. The answer is `max_retained_bytes / step_bytes` and does not depend on
+what the undo stack already holds, because a session has one open gesture at a
+time, so every group present when one opens is closed and evictable.
+
+```cpp
+#include <pulp/timeline_editor/gesture_budget.hpp>
+
+// Priced before the gesture opens, from the step the drag is about to repeat.
+const auto budget = undo_gesture_budget(limits.undo, forward, inverse);
+if (budget.steps < expected_frames)
+    hold_the_edit_locally_and_commit_one_single_on_release();
+else
+    stream_updates_into_one_open_group();
+```
+
+A `GesturePhase::Single` edit is closed on admission and therefore immediately
+evictable, so the fallback branch has no step ceiling at all — only undo depth.
+This is the undo ceiling alone: `JournalLimits` bounds the same gesture
+independently, has no automatic eviction, and can bind first.
 
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no

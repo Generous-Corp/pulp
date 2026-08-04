@@ -2,6 +2,8 @@
 
 #include <pulp/inspect/state_inspector.hpp>
 
+#include <pulp/view/value_channel_set.hpp>
+
 namespace pulp::inspect {
 
 StateInspector::StateInspector(StateStore& store)
@@ -28,6 +30,13 @@ StateInspector::StateInspector(StateStore& store)
 }
 
 StateInspector::~StateInspector() = default;
+
+void StateInspector::set_value_channels(view::ValueChannelSet* channels) {
+    if (channels)
+        set_value_channels(channels->infos());
+    else
+        value_channels_.clear();
+}
 
 std::vector<StateInspector::ParamSnapshot> StateInspector::all_params() const {
     std::vector<ParamSnapshot> result;

@@ -49,6 +49,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # Unbounded-wait lint: a test wait that cannot time out turns a real
+    # regression into a CI job timeout with no output. The selftest is the
+    # load-bearing part — it scans the SAME wait unbounded and bounded, so the
+    # gate is proven to distinguish them rather than proven to be quiet.
+    add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.

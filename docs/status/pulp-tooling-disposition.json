@@ -2112,9 +2112,115 @@
             "name": "--output",
             "kind": "option",
             "required": false
+          },
+          {
+            "name": "--out",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--id",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--value",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--normalized",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--kind",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--channel",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--note",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--velocity",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--duration-ms",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--playing",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--position-samples",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--tempo-bpm",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
           }
         ],
-        "subcommands": []
+        "subcommands": [
+          {
+            "name": "profiles",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "capabilities",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "screenshot",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "set-parameter",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "inject-midi",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "set-transport",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
       },
       {
         "name": "kit",
@@ -4488,11 +4594,27 @@
         "disposition": "excluded"
       },
       {
+        "name": "pulp_inspect_capabilities",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_doctor",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_dom",
         "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp_inspect_evaluate",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_inject_midi",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_list",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4508,11 +4630,19 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "pulp_inspect_profiles",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_screenshot",
         "disposition": "candidate-shared-later"
       },
       {
         "name": "pulp_inspect_set_param",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_set_transport",
         "disposition": "candidate-shared-later"
       },
       {
@@ -4648,7 +4778,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.411.0",
+        "version": "0.415.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4663,13 +4793,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.411.0",
+        "catalog_version": "0.415.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.411.0",
+        "version": "0.415.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

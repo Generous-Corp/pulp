@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -68,6 +69,19 @@ struct InspectorServerConfig {
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
 };
 
+/// Outcome of delivering one generation-scoped event to one authenticated
+/// transport client. Telemetry brokers use the lossy outcomes as debt carried
+/// into their next delivered sample; reliable overflow closes the client.
+enum class InspectorTargetedEventResult {
+    Queued,
+    QueuedAfterLossyEviction,
+    DroppedLossy,
+    ReliableOverflow,
+    ClientNotFound,
+    EventUnavailable,
+    MessageTooLarge,
+};
+
 /// TCP server exposing the inspector protocol to external tools.
 /// Wraps InterprocessConnectionServer for multi-client support.
 class InspectorServer {
@@ -95,6 +109,20 @@ public:
 
     /// Broadcast an event to all connected clients.
     void broadcast(const InspectorMessage& event);
+
+    /// Deliver an event only to the authenticated client identity supplied by
+    /// InspectorRequestContext. The event is rejected when its capability is
+    /// unavailable for the current server generation. Lossy callers with
+    /// independently-accounted streams should supply a stable loss-owner key;
+    /// only an older event with the same key may be coalesced.
+    InspectorTargetedEventResult send_to_client(
+        std::string_view client_id,
+        const InspectorMessage& event,
+        std::string_view loss_owner = {});
+
+    /// Remove queued targeted events owned by one retired client stream.
+    std::size_t cancel_client_events(std::string_view client_id,
+                                     std::string_view loss_owner);
 
     /// Number of connected clients.
     int client_count() const;

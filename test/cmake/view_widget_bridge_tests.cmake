@@ -46,7 +46,8 @@ add_executable(pulp-test-inspector-domain-helpers
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
-    pulp::audio pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
+    pulp::audio pulp::canvas pulp::state pulp::runtime pulp::view-core
+    Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
 # CPU-only inspector session policy, capability enforcement, and lease tests.
@@ -63,6 +64,19 @@ target_include_directories(pulp-test-inspector-session PRIVATE
 target_link_libraries(pulp-test-inspector-session PRIVATE
     pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-session)
+
+add_executable(pulp-test-inspector-test-input
+    test_inspector_test_input.cpp)
+target_link_libraries(pulp-test-inspector-test-input PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-test-input)
+
+add_executable(pulp-test-inspector-audit
+    test_inspector_audit.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)
+target_link_libraries(pulp-test-inspector-audit PRIVATE
+    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-audit)
 
 add_executable(pulp-test-inspector-server
     test_inspector_server.cpp
@@ -95,6 +109,12 @@ add_executable(
 target_link_libraries(pulp-test-inspector-client PRIVATE
     pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-client)
+
+add_executable(pulp-test-inspector-value-channel-telemetry
+    test_value_channel_telemetry_broker.cpp)
+target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
+    pulp::inspect-telemetry pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)

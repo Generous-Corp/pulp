@@ -343,6 +343,39 @@ TEST_CASE("zlib (RFC 1950) compress + gzip_decompress round-trip", "[runtime][zi
     REQUIRE(result == original);
 }
 
+TEST_CASE("zlib_decompress accepts only one complete RFC 1950 stream",
+          "[runtime][zip][zlib]") {
+    const std::string original = "strict zlib payload";
+    const auto* data = reinterpret_cast<const uint8_t*>(original.data());
+    const auto zlib = pulp::runtime::zlib_compress(data, original.size());
+    const auto gzip = pulp::runtime::gzip_compress(data, original.size());
+    REQUIRE(zlib.has_value());
+    REQUIRE(gzip.has_value());
+
+    const auto decoded = pulp::runtime::zlib_decompress(zlib->data(), zlib->size());
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::string(decoded->begin(), decoded->end()) == original);
+    REQUIRE_FALSE(pulp::runtime::zlib_decompress(gzip->data(), gzip->size()).has_value());
+
+    auto trailing = *zlib;
+    trailing.push_back(0);
+    REQUIRE_FALSE(
+        pulp::runtime::zlib_decompress(trailing.data(), trailing.size()).has_value());
+}
+
+TEST_CASE("gzip_decompress grows to the caller bound for highly compressed zlib",
+          "[runtime][zip][zlib]") {
+    std::vector<uint8_t> original(2u * 1024u * 1024u, 0);
+    auto compressed = pulp::runtime::zlib_compress(original.data(), original.size());
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() * 512u < original.size());
+
+    auto decompressed = gzip_decompress(
+        compressed->data(), compressed->size(), original.size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(*decompressed == original);
+}
+
 TEST_CASE("gzip binary data round-trip", "[runtime][zip]") {
     // Generate binary data
     std::vector<uint8_t> data(1000);

@@ -1,6 +1,7 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <mutex>
@@ -9,6 +10,8 @@
 namespace pulp::view {
 
 namespace {
+
+std::atomic<std::uint64_t> next_scripted_ui_session_identity{1};
 
 LogCallback default_log_callback() {
     return [](std::string_view level, std::string_view msg) {
@@ -34,13 +37,20 @@ std::optional<std::filesystem::file_time_type> safe_last_write_time(const std::f
 ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, ScriptedUiOptions options)
     : root_(root)
     , store_(store)
+    , identity_(next_scripted_ui_session_identity.fetch_add(
+          1, std::memory_order_relaxed))
     , script_path_(std::move(options.script_path))
     , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
                                              : std::move(options.theme_path))
     , asset_roots_(std::move(options.asset_roots))
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
-    , value_channels_(options.value_channels)
+    , value_channel_access_(
+          options.value_channel_access
+              ? std::move(options.value_channel_access)
+              : ValueChannelAccess{
+                    [channels = options.value_channels](
+                        const ValueChannelVisitor& visitor) { visitor(channels); }})
     , log_callback_(default_log_callback())
 {
 }
@@ -260,9 +270,8 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         auto next_engine = make_engine(engine_log_callback());
         auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
                                                           gpu_surface_);
-        // Re-attach on every reload: the bridge is rebuilt, the channel set is
-        // owned by the processor and outlives it.
-        next_bridge->set_value_channels(value_channels_);
+        // Re-attach on every reload without retaining a processor generation.
+        next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(script_path_.parent_path());
         if (repaint_callback_) {

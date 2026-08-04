@@ -317,7 +317,7 @@ InspectorMessage InspectorMainThreadRpc::call(
                           "invalid_dispatch");
     }
     if (impl->is_main_thread && impl->is_main_thread()) {
-        std::lock_guard operation_lock(impl->operation_mutex);
+        std::unique_lock operation_lock(impl->operation_mutex);
         if (!impl->accepting.load(std::memory_order_acquire)) {
             run_completion(std::move(completion));
             return cancelled(request_id);
@@ -325,6 +325,10 @@ InspectorMessage InspectorMainThreadRpc::call(
         Impl::OperationGuard running(impl);
         auto response = run_operation(request_id, operation);
         run_completion(std::move(completion));
+        // after_current_operation callbacks may drain transports whose reader
+        // threads are waiting to enter this serialized RPC. Release the
+        // serialization mutex before OperationGuard runs those callbacks.
+        operation_lock.unlock();
         return response;
     }
     if (!impl->accepting.load(std::memory_order_acquire)) {
@@ -352,7 +356,7 @@ InspectorMessage InspectorMainThreadRpc::call(
         [lifetime = std::make_shared<Impl::PostedLifetime>(impl),
          impl, pending, request_id]() mutable {
             (void)lifetime;
-            std::lock_guard operation_lock(impl->operation_mutex);
+            std::unique_lock operation_lock(impl->operation_mutex);
             bool should_run = false;
             bool cancelled_before_start = false;
             Operation operation;
@@ -382,6 +386,9 @@ InspectorMessage InspectorMainThreadRpc::call(
             Impl::OperationGuard running(impl);
             auto response = run_operation(request_id, operation);
             impl->complete_call(pending, std::move(response));
+            // See the direct path above: deferred teardown must not wait for a
+            // reader that is itself blocked on this mutex.
+            operation_lock.unlock();
         };
     bool posted = false;
     bool post_threw = false;

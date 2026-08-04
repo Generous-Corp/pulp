@@ -29,6 +29,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <thread>
 
@@ -231,6 +232,166 @@ TEST_CASE("Standalone hardware MIDI queue drains concurrently without loss",
     REQUIRE(samples_in_range);
     REQUIRE(observed == kEvents);
     REQUIRE(dropped == 0);
+}
+
+TEST_CASE("Standalone inspector test MIDI is bounded and releases held notes",
+          "[format][standalone][midi][inspect][rt-safety]") {
+    detail::StandaloneTestInputHost input;
+    input.prepare(/*playing=*/true, /*tempo_bpm=*/120.0);
+
+    REQUIRE(input.inject_note({
+                .kind = detail::StandaloneTestMidiKind::NoteOn,
+                .channel = 0,
+                .note = 60,
+                .velocity = 100,
+            }) == detail::StandaloneTestInputResult::InvalidArgument);
+    REQUIRE(input.inject_note({
+                .kind = detail::StandaloneTestMidiKind::NoteOn,
+                .channel = 17,
+                .note = 128,
+                .velocity = 100,
+            }) == detail::StandaloneTestInputResult::InvalidArgument);
+
+    const detail::StandaloneTestMidiNote note_on{
+        .kind = detail::StandaloneTestMidiKind::NoteOn,
+        .channel = 3,
+        .note = 64,
+        .velocity = 99,
+    };
+    REQUIRE(input.inject_note(note_on) ==
+            detail::StandaloneTestInputResult::Applied);
+
+    midi::MidiBuffer first;
+    first.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    first.set_realtime_capacity_limit(true);
+    REQUIRE(input.drain_midi_into(first, 128) == 1);
+    REQUIRE(first.size() == 1);
+    REQUIRE(first[0].is_note_on());
+    REQUIRE(first[0].channel() == 2);
+    REQUIRE(first[0].note() == 64);
+
+    input.release_test_input();
+    midi::MidiBuffer released;
+    released.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    released.set_realtime_capacity_limit(true);
+    REQUIRE(input.drain_midi_into(released, 128) == 0);
+    REQUIRE(released.size() == 1);
+    REQUIRE(released[0].is_note_off());
+    REQUIRE(released[0].channel() == 2);
+    REQUIRE(released[0].note() == 64);
+
+    REQUIRE(input.inject_note(note_on) ==
+            detail::StandaloneTestInputResult::Applied);
+    input.release_test_input();
+    midi::MidiBuffer stale;
+    stale.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    stale.set_realtime_capacity_limit(true);
+    REQUIRE(input.drain_midi_into(stale, 128) == 1);
+    REQUIRE(stale.size() == 2);
+    REQUIRE(stale[0].is_note_on());
+    REQUIRE(stale[0].sample_offset == 0);
+    REQUIRE(stale[1].is_note_off());
+    REQUIRE(stale[1].sample_offset == 127);
+
+    input.release_test_input();
+    midi::MidiBuffer after_second_release;
+    after_second_release.reserve(detail::kStandaloneMidiBufferEventCapacity);
+    after_second_release.set_realtime_capacity_limit(true);
+    REQUIRE(input.drain_midi_into(after_second_release, 128) == 0);
+    REQUIRE(after_second_release.empty());
+
+    for (std::size_t index = 0;
+         index < detail::kStandaloneTestMidiQueueCapacity; ++index) {
+        REQUIRE(input.inject_note(note_on) ==
+                detail::StandaloneTestInputResult::Applied);
+    }
+    REQUIRE(input.inject_note(note_on) ==
+            detail::StandaloneTestInputResult::QueueFull);
+    REQUIRE(input.midi_overflow_count() == 1);
+}
+
+TEST_CASE("Standalone inspector transport updates are coherent and do not rewind",
+          "[format][standalone][transport][inspect][rt-safety]") {
+    detail::StandaloneTestInputHost input;
+    input.prepare(/*playing=*/true, /*tempo_bpm=*/120.0);
+
+    auto first = input.begin_audio_block();
+    REQUIRE(first.playing);
+    REQUIRE(first.tempo_bpm == 120.0);
+    REQUIRE(first.position_samples == 0);
+    input.end_audio_block(480);
+    REQUIRE(input.transport_snapshot().position_samples == 480);
+
+    REQUIRE(input.update_transport({.tempo_bpm = 140.0}) ==
+            detail::StandaloneTestInputResult::Applied);
+    const auto tempo_only = input.begin_audio_block();
+    REQUIRE(tempo_only.tempo_bpm == 140.0);
+    REQUIRE(tempo_only.position_samples == 480);
+    input.end_audio_block(480);
+
+    REQUIRE(input.update_transport({
+                .playing = false,
+                .position_samples = 96'000,
+                .tempo_bpm = 90.0,
+            }) == detail::StandaloneTestInputResult::Applied);
+    const auto stopped = input.begin_audio_block();
+    REQUIRE_FALSE(stopped.playing);
+    REQUIRE(stopped.tempo_bpm == 90.0);
+    REQUIRE(stopped.position_samples == 96'000);
+    input.end_audio_block(480);
+    REQUIRE(input.transport_snapshot().position_samples == 96'000);
+
+    REQUIRE(input.update_transport({}) ==
+            detail::StandaloneTestInputResult::InvalidArgument);
+    REQUIRE(input.update_transport({.position_samples = -1}) ==
+            detail::StandaloneTestInputResult::InvalidArgument);
+    REQUIRE(input.update_transport({.tempo_bpm = 19.99}) ==
+            detail::StandaloneTestInputResult::InvalidArgument);
+    REQUIRE(input.update_transport({.tempo_bpm = 400.01}) ==
+            detail::StandaloneTestInputResult::InvalidArgument);
+    REQUIRE(input.update_transport({
+                .tempo_bpm = std::numeric_limits<double>::infinity(),
+            }) == detail::StandaloneTestInputResult::InvalidArgument);
+}
+
+TEST_CASE("Standalone inspector transport snapshot stays coherent under contention",
+          "[format][standalone][transport][inspect][concurrent][rt-safety]") {
+    detail::StandaloneTestInputHost input;
+    input.prepare(/*playing=*/false,
+                  detail::StandaloneTestInputHost::kMinimumTempoBpm);
+
+    constexpr std::int64_t kUpdates = 20'000;
+    std::atomic<bool> writer_done{false};
+    std::atomic<bool> writer_ok{true};
+    std::thread writer([&] {
+        for (std::int64_t value = 0; value < kUpdates; ++value) {
+            const auto tempo = 20.0 + static_cast<double>(value % 381);
+            const auto result = input.update_transport({
+                .playing = (value % 2) != 0,
+                .position_samples = value,
+                .tempo_bpm = tempo,
+            });
+            if (result != detail::StandaloneTestInputResult::Applied) {
+                writer_ok.store(false, std::memory_order_release);
+                break;
+            }
+        }
+        writer_done.store(true, std::memory_order_release);
+    });
+
+    bool coherent = true;
+    while (!writer_done.load(std::memory_order_acquire)) {
+        const auto snapshot = input.begin_audio_block();
+        const auto expected_tempo =
+            20.0 + static_cast<double>(snapshot.position_samples % 381);
+        coherent = coherent && snapshot.tempo_bpm == expected_tempo;
+        coherent = coherent && snapshot.playing ==
+            ((snapshot.position_samples % 2) != 0);
+    }
+    writer.join();
+    REQUIRE(writer_done.load(std::memory_order_acquire));
+    REQUIRE(writer_ok.load(std::memory_order_acquire));
+    REQUIRE(coherent);
 }
 
 TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationProperties",

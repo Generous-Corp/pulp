@@ -17,10 +17,12 @@
 #include <pulp/view/binding_diagnostics.hpp>
 #include <pulp/view/param_subscription.hpp>
 #include <pulp/view/reload_capabilities.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/state/store.hpp>
 
 namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -44,11 +46,6 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
-class ValueChannelSet;
-class MeterSource;
-class VectorSource;
-class EventSource;
-
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
     std::unordered_map<std::string, float> scalar_values;
@@ -94,14 +91,11 @@ public:
     // Read-back accessor for diagnostics + tests.
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
 
-    /// Attach the hosting processor's named value channels, enabling
-    /// `bindMeter(id, "value:<name>")`. Non-owning; the set must outlive this
-    /// bridge. Set post-construction for the same reason as the GPU surface:
-    /// the bridge is built before the adapter has resolved the processor.
-    void set_value_channels(ValueChannelSet* channels) noexcept {
-        value_channels_ = channels;
-    }
-    ValueChannelSet* value_channels() const noexcept { return value_channels_; }
+    /// Attach stable channels, or leased access for a reloadable processor.
+    void set_value_channels(ValueChannelSet* channels);
+    void set_value_channel_access(ValueChannelAccess access);
+    /// The visitor must not retain a channel set or source after it returns.
+    void visit_value_channels(const ValueChannelVisitor& visitor) const;
 
     // True iff a GpuSurface is attached AND its adapter reports
     // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
@@ -483,15 +477,16 @@ private:
         using Target = BindingTarget;
         std::string widget_id;
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
-        /// Non-null when bound to a `value:<name>` channel instead of a param;
-        /// owned by the processor's ValueChannelSet, resolved once at bind.
-        MeterSource* value_meter = nullptr;
-        VectorSource* value_vector = nullptr;   ///< as above, for a scope target
+        /// Non-empty when bound to a named value channel instead of a param.
+        /// Resolve it anew during every leased read so a hot swap cannot leave
+        /// a source pointer from the retired processor generation cached here.
+        std::string value_channel;
         /// Staleness tracking. A channel that stops PUBLISHING decays to its
         /// declared neutral; one that publishes the same number forever does
         /// not. Comparing values cannot distinguish those, so watch the
         /// publish sequence instead (see PublishCounter).
         std::uint32_t last_publish_seq = 0;
+        std::uint64_t value_generation_identity = 0;
         std::chrono::steady_clock::time_point last_publish_at{};
         float neutral = 0.0f;
         Target target = Target::value;
@@ -503,7 +498,7 @@ private:
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
-    ValueChannelSet* value_channels_ = nullptr;  ///< non-owning; see set_value_channels
+    ValueChannelAccess value_channel_access_;
     std::vector<ParamSubscription> param_subscriptions_;
     std::uint32_t next_param_subscription_id_ = 1;  ///< monotonic; never reused
     // True while service_param_subscriptions() is dispatching into JS, so an
@@ -511,8 +506,9 @@ private:
     bool in_param_dispatch_ = false;
     struct EventBinding {
         std::uint32_t id = 0;
-        EventSource* source = nullptr;  ///< owned by the processor's channel set
+        std::string channel_name;
         std::uint32_t last_publication = 0;
+        std::uint64_t value_generation_identity = 0;
     };
     std::vector<EventBinding> event_bindings_;
     std::uint32_t next_event_binding_id_ = 1;
@@ -566,11 +562,15 @@ private:
     // Push one binding's transformed source value onto the resolved widget.
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
-    bool apply_param_binding(ParamBinding& binding, View* w);
+    bool apply_param_binding(ParamBinding& binding, View* w,
+                             const MeterFrame* value_frame = nullptr,
+                             std::uint32_t publish_seq = 0);
     /// Fill a `{fromParam: true}` transform from the param's declared range.
     void derive_binding_transform(ParamBinding& binding, View* w);
     /// Push a whole block to a SpectrumView / WaveformView.
-    bool apply_scope_binding(ParamBinding& binding, View* w);
+    bool apply_scope_binding(ParamBinding& binding, View* w,
+                             const VectorFrame* value_frame,
+                             std::uint32_t publish_seq);
     /// True when the channel has not published for kValueChannelStaleAfter.
     /// Updates the binding's sequence/timestamp as a side effect.
     static bool value_channel_is_stale(ParamBinding& binding, std::uint32_t seq);

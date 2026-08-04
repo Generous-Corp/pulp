@@ -20,8 +20,12 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.81.2`,
-which provides it, so the pinned binary is sufficient.
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.83.0`,
+which provides it, so the pinned binary is sufficient. That pin also makes
+formal GitHub stacks fail closed at every Shipyard merge-queue mutation
+boundary, including `shipyard runner steward`; use the native `gh stack`
+lifecycle for an explicit pilot rather than routing stack members through the
+unstacked enqueue path.
 
 Use these commands as the normal agent loop:
 
@@ -478,6 +482,65 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+## Never wait on a signal you did not uniquely produce
+
+Several agents share each dev Mac, and **the bounded-build rule is what makes
+their build commands collide.** CLAUDE.md requires an explicit job count on every
+build, so every agent emits a byte-identical `cmake --build build -j6`. The
+discipline that prevents an OOM is the same discipline that guarantees the
+command lines are indistinguishable — so this hazard gets *worse* the more
+consistently everyone follows the rule, not better. Do not exempt your own
+pattern on the grounds that it is precise.
+
+```bash
+# WRONG — fires when a STRANGER's build ends, in a different worktree.
+until ! pgrep -f "cmake --build build -j6$"; do sleep 30; done
+ctest --test-dir build          # …now running against a half-built tree
+```
+
+Seen 2026-08-01 on m3: the loop matched
+`sh -c cmake --build build -j6 > /tmp/oklab-build-t5.log` from another lane. The
+damage is not the early exit, it is what the early exit is fed into — **missing
+binaries read as failures, or worse, stale binaries read as passes.** A partial
+build in this repo exited 2 while the previously built test binary reported
+`All tests passed (66 assertions)`.
+
+The same defect has both signs, which is why they look unrelated and are not:
+
+| symptom | cause |
+|---|---|
+| wait returns immediately | the pattern matches **nothing** — a typo, or the process was never named that |
+| wait returns at the wrong time | the pattern matches **someone else's** identical command |
+
+Both are a wait keyed on something that is not uniquely yours.
+
+**Wait on an artifact only your own process can produce**: the completion marker
+of a command you started (`…; echo "EXIT=$?" > mine.done`), or your own log's
+mtime advancing. Same move as reading a build's own exit marker instead of a
+waiter's exit code, and as deleting a test binary before rebuilding it so a run
+cannot be served by an artifact the build did not produce.
+
+`pkill`/`kill` need the same care with a worse failure: **resolve the PID by
+working directory, not by name.**
+
+```bash
+for p in $(pgrep -f "cmake --build build"); do
+    printf '%s -> %s\n' "$p" \
+      "$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2-)"
+done
+```
+
+That listing has shown **six** concurrent builds across worktrees on one host; a
+name match would have killed someone else's.
+
+**While `shipyard ship` is validating, treat the worktree as not yours.** The
+local mac backend builds *in the checkout* rather than a copy, so a source edit
+made while it runs — a mutation control, a quick experiment, a revert — can land
+in the validation build, and committing moves HEAD underneath it. Run mutation
+controls in a throwaway worktree, or wait for the lane to finish. Note that a
+`shipyard` process sitting in the worktree is usually just waiting on GitHub;
+confirm an actual compiler is running before concluding a build is in flight.
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
@@ -925,9 +988,12 @@ uses, or the golden warms a cache the real jobs never touch.
   Because this is a required context, the workflow still starts on every PR;
   `webclap_relevance.py` only skips the expensive setup/build/proof steps for an
   unrelated diff. Relevance is evaluated with the classifier fetched from the
-  PR's base SHA, includes both names of renamed files, and fails closed at the
-  GitHub API's 3,000-file cap. Keep the workflow and classifier self-changes on
-  the unconditional full-proof path, and never expose `GH_TOKEN` to the
+  trusted base SHA and includes both names of renamed files. Pull requests use
+  the files API and fail closed at its 3,000-file cap; merge groups diff the
+  complete speculative queue head against `merge_group.base_sha`, so an
+  unrelated queued group can take the same fast path without dropping the
+  required context. A missing base, failed fetch/diff, or workflow/classifier
+  self-change still runs the full proof. Never expose `GH_TOKEN` to the
   PR-controlled checkout while resolving relevance.
 - **`screenshot-sync` is a three-layer gate that mirrors skill-sync.** A repo opts
   in by committing a `.pulp/screenshots.toml` manifest (presence == opt-in);
@@ -1270,7 +1336,9 @@ uses, or the golden warms a cache the real jobs never touch.
   up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
   because GitHub verifies SSH signatures against the account that owns the
   uploaded signing key. If this secret is absent, the signing setup must fail
-  closed rather than create unsigned release tags or bot commits.
+  closed rather than create unsigned release tags or bot commits. The helper
+  writes repository-local Git config only; global signing config can outlive
+  the temporary key and poison unrelated jobs on a shared runner.
 - **Release-runner Xcode must be pinned (C++20 parity).** `sign-and-release.yml`
   runs on GitHub-hosted `macos-14`, whose DEFAULT Xcode is 15.4 — its Apple clang
   lacks C++20 **P0960** (parenthesized aggregate init, `Type p(arg)` for a
@@ -2187,7 +2255,7 @@ envelope carries `status` and `merge_error`, and a malformed-request failure exi
 `8` rather than masquerading as success. See the Shipyard `ci` skill's
 status/exit-code table.
 
-Shipyard v0.81.2 is the fleet floor for queue throughput and capacity health:
+Shipyard v0.81.4 is the fleet floor for queue throughput and capacity health:
 fleet status observes complete registered and expected-host inventories, Tart
 disk/ccache admission problems, accidental hosted Linux routing, and stale
 releases whose bounded commit scan lacks an oldest timestamp. The earlier
@@ -2196,9 +2264,11 @@ newly free worker slots as each target finishes instead of waiting for the whole
 batch, and the release-version surface covers root-level `src/*.rs` so scheduler
 fixes cannot merge without producing the CLI release the fleet pin expects. It
 also keeps long Git-over-SSH pushes alive while Pulp's pre-push proof runs.
-For post-tag reconciliation, v0.81.1 corrected shell tag extraction and v0.81.2
-fully qualifies branch push refspecs so the detached tag checkout can publish
-its queue-bound PR branch.
+For post-tag reconciliation, v0.81.1 corrected shell tag extraction, v0.81.2
+fully qualified branch push refspecs, and v0.81.3 attaches the deterministic
+local PR branch before using Shipyard's supervised push. The last step is
+required by repositories whose pre-push hook rejects detached HEAD or requires
+`SHIPYARD_PR_RUNNING=1`.
 
 ### Stale-SHA merge race — DO NOT push onto a PR that's being shipped
 
@@ -5829,6 +5899,49 @@ with `unbound variable` under `set -u`, and the failure looks like the new gate
 itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
 the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
 Pass the same value through to a script that takes a root argument.
+
+## `unbounded-wait lint` — a test wait must be able to time out
+
+`gates.sh` runs `tools/scripts/unbounded_wait_lint.py` (also a ctest selftest,
+`unbounded-wait-lint-selftest`). It fails a PR that introduces a wait a test
+cannot escape:
+
+```cpp
+while (!started.load(std::memory_order_acquire)) std::this_thread::yield();
+started_future.wait();
+cv.wait(lock, [&] { return ready; });
+```
+
+**Why it is a CI gate and not a style note.** These waits are usually added to
+*fix* a flake — a worker that had not been scheduled before a fixed budget
+elapsed. They do fix it, and they replace it with something worse: if a real
+regression means the worker never reaches that state, none of them ever return.
+The suite does not fail, it parks, and the run ends as a job timeout with no
+output. A flake at least tells you which assertion failed.
+
+Bound it so the outcome that never arrives becomes a named failed assertion —
+helpers are in `test/support/thread_progress.hpp`:
+
+```cpp
+CHECK(pulp::test::wait_for_condition([&] { return started.load(); }));
+CHECK(fut.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+CHECK(cv.wait_for(lock, std::chrono::seconds(10), [&] { return ready; }));
+```
+
+Use `CHECK`, not `REQUIRE`: a Catch2 throw at a barrier unwinds past the
+worker's `join()`, and destroying a joinable thread terminates the process
+instead of reporting the failure.
+
+**It is diff-scoped on purpose.** It flags added/changed lines only. The tree
+still carries a large backlog of unbounded waits (`--all` reports them); each
+needs its own reproduction before it is touched, so the gate stops the
+population growing rather than forcing a blind mass edit. `--all` is a
+reporting mode, not a gate, and it over-reports — a worker's own
+`while (!stop)` exit loop and waits bounded elsewhere both show up.
+
+Escape a genuinely-bounded wait with `// unbounded-wait: allow <reason>`. "The
+OS eventually schedules a runnable thread" is not a reason — it does not cover
+the code under test never publishing the value, which is the case that hangs.
 
 ## Apple's clang ships no libFuzzer runtime — fuzzing cannot live on the macOS lanes
 

@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  SHIPYARD_VERSION: "v0.81.2"
+  SHIPYARD_VERSION: "0.83.0"
 
 jobs:
   sync:
@@ -42,7 +42,8 @@ jobs:
         shell: bash
         env:
           RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
-        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+        run: bash -- tools/scripts/configure_release_bot_ssh_signing.sh
+
 
       - name: Run post-tag docs sync
         shell: bash

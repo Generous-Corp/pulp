@@ -421,12 +421,23 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.81.2 — fleet health and the merge queue are load-bearing
+### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
 
-v0.81.2 preserves the v0.81.0 fleet-health surface, keeps v0.81.1's valid shell
-tag extraction, and fully qualifies the release bot's branch push refspec so a
-detached tag checkout can publish its queue-bound PR branch from the dedicated
-mutation authority. v0.81.0 makes `runner fleet-status` account for the full registered-runner
+v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
+enqueue mutation boundary, including the cross-repository runner steward. Pulp
+can therefore run a small native GitHub stacked-PR pilot without allowing an
+unattended steward tick to send one layer through the legacy unstacked queue
+path. Shipyard remains observe-only for formal stacks until it durably models
+GitHub's asynchronous stack-merge request and completion lifecycle.
+
+v0.81.4 preserves v0.81.3's attached supervised PR push and regenerates Pulp's
+SSH-signing setup from `release.post_tag_hook.ssh_signing_setup_script`, so a
+pin refresh cannot silently remove signed bot commits. The signing helper now
+writes repository-local Git config, preventing its temporary key path from
+poisoning later jobs on a shared runner. v0.81.3 keeps v0.81.1's valid shell tag
+extraction and v0.81.2's fully qualified release-bot refspec, then attaches the
+deterministic PR branch before supervised push so Pulp's pre-push hook sees both
+a branch and `SHIPYARD_PR_RUNNING=1`. v0.81.0 makes `runner fleet-status` account for the full registered-runner
 inventory and configured expected metal hosts, including machines that have not
 registered yet. It also fails visibly when Tart disk headroom falls below its
 admission floor, ccache exceeds its configured maximum, or a merge-group Linux

@@ -48,6 +48,13 @@ Useful flags:
 ## Motion-gated capture
 
 ```bash
+# Running Pulp standalone (works from SSH; no Screen Recording grant)
+python3 tools/motion/visual/capture_sim_frames.py \
+    --source inspector \
+    --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID \
+    --output-dir ./captures/card-open/ \
+    --fps 30 --frame-count 60
+
 # macOS window region (requires --bounds X,Y,W,H)
 python3 tools/motion/visual/capture_sim_frames.py \
     --source macos --bounds 0,0,800,600 \
@@ -64,10 +71,12 @@ python3 tools/motion/visual/capture_sim_frames.py \
 ```
 
 `capture_sim_frames.py` only starts saving frames once real motion appears,
-so a short pre-roll doesn't pollute the analysis window. It exits 3 (CTest
-SKIP) when neither `screencapture` nor a booted simulator is available, so
-it composes cleanly with CI lanes that lack the platform tooling. Pair with
-XcodeBuildMCP on macOS / iOS for log capture and screenshot orchestration.
+so a short pre-roll doesn't pollute the analysis window. Prefer `inspector`
+for Pulp standalones: each frame is captured inside the app, and an unsupported
+host fails explicitly. It exits 3 (CTest SKIP) when the selected source is
+unavailable, so it composes cleanly with CI lanes that lack the platform
+tooling. Pair with XcodeBuildMCP on macOS / iOS for log capture and screenshot
+orchestration.
 
 ## Claim-evidence preamble
 

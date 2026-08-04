@@ -4,6 +4,7 @@
 #include <pulp/format/detail/standalone_inspector.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
@@ -65,12 +67,23 @@ struct ScopedEnv {
         ::unsetenv(name_.c_str());
 #endif
     }
-
 private:
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
 };
+
+#if PULP_TEST_STANDALONE_INSPECTOR
+struct ScopedInspectorTelemetryClock {
+    explicit ScopedInspectorTelemetryClock(
+        StandaloneInspectorTelemetryClock clock) {
+        set_standalone_inspector_telemetry_clock_for_testing(std::move(clock));
+    }
+    ~ScopedInspectorTelemetryClock() {
+        set_standalone_inspector_telemetry_clock_for_testing({});
+    }
+};
+#endif
 
 class TestProcessor : public Processor {
 public:
@@ -82,14 +95,13 @@ public:
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const ProcessContext&) override {}
 };
-
 std::unique_ptr<Processor> null_processor_factory() { return {}; }
-
 class StubWindowHost final : public WindowHost {
 public:
     int repaint_calls = 0;
     std::vector<std::uint8_t> capture_bytes;
     bool capture_supported = true;
+    bool compositor_capture_supported = true;
     bool blocking_event_loop = true;
     bool exit_drain_supported = true;
     bool deferred_close_supported = true;
@@ -101,6 +113,7 @@ public:
     int run_until_calls = 0;
     int readiness_checks = 0;
     bool run_until_ready = false;
+    bool design_viewport_active = false;
 
     void show() override {}
     void hide() override {}
@@ -111,7 +124,23 @@ public:
             capture_callback();
         return capture_bytes;
     }
-    bool supports_compositor_capture() const override { return capture_supported; }
+    std::vector<std::uint8_t> capture_back_buffer_png() override {
+        return capture_png();
+    }
+    bool supports_back_buffer_capture() const override { return capture_supported; }
+    bool supports_compositor_capture() const override {
+        return compositor_capture_supported;
+    }
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        if (!design_viewport_active)
+            return false;
+        sx = 1.5f;
+        sy = 1.5f;
+        tx = 0.0f;
+        ty = 0.0f;
+        return true;
+    }
     bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
     bool event_loop_supports_exit_drain() const override {
         return exit_drain_supported;
@@ -150,7 +179,6 @@ public:
         }
     }
 };
-
 #if PULP_TEST_STANDALONE_INSPECTOR
 std::vector<std::uint8_t> inspector_test_png() {
     return {
@@ -162,15 +190,12 @@ std::vector<std::uint8_t> inspector_test_png() {
         0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     };
 }
-
 class InspectorProcessor : public TestProcessor {
 public:
-    InspectorProcessor(pulp::state::StateStore& store,
-                       std::filesystem::path script)
+    InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
         : store_(store), script_(std::move(script)) {
-        channels_.declare_meter("gain_reduction", "dB", 0.0f);
+        gain_reduction_ = channels_.declare_meter("gain_reduction", "dB", 0.0f);
     }
-
     PluginDescriptor descriptor() const override {
         PluginDescriptor descriptor;
         descriptor.name = "Inspector Test";
@@ -182,6 +207,8 @@ public:
     int latency_samples() const override { return 128; }
     std::unique_ptr<View> create_view() override {
         auto root = std::make_unique<View>();
+        if (scripted_)
+            ++retired_scripted_sessions;
         scripted_ = std::make_unique<ScriptedUiSession>(
             *root, store_, ScriptedUiOptions{.script_path = script_});
         std::string error;
@@ -198,18 +225,77 @@ public:
     pulp::view::ValueChannelSet* value_channels() override {
         return &channels_;
     }
+    void publish_gain_reduction(float rms, float peak) {
+        REQUIRE(gain_reduction_ != nullptr);
+        pulp::view::MeterFrame frame;
+        frame.channels = 1;
+        frame.rms[0] = rms;
+        frame.peak[0] = peak;
+        gain_reduction_->publish(frame);
+        (void)gain_reduction_->read();
+    }
+    std::size_t retired_scripted_sessions = 0;
 
 private:
     pulp::state::StateStore& store_;
     std::filesystem::path script_;
     pulp::view::ValueChannelSet channels_;
+    pulp::view::MeterSource* gain_reduction_ = nullptr;
     std::unique_ptr<ScriptedUiSession> scripted_;
 };
 
 class ReloadingInspectorProcessor final : public InspectorProcessor {
 public:
-    using InspectorProcessor::InspectorProcessor;
+    ReloadingInspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
+        : InspectorProcessor(store, std::move(script)) {
+        replace_value_channels("before_reload", false);
+    }
     bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation_; }
+    pulp::view::ValueChannelSet* value_channels() override {
+        ++value_channel_visits;
+        return reload_channels_.get();
+    }
+    void visit_active_scripted_ui(
+        const std::function<void(ScriptedUiSession*)>& visitor) override {
+        ++scripted_ui_visits;
+        if (scripted_ui_null_visits != 0) {
+            --scripted_ui_null_visits;
+            visitor(nullptr);
+            return;
+        }
+        InspectorProcessor::visit_active_scripted_ui(visitor);
+    }
+    void visit_active_scripted_ui(
+        const std::function<void(const ScriptedUiSession*)>& visitor) const override {
+        ++scripted_ui_visits;
+        if (scripted_ui_null_visits != 0) {
+            --scripted_ui_null_visits;
+            visitor(nullptr);
+            return;
+        }
+        InspectorProcessor::visit_active_scripted_ui(visitor);
+    }
+    void replace_value_channels(std::string name, bool bump = true) {
+        auto replacement = std::make_shared<pulp::view::ValueChannelSet>();
+        REQUIRE(replacement->declare_scalar(std::move(name)) != nullptr);
+        reload_channels_ = std::move(replacement);
+        if (bump)
+            ++generation_;
+    }
+    void replace_with_empty_value_channels() {
+        reload_channels_ = std::make_shared<pulp::view::ValueChannelSet>();
+        ++generation_;
+    }
+    void advance_generation_without_replacing_editor() { ++generation_; }
+    void hide_scripted_ui_for_next_visit() { ++scripted_ui_null_visits; }
+    std::weak_ptr<pulp::view::ValueChannelSet> value_channel_lifetime() const { return reload_channels_; }
+    std::size_t value_channel_visits = 0;
+    mutable std::size_t scripted_ui_visits = 0;
+private:
+    mutable std::size_t scripted_ui_null_visits = 0;
+    std::shared_ptr<pulp::view::ValueChannelSet> reload_channels_;
+    std::uint64_t generation_ = 0;
 };
 
 class QueuedMainThreadBackend {
@@ -257,7 +343,6 @@ public:
             ++pumped;
         return pumped;
     }
-
 private:
     std::thread::id main_thread_;
     mutable std::mutex mutex_;
@@ -265,8 +350,28 @@ private:
     std::size_t post_count_ = 0;
     pulp::events::MainThreadDispatcher::Token token_ = 0;
 };
+template <typename Predicate>
+bool spin_until(Predicate&& predicate, std::chrono::milliseconds timeout =
+                                           std::chrono::seconds(2)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!predicate() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    return predicate();
+}
+pulp::inspect::InspectorMessage request_with_dispatch(
+    pulp::inspect::InspectorClient& client, QueuedMainThreadBackend& dispatcher, std::string method,
+    std::string params) {
+    auto response = std::async(std::launch::async,
+        [&client, method = std::move(method), params = std::move(params)] {
+            return client.request(method, params, std::chrono::seconds(1));
+        });
+    REQUIRE(spin_until([&] {
+        if (!dispatcher.pump_one()) std::this_thread::yield();
+        return response.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+    }));
+    return response.get();
+}
 #endif
-
 } // namespace
 
 #if PULP_TEST_STANDALONE_INSPECTOR
@@ -335,15 +440,43 @@ TEST_CASE("Standalone local inspector owns only the in-window overlay",
     REQUIRE(runtime->try_finish_retirement());
 }
 
-TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",
-          "[standalone][inspect][capabilities][negative]") {
+TEST_CASE("Standalone inspector uses the portable screenshot backend without host readback",
+          "[standalone][inspect][capabilities]") {
     StandaloneApp app(null_processor_factory);
     TestProcessor processor;
     pulp::state::StateStore store;
     ViewBridge bridge(processor, store);
     View root;
+    root.set_background_gradient_linear(
+        0.0f, 0.0f, 1.0f, 1.0f,
+        {pulp::canvas::Color::rgba8(28, 31, 46),
+         pulp::canvas::Color::rgba8(96, 150, 240),
+         pulp::canvas::Color::rgba8(168, 140, 250)},
+        {0.0f, 0.55f, 1.0f});
     StubWindowHost window;
     window.capture_supported = false;
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"session.describe", "capture.image"});
+    if (has_screenshot_backend())
+        REQUIRE(runtime != nullptr);
+    else
+        REQUIRE(runtime == nullptr);
+}
+
+TEST_CASE("Standalone inspector does not advertise capture for a native-overlay tree",
+          "[standalone][inspect][capabilities]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    auto container = std::make_unique<View>();
+    auto native_overlay = std::make_unique<View>();
+    native_overlay->set_contains_native_overlay(true);
+    container->add_child(std::move(native_overlay));
+    root.add_child(std::move(container));
+    StubWindowHost window;
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "custom",
         {"session.describe", "capture.image"});
@@ -445,8 +578,8 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     std::filesystem::remove_all(temp, cleanup_error);
 }
 
-TEST_CASE("Standalone inspector fails closed for processor-level editor replacement",
-          "[standalone][inspect][negative]") {
+TEST_CASE("Standalone inspector accepts processor-level editor replacement",
+          "[standalone][inspect][telemetry][reload]") {
     const auto suffix = std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
     const auto temp = std::filesystem::temp_directory_path()
@@ -460,16 +593,227 @@ TEST_CASE("Standalone inspector fails closed for processor-level editor replacem
     }
     ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
     runtime_env.set(runtime_dir.string());
+    auto telemetry_now = std::chrono::steady_clock::time_point{};
+    ScopedInspectorTelemetryClock telemetry_clock(
+        [&telemetry_now] { return telemetry_now; });
 
     StandaloneApp app(null_processor_factory);
     ReloadingInspectorProcessor processor(app.state(), script);
+    auto competing_telemetry = processor.value_channels()->attach_telemetry();
+    REQUIRE(competing_telemetry.valid());
     ViewBridge bridge(processor, app.state());
     REQUIRE(bridge.open());
     StubWindowHost window;
+    QueuedMainThreadBackend dispatcher;
+    REQUIRE(dispatcher.valid());
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, *bridge.view(), window, "develop", {});
-    REQUIRE(runtime == nullptr);
-    REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
+    REQUIRE(runtime != nullptr);
+    pulp::inspect::InspectorDiscoveryReader reader(runtime_dir);
+    REQUIRE(reader.list().empty());
+    runtime->pump();
+    competing_telemetry = {};
+    runtime->pump();
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    pulp::inspect::InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    processor.replace_value_channels("source_only", false);
+    runtime->pump();
+    const auto source_only_catalog = request_with_dispatch(
+        client, dispatcher, "State.getValueChannels", "{}");
+    REQUIRE_FALSE(source_only_catalog.is_error);
+    const auto source_only_catalog_json =
+        choc::json::parse(source_only_catalog.params_json);
+    REQUIRE(source_only_catalog_json.size() == 1);
+    REQUIRE(source_only_catalog_json[0]["name"].getString() == "source_only");
+    processor.replace_value_channels("before_reload", false);
+    runtime->pump();
+    processor.advance_generation_without_replacing_editor();
+    runtime->pump();
+    {
+        std::ofstream source(script);
+        source << "console.warn('same-session-reload'); createLabel('v', 'same', '');";
+    }
+    std::string same_session_reload_error;
+    REQUIRE(processor.active_scripted_ui()->reload(&same_session_reload_error));
+    const auto same_session_console = request_with_dispatch(
+        client, dispatcher, "Console.getMessages", "{}");
+    REQUIRE_FALSE(same_session_console.is_error);
+    const auto same_session_console_json =
+        choc::json::parse(same_session_console.params_json);
+    REQUIRE(same_session_console_json.isObject());
+    REQUIRE(same_session_console_json["messages"].size() == 1);
+    REQUIRE(same_session_console_json["messages"][0]["message"].getString()
+            == "same-session-reload");
+    const auto console_cursor = same_session_console_json["nextSeq"]
+                                    .getWithDefault<std::int64_t>(0);
+    processor.hide_scripted_ui_for_next_visit();
+    processor.advance_generation_without_replacing_editor();
+    runtime->pump();
+    runtime->pump();
+    {
+        std::ofstream source(script);
+        source << "console.error('transient-session-retry'); createLabel('v', 'retry', '');";
+    }
+    std::string transient_reload_error;
+    REQUIRE(processor.active_scripted_ui()->reload(&transient_reload_error));
+    const auto retried_console = request_with_dispatch(
+        client, dispatcher, "Console.getMessages",
+        std::string("{\"sinceSeq\":") + std::to_string(console_cursor) + "}");
+    REQUIRE_FALSE(retried_console.is_error);
+    const auto retried_console_json = choc::json::parse(retried_console.params_json);
+    REQUIRE(retried_console_json["messages"].size() == 1);
+    REQUIRE(retried_console_json["messages"][0]["message"].getString()
+            == "transient-session-retry");
+    const auto scripted_visits_before_request = processor.scripted_ui_visits;
+    const auto runtime_capabilities = request_with_dispatch(
+        client, dispatcher, "Runtime.getCapabilities", "{}");
+    REQUIRE_FALSE(runtime_capabilities.is_error);
+    REQUIRE(processor.scripted_ui_visits == scripted_visits_before_request + 1);
+    const auto scripted_visits_before_context = processor.scripted_ui_visits;
+    const auto agent_context = request_with_dispatch(
+        client, dispatcher, "Inspector.getAgentContext", "{}");
+    REQUIRE_FALSE(agent_context.is_error);
+    REQUIRE(processor.scripted_ui_visits == scripted_visits_before_context + 1);
+    std::mutex event_mutex;
+    std::condition_variable event_cv;
+    std::vector<std::string> samples;
+    client.set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
+        if (event.method != pulp::inspect::methods::kTelemetrySample)
+            return;
+        {
+            std::lock_guard lock(event_mutex);
+            samples.push_back(event.params_json);
+        }
+        event_cv.notify_all();
+    });
+    const auto subscription = request_with_dispatch(
+        client, dispatcher, "Telemetry.subscribe",
+        R"({"channels":["before_reload"],"rateHz":1})");
+    REQUIRE_FALSE(subscription.is_error);
+    const auto subscription_id = std::string(choc::json::parse(subscription.params_json)
+                                                 ["subscriptionId"].getString());
+    REQUIRE_FALSE(subscription_id.empty());
+    runtime->pump();
+    {
+        std::unique_lock lock(event_mutex);
+        REQUIRE(event_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return !samples.empty(); }));
+        samples.clear();
+    }
+    auto retired_source = processor.value_channel_lifetime();
+    processor.replace_value_channels("after_reload");
+    REQUIRE(retired_source.expired());
+    const auto retired_scripted_before = processor.retired_scripted_sessions;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(processor.retired_scripted_sessions == retired_scripted_before + 1);
+    const auto scripted_visits_after_reload = processor.scripted_ui_visits;
+    const auto reloaded_runtime_capabilities = request_with_dispatch(
+        client, dispatcher, "Runtime.getCapabilities", "{}");
+    REQUIRE_FALSE(reloaded_runtime_capabilities.is_error);
+    REQUIRE(processor.scripted_ui_visits == scripted_visits_after_reload + 1);
+
+    auto competing_reload_telemetry = processor.value_channels()->attach_telemetry();
+    REQUIRE(competing_reload_telemetry.valid());
+    const auto telemetry_before_retry = runtime->telemetry_state_for_testing();
+    telemetry_now += std::chrono::milliseconds(100);
+    runtime->pump();
+    {
+        std::unique_lock lock(event_mutex);
+        REQUIRE(event_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return samples.size() == 1; }));
+    }
+    auto telemetry_after_first_failure = runtime->telemetry_state_for_testing();
+    REQUIRE(telemetry_after_first_failure.source_transition_count
+            == telemetry_before_retry.source_transition_count + 1);
+    REQUIRE(telemetry_after_first_failure.attachment_attempt_count
+            == telemetry_before_retry.attachment_attempt_count + 1);
+    REQUIRE(telemetry_after_first_failure.source_generation
+            == telemetry_before_retry.source_generation);
+    telemetry_now += std::chrono::milliseconds(100);
+    runtime->pump();
+    telemetry_now += std::chrono::milliseconds(100);
+    runtime->pump();
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    {
+        std::lock_guard lock(event_mutex);
+        REQUIRE(samples.size() == 1);
+        const auto terminal = choc::json::parse(samples.front());
+        REQUIRE(terminal["transportDroppedSincePrevious"]
+                    .getWithDefault<std::int64_t>(-1) == 0);
+    }
+    const auto telemetry_after_retries = runtime->telemetry_state_for_testing();
+    REQUIRE(telemetry_after_retries.source_transition_count
+            == telemetry_after_first_failure.source_transition_count);
+    REQUIRE(telemetry_after_retries.attachment_attempt_count
+            == telemetry_after_first_failure.attachment_attempt_count + 2);
+    REQUIRE(telemetry_after_retries.source_generation
+            == telemetry_before_retry.source_generation);
+
+    competing_reload_telemetry = {};
+    runtime->pump();
+    std::string reattached_json;
+    {
+        std::unique_lock lock(event_mutex);
+        REQUIRE(event_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return samples.size() == 2; }));
+        reattached_json = samples.back();
+    }
+    const auto telemetry_after_reattach = runtime->telemetry_state_for_testing();
+    REQUIRE(telemetry_after_reattach.source_transition_count
+            == telemetry_after_first_failure.source_transition_count);
+    REQUIRE(telemetry_after_reattach.attachment_attempt_count
+            == telemetry_after_retries.attachment_attempt_count + 1);
+    const auto reattached = choc::json::parse(reattached_json);
+    REQUIRE(reattached["subscriptionId"].getString() == subscription_id);
+    REQUIRE(reattached["reattached"].getBool());
+    REQUIRE(reattached["sourceGeneration"].getWithDefault<std::int64_t>(0) == 4);
+    REQUIRE(reattached["channels"].size() == 1);
+    REQUIRE(reattached["channels"][0]["name"].getString() == "before_reload");
+    REQUIRE(reattached["channels"][0]["staleReason"].getString() == "unavailable_after_reattach");
+    REQUIRE_FALSE(processor.value_channels()->attach_telemetry().valid());
+
+    const auto catalog = request_with_dispatch(
+        client, dispatcher, "State.getValueChannels", "{}");
+    REQUIRE_FALSE(catalog.is_error);
+    const auto catalog_json = choc::json::parse(catalog.params_json);
+    REQUIRE(catalog_json.size() == 1);
+    REQUIRE(catalog_json[0]["name"].getString() == "after_reload");
+    client.disconnect();
+    REQUIRE(spin_until([&] {
+        return runtime->telemetry_state_for_testing().pending_disconnects != 0;
+    }, std::chrono::seconds(1)));
+    auto disconnect_state = runtime->telemetry_state_for_testing();
+    REQUIRE(disconnect_state.pending_disconnects == 1);
+    REQUIRE(disconnect_state.active_subscriptions == 1);
+    runtime->pump();
+    disconnect_state = runtime->telemetry_state_for_testing();
+    REQUIRE(disconnect_state.pending_disconnects == 0);
+    REQUIRE(disconnect_state.active_subscriptions == 0);
+    pulp::inspect::InspectorClient replacement_client;
+    REQUIRE(replacement_client.connect(records.front(), reader));
+    const auto replacement_subscription = request_with_dispatch(replacement_client, dispatcher,
+        "Telemetry.subscribe", R"({"channels":["after_reload"]})");
+    REQUIRE_FALSE(replacement_subscription.is_error);
+    REQUIRE(choc::json::parse(replacement_subscription.params_json)["subscriptionId"].getString()
+            != subscription_id);
+    processor.replace_with_empty_value_channels();
+    const auto visits_before_empty = processor.value_channel_visits;
+    runtime->pump();
+    runtime->pump();
+    REQUIRE(processor.value_channel_visits == visits_before_empty + 2);
+    REQUIRE(runtime->telemetry_state_for_testing().source_generation == 5);
+    const auto empty_catalog = request_with_dispatch(
+        replacement_client, dispatcher, "State.getValueChannels", "{}");
+    REQUIRE_FALSE(empty_catalog.is_error);
+    const auto empty_catalog_json = choc::json::parse(empty_catalog.params_json);
+    REQUIRE(empty_catalog_json.isArray());
+    REQUIRE(empty_catalog_json.size() == 0);
+    replacement_client.disconnect();
+    runtime->stop();
+    REQUIRE(reader.list().empty());
+    runtime.reset();
     bridge.close();
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
@@ -513,6 +857,10 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
 
     StubWindowHost window;
     window.capture_bytes = inspector_test_png();
+    // Exercise the shared view renderer used by SSH/headless hosts that do not
+    // expose live back-buffer readback. Later lifecycle checks turn readback
+    // back on so their capture callback remains independently covered.
+    window.capture_supported = false;
     QueuedMainThreadBackend dispatcher;
     REQUIRE(dispatcher.valid());
     auto runtime = StandaloneInspectorRuntime::create(
@@ -542,22 +890,8 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(client.connect(records.front(), reader));
     const auto request_from = [&](pulp::inspect::InspectorClient& active_client,
                                   std::string method, std::string params) {
-        auto response = std::async(std::launch::async,
-            [&active_client, method = std::move(method), params = std::move(params)] {
-                return active_client.request(
-                    method, params, std::chrono::seconds(1));
-            });
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (response.wait_for(std::chrono::milliseconds(0))
-                   != std::future_status::ready
-               && std::chrono::steady_clock::now() < deadline) {
-            if (!dispatcher.pump_one())
-                std::this_thread::yield();
-        }
-        REQUIRE(response.wait_for(std::chrono::milliseconds(0))
-                == std::future_status::ready);
-        return response.get();
+        return request_with_dispatch(
+            active_client, dispatcher, std::move(method), std::move(params));
     };
     const auto request = [&](std::string method, std::string params) {
         return request_from(client, std::move(method), std::move(params));
@@ -604,25 +938,130 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(value_channels_json[0]["unit"].getString() == "dB");
     REQUIRE(value_channels_json[0]["shape"].getString() == "meter");
 
+    processor->publish_gain_reduction(0.25f, 0.75f);
+    const auto telemetry_snapshot = request(
+        "Telemetry.getSnapshot",
+        R"({"channels":["gain_reduction"]})");
+    REQUIRE_FALSE(telemetry_snapshot.is_error);
+    const auto telemetry_snapshot_json =
+        choc::json::parse(telemetry_snapshot.params_json);
+    REQUIRE(telemetry_snapshot_json["schema"].getString() ==
+            "pulp.inspect.telemetry.snapshot.v1");
+    REQUIRE(telemetry_snapshot_json["channels"].size() == 1);
+    const auto telemetry_channel = telemetry_snapshot_json["channels"][0];
+    REQUIRE(telemetry_channel["available"].getBool());
+    REQUIRE(telemetry_channel["payload"]["rms"][0]
+                .getWithDefault<double>(0.0) == Catch::Approx(0.25));
+    REQUIRE(telemetry_channel["payload"]["peak"][0]
+                .getWithDefault<double>(0.0) == Catch::Approx(0.75));
+
+    std::mutex telemetry_event_mutex;
+    std::condition_variable telemetry_event_cv;
+    std::string telemetry_event_json;
+    client.set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
+        if (event.method != pulp::inspect::methods::kTelemetrySample)
+            return;
+        {
+            std::lock_guard lock(telemetry_event_mutex);
+            telemetry_event_json = event.params_json;
+        }
+        telemetry_event_cv.notify_all();
+    });
+    const auto telemetry_subscription = request(
+        "Telemetry.subscribe",
+        R"({"channels":["gain_reduction"],"rateHz":60})");
+    REQUIRE_FALSE(telemetry_subscription.is_error);
+    const auto telemetry_subscription_json =
+        choc::json::parse(telemetry_subscription.params_json);
+    const auto telemetry_subscription_id = std::string(
+        telemetry_subscription_json["subscriptionId"].getString());
+    REQUIRE_FALSE(telemetry_subscription_id.empty());
+    runtime->pump();
+    {
+        std::unique_lock lock(telemetry_event_mutex);
+        REQUIRE(telemetry_event_cv.wait_for(
+            lock, std::chrono::seconds(1),
+            [&] { return !telemetry_event_json.empty(); }));
+    }
+    const auto telemetry_sample_json =
+        choc::json::parse(telemetry_event_json);
+    REQUIRE(telemetry_sample_json["schema"].getString() ==
+            "pulp.inspect.telemetry.sample.v1");
+    REQUIRE(telemetry_sample_json["subscriptionId"].getString() ==
+            telemetry_subscription_id);
+    REQUIRE_FALSE(request(
+        "Telemetry.unsubscribe",
+        std::string("{\"subscriptionId\":\"") +
+            telemetry_subscription_id + "\"}").is_error);
+
     const auto audio = request("Audio.getConfig", "{}");
     REQUIRE_FALSE(audio.is_error);
     const auto audio_json = choc::json::parse(audio.params_json);
     REQUIRE(audio_json["sample_rate"].getWithDefault<double>(0.0) == 48'000.0);
     REQUIRE(audio_json["latency_samples"].getWithDefault<std::int64_t>(0) == 128);
+    const auto original_bounds = bridge.view()->bounds();
     const auto screenshot = request("Capture.screenshot", "{}");
     REQUIRE_FALSE(screenshot.is_error);
     const auto screenshot_json = choc::json::parse(screenshot.params_json);
-    REQUIRE(screenshot_json["width"].getWithDefault<std::int64_t>(0) == 1);
-    REQUIRE(screenshot_json["height"].getWithDefault<std::int64_t>(0) == 1);
+    REQUIRE(screenshot_json["width"].getWithDefault<std::int64_t>(0) == 400);
+    REQUIRE(screenshot_json["height"].getWithDefault<std::int64_t>(0) == 300);
     REQUIRE_FALSE(screenshot_json["data"].getString().empty());
+    REQUIRE(bridge.view()->bounds().x == Catch::Approx(original_bounds.x));
+    REQUIRE(bridge.view()->bounds().y == Catch::Approx(original_bounds.y));
+    REQUIRE(bridge.view()->bounds().width == Catch::Approx(original_bounds.width));
+    REQUIRE(bridge.view()->bounds().height == Catch::Approx(original_bounds.height));
 
-    const auto denied = request("State.setParameter", R"({"id":2,"value":3})");
+    auto reloaded_overlay = std::make_unique<View>();
+    reloaded_overlay->set_contains_native_overlay(true);
+    auto* reloaded_overlay_ptr = reloaded_overlay.get();
+    bridge.view()->add_child(std::move(reloaded_overlay));
+    const auto dynamically_unavailable = request("Capture.screenshot", "{}");
+    REQUIRE(dynamically_unavailable.is_error);
+    REQUIRE(dynamically_unavailable.error_code == "capture_unavailable");
+    REQUIRE(bridge.view()->remove_child(reloaded_overlay_ptr) != nullptr);
+
+    window.capture_supported = true;
+    // A structurally valid but one-color host frame must not bypass the
+    // portable capture_view() content floor.
+    window.capture_bytes = inspector_test_png();
+    window.design_viewport_active = true;
+    const auto viewport_failure = request("Capture.screenshot", "{}");
+    REQUIRE(viewport_failure.is_error);
+    REQUIRE(viewport_failure.error_code == "capture_failed");
+    window.design_viewport_active = false;
+    const auto fallback_after_host_failure = request("Capture.screenshot", "{}");
+    REQUIRE_FALSE(fallback_after_host_failure.is_error);
+    const auto fallback_json = choc::json::parse(fallback_after_host_failure.params_json);
+    REQUIRE(fallback_json["width"].getWithDefault<std::int64_t>(0) == 400);
+    REQUIRE(fallback_json["height"].getWithDefault<std::int64_t>(0) == 300);
+    REQUIRE_FALSE(fallback_json["data"].getString().empty());
+    window.capture_bytes = inspector_test_png();
+
+    const auto denied = request(
+        "State.setParameter",
+        R"({"id":2,"value":3,"secret":"must-not-enter-audit"})");
     REQUIRE(denied.is_error);
     REQUIRE(denied.error_code == "controller_lease_required");
     REQUIRE_FALSE(request("Session.acquireController", "{}").is_error);
     REQUIRE_FALSE(request(
         "State.setParameter", R"({"id":2,"value":3})").is_error);
     REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
+
+    const auto audit = runtime->audit_snapshot_for_testing();
+    REQUIRE(audit.size() == 2);
+    REQUIRE(audit[0].session_id == records.front().session_id);
+    REQUIRE(audit[0].instance_id == records.front().instance_id);
+    REQUIRE(audit[0].client_id == audit[1].client_id);
+    REQUIRE_FALSE(audit[0].client_id.empty());
+    REQUIRE(audit[0].method == "State.setParameter");
+    REQUIRE(audit[0].outcome ==
+            pulp::format::detail::StandaloneInspectorAuditOutcome::Denied);
+    REQUIRE(audit[0].error_code == "controller_lease_required");
+    REQUIRE(audit[1].method == "State.setParameter");
+    REQUIRE(audit[1].outcome ==
+            pulp::format::detail::StandaloneInspectorAuditOutcome::Applied);
+    REQUIRE(audit[1].error_code.empty());
+    REQUIRE(audit[0].method.find("must-not-enter-audit") == std::string::npos);
 
     {
         std::ofstream out(script);
@@ -644,6 +1083,12 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         app, *processor, bridge, *bridge.view(), window, "observe", {});
     REQUIRE(observe_runtime != nullptr);
     observe_runtime->pump();
+    // Observe does not grant telemetry.stream and therefore must not reserve
+    // the telemetry sidecars' exclusive reader slot.
+    auto observe_external_telemetry =
+        processor->value_channels()->attach_telemetry();
+    REQUIRE(observe_external_telemetry.valid());
+    observe_external_telemetry = {};
     const auto observe_records = reader.list();
     REQUIRE(observe_records.size() == 1);
     pulp::inspect::InspectorClient observe_client;
@@ -652,10 +1097,37 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         observe_client, "State.setParameter", R"({"id":2,"value":4})");
     REQUIRE(observe_denied.is_error);
     REQUIRE(observe_denied.error_code == "capability_denied");
+    const auto observe_telemetry_denied = request_from(
+        observe_client, "Telemetry.getSnapshot", "{}");
+    REQUIRE(observe_telemetry_denied.is_error);
+    REQUIRE(observe_telemetry_denied.error_code == "capability_denied");
     REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
     observe_client.disconnect();
     observe_runtime->stop();
     observe_runtime.reset();
+    REQUIRE(reader.list().empty());
+    bridge.view()->interaction().overlay_queue.clear();
+
+    auto custom_runtime = StandaloneInspectorRuntime::create(
+        app, *processor, bridge, *bridge.view(), window, "custom",
+        {"session.describe", "state.read"});
+    REQUIRE(custom_runtime != nullptr);
+    custom_runtime->pump();
+    auto custom_external_telemetry =
+        processor->value_channels()->attach_telemetry();
+    REQUIRE(custom_external_telemetry.valid());
+    custom_external_telemetry = {};
+    const auto custom_records = reader.list();
+    REQUIRE(custom_records.size() == 1);
+    pulp::inspect::InspectorClient custom_client;
+    REQUIRE(custom_client.connect(custom_records.front(), reader));
+    const auto custom_telemetry_denied = request_from(
+        custom_client, "Telemetry.getSnapshot", "{}");
+    REQUIRE(custom_telemetry_denied.is_error);
+    REQUIRE(custom_telemetry_denied.error_code == "capability_denied");
+    custom_client.disconnect();
+    custom_runtime->stop();
+    custom_runtime.reset();
     REQUIRE(reader.list().empty());
     bridge.view()->interaction().overlay_queue.clear();
 
@@ -681,11 +1153,7 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         return cancellation_client.request("State.setParameter", R"({"id":2,"value":7})",
                                            std::chrono::seconds(1));
     });
-    const auto queued_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (dispatcher.pending_count() == pending_before &&
-           std::chrono::steady_clock::now() < queued_deadline) {
-        std::this_thread::yield();
-    }
+    REQUIRE(spin_until([&] { return dispatcher.pending_count() != pending_before; }));
     REQUIRE(dispatcher.pending_count() == pending_before + 1);
 
     const auto stop_started = std::chrono::steady_clock::now();
@@ -765,11 +1233,7 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     auto reentrant_capture = std::async(std::launch::async, [&] {
         return reentrant_client.request("Capture.screenshot", "{}", std::chrono::seconds(1));
     });
-    const auto reentrant_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (dispatcher.pending_count() == 0 &&
-           std::chrono::steady_clock::now() < reentrant_deadline) {
-        std::this_thread::yield();
-    }
+    REQUIRE(spin_until([&] { return dispatcher.pending_count() != 0; }));
     REQUIRE(dispatcher.pending_count() == 1);
     REQUIRE(dispatcher.pump_one());
     REQUIRE(capture_source_touches == 1);

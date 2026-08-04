@@ -4173,6 +4173,16 @@ PULP_FRESHNESS_BYPASS=1 tools/import-validation/spectr-roundtrip.sh
 tools/scripts/check_workspace_freshness.sh --max-behind 10 && tools/import-validation/spectr-roundtrip.sh
 ```
 
+The Spectr roundtrip launches its standalone with the observe inspector and
+captures via `pulp inspect screenshot`, not macOS `screencapture`, so it works
+from SSH without Screen Recording permission. When validating a feature
+worktree whose CLI is not installed yet, point the harness at that build:
+
+```bash
+PULP_CAPTURE_CLI="$PWD/build/tools/cli/pulp-cpp" \
+  PULP_FRESHNESS_BYPASS=1 tools/import-validation/spectr-roundtrip.sh
+```
+
 Also verify the **installed SDK** matches your expectations:
 ```bash
 pulp sdk status              # what's installed

@@ -795,6 +795,13 @@ helper. It only starts saving frames once real motion appears, so a short
 pre-roll doesn't pollute the analysis window:
 
 ```bash
+# Running Pulp standalone (works from SSH; no Screen Recording grant)
+python3 tools/motion/visual/capture_sim_frames.py \
+    --source inspector \
+    --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID \
+    --output-dir ./captures/card-open/ \
+    --fps 30 --frame-count 60
+
 # macOS window region (requires --bounds X,Y,W,H)
 python3 tools/motion/visual/capture_sim_frames.py \
     --source macos --bounds 0,0,800,600 \
@@ -810,9 +817,10 @@ python3 tools/motion/visual/capture_sim_frames.py \
     --fps 30 --frame-count 60
 ```
 
-The capture tool exits 3 (CTest SKIP) when neither `screencapture` nor a
-booted simulator is available, so it composes cleanly with CI lanes that lack
-the platform tooling.
+Prefer `--source inspector` for Pulp standalones. It uses the in-app capture
+endpoint, so SSH clients do not need macOS Screen Recording permission. The
+capture tool exits 3 (CTest SKIP) when the selected source is unavailable, so
+it composes cleanly with CI lanes that lack the platform tooling.
 
 ### Claim-evidence preamble
 
