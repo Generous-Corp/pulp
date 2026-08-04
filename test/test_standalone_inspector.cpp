@@ -183,7 +183,7 @@ TEST_CASE("Standalone inspector runtime evaluation rejects every effectful live-
             // set or masks the corresponding native API registration.
             REQUIRE(processor.active_scripted_ui()->bridge()
                         ->granted_capabilities().has(capability));
-            bridge.close();
+            processor.close_editor(bridge);
         }
     }
 
@@ -280,7 +280,7 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
     client.disconnect();
     runtime->stop();
     runtime.reset();
-    bridge.close();
+    processor.close_editor(bridge);
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
@@ -418,7 +418,7 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     REQUIRE(primary_logs == std::vector<std::string>{"after-failure"});
     window.run_deferred_close();
     REQUIRE(close_calls == 1);
-    bridge.close();
+    processor->close_editor(bridge);
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
@@ -661,7 +661,7 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     runtime->stop();
     REQUIRE(reader.list().empty());
     runtime.reset();
-    bridge.close();
+    processor.close_editor(bridge);
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
@@ -1137,7 +1137,7 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
             std::vector<std::string>{"after-start", "same-session-generation",
                                      "after-stop"});
     bridge.view()->set_window_host(nullptr);
-    bridge.close();
+    processor->close_editor(bridge);
     processor.reset();
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);

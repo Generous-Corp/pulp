@@ -210,6 +210,15 @@ public:
     const ScriptedUiSession* active_scripted_ui() const override {
         return scripted_.get();
     }
+    void close_editor(ViewBridge& bridge) {
+        // This fixture takes the custom-processor path, so ViewBridge does not
+        // own the ScriptedUiSession. Retire the session while its root tree is
+        // still alive, matching a production processor's on_view_closed()
+        // responsibility, before ViewBridge drops that tree.
+        scripted_.reset();
+        root_ = nullptr;
+        bridge.close();
+    }
     bool supports_editor_reload() const override { return true; }
     std::uint64_t editor_reload_generation() const override {
         return scripted_ui_generation_;

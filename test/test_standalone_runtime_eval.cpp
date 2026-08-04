@@ -100,7 +100,7 @@ TEST_CASE("Standalone inspector runtime evaluation rejects every effectful live-
             // set or masks the corresponding native API registration.
             REQUIRE(processor.active_scripted_ui()->bridge()
                         ->granted_capabilities().has(capability));
-            bridge.close();
+            processor.close_editor(bridge);
         }
     }
 
@@ -139,7 +139,7 @@ TEST_CASE("Standalone inspector runtime evaluation rejects a tree beyond its bou
                 "develop", {}, true) == nullptr);
     REQUIRE(processor.active_scripted_ui()->bridge() != nullptr);
 
-    bridge.close();
+    processor.close_editor(bridge);
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
@@ -300,7 +300,7 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
     client.disconnect();
     runtime->stop();
     runtime.reset();
-    bridge.close();
+    processor.close_editor(bridge);
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
