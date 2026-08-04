@@ -998,6 +998,19 @@ public:
     void hot_swap_to(int v) { variant = v; ++gen; }
 };
 
+class LegacyReloadingScriptedProcessor final : public ScriptedCustomViewProcessor {
+public:
+    std::uint64_t generation = 0;
+    int create_count = 0;
+
+    bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation; }
+    std::unique_ptr<view::View> create_view() override {
+        ++create_count;
+        return ScriptedCustomViewProcessor::create_view();
+    }
+};
+
 class ReloadingScriptedProcessor final : public StubProcessor {
 public:
     explicit ReloadingScriptedProcessor(std::filesystem::path script_path)
@@ -1011,6 +1024,7 @@ public:
 
     bool supports_editor_reload() const override { return true; }
     std::uint64_t editor_reload_generation() const override { return generation; }
+    bool supports_in_place_scripted_ui_reload() const override { return true; }
     bool reload_active_scripted_ui_in_place(std::string* error) override {
         return allow_in_place_reload && session != nullptr && session->reload(error);
     }
@@ -1124,6 +1138,24 @@ TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
     REQUIRE(stable_root->child_count() == 1);
     REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
             == "after");
+}
+
+TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
+          "[view_bridge][reload][scripted-ui]") {
+    state::StateStore store;
+    LegacyReloadingScriptedProcessor proc;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    auto* stable_root = bridge.view();
+    REQUIRE(stable_root != nullptr);
+    REQUIRE(proc.create_count == 1);
+
+    ++proc.generation;
+    REQUIRE(bridge.poll_editor_reload());
+    REQUIRE(bridge.view() == stable_root);
+    REQUIRE(proc.create_count == 2);
 }
 
 TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bridge][reload][issue-1_9]") {

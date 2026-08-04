@@ -94,7 +94,8 @@ bool ViewBridge::open(std::string* error) {
     if (custom) {
         view_ = std::move(custom);
         if (safe_active_scripted_ui(processor_)) {
-            processor_owned_scripted_ui_ = true;
+            in_place_scripted_ui_reload_ =
+                processor_.supports_in_place_scripted_ui_reload();
             uses_script_ui_ = true;
         }
     } else {
@@ -211,7 +212,7 @@ bool ViewBridge::rebuild_primary_view() {
     // of calling create_view(), which would replace the session and strand raw
     // host subscriptions on the destroyed instance. Keep this mode cached from
     // open() so a failed reload cannot change the retry path.
-    if (processor_owned_scripted_ui_) {
+    if (in_place_scripted_ui_reload_) {
         std::string reload_error;
         bool reloaded = false;
         PULP_TRY { reloaded = processor_.reload_active_scripted_ui_in_place(&reload_error); }
@@ -358,7 +359,7 @@ void ViewBridge::close() {
     view_.reset();          // no-op if already released
     host_param_surface_.reset();
     view_raw_ = nullptr;
-    processor_owned_scripted_ui_ = false;
+    in_place_scripted_ui_reload_ = false;
     uses_script_ui_ = false;
     uses_auto_ui_ = false;
     released_ = false;

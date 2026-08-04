@@ -1700,9 +1700,12 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   common container-root editor).
 - **Processor-owned scripted sessions reload themselves.** When `create_view()`
   returns a custom root while `active_scripted_ui()` also exposes the processor's
-  live `ScriptedUiSession`, `ViewBridge` caches that ownership mode at `open()`
-  and calls `Processor::reload_active_scripted_ui_in_place()` on a generation
-  change. Do not call `create_view()` again in this mode: it would replace the
+  live `ScriptedUiSession`, it may explicitly opt in with
+  `supports_in_place_scripted_ui_reload()`. `ViewBridge` caches that mode at
+  `open()` and calls `reload_active_scripted_ui_in_place()` on a generation
+  change. The opt-in is separate from `active_scripted_ui()` so existing custom
+  scripted processors keep their ordinary `create_view()` rebuild behavior. In
+  the opted-in mode, do not call `create_view()` again: it would replace the
   session and strand the root's raw host subscriptions on the destroyed
   instance. The override owns its locking protocol and must retain both the
   original session and root; returning false leaves the generation pending so

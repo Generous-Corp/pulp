@@ -143,6 +143,7 @@ public:
     std::uint64_t editor_reload_generation() const override {
         return g_reload_generation.load(std::memory_order_acquire);
     }
+    bool supports_in_place_scripted_ui_reload() const override { return true; }
     bool reload_active_scripted_ui_in_place(std::string* error) override {
         return scripted_ != nullptr && scripted_->reload(error);
     }
