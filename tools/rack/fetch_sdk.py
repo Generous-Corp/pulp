@@ -98,9 +98,16 @@ def compiler_missing() -> str | None:
         r = subprocess.run(["xcode-select", "-p"], capture_output=True)
         if r.returncode == 0:
             return None
-        return ("the Xcode Command Line Tools are not installed, so modules "
-                "cannot be compiled. Run:  xcode-select --install  and try "
-                "again. Patch generation does not need them.")
+        # NOT "patch generation does not need them", which is what this said
+        # and is false on macOS: /usr/bin/python3, /usr/bin/clang++ and
+        # /usr/bin/git are one shared xcode-select shim binary, so without the
+        # Command Line Tools there is no python3 to run the generator at all.
+        # Telling someone a step is optional when nothing works without it
+        # sends them looking for a different problem.
+        return ("Apple's Command Line Tools are not installed. Run:  "
+                "xcode-select --install  and try again. They are needed for "
+                "patches as well as modules: on macOS the python3 that runs "
+                "the generator is part of them.")
     import shutil
     if shutil.which("clang++") or shutil.which("g++"):
         return None

@@ -37,16 +37,35 @@ SOFTWARE=(
     "$PLUGINS/Components/Forge Modular.component"
     "$PLUGINS/VST3/Forge Modular.vst3"
     "$PLUGINS/CLAP/Forge Modular.clap"
-    "$SUPPORT/Rack2/plugins-mac-arm64/ForgeModular"
     "$SUPPORT/Forge Modular/tools"
     "$SUPPORT/Forge Modular/Rack-SDK"
     "$SUPPORT/Forge Modular/runs"
+    # The library catalog, the module index, the cached entitlements and the
+    # built patch gate. All derived, and the entitlements file holds a VCV
+    # token, which is the one thing here a person would mind being left behind.
+    "$HOME/.cache/forge-modular"
 )
+
+# The Rack pack exists in TWO shapes and both are a real installation: the
+# installer places a `ForgeModular-<version>-mac-<arch>.vcvplugin` archive, and
+# Rack unpacks it into a `ForgeModular/` directory the first time it starts.
+# Removing only the directory left a user who had installed and never opened
+# Rack unable to remove the modules at all -- and the archive would then be
+# unpacked by the next Rack launch, so the software came back.
+#
+# The architecture is not assumed: a Mac can carry an Intel and an Apple
+# Silicon plugin folder, and Rack names one directory per platform key.
+while IFS= read -r p; do
+    SOFTWARE+=("$p")
+done < <(find "$SUPPORT/Rack2" -mindepth 2 -maxdepth 2 -path '*/plugins-*' \
+              \( -name 'ForgeModular' -o -name 'ForgeModular-*.vcvplugin' \) \
+              2>/dev/null)
 
 # What the user MADE. Only touched with --all.
 WORK=(
     "$SUPPORT/Forge Modular/projects"
     "$SUPPORT/Forge Modular/examples"
+    "$SUPPORT/Forge Modular/patches"
 )
 
 gone=0

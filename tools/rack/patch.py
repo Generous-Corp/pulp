@@ -29,40 +29,22 @@ import sys
 
 
 def find_claude() -> str:
-    """Locate the `claude` binary without relying on PATH.
+    """Where the model CLI is, asked of the one place that knows.
 
-    An app launched from Finder does not inherit a shell's PATH, so ~/.local/bin
-    is absent and the model call dies instantly with
-    FileNotFoundError: 'claude' -- a build that looks like it gave up. Every
-    generation that worked during development was launched from a terminal,
-    which is exactly the environment a user does not have.
+    An app launched from Finder does not inherit a shell's PATH, so
+    ~/.local/bin is absent and the model call dies instantly -- a build that
+    looks like it gave up. Every generation that worked during development was
+    launched from a terminal, which is exactly the environment a user does not
+    have.
+
+    This used to be a SECOND implementation, and it had drifted: it ended
+    `return "claude"`, so a machine without the CLI got a raw
+    FileNotFoundError instead of a sentence saying what to install. Both
+    answers now come from toolpaths, which raises something a person can act
+    on.
     """
-    override = os.environ.get("FORGE_CLAUDE_BIN")
-    if override:
-        return override
-    found = shutil.which("claude")
-    if found:
-        return found
-    # Codex CLI drives the same generator with its own PATH, and a shim may be
-    # the only "claude" on it. Honour an explicit Codex binary before falling
-    # back to fixed locations, so a run launched from either agent resolves
-    # something real rather than dying on FileNotFoundError.
-    for env in ("FORGE_CODEX_BIN", "CODEX_BIN"):
-        candidate = os.environ.get(env)
-        if candidate and os.path.exists(candidate):
-            return candidate
-    for name in ("codex",):
-        found = shutil.which(name)
-        if found:
-            return found
-    home = os.path.expanduser("~")
-    for candidate in (f"{home}/.local/bin/claude",
-                      "/opt/homebrew/bin/claude",
-                      "/usr/local/bin/claude",
-                      f"{home}/.claude/local/claude"):
-        if os.path.exists(candidate):
-            return candidate
-    return "claude"   # let the failure name it, rather than guessing further
+    import toolpaths
+    return toolpaths.find_claude()
 
 
 
@@ -76,6 +58,25 @@ PLUGIN_DIRS = [d for d in PLUGIN_DIRS if os.path.basename(d).startswith("plugins
 # runs inside Rack can read PortInfo.
 PACK_MODULES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "..", "examples", "forge-modular", "modules")
+
+
+def user_patches_dir() -> str:
+    """Where a generated patch is written.
+
+    NOT beside the module manifests. That path is inside the app bundle once
+    this is installed, and an installer writes /Applications as root -- so
+    `makedirs` there raises PermissionError, unhandled, at the END of a
+    successful multi-minute generation: model call, lint and layout all done,
+    and the only thing the user sees is a traceback where the patch should be.
+    A checkout never shows it, because a developer owns their own source tree.
+
+    Signing makes it worse rather than better: writing inside a signed bundle
+    breaks its seal, so the run that appeared to work would leave an app macOS
+    then refuses to open.
+    """
+    home = os.path.expanduser("~")
+    return os.path.join(home, "Library", "Application Support",
+                        "Forge Modular", "patches")
 
 
 # ── Inventory ────────────────────────────────────────────────────────────────
@@ -101,20 +102,14 @@ def _read_vcvplugin(path: str) -> dict | None:
     missing right after installing it -- and the lint would then reject the
     very patch that was built to use it.
     """
-    import io
-    import subprocess
-    import tarfile
-    try:
-        raw = subprocess.run(["zstd", "-dc", path], capture_output=True,
-                             timeout=60).stdout
-        with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
-            for member in tf.getmembers():
-                if os.path.basename(member.name) == "plugin.json":
-                    f = tf.extractfile(member)
-                    return json.load(f) if f else None
-    except Exception:
+    import archive
+    raw = archive.read_member(path, "plugin.json")
+    if not raw:
         return None
-    return None
+    try:
+        return json.loads(raw)
+    except Exception:                                           # noqa: BLE001
+        return None
 
 
 def inventory() -> dict:
@@ -939,7 +934,25 @@ def diff(old: dict, new: dict, inv: dict) -> list[str]:
 CACHE_DIR = os.path.expanduser("~/.cache/forge-modular")
 CATALOG = os.path.join(CACHE_DIR, "library.json")
 CATALOG_URL = "https://api.vcvrack.com/library/manifests?version=2"
-CATALOG_MAX_AGE_DAYS = 7
+
+# A DAY, not a week.
+#
+# The library gains plugins continuously, and a cache is only ever wrong in one
+# direction: it cannot contain something published since it was written. A user
+# typing a module name correctly, and being told it does not exist, has no way
+# to tell a stale index from a broken search -- observed with CVfunk's Sands,
+# against an index four days old. A week of that is a week of the product
+# looking like it cannot find things.
+#
+# The refresh is a few hundred KB, so the only cost of the shorter window is
+# one request a day. Staleness beyond a day is caught by the miss path below,
+# which is the primary mechanism; this is the backstop.
+CATALOG_MAX_AGE_DAYS = 1
+
+# Refreshing on a miss is worth doing once, not once per search: a term that is
+# genuinely not in the library misses every time, and re-downloading 350 KB for
+# each of them would turn a typo into a stall.
+_REFRESHED_ON_MISS = False
 
 
 def catalog(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS) -> dict:
@@ -1096,6 +1109,56 @@ def find_modules(term: str, midx: dict, cat: dict, inv: dict) -> list:
                 "score": 100 if name.lower() == t or mslug.lower() == t else 50,
             })
     return sorted(out, key=lambda h: (-h["score"], not h["installed"], h["plugin"]))
+
+
+def _index_written_within(seconds: int) -> bool:
+    """Was the module index downloaded very recently?"""
+    try:
+        return (time.time() - os.path.getmtime(MODULE_INDEX)) < seconds
+    except OSError:
+        return False
+
+
+def search_modules(term: str, inv: dict) -> tuple:
+    """Search, and if it finds nothing, make sure that answer is current.
+
+    THE PRIMARY DEFENCE AGAINST A STALE INDEX. A cached module database cannot
+    contain a plugin published after it was written, so a correctly typed name
+    resolves to nothing and reads exactly like a broken search -- there is no
+    way for the person typing to tell the two apart. Observed on a four-day-old
+    index that did not carry CVfunk's Sands.
+
+    A miss is the one moment the answer is cheap to check and worth checking:
+    a hit is already proof the index was good enough. Once per process, because
+    a term that genuinely is not in the library misses every time, and paying
+    350 KB for each typo would turn a mistake into a stall.
+
+    Returns (hits, refreshed) so a caller can say the index was just brought up
+    to date rather than leaving a long pause unexplained.
+    """
+    global _REFRESHED_ON_MISS
+    cat = catalog()
+    hits = find_modules(term, module_index(), cat, inv)
+    if hits or _REFRESHED_ON_MISS:
+        return hits, False
+    # An index written seconds ago cannot be the reason for a miss, and the
+    # first search on a new machine has just written one. Re-downloading 350 KB
+    # to re-read what we already hold turns every unmatched word into a wait.
+    if _index_written_within(300):
+        return hits, False
+    _REFRESHED_ON_MISS = True
+    try:
+        midx = module_index(refresh=True)
+        cat = catalog(refresh=True)
+    except SystemExit:
+        # Offline. The cached answer is the only one available and is better
+        # than a refusal to answer at all.
+        return hits, False
+    hits = find_modules(term, midx, cat, inv)
+    # Reported only when it CHANGED the answer. Saying "the module list was out
+    # of date" over a refresh that found nothing states something we do not
+    # know, and pins the blame for an unmatched word on a cache that was fine.
+    return hits, bool(hits)
 
 
 def resolve_mention(term: str, cat: dict, inv: dict) -> dict:
@@ -1828,14 +1891,8 @@ def _plugin_dir() -> str | None:
             slug = entry.split("-")[0]
             if os.path.isdir(os.path.join(d, slug)):
                 continue
-            try:
-                tar = subprocess.Popen(["zstd", "-dc", os.path.join(d, entry)],
-                                       stdout=subprocess.PIPE)
-                subprocess.run(["tar", "xf", "-"], stdin=tar.stdout, cwd=d,
-                               timeout=120)
-                tar.wait()
-            except Exception:
-                pass
+            import archive
+            archive.extract_all(os.path.join(d, entry), d)
         return d
     return None
 
@@ -2443,11 +2500,18 @@ def main(argv):
         # Selection-time gating. Anything not installed cannot be wired, so
         # resolving a mention BEFORE generating is what stops a whole patch
         # being built around something the user cannot load.
-        cat = catalog()
         term = argv[2]
         # Modules first: a person naming "Pamela's" or "Plaits" means a module,
         # and only naming a maker means a brand.
-        mods = find_modules(term, module_index(), cat, inv)
+        #
+        # Through search_modules, not find_modules: a zero-result answer out of
+        # a stale cache is indistinguishable from the module not existing, and
+        # the person typing has no way to tell. A miss re-checks, once.
+        mods, refreshed = search_modules(term, inv)
+        cat = catalog()
+        if refreshed:
+            print("(the module list was out of date; refreshed it, and this "
+                  "is in the new one)\n")
         if mods:
             ready = sum(1 for m in mods if m["installed"])
             print(f"'{term}' — {len(mods)} module(s), {ready} usable now\n")
@@ -2513,10 +2577,28 @@ def main(argv):
         print(f"{len(cat)} plugins in the library · {prem} premium · "
               f"{have} installed here")
         print(f"cache {CATALOG} ({age:.1f}h old, refreshed every "
-              f"{CATALOG_MAX_AGE_DAYS} days)")
+              f"{CATALOG_MAX_AGE_DAYS * 24}h, and on any search that finds "
+              f"nothing)")
         return 0
 
     if cmd == "build" and len(argv) > 2:
+        # WHAT THIS MACHINE IS MISSING, BEFORE ANYTHING IS SPENT.
+        #
+        # Every prerequisite here was previously discovered one at a time, at
+        # the end of a run: the catalog fetched, the inventory read, the
+        # preflight passed, and only then a traceback naming a binary. Asked
+        # first, and all at once, it is a short shopping list instead of an
+        # evening.
+        import toolpaths as _tp
+        _lacking = _tp.missing_prerequisites()
+        if _lacking:
+            lines = "\n".join(f"  - {m}" for m in _lacking)
+            raise SystemExit(
+                "this Mac is missing something Forge Modular needs:\n"
+                f"{lines}\n"
+                "  Install what is listed and try again. Nothing has been "
+                "changed on your machine.")
+
         # --prefer-ours biases toward the user's own generated modules; without
         # it the whole installed library competes on equal footing, which is
         # usually what you want when a vendor module simply fits better.
@@ -2624,7 +2706,7 @@ def main(argv):
             slug = re.sub(r"[^a-z0-9]+", "-", argv[2].lower()).strip("-")[:40]
             if not slug:
                 slug = "patch"
-            pdir = os.path.normpath(os.path.join(PACK_MODULES, "..", "patches"))
+            pdir = user_patches_dir()
             os.makedirs(pdir, exist_ok=True)
             out = os.path.join(pdir, slug + ".vcv")
             # Never clobber a different patch that already answers to this

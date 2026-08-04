@@ -82,7 +82,14 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
         contains(lower, "is not sound") ||
         contains(lower, "did not contain both a json") ||
         contains(lower, "duplicate addmodel") ||
-        contains(lower, "sdk not found") ||
+        // A prerequisite this Mac does not have -- the model CLI, or Apple's
+        // Command Line Tools. Both are a real stop, and both are things the
+        // person can fix in a minute once they are told.
+        contains(lower, "is missing something") ||
+        contains(lower, "model cli is not installed") ||
+        contains(lower, "the rack sdk is not installed") ||
+        contains(lower, "could not download the rack sdk") ||
+        contains(lower, "unknown setting") ||
         contains(lower, "two manifests claim")) {
         return BuildLine::Kind::error;
     }

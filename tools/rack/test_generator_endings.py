@@ -32,6 +32,11 @@ LOG_WRITERS = GENERATORS + [
     os.path.join(HERE, "patch_gate.cpp"),        # the audio gate
     os.path.join(HERE, "behaviour_gate.cpp"),    # the module gate
     os.path.join(HERE, "idiom_check.py"),        # the idiom verdicts
+    # Imported by both generators and raising into the same stream: a missing
+    # SDK, a failed download, and a machine with no model CLI all end a run
+    # from here, and the app has to see each of them stop.
+    os.path.join(HERE, "fetch_sdk.py"),
+    os.path.join(HERE, "toolpaths.py"),
 ]
 MONITOR = os.path.join(HERE, "..", "..", "forge-seam", "modular",
                        "build_monitor.cpp")

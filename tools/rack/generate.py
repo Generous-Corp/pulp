@@ -287,10 +287,12 @@ def install(lib):
         else:
             shutil.copy(src, dst)
     pkg = os.path.join(stage, "ForgeModular-2.0.0-mac-arm64.vcvplugin")
-    tar = subprocess.Popen(["tar", "--no-xattrs", "-cf", "-", "-C", stage, "ForgeModular"],
-                           stdout=subprocess.PIPE)
-    subprocess.run(["zstd", "-q", "-19", "-o", pkg], stdin=tar.stdout, check=True)
-    tar.wait()
+    # Not `zstd` directly. macOS ships no zstd binary, so this line ended a
+    # successful generation -- model call, compile and gate all passed -- with
+    # FileNotFoundError at the last step. archive.create falls back to
+    # /usr/bin/tar --zstd, which macOS does have.
+    import archive
+    archive.create(pkg, stage, "ForgeModular")
     os.makedirs(PLUGIN_DIR, exist_ok=True)
     for old in os.listdir(PLUGIN_DIR):
         if old.startswith("ForgeModular"):

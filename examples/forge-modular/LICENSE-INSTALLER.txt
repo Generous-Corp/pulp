@@ -10,13 +10,24 @@ WHAT GETS INSTALLED
 
 Forge Modular itself is required, because the Rack modules and the uninstaller live inside it. The plug-in formats are optional.
 
+WHAT YOU NEED BEFORE IT CAN DO ANYTHING
+
+Two things, and neither can be shipped inside this installer. Forge Modular checks for both before it spends any time, and names whichever is missing.
+
+  VCV Rack 2         free from vcvrack.com. It is what plays the patches, and
+                     the modules install into it.
+  Claude Code        free from claude.com/claude-code. It is the model that
+                     writes the patch. Install it, then run "claude" once in
+                     Terminal to sign in.
+  Command Line Tools Apple's, and already present on most Macs that have ever
+                     run a developer tool. If not, macOS offers to install
+                     them, or run: xcode-select --install
+
+The Command Line Tools are needed for patches as well as modules, not only for modules. On macOS the python3 that runs the generator is part of them.
+
 ABOUT BUILDING MODULES
 
-Generating a patch works straight away. It needs nothing else.
-
 Generating a new module compiles real code on your Mac, so the first time you do it Forge Modular will offer to download the VCV Rack SDK. That SDK belongs to VCV and is licensed under the GPLv3. We do not ship a copy of it; your Mac downloads it from vcvrack.com when you say yes. If you never build a module, it is never downloaded.
-
-Building modules also needs Apple's Xcode Command Line Tools. If they are missing, Forge Modular will tell you and give you the one command that installs them.
 
 A module you build links the Rack SDK, so it inherits the GPLv3. That is fine for your own use. If you ever share one, its licence follows from that.
 

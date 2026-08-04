@@ -1052,6 +1052,207 @@ def check_setting_writer() -> tuple:
     return bad, 5
 
 
+def check_fresh_machine() -> tuple:
+    """What a Mac that has never seen this source gets.
+
+    Every one of these was true of a shipped installer and invisible on every
+    machine that built it, because a development machine already has the tool,
+    the directory or the cache that hides it.
+    """
+    import importlib
+    import subprocess
+    import tempfile
+
+    bad = 0
+    ran = 0
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    # 1. A generated patch must not be written inside the app bundle.
+    #
+    # It used to land beside the module manifests, which after an install is
+    # /Applications/Forge Modular.app/Contents/Resources/... -- owned by root,
+    # and sealed by the signature. `makedirs` there raises PermissionError,
+    # unhandled, at the END of a successful multi-minute generation.
+    ran += 1
+    with tempfile.TemporaryDirectory() as tmp:
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import patch; print(patch.user_patches_dir())"],
+            cwd=here, env={**os.environ, "HOME": tmp},
+            capture_output=True, text=True)
+        where = r.stdout.strip()
+        if r.returncode != 0:
+            bad += 1
+            print(f"  WRONG  patch.py will not import: {r.stderr.strip()[-200:]}")
+        elif ".app/Contents" in where or not where.startswith(tmp):
+            bad += 1
+            print(f"  WRONG  patches are written to {where} — inside the "
+                  f"bundle, which is root-owned and signed after an install")
+        else:
+            print("  ok     generated patches go to the user's own directory")
+
+    # 2. The model CLI resolves to something real, or says what to install.
+    #
+    # patch.py kept a second copy of this lookup that ended `return "claude"`,
+    # so a machine without it got FileNotFoundError as the entire explanation
+    # of why nothing was generated. Every beta user's machine is that machine.
+    ran += 1
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN", "CODEX_BIN")}
+        # An empty PATH and an empty HOME: nothing can be found anywhere.
+        env.update({"HOME": tmp, "PATH": os.path.join(tmp, "nothing")})
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import patch; print('RESOLVED', patch.find_claude())"],
+            cwd=here, env=env, capture_output=True, text=True)
+        said = (r.stdout + r.stderr)
+        if "RESOLVED" in said:
+            bad += 1
+            print(f"  WRONG  find_claude returned {said.strip()} on a machine "
+                  f"with nothing installed — subprocess will raise "
+                  f"FileNotFoundError with no explanation")
+        elif "claude.com/claude-code" in said and "FORGE_CLAUDE_BIN" in said:
+            print("  ok     a missing model CLI is named, with how to fix it")
+        else:
+            bad += 1
+            print(f"  WRONG  a missing model CLI produced no actionable "
+                  f"message: {said.strip()[-300:]}")
+
+    # 3. An explicit override is still honoured.
+    #    A check that only proves the failure path would happily pass with the
+    #    lookup ripped out entirely.
+    ran += 1
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = os.path.join(tmp, "my-claude")
+        open(fake, "w").close()
+        os.chmod(fake, 0o755)
+        r = subprocess.run(
+            [sys.executable, "-c", "import patch; print(patch.find_claude())"],
+            cwd=here, env={**os.environ, "FORGE_CLAUDE_BIN": fake},
+            capture_output=True, text=True)
+        if r.stdout.strip() == fake:
+            print("  ok     FORGE_CLAUDE_BIN still wins")
+        else:
+            bad += 1
+            print(f"  WRONG  FORGE_CLAUDE_BIN ignored: {r.stdout.strip()} "
+                  f"{r.stderr.strip()[-160:]}")
+
+    # 4. Plugin archives are readable without Homebrew's zstd.
+    #
+    # macOS ships no zstd. The three call sites that shelled out to it failed
+    # silently on read (a freshly installed plugin read as NOT installed, so
+    # the lint rejected the patch built to use it) and fatally on write, after
+    # the model call and the compile had both succeeded.
+    ran += 1
+    archive = importlib.import_module("archive")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "Thing"))
+        with open(os.path.join(tmp, "Thing", "plugin.json"), "w") as f:
+            f.write('{"slug":"Thing","modules":[{"slug":"A","name":"A"}]}')
+        pkg = os.path.join(tmp, "Thing-1.0.0-mac-arm64.vcvplugin")
+        # PATH stripped to what a Finder-launched app inherits, which is where
+        # the real failure lives: even a machine WITH Homebrew's zstd does not
+        # have /opt/homebrew/bin on that PATH.
+        probe = ("import sys, json, os; sys.path.insert(0, %r);"
+                 "import archive;"
+                 "archive.create(%r, %r, 'Thing');"
+                 "raw = archive.read_member(%r, 'plugin.json');"
+                 "os.makedirs(%r);"
+                 "ok = archive.extract_all(%r, %r);"
+                 "print(json.loads(raw)['slug'], ok, "
+                 "os.path.isdir(os.path.join(%r, 'Thing')))"
+                 % (here, pkg, tmp, pkg, os.path.join(tmp, "out"),
+                    pkg, os.path.join(tmp, "out"), os.path.join(tmp, "out")))
+        r = subprocess.run([sys.executable, "-c", probe],
+                           env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                                "HOME": tmp},
+                           capture_output=True, text=True)
+        if r.stdout.strip() == "Thing True True":
+            print("  ok     .vcvplugin round-trips with no zstd on PATH")
+        else:
+            bad += 1
+            print(f"  WRONG  archives need a zstd binary macOS does not ship: "
+                  f"{r.stdout.strip()} {r.stderr.strip()[-240:]}")
+
+    # 5. A search that finds nothing re-checks the index, once.
+    #
+    # A cache cannot contain a plugin published since it was written, so a
+    # correctly typed name resolves to nothing and reads exactly like a broken
+    # search. Neither the person typing nor the app can tell the difference.
+    ran += 1
+    P._REFRESHED_ON_MISS = False
+    calls = {"index": 0, "catalog": 0}
+    real_index, real_catalog, real_find = \
+        P.module_index, P.catalog, P.find_modules
+    # Pinned, not inherited. This otherwise reads the mtime of the real cache
+    # in the developer's home directory, which an earlier check in this same
+    # run may have just written — and the check then silently measured "the
+    # index is fresh" instead of the behaviour it is named for.
+    real_recent_outer = P._index_written_within
+    P._index_written_within = lambda seconds: False
+    # The index gains the searched-for module only on the refreshed call, which
+    # is what a stale cache looks like from the inside.
+    def fake_index(refresh=False, **kw):
+        calls["index"] += 1
+        return {"CVfunk": {"Sands": {"name": "Sands", "tags": []}}} \
+            if refresh else {}
+    P.module_index = fake_index
+    P.catalog = lambda refresh=False, **kw: (calls.__setitem__(
+        "catalog", calls["catalog"] + 1), {})[1]
+    try:
+        hits, refreshed = P.search_modules("Sands", {})
+        if not hits:
+            bad += 1
+            print("  WRONG  a miss did not re-check the index, so a module "
+                  "published this week cannot be found at all")
+        elif not refreshed:
+            bad += 1
+            print("  WRONG  found it but did not report the refresh, so the "
+                  "pause is unexplained")
+        else:
+            before = calls["index"]
+            P.search_modules("Nonexistent", {})
+            P.search_modules("AlsoNothing", {})
+            # Two more misses must not each pay for a 350 KB download.
+            if calls["index"] - before > 2:
+                bad += 1
+                print(f"  WRONG  every miss refreshes ({calls['index'] - before} "
+                      f"index reads for two searches) — a typo becomes a stall")
+            else:
+                print("  ok     a miss refreshes the index once, then re-searches")
+        # And an index downloaded seconds ago is not the reason for a miss.
+        # The first search on a new machine has just written one, so refreshing
+        # there re-downloads 350 KB to re-read what is already in hand.
+        ran += 1
+        P._REFRESHED_ON_MISS = False
+        P._index_written_within = lambda seconds: True
+        before = calls["index"]
+        hits, refreshed = P.search_modules("Sands", {})
+        if refreshed or calls["index"] - before > 1:
+            bad += 1
+            print("  WRONG  a just-downloaded index is refreshed again, so "
+                  "the first unmatched word on a new machine waits twice")
+        else:
+            print("  ok     a just-downloaded index is not re-downloaded")
+    finally:
+        P.module_index, P.catalog, P.find_modules = \
+            real_index, real_catalog, real_find
+        P._index_written_within = real_recent_outer
+        P._REFRESHED_ON_MISS = False
+
+    # 6. The cache window is a day, not a week.
+    ran += 1
+    if P.CATALOG_MAX_AGE_DAYS <= 1:
+        print("  ok     the library cache is refreshed daily")
+    else:
+        bad += 1
+        print(f"  WRONG  the library cache is {P.CATALOG_MAX_AGE_DAYS} days "
+              f"stale before anything refreshes it")
+
+    return bad, ran
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -1062,8 +1263,9 @@ def main():
     lb_bad, lb_ran = check_library_brief()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
-    acq_bad += lb_bad + sdk_bad + set_bad
-    acq_ran += lb_ran + sdk_ran + set_ran
+    fresh_bad, fresh_ran = check_fresh_machine()
+    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad
+    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

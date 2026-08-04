@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 
 # Everywhere a Mac keeps user-installed tools. Ordered: a version a person
 # chose beats one that arrived with the system.
@@ -53,20 +54,77 @@ def tool_env(extra: dict | None = None) -> dict:
 
 
 def find_claude() -> str:
-    """The claude binary, or a clear failure naming where we looked.
+    """The model CLI, or a clear failure naming what to install.
 
     Searched against the enriched PATH rather than the inherited one: an app
     launched from Finder inherits almost nothing, which is how "Build" once
     failed with FileNotFoundError on a machine where claude was plainly
     installed.
+
+    THE ONE ANSWER TO THIS QUESTION. patch.py kept a second copy that ended
+    `return "claude"` when it found nothing -- a bare string, handed straight
+    to subprocess, so a machine without it got
+    `FileNotFoundError: [Errno 2] ... 'claude'` as the entire explanation of
+    why nothing was generated. Every beta user's machine is that machine.
     """
-    found = shutil.which("claude", path=enriched_path())
-    if found:
-        return found
-    for directory in TOOL_DIRS:
-        candidate = os.path.join(directory, "claude")
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+    # An explicit choice beats a search. Both agents drive this generator, and
+    # a shim may be the only thing named `claude` on either one's PATH.
+    for var in ("FORGE_CLAUDE_BIN", "FORGE_CODEX_BIN", "CODEX_BIN"):
+        chosen = os.environ.get(var)
+        if chosen and os.path.isfile(chosen) and os.access(chosen, os.X_OK):
+            return chosen
+
+    for name in ("claude", "codex"):
+        found = shutil.which(name, path=enriched_path())
+        if found:
+            return found
+        for directory in TOOL_DIRS:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+
+    # Named and actionable, never a traceback. This is a real prerequisite:
+    # the model is not bundled and there is no API-key path, so without it
+    # nothing generates -- not a module, not even a patch.
     raise SystemExit(
-        "could not find `claude`. Looked on PATH and in:\n  " +
-        "\n  ".join(TOOL_DIRS))
+        "the model CLI is not installed, so nothing can be generated.\n"
+        "  Forge Modular writes patches and modules with Claude Code, which is\n"
+        "  a separate free download and not something we can ship for you.\n"
+        "  Install it, run `claude` once to sign in, then try again:\n"
+        "      https://claude.com/claude-code\n"
+        "  If it is already installed somewhere unusual, point us at it:\n"
+        "      export FORGE_CLAUDE_BIN=/full/path/to/claude\n"
+        "  Looked on PATH and in:\n    " + "\n    ".join(TOOL_DIRS))
+
+
+def missing_prerequisites() -> list:
+    """Everything this machine needs and does not have, in one list.
+
+    A prerequisite discovered one at a time, minutes apart, at the end of
+    successive failed runs is the worst possible way to learn what is needed.
+    Asked all at once, it is a short shopping list.
+    """
+    import subprocess
+
+    out = []
+    try:
+        find_claude()
+    except SystemExit:
+        out.append(
+            "Claude Code (the model that writes the patch) is not installed. "
+            "It is a free separate download: https://claude.com/claude-code")
+
+    # python3 is running this, so it is present by definition -- but on macOS
+    # /usr/bin/python3 is the Xcode shim, and the SAME missing component means
+    # no compiler either. Reported once, in the terms that fix both.
+    if sys.platform == "darwin":
+        try:
+            if subprocess.run(["xcode-select", "-p"],
+                              capture_output=True).returncode != 0:
+                out.append(
+                    "Apple's Command Line Tools are not installed. Run:  "
+                    "xcode-select --install")
+        except Exception:                                       # noqa: BLE001
+            out.append("could not ask whether the Command Line Tools are "
+                       "installed. Run:  xcode-select --install")
+    return out

@@ -81,18 +81,71 @@ ditto "$REPO/tools/rack" "$TOOLS_DEST"
 # not need staging of its own: fetch_sdk.py ships inside tools/rack above,
 # and it is the ONE resolver-and-fetcher (a second shell copy of it shipped
 # here once, pointing at a different directory, and nothing ever invoked it).
-for helper in uninstall.sh; do
+#
+# install_pack.sh is the rule for putting the Rack modules where Rack reads
+# them. It ships in the bundle because BOTH of its callers live there: the
+# installer's postinstall (as root, for the console user) and the app's own
+# repair path (as the user, on any generation that finds no pack).
+for helper in uninstall.sh install_pack.sh; do
     if [[ -f "$REPO/examples/forge-modular/$helper" ]]; then
         ditto "$REPO/examples/forge-modular/$helper" "$APP/Contents/Resources/$helper"
         chmod +x "$APP/Contents/Resources/$helper"
     fi
 done
+# THE GENERATOR IS NOT THE ONLY THING IT READS.
+#
+# tools_dir() is Contents/Resources/tools/rack, and three readers walk up from
+# it to `examples/forge-modular/`: patch.py names our own modules' ports from
+# modules/*.json, the shell's rack preview draws panels out of res/, and the
+# module summary reads the newest manifest. None of that was staged, so on a
+# machine without the source every Forge module in a patch was drawn blank and
+# explained by port index. On a development machine the walk lands in the
+# checkout and everything is perfect.
+#
+# Read-only, so it can live in the signed bundle. What the app WRITES goes to
+# Application Support instead -- see user_patches_dir() in patch.py.
+PACK_DEST="$APP/Contents/Resources/examples/forge-modular"
+mkdir -p "$PACK_DEST"
+for part in modules res design; do
+    if [[ -d "$REPO/examples/forge-modular/$part" ]]; then
+        ditto "$REPO/examples/forge-modular/$part" "$PACK_DEST/$part"
+    fi
+done
 [[ -f "$TOOLS_DEST/patch.py" ]] || { echo "staging failed: no patch.py" >&2; exit 1; }
+_fm_manifests=$(find "$PACK_DEST/modules" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+[[ "${_fm_manifests:-0}" -gt 0 ]] || { echo "staging failed: no module manifests" >&2; exit 1; }
+echo "[installer] staged $_fm_manifests module manifests + panel artwork"
 echo "[installer] staged $(ls "$TOOLS_DEST"/*.py | wc -l | tr -d ' ') generator files + helpers"
 AU="$BUILD_DIR/AU/Forge Modular.component"
 VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
 CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
-RACK_PLUGIN=$(ls "$BUILD_DIR"/rack/ForgeModular-*.vcvplugin 2>/dev/null | head -1 || true)
+# THE MODULES ARE NOT BUILT WHERE THE APP IS.
+#
+# `pulp_add_rack_plugin` runs in the pulp tree and writes the .vcvplugin into
+# THAT build directory; the app is compiled in a Forge worktree. So the
+# documented invocation (--build-dir /tmp/forge-cur/build) can never contain
+# one, and this used to look only there, find nothing, print a note to stderr
+# and carry on.
+#
+# The 0.12.4 installer shipped modules anyway -- because somebody had copied a
+# .vcvplugin into the built app bundle by hand, weeks earlier, and the staging
+# step copies whatever is in the bundle. It was a stale pack placed by an
+# interactive step nothing records, and the next clean build would have shipped
+# an installer with no modules and said so only in a line nobody reads.
+#
+# So: look where the modules are actually built, take the newest, SAY WHICH,
+# and refuse to package without one. The app's own installer pane promises
+# "Includes the Rack plug-in" -- an installer that quietly does not is worse
+# than one that fails here.
+RACK_PLUGIN="${RACK_PLUGIN_OVERRIDE:-}"
+if [[ -z "$RACK_PLUGIN" ]]; then
+    for dir in "$BUILD_DIR/rack" "$REPO/build/rack" "$REPO/build-rack/rack"; do
+        [[ -d "$dir" ]] || continue
+        found=$(find "$dir" -maxdepth 1 -name 'ForgeModular-*.vcvplugin' 2>/dev/null \
+                | sort | tail -1)
+        if [[ -n "$found" ]]; then RACK_PLUGIN="$found"; break; fi
+    done
+fi
 
 # A bundle EXISTING is not a bundle with anything in it.
 #
@@ -176,12 +229,26 @@ for artifact in "$APP" "$AU" "$VST3" "$CLAP"; do
     fi
 done
 if [[ -z "$RACK_PLUGIN" ]]; then
-    # Not fatal: the app is useful without it, and somebody may be packaging
-    # only the DAW side. But it is worth saying, because an installer that
-    # quietly omits the modules looks identical to one that includes them.
-    echo "note: no .vcvplugin found in $BUILD_DIR/rack — the installer will" >&2
-    echo "      carry the app and plugins but NOT the Rack modules" >&2
+    echo "no ForgeModular-*.vcvplugin found. The installer's own pane promises" >&2
+    echo "the Rack plug-in, so packaging without it ships a broken promise." >&2
+    echo "Build the module pack in the pulp tree (it needs the Rack SDK):" >&2
+    echo "  cmake -S . -B build -DPULP_ENABLE_RACK=ON && \\" >&2
+    echo "  cmake --build build --target forge-modular -j8" >&2
+    echo "Or pass one explicitly: RACK_PLUGIN_OVERRIDE=/path/to/x.vcvplugin" >&2
+    exit 1
 fi
+echo "[installer] rack pack: $RACK_PLUGIN"
+# IDENTITY, not size. A .vcvplugin is a zstd tar; a truncated download or a
+# half-written copy is still a file of plausible length. Reading the manifest
+# back out proves it is the pack we mean, and prints the module count so an
+# emptied pack cannot pass for a full one.
+if ! _fm_mods=$(/usr/bin/tar --zstd -xOf "$RACK_PLUGIN" 'ForgeModular/plugin.json' 2>/dev/null \
+        | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin)["modules"]))' 2>/dev/null) \
+   || [[ -z "$_fm_mods" || "$_fm_mods" -lt 1 ]]; then
+    echo "unreadable rack pack: $RACK_PLUGIN carries no ForgeModular/plugin.json" >&2
+    exit 1
+fi
+echo "[installer] rack pack carries $_fm_mods modules"
 [[ $missing -eq 0 ]] || { echo "build the four targets first" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
@@ -202,15 +269,17 @@ if [[ $DO_SIGN -eq 0 ]]; then
     cp -R "$VST3" "$STAGE/Library/Audio/Plug-Ins/VST3/"
     cp -R "$CLAP" "$STAGE/Library/Audio/Plug-Ins/CLAP/"
 
-    if [[ -n "$RACK_PLUGIN" ]]; then
-        # Rack reads from the user's Application Support, which a package
-        # payload cannot address, so the modules ride along inside the app and
-        # a postinstall step is what places them. Copying here would install
-        # them for root and nobody else.
-        mkdir -p "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack"
-        cp "$RACK_PLUGIN" \
-           "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack/"
-    fi
+    # Rack reads from the user's Application Support, which a package payload
+    # cannot address, so the modules ride along inside the app and a postinstall
+    # step is what places them. Copying here would install them for root and
+    # nobody else.
+    #
+    # Emptied first: a build tree can carry a pack that was put there by hand,
+    # and "whatever was already in the bundle" is how a stale one shipped.
+    rm -rf "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack"
+    mkdir -p "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack"
+    cp "$RACK_PLUGIN" \
+       "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack/"
 
     PKG="$OUT_DIR/ForgeModular-$VERSION-unsigned.pkg"
     pkgbuild --root "$STAGE" \
@@ -230,10 +299,13 @@ fi
 # step is what puts them in place -- the same reason as the unsigned path
 # above. Without this the signed installer carried the app and all three
 # plugins but silently no modules, which looks identical to one that has them.
-if [[ -n "$RACK_PLUGIN" ]]; then
-    mkdir -p "$APP/Contents/Resources/rack"
-    cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
-fi
+#
+# Emptied first, for the same reason as the unsigned path: a build tree can
+# carry a pack somebody placed by hand, and taking "whatever is already in the
+# bundle" is how a stale one shipped once already.
+rm -rf "$APP/Contents/Resources/rack"
+mkdir -p "$APP/Contents/Resources/rack"
+cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
 
 # The identities live in ~/.config/pulp/secrets/keychain.env as hashes, which
 # is what codesign wants anyway -- a name can match two certificates, a hash
@@ -245,6 +317,13 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
       --sign-identity "$PULP_SIGN_IDENTITY_HASH"
       --installer-identity "$PULP_SIGN_INSTALLER_HASH"
       --app "Forge Modular" "$APP"
+      # Rack loads plug-ins from the user's Application Support. A package
+      # writes absolute paths as root, so the .vcvplugin cannot be addressed to
+      # its real home by the payload -- it rides inside the app bundle and this
+      # script moves it afterwards. Without it the modules install and are
+      # never seen, which no development machine can notice, because the pack
+      # is already in that folder from a build.
+      --app-scripts "Forge Modular" "$REPO/examples/forge-modular/scripts"
       --plugin au "$AU" --plugin vst3 "$VST3" --plugin clap "$CLAP")
 # build_combined_installer.sh notarizes by DEFAULT and takes --no-notarize to
 # opt out -- the inverse of this script's own flag. Passing --notarize through
@@ -255,4 +334,10 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
 # the Rack SDK / GPLv3 note belongs -- the moment the user is deciding.
 export PKG_LICENSE_FILE="${PKG_LICENSE_FILE:-$REPO/examples/forge-modular/LICENSE-INSTALLER.txt}"
 
-exec "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
+# NOT `exec`. The package has to be opened afterwards and read back, because
+# every delivery failure this project has had was a build script reporting
+# success over an artifact nobody looked inside.
+"$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
+
+PKG="$OUT_DIR/Forge Modular-$VERSION.pkg"
+"$REPO/examples/forge-modular/verify_package.sh" "$PKG"

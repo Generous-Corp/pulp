@@ -21,6 +21,8 @@
 #     --out DIR \
 #     [--plugin au|vst3|clap PATH]...     (repeatable)
 #     [--app "Title" PATH [ENTITLEMENTS]]...  (repeatable; installs to /Applications)
+#     [--app-scripts "Title" DIR]...      (repeatable; a pkgbuild --scripts
+#                                          directory for the app of that title)
 #     [--content "Title" "Desc" DEST SRCDIR]...  (repeatable; installs SRCDIR's
 #                                                 contents to DEST, e.g. sample
 #                                                 models/IRs into Application Support)
@@ -37,6 +39,7 @@ NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
 # Parallel arrays of components.
 declare -a P_KIND P_PATH      # plugins: kind + bundle path
 declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
+declare -a S_TITLE S_DIR         # app scripts: app title + pkgbuild --scripts directory
 declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
 
 while [[ $# -gt 0 ]]; do
@@ -51,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --app)
       A_TITLE+=("$2"); A_PATH+=("$3")
       if [[ "${4:-}" == --* || -z "${4:-}" ]]; then A_ENT+=(""); shift 3; else A_ENT+=("$4"); shift 4; fi;;
+    --app-scripts) S_TITLE+=("$2"); S_DIR+=("$3"); shift 3;;
     --content) C_TITLE+=("$2"); C_DESC+=("$3"); C_DEST+=("$4"); C_SRC+=("$5"); shift 5;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -166,13 +170,37 @@ else
 fi
 
 echo "== apps → /Applications =="
+ANY_SCRIPTS=0
 for ((i=0; i<${#A_TITLE[@]}; i++)); do
   t="${A_TITLE[$i]}"; p="${A_PATH[$i]}"; ent="${A_ENT[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   deep_sign "$p" "$ent"
   id="$(echo "$t" | tr ' A-Z' '-a-z' | tr -cd 'a-z0-9-')"
   r="$STAGE/root-$id"; mkdir -p "$r/Applications"; cp -R "$p" "$r/Applications/"
   f="$(basename "$p").pkg"
+  # An installer can only write absolute paths, as root. Anything that has to
+  # land in the logged-in person's home directory -- a Rack plug-in folder, a
+  # preference seed -- needs a script, so a component may carry one. macOS ships
+  # bash 3.2 and has no associative arrays, so the title is looked up by scan.
+  SCRIPT_ARGS=()
+  for ((s=0; s<${#S_TITLE[@]}; s++)); do
+    [[ "${S_TITLE[$s]}" == "$t" ]] || continue
+    [[ -d "${S_DIR[$s]}" ]] || { echo "missing scripts dir: ${S_DIR[$s]}" >&2; exit 2; }
+    # pkgbuild accepts a --scripts directory whose postinstall is not
+    # executable and silently ships one that never runs, which is the same
+    # nothing as having no script at all.
+    for hook in preinstall postinstall; do
+      if [[ -f "${S_DIR[$s]}/$hook" && ! -x "${S_DIR[$s]}/$hook" ]]; then
+        echo "scripts/$hook is not executable — it would ship and never run" >&2
+        exit 2
+      fi
+    done
+    SCRIPT_ARGS=(--scripts "${S_DIR[$s]}")
+    ANY_SCRIPTS=1
+    echo "   scripts: ${S_DIR[$s]}"
+    break
+  done
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
+    "${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"}" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "Required. Includes the Rack plug-in and uninstaller." "$f" required
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
@@ -208,11 +236,18 @@ else
   LICENSE_LINE=""
 fi
 
+# require-scripts tells Installer that a component's scripts are part of the
+# product rather than optional decoration. Left "false" while a component
+# carries a postinstall, an install that skipped scripts would report success
+# having placed nothing -- the failure this whole mechanism exists to prevent.
+REQUIRE_SCRIPTS=false
+[[ "$ANY_SCRIPTS" == 1 ]] && REQUIRE_SCRIPTS=true
+
 cat > "$STAGE/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
   <title>$NAME $VERSION</title><organization>com.pulp</organization>
-  <options customize="always" require-scripts="false" hostArchitectures="arm64"/>
+  <options customize="always" require-scripts="$REQUIRE_SCRIPTS" hostArchitectures="arm64"/>
   $LICENSE_LINE
   <choices-outline>$CHOICES</choices-outline>
   $DEFS

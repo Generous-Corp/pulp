@@ -452,7 +452,14 @@ GENERATOR_ENDED_BADLY = (
     "is not sound",
     "did not contain both a json",
     "duplicate addmodel",
-    "sdk not found",
+    # A prerequisite the machine does not have: the model CLI, Apple's Command
+    # Line Tools, or the Rack SDK. Each is a real stop with a one-line fix, and
+    # each used to report INCONCLUSIVE.
+    "is missing something",
+    "model cli is not installed",
+    "the rack sdk is not installed",
+    "could not download the rack sdk",
+    "unknown setting",
     "two manifests claim",
     "already running against this module pack",
 )
