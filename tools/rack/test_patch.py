@@ -828,6 +828,230 @@ def check_library_brief() -> tuple:
     return bad, 2
 
 
+def check_sdk_resolution() -> tuple:
+    """Every component must answer 'where is the Rack SDK' identically.
+
+    Three components once held three different answers, so the SDK one of
+    them fetched was invisible to the others and a fresh machine died on a
+    manual-download message. fetch_sdk.py is the one resolver; this drives
+    each consumer in a subprocess with a scratch HOME and requires them to
+    agree, then proves the resolve-or-fetch decisions without any network.
+    """
+    import importlib
+    import subprocess
+    import tempfile
+
+    bad = 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    fetch_sdk = importlib.import_module("fetch_sdk")
+
+    # 1. One canonical location, seen by all three consumers.
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel in ("Library/Application Support/Forge Modular/Rack-SDK",
+                    ".local/share/forge-modular/Rack-SDK"):
+            os.makedirs(os.path.join(tmp, rel, "include"), exist_ok=True)
+            open(os.path.join(tmp, rel, "include", "rack.hpp"), "w").close()
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("RACK_SDK_DIR", "PULP_RACK_SDK_DIR")}
+        env["HOME"] = tmp
+        answers = {}
+        probes = {"fetch_sdk": "import fetch_sdk; print(fetch_sdk.installed_at())",
+                  "generate": "import generate; print(generate.SDK)",
+                  "patch": "import patch; print(patch.SDK)"}
+        for name, code in probes.items():
+            r = subprocess.run([sys.executable, "-c", code], cwd=here,
+                               env=env, capture_output=True, text=True)
+            answers[name] = r.stdout.strip() if r.returncode == 0 else \
+                f"IMPORT FAILED: {r.stderr.strip()[-200:]}"
+        if len(set(answers.values())) != 1:
+            bad += 1
+            print("  WRONG  the components disagree about where the SDK lives:")
+            for name, where in answers.items():
+                print(f"         {name}: {where}")
+        elif tmp not in answers["fetch_sdk"]:
+            bad += 1
+            print(f"  WRONG  resolution ignored $HOME: {answers['fetch_sdk']}")
+        else:
+            print("  ok     fetch_sdk, generate and patch name one SDK location")
+
+    # 2. An explicit override wins, and nothing downloads to honour it.
+    with tempfile.TemporaryDirectory() as tmp:
+        mine = os.path.join(tmp, "my-sdk")
+        os.makedirs(os.path.join(mine, "include"))
+        open(os.path.join(mine, "include", "rack.hpp"), "w").close()
+        env = dict(os.environ, RACK_SDK_DIR=mine, HOME=tmp)
+        env.pop("PULP_RACK_SDK_DIR", None)
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import fetch_sdk; print(fetch_sdk.installed_at())"],
+            cwd=here, env=env, capture_output=True, text=True)
+        if r.stdout.strip() != mine:
+            bad += 1
+            print(f"  WRONG  RACK_SDK_DIR was not honoured: {r.stdout.strip()}")
+        else:
+            print("  ok     RACK_SDK_DIR overrides, no download")
+
+    # 3. ensure(): missing + forbidden is a NAMED refusal; missing +
+    #    permitted fetches and says so first; installed short-circuits both.
+    real_installed, real_fetch = fetch_sdk.installed_at, fetch_sdk.fetch
+    try:
+        fetch_sdk.installed_at = lambda: None
+        try:
+            fetch_sdk.ensure(may_fetch=False)
+            bad += 1
+            print("  WRONG  missing SDK with auto-fetch off did not refuse")
+        except SystemExit as e:
+            msg = str(e)
+            if "auto_fetch_sdk" not in msg or "RACK_SDK_DIR" not in msg:
+                bad += 1
+                print(f"  WRONG  the refusal does not name the fix: {msg}")
+            else:
+                print("  ok     auto-fetch off refuses with the fix named")
+
+        calls = []
+        fetch_sdk.fetch = lambda quiet=True: (calls.append(quiet), "/fetched")[1]
+        said = []
+        got = fetch_sdk.ensure(may_fetch=True, announce=said.append)
+        if got != "/fetched" or calls != [False]:
+            bad += 1
+            print(f"  WRONG  permitted fetch did not run loudly: {got}, {calls}")
+        elif not said or "vcvrack.com" not in said[0] or "GPLv3" not in said[0]:
+            bad += 1
+            print(f"  WRONG  the fetch was not announced honestly: {said}")
+        else:
+            print("  ok     a permitted fetch announces source and licence")
+
+        fetch_sdk.installed_at = lambda: "/already/there"
+        if fetch_sdk.ensure(may_fetch=False) != "/already/there":
+            bad += 1
+            print("  WRONG  an installed SDK did not satisfy ensure()")
+        else:
+            print("  ok     an installed SDK needs no permission")
+    finally:
+        fetch_sdk.installed_at, fetch_sdk.fetch = real_installed, real_fetch
+
+    # 4. generate.resolve_sdk obeys the setting the user actually saves.
+    import tempfile as _tf
+    import generate as G
+    with _tf.TemporaryDirectory() as tmp:
+        spath = os.path.join(tmp, "settings.json")
+        real_spath = P.SETTINGS_PATH
+        try:
+            P.SETTINGS_PATH = spath
+            json.dump({"auto_fetch_sdk": False}, open(spath, "w"))
+            fetch_sdk.installed_at = lambda: None
+            try:
+                G.resolve_sdk()
+                bad += 1
+                print("  WRONG  resolve_sdk fetched against the user's setting")
+            except SystemExit as e:
+                if "auto_fetch_sdk" not in str(e):
+                    bad += 1
+                    print(f"  WRONG  resolve_sdk refused namelessly: {e}")
+                else:
+                    print("  ok     resolve_sdk honours auto_fetch_sdk=false")
+            os.remove(spath)
+            fetch_sdk.fetch = lambda quiet=True: "/fetched"
+            if G.resolve_sdk() != "/fetched":
+                bad += 1
+                print("  WRONG  resolve_sdk did not fetch under the default")
+            else:
+                print("  ok     resolve_sdk fetches by default")
+        finally:
+            P.SETTINGS_PATH = real_spath
+            fetch_sdk.installed_at, fetch_sdk.fetch = real_installed, real_fetch
+
+    # 5. A missing compiler is a sentence with the fix in it, never a blank.
+    import subprocess as sp
+    real_run = sp.run
+    try:
+        class _R:
+            returncode = 1
+        sp.run = lambda *a, **k: _R()
+        msg = fetch_sdk.compiler_missing()
+        if sys.platform == "darwin" and (not msg or "xcode-select --install" not in msg):
+            bad += 1
+            print(f"  WRONG  missing toolchain is not actionable: {msg}")
+        else:
+            print("  ok     a missing toolchain names its one-command fix")
+        _R.returncode = 0
+        if sys.platform == "darwin" and fetch_sdk.compiler_missing() is not None:
+            bad += 1
+            print("  WRONG  a present toolchain was reported missing")
+        else:
+            print("  ok     a present toolchain passes silently")
+    finally:
+        sp.run = real_run
+
+    # 6. The duplicate fetcher stays dead. It shipped once, pointing at a
+    #    directory nothing else used, and nothing ever invoked it.
+    repo = os.path.normpath(os.path.join(here, "..", ".."))
+    pack = os.path.join(repo, "examples", "forge-modular")
+    if os.path.isfile(os.path.join(pack, "package.sh")):
+        if os.path.exists(os.path.join(pack, "fetch_rack_sdk.sh")):
+            bad += 1
+            print("  WRONG  the duplicate fetch_rack_sdk.sh is back")
+        elif "fetch_rack_sdk" in open(os.path.join(pack, "package.sh")).read():
+            bad += 1
+            print("  WRONG  package.sh still stages the deleted fetcher")
+        else:
+            print("  ok     one fetcher: the shell duplicate stays deleted")
+    return bad, 9
+
+
+def check_setting_writer() -> tuple:
+    """write_setting must be the one safe way to change a preference."""
+    import tempfile
+
+    bad = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        spath = os.path.join(tmp, "settings.json")
+        real = P.SETTINGS_PATH
+        try:
+            P.SETTINGS_PATH = spath
+            # A hand-added key and an unrelated preference both survive.
+            json.dump({"auto_download": "none", "someday": 7, "never_buy": False},
+                      open(spath, "w"))
+            P.write_setting("module_source", "prefer_generated")
+            on_disk = json.load(open(spath))
+            if on_disk.get("auto_download") != "none" or on_disk.get("someday") != 7:
+                bad += 1
+                print(f"  WRONG  the writer dropped keys it did not own: {on_disk}")
+            elif "never_buy" in on_disk:
+                bad += 1
+                print("  WRONG  the writer let never_buy into the file")
+            elif P.settings()["module_source"] != "prefer_generated":
+                bad += 1
+                print("  WRONG  a written preference did not read back")
+            else:
+                print("  ok     write_setting changes one key and drops never_buy")
+
+            for key, value, why in (
+                    ("never_buy", False, "never_buy is not a preference"),
+                    ("module_source", "sideways", "an unknown value"),
+                    ("made_up", True, "an unknown key")):
+                try:
+                    P.write_setting(key, value)
+                    bad += 1
+                    print(f"  WRONG  {why} was accepted")
+                except SystemExit:
+                    print(f"  ok     {why} is refused by name")
+
+            # The booleans write as booleans, not strings.
+            P.write_setting("auto_fetch_sdk", False)
+            if json.load(open(spath)).get("auto_fetch_sdk") is not False:
+                bad += 1
+                print("  WRONG  auto_fetch_sdk did not persist as a boolean")
+            elif P.settings()["auto_fetch_sdk"] is not False:
+                bad += 1
+                print("  WRONG  a persisted auto_fetch_sdk=false did not read back")
+            else:
+                print("  ok     auto_fetch_sdk persists and reads back")
+        finally:
+            P.SETTINGS_PATH = real
+    return bad, 5
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -836,7 +1060,10 @@ def main():
     parts_bad, parts_ran = check_buildable_from_parts()
     acq_bad, acq_ran = check_acquisition()
     lb_bad, lb_ran = check_library_brief()
-    acq_bad += lb_bad; acq_ran += lb_ran
+    sdk_bad, sdk_ran = check_sdk_resolution()
+    set_bad, set_ran = check_setting_writer()
+    acq_bad += lb_bad + sdk_bad + set_bad
+    acq_ran += lb_ran + sdk_ran + set_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

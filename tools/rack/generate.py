@@ -14,7 +14,7 @@ reaches the user -- and it avoids the ~24x per-sample overhead a baked graph
 pays when driven one sample at a time (see test/graph_cost_bench.cpp).
 
 Requires: a `claude` binary on PATH (override with FORGE_CLAUDE_BIN), the Rack
-SDK (RACK_SDK_DIR or ~/SDKs/Rack-SDK), and zstd.
+SDK (resolved by fetch_sdk.py, and fetched by it when missing), and zstd.
 """
 from __future__ import annotations
 
@@ -51,7 +51,26 @@ PACK = os.path.join(ROOT, "examples", "forge-modular")
 CONTRACT = os.path.join(HERE, "prompt", "module_contract.md")
 EMITTER = os.path.join(HERE, "forge_modular.py")
 
-SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
+# Resolved by the ONE resolver (fetch_sdk.py) -- never by a path kept here.
+# Three components once disagreed about where the SDK lives, so the copy one
+# of them fetched was invisible to the others. The SDK is GPLv3 and VCV's: it
+# is never shipped in any Forge artifact and never sits inside a checkout;
+# the user's machine fetches it, which is why resolve_sdk() may download.
+import fetch_sdk
+
+SDK = fetch_sdk.installed_at() or fetch_sdk.DEST
+
+
+def resolve_sdk(log=lambda _msg: None) -> str:
+    """The SDK directory, fetching it first when absent and permitted.
+
+    Permission is the auto_fetch_sdk setting (default on). Only a genuine
+    failure -- download error, unsupported platform, or auto-fetch switched
+    off with nothing installed -- raises, and it raises with the fix named.
+    """
+    import patch as patch_mod
+    may_fetch = bool(patch_mod.settings().get("auto_fetch_sdk", True))
+    return fetch_sdk.ensure(may_fetch=may_fetch, announce=log)
 
 
 RACK_APP = "/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack"
@@ -314,9 +333,18 @@ def main(argv):
                     help="leave the failed sources in place for inspection")
     a = ap.parse_args(argv[1:])
 
-    if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
-        raise SystemExit(f"Rack SDK not found at {SDK}. Set RACK_SDK_DIR, or download "
-                         "https://vcvrack.com/downloads/Rack-SDK-2.6.6-mac-arm64.zip")
+    # Fail on the compiler FIRST: it is free to check, and fetching an SDK a
+    # machine cannot compile against would spend the download to hit the same
+    # wall one step later.
+    problem = fetch_sdk.compiler_missing()
+    if problem:
+        raise SystemExit(problem)
+
+    # Resolve, and fetch when absent and permitted. This is the step that
+    # used to be a SystemExit telling the user to go and download a zip by
+    # hand; the errand is ours to run, and only a real failure is an error.
+    global SDK
+    SDK = resolve_sdk(log)
 
     # One generation at a time. Every run rewrites the same module pack and
     # restores it from a snapshot on failure, so two at once interleave their

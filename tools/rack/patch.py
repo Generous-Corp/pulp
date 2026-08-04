@@ -1282,6 +1282,14 @@ SETTINGS_DEFAULTS = {
     # does not own, because that would be a purchase. "none" disables silent
     # downloads entirely for anyone who wants the machine left alone.
     "auto_download": "entitled",
+    # Fetch the VCV Rack SDK automatically the first time a module build
+    # needs it. The SDK is VCV's and GPLv3: no Forge artifact ever ships a
+    # copy, and the fetch happens on the user's own machine, from vcvrack.com
+    # -- that is the licence boundary, and switching this off never moves it.
+    # Off means a missing SDK is reported with the fix named instead of
+    # fetched, the same courtesy auto_download="none" extends to modules, for
+    # anyone who wants this machine to download nothing on its own.
+    "auto_fetch_sdk": True,
     # Fetch a FREE module from the VCV library when one would close the gap.
     # Needs a Rack account token, which Rack stores in its own settings after
     # you sign in to the library; without one this is inert and says so. We
@@ -1559,6 +1567,56 @@ def settings() -> dict:
     return out
 
 
+# What each preference may be set to. The single source the writer validates
+# against, so a typo becomes a named refusal here instead of a value settings()
+# silently carries and every reader has to defend against.
+SETTING_CHOICES = {
+    "module_source": ("prefer_existing", "balanced", "prefer_generated"),
+    "auto_download": ("entitled", "none"),
+    "auto_fill_gaps": (True, False),
+    "auto_download_free": (True, False),
+    "auto_restart_rack": (True, False),
+    "auto_fetch_sdk": (True, False),
+}
+
+
+def write_setting(key: str, value) -> None:
+    """Change ONE preference, preserving everything else in the file.
+
+    The one writer. The app's settings controls come through here (via the
+    `setting` subcommand) rather than writing JSON of their own, so the file
+    format, the unknown-key tolerance and the never_buy guarantee live in
+    exactly one place. Raises SystemExit with the reason on a bad key or
+    value; never writes a file it could not read back.
+    """
+    if key not in SETTING_CHOICES:
+        allowed = ", ".join(sorted(SETTING_CHOICES))
+        raise SystemExit(f"unknown setting {key!r}. Settings: {allowed}")
+    if value not in SETTING_CHOICES[key]:
+        shown = ", ".join(str(c).lower() if isinstance(c, bool) else c
+                          for c in SETTING_CHOICES[key])
+        raise SystemExit(f"{key} must be one of: {shown}")
+    current = {}
+    try:
+        with open(SETTINGS_PATH) as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            current = loaded          # unknown keys ride along untouched
+    except Exception:                                       # noqa: BLE001
+        pass                          # a corrupt file is replaced, not fatal
+    current[key] = value
+    # never_buy can sit in the file as a statement, but never as False --
+    # settings() forces it true on read, and the writer must not plant a
+    # value the reader would have to correct.
+    current.pop("never_buy", None)
+    os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+    tmp = SETTINGS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(current, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, SETTINGS_PATH)
+
+
 def rack_library_token() -> str:
     """Rack's own library token, or empty when nobody has signed in.
 
@@ -1742,7 +1800,14 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
 GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
-SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
+# Resolved by the one resolver every component shares (fetch_sdk.py), never
+# by a private path -- patch.py once looked only at ~/SDKs/Rack-SDK, so an
+# SDK fetch_sdk.py had installed was an SDK this gate could not see. Patch
+# generation itself needs no SDK and nothing on this path downloads one:
+# _build_gate() simply skips when none is installed.
+import fetch_sdk as _fetch_sdk
+
+SDK = _fetch_sdk.installed_at() or _fetch_sdk.DEST
 
 
 def _plugin_dir() -> str | None:
@@ -2296,6 +2361,23 @@ def main(argv):
         print(__doc__)
         return 2
     cmd = argv[1]
+
+    # Before inventory(): reading or writing a preference must not depend on
+    # a populated plugin cache, and the app calls this at editor-open.
+    if cmd == "setting":
+        if len(argv) == 2:
+            print(json.dumps(settings(), indent=2))
+            return 0
+        if len(argv) != 4:
+            print("usage: patch.py setting            # print effective settings\n"
+                  "       patch.py setting KEY VALUE  # change one preference")
+            return 2
+        raw = argv[3]
+        value = {"true": True, "false": False}.get(raw.lower(), raw)
+        write_setting(argv[2], value)
+        print(f"{argv[2]} = {raw}")
+        return 0
+
     inv = inventory()
 
     if cmd == "inventory":

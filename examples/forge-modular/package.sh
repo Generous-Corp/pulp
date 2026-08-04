@@ -77,8 +77,11 @@ APP="$STAGED_ROOT/$(basename "$APP")"
 TOOLS_DEST="$APP/Contents/Resources/tools/rack"
 mkdir -p "$TOOLS_DEST"
 ditto "$REPO/tools/rack" "$TOOLS_DEST"
-# The uninstaller and the SDK fetch live beside the app that offers them.
-for helper in uninstall.sh fetch_rack_sdk.sh; do
+# The uninstaller lives beside the app that offers it. The SDK fetch does
+# not need staging of its own: fetch_sdk.py ships inside tools/rack above,
+# and it is the ONE resolver-and-fetcher (a second shell copy of it shipped
+# here once, pointing at a different directory, and nothing ever invoked it).
+for helper in uninstall.sh; do
     if [[ -f "$REPO/examples/forge-modular/$helper" ]]; then
         ditto "$REPO/examples/forge-modular/$helper" "$APP/Contents/Resources/$helper"
         chmod +x "$APP/Contents/Resources/$helper"

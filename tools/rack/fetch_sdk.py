@@ -8,12 +8,20 @@ the same thing rustup does for a toolchain or Android Studio for the NDK. The
 build system's refusal to vendor the SDK stays exactly as it is; this only
 removes the errand.
 
-So it runs during install, silently, and the only thing a person sees is one
-licence acknowledgement. That acknowledgement is not paperwork for the
-download: it is there because obligations transfer to whoever distributes a
-module they built, and nobody would guess them. Give a module away and any
-licence will do. Sell one and it needs a commercial licence from VCV, which is
-included free if sold through the VCV Library.
+THIS FILE IS THE ONE RESOLVER. generate.py and patch.py both take the SDK's
+location from installed_at()/DEST rather than keeping paths of their own --
+three components once held three different answers ("~/SDKs/Rack-SDK", this
+DEST, and an "sdk/" sibling of it), so an SDK one of them fetched was an SDK
+the others could not see, and a fresh machine died on a manual-download
+message. A new consumer must import this module, never restate a path.
+
+The fetch runs when the first module build needs it (generate.py calls
+ensure()), gated by the auto_fetch_sdk setting. The installer's licence text
+is the acknowledgement: it is not paperwork for the download, it is there
+because obligations transfer to whoever distributes a module they built, and
+nobody would guess them. Give a module away and any licence will do. Sell one
+and it needs a commercial licence from VCV, which is included free if sold
+through the VCV Library.
 
     fetch_sdk.py                 # fetch if missing, print where it landed
     fetch_sdk.py --check         # report only, fetch nothing
@@ -77,6 +85,54 @@ def installed_at() -> str | None:
     return None
 
 
+def compiler_missing() -> str | None:
+    """Why modules cannot be compiled here, or None when they can.
+
+    The compiler is Apple's (or the distro's) and we do not redistribute it
+    either. A missing toolchain must surface as a named, actionable message,
+    never a blank failure -- this product once showed a bare traceback where
+    this sentence belonged.
+    """
+    if sys.platform == "darwin":
+        import subprocess
+        r = subprocess.run(["xcode-select", "-p"], capture_output=True)
+        if r.returncode == 0:
+            return None
+        return ("the Xcode Command Line Tools are not installed, so modules "
+                "cannot be compiled. Run:  xcode-select --install  and try "
+                "again. Patch generation does not need them.")
+    import shutil
+    if shutil.which("clang++") or shutil.which("g++"):
+        return None
+    return ("no C++ compiler was found, so modules cannot be compiled. "
+            "Install clang or g++ and try again. Patch generation does not "
+            "need one.")
+
+
+def ensure(may_fetch: bool = True, announce=None) -> str:
+    """The SDK directory, fetched first when it is absent and permitted.
+
+    The only errors are real ones: an unsupported platform, a failed
+    download, or auto-fetch switched off while nothing is installed. A
+    merely-missing SDK on a machine that permits fetching is an errand, and
+    this runs it, saying so through `announce` before the wait starts.
+    """
+    have = installed_at()
+    if have:
+        return have
+    if not may_fetch:
+        raise SystemExit(
+            "the Rack SDK is not installed, and auto_fetch_sdk is switched "
+            "off in Forge Modular's settings. Switch it back on, or set "
+            "RACK_SDK_DIR to an SDK you have already downloaded.")
+    if announce:
+        announce(f"the Rack SDK {SDK_VERSION} is not installed yet. "
+                 f"Fetching it from vcvrack.com (about 40 MB) into {DEST}. "
+                 "It is VCV's, GPLv3 and free; your machine downloads it, "
+                 "we never ship it.")
+    return fetch(quiet=announce is None)
+
+
 def fetch(quiet: bool = True) -> str:
     """Download and unpack. Returns the directory, or raises with a reason."""
     import io
@@ -125,10 +181,12 @@ def main(argv):
     have = installed_at()
     if "--check" in argv:
         u = url()
+        problem = compiler_missing()
         print(f"platform   : {platform_key() or 'unsupported'}")
         print(f"would fetch: {u or '(nothing available)'}")
         print(f"installed  : {have or 'no'}")
-        return 0 if have else 1
+        print(f"compiler   : {'present' if problem is None else problem}")
+        return 0 if have and problem is None else 1
 
     where = fetch(quiet="--verbose" not in argv)
     print(where)

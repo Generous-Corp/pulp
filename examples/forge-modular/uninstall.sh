@@ -39,7 +39,7 @@ SOFTWARE=(
     "$PLUGINS/CLAP/Forge Modular.clap"
     "$SUPPORT/Rack2/plugins-mac-arm64/ForgeModular"
     "$SUPPORT/Forge Modular/tools"
-    "$SUPPORT/Forge Modular/sdk"
+    "$SUPPORT/Forge Modular/Rack-SDK"
     "$SUPPORT/Forge Modular/runs"
 )
 
