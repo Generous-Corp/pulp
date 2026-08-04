@@ -37,6 +37,7 @@ using Catch::Approx;
 
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/canvas/svg_dom_cache.hpp>
 #include "forge/project_store.hpp"
@@ -1321,86 +1322,45 @@ TEST_CASE("preferences are read from the file patch.py owns", "[prefs][seam]") {
     CHECK(forge_modular::modular_setting("made_up", "fallback") == "fallback");
 }
 
-TEST_CASE("the generation preferences are on Home and clickable",
+namespace {
+
+/// How many options a product choice renders, walked through the chrome's
+/// accessor so the count comes from the LIVE sheet rather than the shell.
+int options_of(const forge::ForgeChrome& chrome, std::size_t choice) {
+    int n = 0;
+    while (chrome.settings_product_choice_button(choice, n)) ++n;
+    return n;
+}
+
+/// Which option of a choice is painted as chosen. Exactly one must wear the
+/// primary style -- the sheet's own selected look -- or the row reads as
+/// two answers at once. Returns {count, index}.
+std::pair<int, int> chosen_of(const forge::ForgeChrome& chrome,
+                              std::size_t choice) {
+    int n = 0, at = -1;
+    for (int i = 0; auto* b = chrome.settings_product_choice_button(choice, i);
+         ++i) {
+        if (b->style() == pulp::view::TextButton::Style::primary) {
+            ++n;
+            at = i;
+        }
+    }
+    return {n, at};
+}
+
+}  // namespace
+
+TEST_CASE("the generation preferences live in Settings, on Permissions",
           "[prefs][seam]") {
     // The user asked for module_source and auto_download to be theirs to
-    // change. Until this surface existed they lived only in a JSON file,
-    // while the mention overlay said "switched off in Settings" about a
-    // Settings nobody could reach.
+    // change, in the real gear-menu settings sheet -- a first draft put them
+    // on the Home screen and was rightly rejected as bolted on. The sheet
+    // renders the rows itself (ForgeShell::settings_choices), so they share
+    // the built-in rows' idiom by construction.
     ScratchHome home;
     home.write("{\"module_source\": \"prefer_generated\", "
                "\"auto_download\": \"none\"}");
 
-    HermeticProjects isolated;
-    forge_modular::ForgeModularShell shell;
-    auto accessory = shell.home_accessory();
-    REQUIRE(accessory != nullptr);
-
-    // Both controls exist, with every option present and handled -- the
-    // Random button shipped once with no handler at all.
-    const auto& source = shell.module_source_tabs();
-    const auto& download = shell.auto_download_tabs();
-    REQUIRE(source.size() == 3);
-    REQUIRE(download.size() == 2);
-    for (auto* b : source) REQUIRE(b->on_click);
-    for (auto* b : download) REQUIRE(b->on_click);
-
-    // The control shows the FILE's values, not the defaults: the person who
-    // edited the file by hand last week must not see their choice undone by
-    // the control's first paint.
-    CHECK(shell.module_source_shown() == "prefer_generated");
-    CHECK(shell.auto_download_shown() == "none");
-
-    // Exactly one option per row reads as chosen, by painted colour.
-    const auto raised = [](const std::vector<pulp::view::TextButton*>& tabs) {
-        int n = 0, at = -1;
-        for (std::size_t i = 0; i < tabs.size(); ++i) {
-            if (tabs[i]->style() == pulp::view::TextButton::Style::secondary) {
-                ++n;
-                at = static_cast<int>(i);
-            }
-            auto* lbl = dynamic_cast<pulp::view::Label*>(tabs[i]->child_at(0));
-            REQUIRE(lbl != nullptr);
-            if (tabs[i]->style() != pulp::view::TextButton::Style::secondary)
-                CHECK(lbl->text_color() != forge::design::color::text);
-        }
-        return std::pair{n, at};
-    };
-    CHECK(raised(source) == std::pair{1, 2});     // Build my own
-    CHECK(raised(download) == std::pair{1, 1});   // Off
-
-    // Clicking a different option adopts it, restyles, and hands the write
-    // to patch.py -- the one validated writer -- rather than writing JSON
-    // from the shell. The bare shell records the command and launches
-    // nothing, so this asserts the decision without touching the machine.
-    const auto before = shell.launched().size();
-    source[1]->on_click();
-    CHECK(shell.module_source_shown() == "balanced");
-    CHECK(raised(source) == std::pair{1, 1});
-    REQUIRE(shell.launched().size() == before + 1);
-    CHECK(shell.launched().back().find("patch.py setting module_source balanced")
-          != std::string::npos);
-
-    download[0]->on_click();
-    CHECK(shell.auto_download_shown() == "entitled");
-    CHECK(raised(download) == std::pair{1, 0});
-    REQUIRE(shell.launched().size() == before + 2);
-    CHECK(shell.launched().back().find("patch.py setting auto_download entitled")
-          != std::string::npos);
-
-    // Re-clicking the already-chosen option is a no-op: no second process to
-    // write what is already written.
-    source[1]->on_click();
-    download[0]->on_click();
-    CHECK(shell.launched().size() == before + 2);
-}
-
-TEST_CASE("closing the editor forgets the preference controls",
-          "[prefs][seam]") {
-    // The preference buttons are BORROWED from the editor's tree, and this
-    // shell outlives every editor its host opens. Kept across a close they
-    // name freed memory -- the exact class of crash show_rack already had.
-    ScratchHome home;
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
     pulp::state::StateStore store;
@@ -1412,14 +1372,136 @@ TEST_CASE("closing the editor forgets the preference controls",
     shell.prepare(pc);
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
-    // Wired through the real chrome, not a bare accessory call.
-    REQUIRE(shell.module_source_tabs().size() == 3);
-    REQUIRE(shell.auto_download_tabs().size() == 2);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+
+    // Both controls are in the live sheet, every option present and handled.
+    REQUIRE(chrome->settings_product_choice_count() == 2);
+    REQUIRE(options_of(*chrome, 0) == 3);
+    REQUIRE(options_of(*chrome, 1) == 2);
+    for (std::size_t c = 0; c < 2; ++c)
+        for (int i = 0; auto* b = chrome->settings_product_choice_button(c, i);
+             ++i)
+            REQUIRE(b->on_click);
+
+    // And OFF the Home screen: the accessory is the Module|Patch tabs and
+    // nothing else.
+    auto accessory = shell.home_accessory();
+    REQUIRE(accessory != nullptr);
+    int home_buttons = 0;
+    for (std::size_t i = 0; i < accessory->child_count(); ++i)
+        if (dynamic_cast<pulp::view::TextButton*>(accessory->child_at(i)))
+            ++home_buttons;
+    CHECK(home_buttons == 2);
+
+    // The sheet shows the FILE's values, not the defaults: a value written
+    // by hand last week must not be undone by the control's first paint.
+    CHECK(shell.module_source_shown() == "prefer_generated");
+    CHECK(shell.auto_download_shown() == "none");
+    CHECK(chosen_of(*chrome, 0) == std::pair{1, 2});   // Build my own
+    CHECK(chosen_of(*chrome, 1) == std::pair{1, 1});   // Off
+
+    // Clicking a different option adopts it, restyles exclusively, and hands
+    // the write to patch.py -- the one validated writer -- rather than
+    // writing JSON from C++. The bare shell records the command and launches
+    // nothing, so this asserts the decision without touching the machine.
+    const auto before = shell.launched().size();
+    chrome->settings_product_choice_button(0, 1)->on_click();
+    CHECK(shell.module_source_shown() == "balanced");
+    CHECK(chosen_of(*chrome, 0) == std::pair{1, 1});
+    REQUIRE(shell.launched().size() == before + 1);
+    CHECK(shell.launched().back().find("patch.py setting module_source balanced")
+          != std::string::npos);
+
+    chrome->settings_product_choice_button(1, 0)->on_click();
+    CHECK(shell.auto_download_shown() == "entitled");
+    CHECK(chosen_of(*chrome, 1) == std::pair{1, 0});
+    REQUIRE(shell.launched().size() == before + 2);
+    CHECK(shell.launched().back().find("patch.py setting auto_download entitled")
+          != std::string::npos);
+
+    // Re-clicking the already-chosen option is a no-op: no second process to
+    // write what is already written.
+    chrome->settings_product_choice_button(0, 1)->on_click();
+    chrome->settings_product_choice_button(1, 0)->on_click();
+    CHECK(shell.launched().size() == before + 2);
+
+    // The visual proof: the sheet, open on Permissions, rendered headlessly.
+    // Kept in temp for a human to look at; the render succeeding is also the
+    // layout pass that would catch a row that cannot fit its pane.
+    chrome->open_permissions_settings();
+    pulp::view::FrameClock clock;
+    view->set_frame_clock(&clock);
+    for (int frame = 0; frame < 8; ++frame) clock.pump_activity(0.040f);
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-settings-permissions.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth,
+        forge::ForgeChrome::kDesignHeight, shot.string(), 1.0f,
+        pulp::view::ScreenshotBackend::skia));
+    view->set_frame_clock(nullptr);
+    shell.on_view_closed(*view);
+}
+
+TEST_CASE("products that contribute no settings rows keep their sheet as-is",
+          "[prefs][seam]") {
+    // The hook must cost the three original products nothing: no heading,
+    // no empty section, zero controls. Their Home frames are byte-pinned by
+    // the no-leak baselines; this pins the sheet side of the same promise.
+    HermeticProjects isolated;
+    forge::ForgeFxShell shell;
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    REQUIRE(shell.chrome() != nullptr);
+    CHECK(shell.chrome()->settings_product_choice_count() == 0);
+    CHECK(shell.chrome()->settings_product_choice_button(0, 0) == nullptr);
+    shell.on_view_closed(*view);
+}
+
+TEST_CASE("a preference chosen in one editor survives into the next",
+          "[prefs][seam]") {
+    // End to end: the click runs the REAL patch.py (a synchronous launcher
+    // under a scratch HOME), the write lands in the real file format, and a
+    // fresh editor's sheet reads it back. This is the loop a person actually
+    // lives: change a setting, close the plugin window, open it again.
+    ScratchHome home;
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    shell.set_launcher([](const std::string& command) {
+        std::string out;
+        forge_modular::ProcessEngine::run(command, out);
+    });
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    REQUIRE(shell.chrome() != nullptr);
+    CHECK(chosen_of(*shell.chrome(), 0) == std::pair{1, 0});  // the default
+    shell.chrome()->settings_product_choice_button(0, 2)->on_click();
+    CHECK(shell.module_source_shown() == "prefer_generated");
+    // The write went through patch.py into the scratch HOME's file.
+    REQUIRE(std::filesystem::exists(home.settings()));
 
     shell.on_view_closed(*view);
     view.reset();
-    CHECK(shell.module_source_tabs().empty());
-    CHECK(shell.auto_download_tabs().empty());
+
+    auto reopened = shell.create_view();
+    REQUIRE(reopened != nullptr);
+    REQUIRE(shell.chrome() != nullptr);
+    REQUIRE(shell.chrome()->settings_product_choice_count() == 2);
+    // The fresh sheet paints the persisted choice, not the default.
+    CHECK(chosen_of(*shell.chrome(), 0) == std::pair{1, 2});
+    shell.on_view_closed(*reopened);
 }
 
 TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]") {
@@ -7538,8 +7620,10 @@ TEST_CASE("a mention fetch that cannot succeed is refused, not promised",
     REQUIRE_FALSE(off.fetch);
     REQUIRE(says(off.why, "switched off"));
     // And it points at the REAL control. This copy said "in Settings" while
-    // the preference lived only in a JSON file nobody could find.
-    REQUIRE(says(off.why, "Home screen"));
+    // the preference lived only in a JSON file nobody could find; the
+    // control now lives in Settings on the Permissions tab, and the words
+    // must keep matching the place.
+    REQUIRE(says(off.why, "Permissions"));
 
     // Paid and unowned is refused without ever suggesting a purchase.
     const auto paid = forge_modular::plan_mention_fetch(A::paid, true, "entitled");

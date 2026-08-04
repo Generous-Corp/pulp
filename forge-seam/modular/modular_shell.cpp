@@ -132,11 +132,11 @@ MentionFetch plan_mention_fetch(MentionCandidate::Availability state,
                        "name it."};
     if (pref == "none")
         // Named where the switch actually is. This said "in Settings" while
-        // the preference lived only in a JSON file; the Downloads control on
-        // the Home screen is now the real place.
-        return {false, " is free, but automatic downloading is switched off. "
-                       "Turn Downloads back to Automatic on the Home screen, "
-                       "or the prompt can still name it."};
+        // the preference lived only in a JSON file; the control now really
+        // is in Settings, on the Permissions tab.
+        return {false, " is free, but module downloads are switched off. "
+                       "Turn them back to Automatic in Settings, on the "
+                       "Permissions tab, or the prompt can still name it."};
     return {true, ""};
 }
 
@@ -478,135 +478,44 @@ std::unique_ptr<View> ForgeModularShell::home_accessory() {
     tab_module_ = add_tab("Module", Artifact::module);
     tab_patch_ = add_tab("Patch", Artifact::patch);
     style_tabs();
-
-    // The tabs plus the generation preferences, in one column. The chrome's
-    // settings sheet has no per-product hook (ForgeChrome has no virtuals),
-    // so Home is where this product's own choices live -- and these two were
-    // file-only until they lived here, which made "automatic downloading is
-    // switched off in Settings" a sentence about a file nobody could find.
-    auto column = std::make_unique<View>();
-    column->flex().direction = FlexDirection::column;
-    column->flex().align_items = FlexAlign::center;
-    column->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-    column->flex().gap = 14;
-    column->add_child(std::move(tabs));
-    column->add_child(build_pref_rows());
-    return column;
+    return tabs;
 }
 
-std::unique_ptr<View> ForgeModularShell::build_pref_rows() {
-    // Two labelled choice rows, styled like the depth tabs: small, quiet,
-    // exactly one option raised. The values are patch.py's own enum strings;
-    // the words are what the strings mean.
+std::vector<forge::ForgeShell::SettingsChoice>
+ForgeModularShell::settings_choices() {
+    // The two generation preferences, for the gear-menu settings sheet's
+    // Permissions tab. Words, values and callbacks only: the sheet renders
+    // them in its own row idiom, so these rows are indistinguishable from
+    // the built-in ones. The values are patch.py's enum strings; the labels
+    // are what the strings mean. Read from the file HERE, each time the
+    // sheet is built, so a value written by hand or by another process is
+    // what the control shows.
     module_source_ = modular_setting("module_source", "prefer_existing");
     auto_download_ = modular_setting("auto_download", "entitled");
-    source_tabs_.clear();
-    source_labels_.clear();
-    download_tabs_.clear();
-    download_labels_.clear();
 
-    auto rows = std::make_unique<View>();
-    rows->flex().direction = FlexDirection::column;
-    rows->flex().align_items = FlexAlign::center;
-    rows->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-    rows->flex().gap = 6;
+    forge::ForgeShell::SettingsChoice source;
+    source.caption = "Module source";
+    source.detail =
+        "Where the modules in a generated patch come from. Library first "
+        "uses published modules and builds one only for a genuine gap. "
+        "Build my own prefers modules generated for you.";
+    source.options = {{"Library first", "prefer_existing"},
+                      {"Balanced", "balanced"},
+                      {"Build my own", "prefer_generated"}};
+    source.value = module_source_;
+    source.on_choose = [this](const std::string& v) { choose_module_source(v); };
 
-    const auto add_row = [&](const char* caption,
-                             std::vector<pulp::view::TextButton*>& tabs_out,
-                             std::vector<pulp::view::Label*>& labels_out,
-                             std::initializer_list<std::pair<const char*, const char*>>
-                                 options,
-                             auto&& choose) {
-        auto row = std::make_unique<View>();
-        row->flex().direction = FlexDirection::row;
-        row->flex().align_items = FlexAlign::center;
-        row->flex().justify_content = pulp::view::FlexJustify::center;
-        row->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-        row->flex().gap = 6;
+    forge::ForgeShell::SettingsChoice downloads;
+    downloads.caption = "Module downloads";
+    downloads.detail =
+        "Whether missing modules may be fetched for you: free ones, and "
+        "paid ones this VCV account already owns. Nothing is ever bought "
+        "either way.";
+    downloads.options = {{"Automatic", "entitled"}, {"Off", "none"}};
+    downloads.value = auto_download_;
+    downloads.on_choose = [this](const std::string& v) { choose_auto_download(v); };
 
-        auto cap = std::make_unique<pulp::view::Label>(caption);
-        cap->set_font_family(forge::design::type::display);
-        cap->set_font_size(12.0f);
-        cap->set_text_color(forge::design::color::text_muted);
-        cap->set_hit_testable(false);
-        cap->flex().preferred_width = 88;
-        cap->set_text_align(pulp::view::LabelAlign::right);
-        row->add_child(std::move(cap));
-
-        for (const auto& [label, value] : options) {
-            auto b = std::make_unique<pulp::view::TextButton>();
-            // Lower-cased on purpose: "Build my own" in an access label made
-            // this the first hit for a tree walk looking for the composer's
-            // Build button. Access labels describe; they must not collide
-            // with the primary actions' names.
-            std::string spoken = label;
-            if (!spoken.empty()) spoken[0] = static_cast<char>(
-                std::tolower(static_cast<unsigned char>(spoken[0])));
-            b->set_access_label(std::string(caption) + ": " + spoken);
-            auto lbl = std::make_unique<pulp::view::Label>(label);
-            lbl->set_font_family(forge::design::type::display);
-            lbl->set_font_size(12.0f);
-            lbl->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-            lbl->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
-            lbl->set_text_align(pulp::view::LabelAlign::center);
-            lbl->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
-            lbl->set_hit_testable(false);
-            labels_out.push_back(lbl.get());
-            b->add_child(std::move(lbl));
-            b->flex().preferred_height = 24;
-            b->flex().padding_left = 12;
-            b->flex().padding_right = 12;
-            b->flex().flex_grow = 0;
-            b->flex().flex_shrink = 0;
-            // `choose` is copied INTO the handler: the row builder returns
-            // long before anyone clicks, so a reference capture here would
-            // be a dangling call the first time the control is used.
-            const std::string chosen = value;
-            b->on_click = [chosen, choose] { choose(chosen); };
-            tabs_out.push_back(b.get());
-            row->add_child(std::move(b));
-        }
-        rows->add_child(std::move(row));
-    };
-
-    add_row("Modules", source_tabs_, source_labels_,
-            {{"Library first", "prefer_existing"},
-             {"Balanced", "balanced"},
-             {"Build my own", "prefer_generated"}},
-            [this](const std::string& v) { choose_module_source(v); });
-    add_row("Downloads", download_tabs_, download_labels_,
-            {{"Automatic", "entitled"}, {"Off", "none"}},
-            [this](const std::string& v) { choose_auto_download(v); });
-
-    style_pref_tabs();
-    return rows;
-}
-
-void ForgeModularShell::style_pref_tabs() {
-    // Exactly one option per row reads as chosen, by the colour actually
-    // painted -- the depth tabs shipped a style-only version of this once and
-    // two tabs looked selected at the same time.
-    static const char* kSourceValues[] = {"prefer_existing", "balanced",
-                                          "prefer_generated"};
-    for (std::size_t i = 0; i < source_tabs_.size(); ++i) {
-        const bool active = module_source_ == kSourceValues[i];
-        source_tabs_[i]->set_style(active ? TextButton::Style::secondary
-                                          : TextButton::Style::ghost);
-        if (i < source_labels_.size() && source_labels_[i])
-            source_labels_[i]->set_text_color(active ? color::text
-                                                     : color::text_muted);
-        source_tabs_[i]->request_repaint();
-    }
-    static const char* kDownloadValues[] = {"entitled", "none"};
-    for (std::size_t i = 0; i < download_tabs_.size(); ++i) {
-        const bool active = auto_download_ == kDownloadValues[i];
-        download_tabs_[i]->set_style(active ? TextButton::Style::secondary
-                                            : TextButton::Style::ghost);
-        if (i < download_labels_.size() && download_labels_[i])
-            download_labels_[i]->set_text_color(active ? color::text
-                                                       : color::text_muted);
-        download_tabs_[i]->request_repaint();
-    }
+    return {std::move(source), std::move(downloads)};
 }
 
 void ForgeModularShell::write_pref(const std::string& key,
@@ -624,14 +533,12 @@ void ForgeModularShell::write_pref(const std::string& key,
 void ForgeModularShell::choose_module_source(const std::string& value) {
     if (value == module_source_) return;
     module_source_ = value;
-    style_pref_tabs();
     write_pref("module_source", value);
 }
 
 void ForgeModularShell::choose_auto_download(const std::string& value) {
     if (value == auto_download_) return;
     auto_download_ = value;
-    style_pref_tabs();
     write_pref("auto_download", value);
 }
 
@@ -1881,10 +1788,6 @@ void ForgeModularShell::on_view_closed(pulp::view::View& view) {
     tab_labels_.clear();
     tab_module_ = nullptr;
     tab_patch_ = nullptr;
-    source_tabs_.clear();
-    source_labels_.clear();
-    download_tabs_.clear();
-    download_labels_.clear();
     mentions_.forget_views();
     forge::ForgeShell::on_view_closed(view);
 }

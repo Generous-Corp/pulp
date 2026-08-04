@@ -170,23 +170,20 @@ public:
 
     /// The generation preferences a person can change without opening a JSON
     /// file: where modules come from (module_source) and whether missing ones
-    /// may be fetched (auto_download). They live on Home because the chrome's
-    /// own settings sheet has no per-product hook -- ForgeChrome has no
-    /// virtuals, so the shell's accessories are the only surface this product
-    /// owns. Exposed so a test can reach the buttons a person is shown.
-    const std::vector<pulp::view::TextButton*>& module_source_tabs() const {
-        return source_tabs_;
-    }
-    const std::vector<pulp::view::TextButton*>& auto_download_tabs() const {
-        return download_tabs_;
-    }
+    /// may be fetched (auto_download). They live in the gear-menu settings
+    /// sheet, on the Permissions tab, through ForgeShell::settings_choices()
+    /// -- the sheet renders them in its own row idiom, so this shell hands
+    /// over words, values and callbacks, never a view.
+    std::vector<forge::ForgeShell::SettingsChoice> settings_choices() override;
+
+    /// What the controls currently show, for tests.
     const std::string& module_source_shown() const { return module_source_; }
     const std::string& auto_download_shown() const { return auto_download_; }
 
-    /// Adopt a preference: restyle the control and hand the write to
-    /// patch.py, the one validated writer of the settings file. A no-op when
-    /// the value is already current, so re-clicking the chosen option does
-    /// not spawn a process to write what is already written.
+    /// Adopt a preference and hand the write to patch.py, the one validated
+    /// writer of the settings file. A no-op when the value is already
+    /// current, so re-clicking the chosen option does not spawn a process to
+    /// write what is already written.
     void choose_module_source(const std::string& value);
     void choose_auto_download(const std::string& value);
     bool depth_group_visible() const {
@@ -464,18 +461,12 @@ private:
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
     pulp::view::View* depth_group_ = nullptr;
-    /// The Home preference controls, and the values they currently show.
-    /// The values are cached from the settings file when the row is built,
-    /// then kept by choose_*(): the file write is asynchronous, so reading
-    /// it back immediately would style the control from a stale file.
-    std::vector<pulp::view::TextButton*> source_tabs_;
-    std::vector<pulp::view::Label*> source_labels_;
-    std::vector<pulp::view::TextButton*> download_tabs_;
-    std::vector<pulp::view::Label*> download_labels_;
+    /// The preference values currently in force, cached from the settings
+    /// file when the sheet asks for choices, then kept by choose_*(): the
+    /// file write is asynchronous, so reading it back immediately would
+    /// answer from a stale file.
     std::string module_source_ = "prefer_existing";
     std::string auto_download_ = "entitled";
-    std::unique_ptr<pulp::view::View> build_pref_rows();
-    void style_pref_tabs();
     void write_pref(const std::string& key, const std::string& value);
     pulp::view::TextButton* open_button_ = nullptr;
     Launcher launcher_;

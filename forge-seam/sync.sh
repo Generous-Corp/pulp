@@ -105,8 +105,13 @@ if [ -f "$SRC/test/test_chrome_no_leak.cpp" ]; then
            "$SEAM/test/test_chrome_no_leak.cpp"
 fi
 if [ "$CHECK_ONLY" -eq 0 ]; then
+    # settings_surface carries the shell-contributed settings rows (the
+    # ForgeShell::settings_choices hook), and test_chrome.cpp carries the
+    # corrected open-permissions tab index its own assertion had enshrined.
     ( cd "$SRC" && git diff -- include/forge/shell.hpp include/forge/chrome.hpp \
-        src/chrome.cpp include/forge/fx_shell.hpp include/forge/instrument_shell.hpp \
+        src/chrome.cpp src/settings_surface.hpp src/settings_surface.cpp \
+        test/test_chrome.cpp \
+        include/forge/fx_shell.hpp include/forge/instrument_shell.hpp \
         include/forge/midi_shell.hpp CMakeLists.txt ) \
         > "$SEAM/patches/0001-chrome-copy-from-the-shell.patch" || true
     # The commit the patch is a diff AGAINST, recorded beside it.
