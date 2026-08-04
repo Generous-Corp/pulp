@@ -108,6 +108,42 @@ TEST_CASE("Standalone inspector runtime evaluation rejects every effectful live-
     std::filesystem::remove_all(temp, cleanup_error);
 }
 
+TEST_CASE("Standalone inspector runtime evaluation rejects a tree beyond its bounded reset",
+          "[standalone][inspect][runtime-eval][reset][negative]") {
+    const auto suffix = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto temp = std::filesystem::temp_directory_path()
+        / ("pulp-standalone-inspector-eval-reset-" + suffix);
+    const auto script = temp / "ui.js";
+    std::filesystem::create_directories(temp);
+    {
+        std::ofstream source(script);
+        source << "for (let i = 0; i < 2049; ++i) "
+                  "createLabel('v' + i, 'safe', '');";
+    }
+
+    StandaloneApp app(null_processor_factory);
+    CapabilitySet safe;
+    InspectorProcessor processor(app.state(), script, safe);
+    ViewBridge bridge(processor, app.state());
+    REQUIRE(bridge.open());
+
+    const std::string denial =
+        "Runtime.evaluate denied: live scripted-UI realm reset tree exceeds bounded cleanup limit";
+    REQUIRE(standalone_runtime_eval_realm_denial(
+                processor.active_scripted_ui()) == denial);
+
+    StubWindowHost window;
+    REQUIRE(StandaloneInspectorRuntime::create(
+                app, processor, bridge, *bridge.view(), window,
+                "develop", {}, true) == nullptr);
+    REQUIRE(processor.active_scripted_ui()->bridge() != nullptr);
+
+    bridge.close();
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(temp, cleanup_error);
+}
+
 TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refuses unsafe rebind",
           "[standalone][inspect][runtime-eval][capabilities][reload]") {
     const auto suffix = std::to_string(

@@ -27,6 +27,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <functional>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -182,6 +183,9 @@ public:
     // Runtime.evaluate realm replacement must never execute cleanup code in the
     // evaluated realm: user code can replace those helpers and wedge teardown.
     void clear_for_realm_replacement(const DeadlineCheck& deadline_check = {});
+    /// Empty when the current tree can be retired by Runtime.evaluate's
+    /// bounded reset; otherwise describes the structural blocker.
+    std::string_view bounded_realm_retirement_denial() const noexcept;
     // Owner-teardown cleanup for a quarantined realm. Removes only this
     // bridge's root children so a replacement session already attached to the
     // shared root remains intact.

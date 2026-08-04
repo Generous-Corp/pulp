@@ -10,6 +10,59 @@
 
 namespace pulp::view {
 
+namespace {
+
+enum class BoundedRetirementBlocker {
+    none,
+    too_many_views,
+    attached_native_view,
+};
+
+BoundedRetirementBlocker validate_bounded_retirement_tree(
+    const View& root, const WidgetBridge::DeadlineCheck* deadline_check) {
+    constexpr std::size_t kMaxDeadlineResetViews = 2048;
+    std::size_t view_count = 0;
+    const auto validate = [&](auto&& self, const View* node)
+        -> BoundedRetirementBlocker {
+        if (deadline_check) (*deadline_check)();
+        if (node == nullptr)
+            return BoundedRetirementBlocker::none;
+        ++view_count;
+        if (view_count > kMaxDeadlineResetViews)
+            return BoundedRetirementBlocker::too_many_views;
+        if (const auto* native = dynamic_cast<const NativeViewHost*>(node);
+            native != nullptr && native->is_native_attached())
+            return BoundedRetirementBlocker::attached_native_view;
+        for (std::size_t child = 0; child < node->child_count(); ++child) {
+            const auto blocker = self(self, node->child_at(child));
+            if (blocker != BoundedRetirementBlocker::none)
+                return blocker;
+        }
+        return BoundedRetirementBlocker::none;
+    };
+    for (std::size_t index = 0; index < root.child_count(); ++index) {
+        const auto blocker = validate(validate, root.child_at(index));
+        if (blocker != BoundedRetirementBlocker::none)
+            return blocker;
+    }
+    return BoundedRetirementBlocker::none;
+}
+
+std::string_view bounded_retirement_denial(
+    BoundedRetirementBlocker blocker) noexcept {
+    switch (blocker) {
+        case BoundedRetirementBlocker::too_many_views:
+            return "realm reset tree exceeds bounded cleanup limit";
+        case BoundedRetirementBlocker::attached_native_view:
+            return "realm reset cannot replace an attached native view";
+        case BoundedRetirementBlocker::none:
+            return {};
+    }
+    return {};
+}
+
+} // namespace
+
 void WidgetBridge::clear(const DeadlineCheck& deadline_check) {
     clear_realm(deadline_check);
 }
@@ -17,6 +70,11 @@ void WidgetBridge::clear(const DeadlineCheck& deadline_check) {
 void WidgetBridge::clear_for_realm_replacement(
     const DeadlineCheck& deadline_check) {
     retire_realm(deadline_check);
+}
+
+std::string_view WidgetBridge::bounded_realm_retirement_denial() const noexcept {
+    return bounded_retirement_denial(
+        validate_bounded_retirement_tree(root_, nullptr));
 }
 
 void WidgetBridge::clear_quarantined_realm() {
@@ -175,27 +233,12 @@ void WidgetBridge::retire_realm(const DeadlineCheck& deadline_check) {
     // All fallible work precedes the ownership transition. A bounded reset
     // rejects trees whose validation cannot fit inside its fixed grace window;
     // an ordinary reload uses the same transition without imposing that cap.
-    constexpr std::size_t kMaxDeadlineResetViews = 2048;
-    std::size_t view_count = 0;
-    const auto validate = [&](auto&& self, View* node) -> void {
-        if (deadline_check) deadline_check();
-        if (node == nullptr)
-            return;
-        ++view_count;
-        if (deadline_check && view_count > kMaxDeadlineResetViews)
-            throw std::runtime_error(
-                "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
-        if (deadline_check) {
-            if (const auto* native = dynamic_cast<const NativeViewHost*>(node);
-                native != nullptr && native->is_native_attached())
-                throw std::runtime_error(
-                    "Runtime.evaluate realm reset cannot replace an attached native view");
-        }
-        for (std::size_t child = 0; child < node->child_count(); ++child)
-            self(self, node->child_at(child));
-    };
-    for (auto* child : roots_to_retire)
-        validate(validate, child);
+    if (deadline_check) {
+        const auto denial = bounded_retirement_denial(
+            validate_bounded_retirement_tree(root_, &deadline_check));
+        if (!denial.empty())
+            throw std::runtime_error("Runtime.evaluate " + std::string(denial));
+    }
     const auto removed_recognizers = root_.collect_realm_reset_gestures();
     defer_all_param_gesture_routes();
     if (!roots_to_retire.empty())

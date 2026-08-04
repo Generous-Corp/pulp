@@ -44,10 +44,16 @@ standalone_runtime_eval_realm_denial(const view::ScriptedUiSession* scripted_ui)
     if (!scripted_ui)
         return std::nullopt;
     const auto effectful = scripted_ui->granted_capabilities().first_effectful();
-    if (!effectful)
-        return std::nullopt;
-    return "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '"
-        + std::string(view::capability_name(*effectful)) + "'";
+    if (effectful)
+        return "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '"
+            + std::string(view::capability_name(*effectful)) + "'";
+    if (const auto* bridge = scripted_ui->bridge()) {
+        const auto reset_denial = bridge->bounded_realm_retirement_denial();
+        if (!reset_denial.empty())
+            return "Runtime.evaluate denied: live scripted-UI "
+                + std::string(reset_denial);
+    }
+    return std::nullopt;
 }
 
 } // namespace pulp::format::detail
