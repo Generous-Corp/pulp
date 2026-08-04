@@ -9,10 +9,16 @@ namespace pulp::view {
 /// The shader replaces the widget's body / track / fill drawing only — labels,
 /// value text, and hover glow keep painting in C++. Widgets opt in by
 /// inheriting this alongside `View`, which is what makes shader support
-/// *discoverable*: the JS bridge and the continuous-frame check each locate
-/// shader-capable widgets with a single `dynamic_cast<CustomShaderHost*>`
-/// rather than a hardcoded chain of concrete widget types. A new shader-capable
-/// widget therefore needs no edits outside its own class.
+/// *discoverable*: the JS bridge locates shader-capable widgets with a single
+/// `dynamic_cast<CustomShaderHost*>` rather than a hardcoded chain of concrete
+/// widget types.
+///
+/// The one place that is NOT free is the render loop. `needs_continuous_frames`
+/// runs over every view on every frame, and asking it for a cast per node cost
+/// more than the drawing it gated, so it asks `View::needs_frames_self()`
+/// instead. A widget that inherits this mixin must therefore fold
+/// `shader_uses_time()` into its own `needs_frames_self()` override, or a
+/// time-driven shader on it freezes as soon as nothing else wants frames.
 class CustomShaderHost {
 public:
     virtual ~CustomShaderHost() = default;

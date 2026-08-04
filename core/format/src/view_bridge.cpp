@@ -28,14 +28,19 @@ ViewSize safe_view_size(Processor& processor) noexcept {
 // Pull host values into every DesignFrameView at or below `v`. Walks the LIVE
 // tree rather than a cached pointer list: a cached list would dangle whenever a
 // view is removed (editor reload transplants children), and a dangling
-// DesignFrameView* here is a use-after-free inside a DAW's UI tick. The walk is
-// the cheap half of the pump — the per-frame cost is dominated by the sync
-// itself, and a design tree is tens of views, not thousands.
+// DesignFrameView* here is a use-after-free inside a DAW's UI tick.
+//
+// "A design tree is tens of views, not thousands" was the assumption behind
+// doing that with a `dynamic_cast` per node, and an application shell built on
+// the same view tree is where it stops being true: sampled on an idle Forge
+// Modular window, the RTTI question alone was 7% of the process. The flag is
+// set by DesignFrameView's own constructor, so the static_cast below is asking
+// a type that has already answered.
 std::size_t sync_design_frames(view::View* v) {
     if (!v) return 0;
     std::size_t synced = 0;
-    if (auto* frame = dynamic_cast<view::DesignFrameView*>(v)) {
-        frame->sync_from_host_params();
+    if (v->is_design_frame()) {
+        static_cast<view::DesignFrameView*>(v)->sync_from_host_params();
         ++synced;
     }
     for (std::size_t i = 0; i < v->child_count(); ++i)

@@ -150,6 +150,11 @@ public:
         return analyzer_enabled_ && !spectrum_smoothed_.empty();
     }
 
+    /// A handle mid-settle, or a live analyzer with data to draw.
+    bool needs_frames_self() const override {
+        return hover_animating() || analyzer_animating();
+    }
+
     // Drag the LEFT dB-scale gutter to zoom the analyzer dBFS range, Logic-style
     // (drag DOWN → lower/expand the floor toward −100 dBFS = zoom OUT; drag UP →
     // raise the floor toward −40 dBFS = zoom IN). Scoped to a narrow left gutter

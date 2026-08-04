@@ -1654,6 +1654,30 @@ public:
     void set_continuous_repaint(bool on) { wants_continuous_repaint_ = on; }
     bool wants_continuous_repaint() const { return wants_continuous_repaint_; }
 
+    /// Is THIS view, on its own, mid-something that needs the next frame?
+    ///
+    /// A widget with an animation of its own — a knob's hover glow, a toggle's
+    /// thumb travel, a shader with a `time` uniform — answers yes while it is
+    /// moving and no the frame it settles. `needs_continuous_frames()` asks
+    /// every view in the tree this question once per frame, which is the
+    /// reason it is a virtual call rather than a cast: the predicate used to
+    /// try six `dynamic_cast`s per node per frame, and on a real UI tree that
+    /// RTTI search was measured as the single largest CPU cost in the idle
+    /// app — larger than the painting it was deciding about.
+    virtual bool needs_frames_self() const { return false; }
+
+    /// Set by `DesignFrameView`'s constructor, read by the host-parameter pump.
+    ///
+    /// A flag rather than a `dynamic_cast`, for the same reason as above: the
+    /// pump walks the whole live tree every time it runs, and asking libc++abi
+    /// "is this a DesignFrameView" once per node was 7% of the idle process.
+    /// The walk still visits the LIVE tree — a cached pointer list would dangle
+    /// when an editor reload transplants children — so nothing about lifetime
+    /// changes; only the question got cheaper.
+    bool is_design_frame() const { return is_design_frame_; }
+    /// Only `DesignFrameView` sets this, and only on itself.
+    void mark_design_frame() { is_design_frame_ = true; }
+
     /// RN textShadow per-attribute storage. Storage-only; SkPaint shadow
     /// integration is not wired here. Each slot is round-trippable so a
     /// commitUpdate that touches only one of the three preserves the others
@@ -2152,6 +2176,7 @@ private:
     std::string resize_;                   // noop (no resize handles)
     std::string animation_play_state_;     // partial (tick_animations consumes)
     bool wants_continuous_repaint_ = false; // opt-in per-vsync repaint
+    bool is_design_frame_ = false;          // set by DesignFrameView's ctor
     // RN textShadow* per-attribute storage slots. SkPaint shadow integration
     // deferred; storage path is round-trippable.
     std::string text_shadow_color_;

@@ -2154,7 +2154,12 @@ private:
         paint_scene(*canvas);
 
         continuous_frames_.store(
-            pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
+            // The O(1) question first. `needs_continuous_frames` walks the
+            // whole view tree; `has_active_subscribers` is a count. Asking the
+            // expensive one first meant the walk ran on every frame of every
+            // animation, when the answer was already yes.
+            frame_clock_.has_active_subscribers() ||
+                pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
         // PULP_EMBED_GPU_FRAME_STAT — env-gated LIVE display-link present-path

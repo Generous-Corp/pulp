@@ -471,6 +471,8 @@ public:
     bool scroll_animating() const {
         return smooth_scroll_x_.animating() || smooth_scroll_y_.animating();
     }
+    /// The offset is still easing toward its target.
+    bool needs_frames_self() const override { return scroll_animating(); }
     void set_scroll(float x, float y);
 
     /// Scroll by a delta.

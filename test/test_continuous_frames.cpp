@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -96,6 +97,37 @@ TEST_CASE("the predicate walks descendants", "[view][continuous-frames]") {
     REQUIRE_FALSE(needs_continuous_frames(&root));
 }
 
+// EACH WIDGET ANSWERS FOR ITSELF, and the tree walk only asks.
+//
+// The predicate used to try six `dynamic_cast`s per node per frame, three of
+// them through multiple inheritance, and on a real UI tree that RTTI search was
+// the largest single CPU cost in an idle window -- more than the drawing it
+// gated. This pins the replacement contract rather than only its outcome: a
+// widget with an animation of its own has to report it through
+// `needs_frames_self()`, because that is the only question the walk now asks.
+TEST_CASE("a widget reports its own liveness", "[view][continuous-frames]") {
+    SECTION("a plain view is never live on its own") {
+        View v;
+        REQUIRE_FALSE(v.needs_frames_self());
+    }
+    SECTION("a time-driven shader makes the widget itself report live") {
+        Knob knob;
+        REQUIRE_FALSE(knob.needs_frames_self());
+        knob.set_custom_shader(
+            "uniform float time; half4 main(float2 p) { return half4(time); }");
+        REQUIRE(knob.needs_frames_self());
+    }
+    SECTION("an EQ analyzer with data reports live from the widget") {
+        EqCurveView eq;
+        eq.set_bounds({0, 0, 320, 160});
+        eq.set_sample_rate(48000.0f);
+        REQUIRE_FALSE(eq.needs_frames_self());
+        const std::vector<float> bins(64, -30.0f);
+        eq.set_spectrum(bins.data(), bins.size());
+        REQUIRE(eq.needs_frames_self());
+    }
+}
+
 TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
     View root;
     root.add_child(std::make_unique<Knob>());
@@ -109,8 +141,7 @@ TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
 }
 
 // A shader that declares a `time` uniform animates every frame, so the widget's
-// subtree needs continuous frames. Any CustomShaderHost is covered by the single
-// dynamic_cast in needs_continuous_frames().
+// subtree needs continuous frames.
 namespace {
 // Valid SkSL that really declares `time`. The fixture used to be
 // `half4 main() { return half4(time); }`, which declares no uniform and does not
