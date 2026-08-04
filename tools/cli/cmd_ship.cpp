@@ -624,15 +624,17 @@ static int ship_package_impl(const std::vector<std::string>& args,
                 "pulp ship package")) {
             return 2;
         }
-        const auto capability_evidence =
-            artifacts / "inspector-capability-package-input.json";
-        if (!pulp::cli::inspector_shipping::write_evidence(
-                capability_evidence, inspector_report, "package-input")) {
-            std::cerr << "pulp ship package: could not write inspector capability evidence\n";
-            return 1;
+        if (!inspector_artifacts.empty()) {
+            const auto capability_evidence =
+                artifacts / "inspector-capability-package-input.json";
+            if (!pulp::cli::inspector_shipping::write_evidence(
+                    capability_evidence, inspector_report, "package-input")) {
+                std::cerr << "pulp ship package: could not write inspector capability evidence\n";
+                return 1;
+            }
+            evidence.path = capability_evidence;
         }
         evidence.report = inspector_report;
-        evidence.path = capability_evidence;
 
         if (apk_only && aab_only) {
             std::cerr << "Error: --apk-only and --aab-only are mutually exclusive.\n";
