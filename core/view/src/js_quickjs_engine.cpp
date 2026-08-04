@@ -190,7 +190,8 @@ private:
                 std::chars_format::general);
             if (converted.ec != std::errc{})
                 throw std::runtime_error("could not serialize evaluation number");
-            append(std::string_view(text, converted.ptr));
+            append(std::string_view(
+                text, static_cast<std::size_t>(converted.ptr - text)));
             return;
         }
         if (qjs::JS_IsString(value)) {
