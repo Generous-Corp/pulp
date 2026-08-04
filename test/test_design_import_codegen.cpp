@@ -3945,3 +3945,44 @@ TEST_CASE("an overlay control keeps the capture visible beneath it",
     INFO(js);
     REQUIRE(js.find(".style.backgroundColor") == std::string::npos);
 }
+
+// A tiled background is a gradient PLUS a size, and the JS emitter wrote only
+// the gradient — so the tile collapsed to one stretched copy.
+//
+// That is not a texture nicety. A design-system grid or scanline overlay IS
+// nothing but a gradient and a size, so losing the size loses the whole
+// element: a spectrum display whose only children were `.grid-x` / `.grid-y`
+// rendered as an empty panel and was reported as a layout bug on three
+// different panels before the missing size was found here.
+//
+// Order is load-bearing. The `background` shorthand RESETS `background-size`,
+// so the size has to be written after it; emitted first, it is silently
+// discarded and this test would pass against markup that still renders wrong.
+TEST_CASE("the JS emitter carries background-size, after the shorthand",
+          "[view][import][codegen][background-size]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    IRNode grid;
+    grid.type = "frame";
+    grid.name = "grid-x";
+    grid.style.background_gradient =
+        "linear-gradient(90deg, rgb(36, 38, 84) 1px, rgba(0, 0, 0, 0) 1px)";
+    grid.style.background_size = "12.5% 100%";
+    ir.root.children.push_back(std::move(grid));
+
+    // web_compat, not bridge_native_js: this is the document.createElement +
+    // el.style lane, which is what a generated panel's ui.js actually uses.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    const auto gradient_at = js.find(".style.background = ");
+    const auto size_at = js.find(".style.backgroundSize = ");
+    REQUIRE(gradient_at != std::string::npos);
+    REQUIRE(size_at != std::string::npos);
+    CHECK(js.find("12.5% 100%") != std::string::npos);
+    // The shorthand resets the size, so anything else here ships a tile that
+    // never tiles.
+    CHECK(gradient_at < size_at);
+}

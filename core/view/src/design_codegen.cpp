@@ -421,6 +421,16 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("backgroundColor", s.background_color);
     if (s.background_gradient)
         ss << ind << var << ".style.background = '" << js_single_quote_escape(*s.background_gradient) << "';\n";
+    // AFTER the shorthand, never before: `background` resets `background-size`,
+    // so emitting the size first silently throws it away.
+    //
+    // Without this a tiled background collapses to one stretched copy of its
+    // gradient. That is not a texture nicety — a design-system grid or scanline
+    // IS a gradient plus a size, so losing the size loses the element. A
+    // spectrum display whose only content was `.grid-x` / `.grid-y` rendered as
+    // an empty panel and was reported as a layout bug three separate times, on
+    // three different panels, before the size was found missing here.
+    emit_str("backgroundSize", s.background_size);
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);
