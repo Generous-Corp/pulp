@@ -692,13 +692,17 @@ void StateStore::flush_deferred_gesture_releases() noexcept {
     auto pending = std::move(deferred_gesture_releases_);
     deferred_gesture_releases_.clear();
     for (const auto id : pending) {
+#if defined(__cpp_exceptions)
         try {
+#endif
             if (on_end_gesture_)
                 on_end_gesture_(id);
+#if defined(__cpp_exceptions)
         } catch (...) {
             // Bookkeeping was already closed when the release was deferred.
             // One hostile host callback must not suppress later queued ends.
         }
+#endif
     }
 }
 
@@ -709,13 +713,17 @@ void StateStore::flush_deferred_gesture_release(ParamID id) noexcept {
         id);
     if (found == deferred_gesture_releases_.end()) return;
     deferred_gesture_releases_.erase(found);
+#if defined(__cpp_exceptions)
     try {
+#endif
         if (on_end_gesture_)
             on_end_gesture_(id);
+#if defined(__cpp_exceptions)
     } catch (...) {
         // The retired owner's bookkeeping is already closed. Match the bulk
         // flush contract: a hostile host callback cannot strand later work.
     }
+#endif
 }
 
 void StateStore::release_open_gestures() {
