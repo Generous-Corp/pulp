@@ -681,14 +681,32 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     REQUIRE(result);
 
     std::vector<const pulp::view::IRNode*> controls;
+    std::vector<const pulp::view::IRNode*> drivers;
+    std::vector<const pulp::view::IRNode*> displays;
     std::function<void(const pulp::view::IRNode&)> walk =
         [&](const pulp::view::IRNode& node) {
-            if (node.attributes.count("pulpParamKey") != 0) controls.push_back(&node);
+            const bool drives = node.attributes.count("pulpParamKey") != 0;
+            const bool shows = node.attributes.count("pulpMeterValueKey") != 0;
+            if (drives) drivers.push_back(&node);
+            if (shows) displays.push_back(&node);
+            if (drives || shows) controls.push_back(&node);
             for (const auto& child : node.children) walk(child);
         };
     walk(result.design_ir->root);
 
     REQUIRE(controls.size() == 2);
+    // The knob DRIVES the macro and the meter only DISPLAYS it. Both under
+    // pulpParamKey reads downstream as two controls competing for one
+    // parameter, which a host that requires each macro to be driven exactly
+    // once rejects -- on a panel whose author did the ordinary thing.
+    REQUIRE(drivers.size() == 1);
+    REQUIRE(displays.size() == 1);
+    REQUIRE(drivers.front()->attributes.at("pulpParamKey") == "shared");
+    REQUIRE(displays.front()->attributes.at("pulpMeterValueKey") == "shared");
+    REQUIRE(displays.front()->attributes.count("pulpParamKey") == 0);
+    // The shared "binding" key stays on both: the JS emitter reads one key and
+    // branches on the widget type (bindMeter vs bindWidgetToParam).
+    REQUIRE(displays.front()->attributes.at("binding") == "shared");
     std::set<std::string> anchors;
     for (const auto* control : controls) {
         const auto route = control->attributes.find("pulpRouteId");

@@ -259,8 +259,19 @@ int lower_semantic_controls(const fs::path& path,
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
+        // Which attribute supplied the key IS the declared role: a control
+        // DRIVES its parameter, a meter only DISPLAYS one. Keying the role off
+        // the attribute rather than the widget kind keeps this agreeing by
+        // construction with the authoring contract an importing host checks
+        // before the browser runs -- a fader beside its own level meter binds
+        // the same parameter twice, which is completely ordinary and must not
+        // read as two controls driving one parameter.
         std::string param = string_member(data, "param");
-        if (param.empty()) param = string_member(data, "meter");
+        bool displays_only = false;
+        if (param.empty()) {
+            param = string_member(data, "meter");
+            displays_only = !param.empty();
+        }
         if (param.empty()) continue;  // "bound" without a key is not a binding
 
         // Prefer the declared paint box; fall back to the component box and
@@ -287,7 +298,14 @@ int lower_semantic_controls(const fs::path& path,
         // real widgets and an EMPTY binding manifest -- knobs that render and
         // move nothing.
         control.attributes["binding"] = param;
-        control.attributes["pulpParamKey"] = param;
+        // The JS emitter reads one key for both roles and branches on the
+        // widget type (bindMeter vs bindWidgetToParam), so "binding" is
+        // shared. The C++ / manifest vocabulary separates them, and writing a
+        // display under pulpParamKey claims the parameter is DRIVEN here --
+        // which reads downstream as a second control on a parameter that
+        // already has one.
+        control.attributes[displays_only ? "pulpMeterValueKey" : "pulpParamKey"] =
+            param;
         // A param key alone gets the control into the binding MANIFEST but not
         // into the emitted C++. `collect_resolved_binding_plan` admits a helper
         // route only when the node ALSO carries a route id and a stable anchor:
@@ -864,6 +882,14 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         capture.style.height = static_cast<float>(logical_height);
         capture.style.object_fit = "fill";
         capture.attributes["asset_ref"] = reference_id;
+        // Every node in a lowered tree carries an anchor: it is the identity a
+        // consumer edits, re-links and reconciles against. This backdrop is
+        // adapter-authored rather than a document element, so the anchor is a
+        // constant -- but a tree with one unanchored node is refused whole by
+        // a host that enforces the contract, and the panel it refuses is the
+        // one the browser just solved correctly.
+        capture.stable_anchor_id = "browser:capture";
+        capture.anchor_strategy = "adapter";
         ir.root.children.push_back(std::move(capture));
     } else {
         ir.root.render_mode = NodeRenderMode::faithful_capture;

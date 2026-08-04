@@ -33,6 +33,7 @@ import {
   freezeAndMeasureDocumentExtent,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
+  measureClippedControls,
   measureDocumentExtent,
   resumeDynamicTime,
   validateCaptureDimensions,
@@ -730,6 +731,21 @@ async function runCapture(options) {
         `frozen content begins outside the corrected viewport at ` +
         `(${finalExtent.left}, ${finalExtent.top})`);
       error.code = "capture-negative-overflow";
+      throw error;
+    }
+    // Symmetric with the rule above. Content past the top or left is refused;
+    // content past a clipping edge was silently dropped, so a panel could ship
+    // with parameters bound to controls nobody can see.
+    const clippedControls = await measureClippedControls(cdp);
+    if (clippedControls.length > 0) {
+      const detail = clippedControls
+        .map(c => `${c.binding || "(unbound)"} cut by ${c.lost}px inside .${c.by}`)
+        .join("; ");
+      const error = new Error(
+        `${clippedControls.length} bound control(s) are clipped out of view: ` +
+        `${detail}. The panel declares a frame smaller than its own content; ` +
+        "give the root the height its content needs, or remove what does not fit.");
+      error.code = "capture-control-clipped";
       throw error;
     }
     const captureWidth = finalExtent.width;

@@ -5016,6 +5016,123 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 
 **Claude Code surfacing**: when someone runs `/import-design` on a Figma file, ask if they want silver (default) or sprite. If they're unsure, default silver and add a note that they can re-import with `--knob-style=sprite` to compare. If they have one specific knob that "needs to look like the Figma", suggest the `@sprite` suffix on that node's name in the Figma file.
 
+## A generated panel can be captured perfectly and still not be the one that ships
+
+Four independent defects, all found in one session on a single panel, all of
+which reported success at every stage. They share a shape: the browser lane
+worked, and something AFTER it quietly substituted, discarded or invented.
+Check each by looking at the INSTALLED artifact, never at the capture's own
+proof images.
+
+- **`capture_method` tells you which panel actually won.** `chromium-cdp` means
+  the browser-solved document survived; `design-ir-first` (or any procedural
+  builder's stamp) means something rebuilt the panel from the parameter list
+  after the import. A host that imports HTML must have an explicit branch that
+  makes the imported IR the design — if its selection chain only handles
+  "emitted" and "retained", the imported document falls through to the template
+  and the serialization below overwrites it. Nothing reports a fallback,
+  because nothing considers it one: the install succeeds and the panel is
+  merely someone else's. Assert the capture method on the installed document.
+
+- **A meter and the control beside it legitimately name the same parameter.**
+  `data-pulp-param` DRIVES, `data-pulp-meter` DISPLAYS. Lowering both under
+  `pulpParamKey` makes one parameter read as driven twice, and a host that
+  requires each to be driven exactly once then rejects an ordinary panel. The
+  attribute that supplied the key is the declared role: meters lower to
+  `pulpMeterValueKey`. The shared `binding` attribute stays on both — the JS
+  emitter reads one key and branches on the widget type.
+
+- **Every node in a lowered tree needs an anchor, including the ones the
+  adapter authored.** The capture backdrop is not a document element, so it is
+  easy to leave unanchored; a consumer that enforces "every node carries an
+  anchor" then refuses the whole tree, and the panel it refuses is the one the
+  browser just solved correctly.
+
+- **The whole-tree lowering is opt-in and silence looks like success.** Without
+  `--native-panel-lowering` the capture emits ONE photograph plus control
+  overlays. It scores *better* against the oracle (the bitmap is the oracle),
+  so a fidelity gate cannot see the difference — but the colours are baked into
+  pixels, nothing downstream can retint or theme it, and the bitmap does not
+  survive being saved, because a project persists the DesignIR and the ui.js,
+  not the scratch directory the asset lived in. Count `faithful_capture` nodes
+  in the installed IR: on a natively lowered panel it is zero.
+
+## Colour: the agent chooses it, and it belongs on the root
+
+A style pack ships structure, components, spacing and type. It does **not** own
+the panel's palette. If every pack ships the same ground — which is easy to end
+up with, and was true of all three at one point — then a brief that tells the
+model "write no literal colour, every colour comes from a token" guarantees
+every generated plugin is the same shade, no matter what art direction the
+model committed to. The variety is structural only, and nobody notices because
+each panel looks deliberate on its own.
+
+The rule that gets both properties is **one place, not everywhere**:
+
+```html
+<div class="pulp-root" style="
+  --surface-app:<ground>; --surface-panel:<panel>; --text-strong:<type>;
+  --accent:<accent>; --line:<hairline>; ...">
+```
+
+Write the brief with placeholders, not with a worked palette. A concrete
+example gets copied, and then every generated plugin arrives in the example's
+colours — which is the same defect as inheriting the pack's ground, differing
+only in which hex everything collapses to. It is an easy one to introduce while
+fixing the original.
+
+then `var(--token)` for every colour below it. The model picks the hex; the
+panel stays addressable, so themes, retinting and pack restyling all keep
+working. Scattering literals through the markup is what actually breaks
+restyling — measured once at 106 literals and zero tokens, where a warm cream
+pack and a phosphor-green pack produced two near-identical pictures.
+
+Enforce it, do not merely ask: require an accent AND a surface override in the
+document, checked before the browser starts. A prose instruction in a brief
+does not hold. Require both, because either alone is the house style with one
+thing moved.
+
+## Clipping: the negative rule and the positive one are not symmetric
+
+Content past the TOP or LEFT reaches negative document coordinates and the
+capture refuses it outright (`capture-negative-overflow`). Content past a
+clipping edge — a root that declares `height:540px; overflow:hidden` and then
+holds 900px — is **silently dropped**, and every stage downstream reports
+success. `overflow:hidden` means the document never grows, so the extent checks
+measure a clean 540px document and capture without complaint while a third of
+the panel, including controls bound to real parameters, is cut away.
+
+Scope the check to **bound controls**, not to all content: clipped text is
+ordinary and usually intentional (`text-overflow: ellipsis` requires
+`overflow: hidden`, and design systems use it throughout), so failing on it
+rejects correct panels. A control the user cannot reach is never intentional —
+it drives a parameter that can now only be automated. `capture-control-clipped`
+names each binding and how many pixels were lost.
+
+## The value arc belongs to the WIDGET, and a blank knob in the capture is correct
+
+A captured knob that is a bare shaded disc — no arc, no pointer — looks like a
+design that forgot its indicator. It is not. The value arc has to MOVE with the
+parameter, and a captured one cannot: it is baked at whatever value the document
+declared. So the authoring brief tells the model not to draw one, and the widget
+supplies the arc and the indicator at runtime.
+
+Do not "fix" this by adding a ring to the design. That puts a static arc under a
+moving one, which is visibly worse than either — two rings at two different
+angles — and it is a documented regression with a test pinning the prompt
+against it. The blank disc in the browser oracle is the correct intermediate.
+
+The trap for a reader arriving at a screenshot: our render has indicators and
+the Chrome oracle does not, so the renderer looks like it is inventing control
+appearance in violation of "the design draws, the runtime animates". The value
+arc is the deliberate exception, for the reason above. Check the authoring brief
+and its tests before concluding the renderer overdraws.
+
+Note that a pack may still SHIP `.ring` / `.pointer` components while the brief
+tells generated panels not to use them — hand-authored panels and other lanes
+consume the same pack. A component existing in the stylesheet is not permission
+for the generated lane to use it.
+
 ## Native-import gotchas
 
 Non-obvious rules in the import + native-codegen path. Each cost a real
