@@ -1019,6 +1019,27 @@ std::vector<std::string> names_of(
     return out;
 }
 
+/// The module rows only. The list carries maker rows too, and a count that
+/// silently absorbs them cannot tell "the maker row appeared" from "a module
+/// went missing".
+std::vector<forge_modular::MentionCandidate> modules_in(
+    const std::vector<forge_modular::MentionCandidate>& cs) {
+    std::vector<forge_modular::MentionCandidate> out;
+    for (const auto& c : cs)
+        if (c.kind == forge_modular::MentionCandidate::Kind::module_)
+            out.push_back(c);
+    return out;
+}
+
+std::vector<forge_modular::MentionCandidate> brands_in(
+    const std::vector<forge_modular::MentionCandidate>& cs) {
+    std::vector<forge_modular::MentionCandidate> out;
+    for (const auto& c : cs)
+        if (c.kind == forge_modular::MentionCandidate::Kind::brand)
+            out.push_back(c);
+    return out;
+}
+
 }  // namespace
 
 TEST_CASE("a maker's name finds that maker's modules", "[mention][catalog]") {
@@ -1028,19 +1049,21 @@ TEST_CASE("a maker's name finds that maker's modules", "[mention][catalog]") {
     using forge_modular::search_entries;
 
     // A maker writes their own name three ways, and somebody types whichever
-    // they remember. All three have to land on the same three modules.
+    // they remember. All three have to land on the same three modules, plus
+    // the maker's own row.
     for (const auto& spelling : {"CV funk", "cvfunk", "CV Funk", "cv-funk"}) {
         const auto hits = search_entries(space_library(), spelling);
         INFO("spelling: " << spelling);
-        CHECK(hits.size() == 3);
+        CHECK(modules_in(hits).size() == 3);
     }
 
     // A DIRECT HIT IS NEVER BURIED BY A MAKER. There is a module called Sphinx
     // and a maker called Sphinx Modular, and the maker's two modules are first
     // in the list — so only the ranking can put the direct hit on top.
     const auto sphinx = search_entries(space_library(), "sphinx");
-    REQUIRE(sphinx.size() == 3);
+    REQUIRE(modules_in(sphinx).size() == 3);
     CHECK(sphinx[0].name == "Sphinx");
+    CHECK(sphinx[0].kind == forge_modular::MentionCandidate::Kind::module_);
 
     // Exact above prefix: a whole name that loses to a longer one containing
     // it is the query being ignored.
@@ -1054,6 +1077,126 @@ TEST_CASE("a maker's name finds that maker's modules", "[mention][catalog]") {
     REQUIRE_FALSE(br.empty());
     CHECK(br[0].name == "Macro Oscillator");
     CHECK(br[0].alias == "Braids");
+    CHECK(br[0].kind == forge_modular::MentionCandidate::Kind::module_);
+}
+
+TEST_CASE("a maker is a row of its own, above its modules", "[mention][catalog]") {
+    // A maker with fifty modules could only ever be reached fifty rows at a
+    // time. The one gesture somebody actually wants — "that maker" — did not
+    // exist, so naming a vendor meant typing its name and hoping the model
+    // recognised it.
+    using forge_modular::search_entries;
+    using Kind = forge_modular::MentionCandidate::Kind;
+
+    const auto cv = search_entries(space_library(), "CV");
+    REQUIRE_FALSE(cv.empty());
+    CHECK(cv[0].kind == Kind::brand);
+    CHECK(cv[0].brand == "CV funk");
+    // The count is the whole reason the row is worth offering: it says how big
+    // a thing is being named.
+    CHECK(cv[0].name == "3 modules");
+    // And what gets inserted is the maker's NAME, not a slug and not a syntax.
+    // The prompt reader matches makers by name whether they arrived as a token
+    // or as ordinary words, so this is one behaviour rather than two.
+    CHECK(cv[0].slug == "CV funk");
+    // Picking it installs nothing and refuses nothing.
+    CHECK(cv[0].insertable());
+    // Its modules are still there, underneath.
+    CHECK(modules_in(cv).size() == 3);
+
+    // A BRAND ROW NEVER BURIES AN EXACT MODULE MATCH. "@Dunes" is a module and
+    // stays one, even though a maker row would be a plausible thing to offer.
+    const auto dunes = search_entries(space_library(), "Dunes");
+    REQUIRE_FALSE(dunes.empty());
+    CHECK(dunes[0].kind == Kind::module_);
+    CHECK(dunes[0].name == "Dunes");
+
+    // Nor does it bury an exact match that shares a name with a maker: there
+    // is a module called Sphinx and a maker called Sphinx Modular.
+    const auto sphinx = search_entries(space_library(), "sphinx");
+    REQUIRE(sphinx.size() >= 2);
+    CHECK(sphinx[0].kind == Kind::module_);
+    CHECK(brands_in(sphinx).size() == 1);
+
+    // "@" alone opens the whole library, and every maker prefix-matches an
+    // empty string. A wall of maker rows in front of it is not a list.
+    CHECK(brands_in(search_entries(space_library(), "")).empty());
+}
+
+TEST_CASE("two letters name a module, not a maker", "[mention][catalog]") {
+    // "br" means Braids. A maker called Bruer prefix-matches those same two
+    // letters, and if a partial maker name outranked the alias tier it would
+    // take that row — which is the mirror image of the "@CV" fix and has to
+    // stay wrong. Two letters are weak evidence of naming a vendor.
+    //
+    std::vector<forge_modular::ModuleEntry> lib;
+    for (auto e : space_library()) {
+        // Installed, because readiness leads the list and this rule is about
+        // what happens at the front of it: the row Braids has earned.
+        if (e.brand == "Audible Instruments") e.installed = true;
+        lib.push_back(e);
+    }
+    lib.push_back({"Bruer", "Klok", "Bruer/Klok", false});
+
+    const auto br = forge_modular::search_entries(lib, "br");
+    REQUIRE_FALSE(br.empty());
+    CHECK(br[0].name == "Macro Oscillator");
+    CHECK(br[0].alias == "Braids");
+    CHECK(br[0].kind == forge_modular::MentionCandidate::Kind::module_);
+    // Said as an ordering rather than only as a first place, because the row
+    // that matters is the one the maker would have taken.
+    const auto names = names_of(br);
+    const auto braids = std::find(names.begin(), names.end(), "Macro Oscillator");
+    const auto maker = std::find(names.begin(), names.end(), "1 module");
+    REQUIRE(braids != names.end());
+    REQUIRE(maker != names.end());
+    CHECK(braids < maker);
+
+    // A module whose NAME simply repeats its maker's is not a name match for a
+    // query reaching for the maker: "@CV" answered "CV funk Blank 4HP" before
+    // the maker row, which is a blank panel leading a list about a vendor.
+    lib.push_back({"CV funk", "CV funk Blank 4HP", "CVfunk/CVfunkBlank4HP", true});
+    const auto cv = forge_modular::search_entries(lib, "CV");
+    REQUIRE_FALSE(cv.empty());
+    CHECK(cv[0].kind == forge_modular::MentionCandidate::Kind::brand);
+    CHECK(cv[0].brand == "CV funk");
+
+    // And typing PAST the maker's name still reaches that module, because the
+    // query is then longer than the brand and plainly means the module.
+    const auto blank = forge_modular::search_entries(lib, "CV funk Blank");
+    REQUIRE_FALSE(blank.empty());
+    CHECK(blank[0].name == "CV funk Blank 4HP");
+}
+
+TEST_CASE("picking a maker inserts the maker and says what that means",
+          "[mention]") {
+    // Picking a row that says "50 modules" looks, from the outside, exactly
+    // like asking for fifty modules. It is a sourcing preference, and the row
+    // that inserts it has to say so before the patch settles the question.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(space_source);
+
+    std::string chosen;
+    overlay.on_choose = [&](const std::string& s) { chosen = s; };
+    bool refused = false;
+    overlay.on_refused = [&](const forge_modular::MentionCandidate&) {
+        refused = true;
+    };
+
+    overlay.handle_text("@CV", 3);
+    REQUIRE(overlay.is_open());
+    REQUIRE(overlay.candidates()[0].kind ==
+            forge_modular::MentionCandidate::Kind::brand);
+    overlay.choose(0);
+
+    CHECK(chosen == "CV funk");
+    // None of CV funk's modules are installed in this library, and a maker row
+    // must still not be routed through the download path: naming a maker
+    // downloads nothing.
+    CHECK_FALSE(refused);
+    CHECK(overlay.notice().find("CV funk preferred") != std::string::npos);
+    CHECK(overlay.notice().find("not all 3 modules") != std::string::npos);
 }
 
 TEST_CASE("a mention survives a space while it still matches", "[mention]") {
@@ -1075,7 +1218,7 @@ TEST_CASE("a mention survives a space while it still matches", "[mention]") {
     CHECK(overlay.is_open());                      // the guess is still alive
     overlay.handle_text("@CV funk", 8);
     CHECK(overlay.is_open());
-    CHECK(overlay.candidates().size() == 3);
+    CHECK(modules_in(overlay.candidates()).size() == 3);
 
     // A two-word module name, which is the other half of the same problem.
     overlay.handle_text("@Bernoulli Gate", 15);

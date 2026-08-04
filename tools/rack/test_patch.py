@@ -784,6 +784,275 @@ def check_acquisition() -> tuple:
 
 
 
+#: A library small enough to assert about and shaped like the cases that go
+#: wrong: a maker who publishes under several plugin slugs, a maker whose name
+#: is also an ordinary English word, a maker with a paid plugin, and a maker
+#: whose modules span several kinds so a cut list can be judged.
+BRAND_CAT = {
+    "CVfunk": {"brand": "CV funk", "arches": ["mac-arm64"]},
+    "CVfunkSands": {"brand": "CV funk", "arches": ["mac-arm64"]},
+    "Valley": {"brand": "Valley", "arches": ["mac-arm64"]},
+    "Bogaudio": {"brand": "Bogaudio", "arches": ["mac-arm64"]},
+    "Vult": {"brand": "Vult", "arches": ["mac-arm64"], "premium": True},
+}
+
+BRAND_MIDX = {
+    "CVfunk": {f"M{i}": {"name": f"Mod {i}",
+                         "tags": ["Sequencer" if i % 2 else "Reverb"],
+                         "description": ""}
+               for i in range(30)},
+    "CVfunkSands": {"Dunes": {"name": "Dunes", "tags": ["Function generator"],
+                              "description": "Dual function generator"}},
+    "Valley": {"Plateau": {"name": "Plateau", "tags": ["Reverb"],
+                           "description": "Plate reverb"},
+               "Dexter": {"name": "Dexter", "tags": ["Oscillator"],
+                          "description": "FM oscillator"}},
+    "Bogaudio": {f"B{i}": {"name": f"Bog {i}", "tags": ["Mixer"],
+                           "description": ""} for i in range(40)},
+    "Vult": {"Freak": {"name": "Freak", "tags": ["Filter"], "description": ""}},
+}
+
+
+def check_gate_crash_is_not_silence() -> tuple:
+    """A dead process is not a silent patch.
+
+    The gate segfaults loading some third-party Rack plugins. A negative
+    return code with no output was read as "this patch makes no sound", so a
+    correct patch built from library modules was rejected, the model was handed
+    an empty explanation, and the run ended in "gave up after 3 attempts" with
+    nothing anywhere saying a process had died.
+    """
+    bad, ran = 0, 2
+    patch = {"modules": [{"plugin": "Bogaudio", "model": "Bogaudio-VCO"},
+                         {"plugin": "Valley", "model": "Plateau"}]}
+    report = P.gate_crash_report(11, patch)
+    if P.GATE_CRASHED not in report:
+        bad += 1
+        print("  WRONG  a crashed gate does not say it crashed")
+    elif "Bogaudio" not in report or "Valley" not in report:
+        bad += 1
+        print(f"  WRONG  the crash names no plugin, so there is no lead to "
+              f"follow: {report}")
+    elif "signal 11" not in report:
+        bad += 1
+        print("  WRONG  the crash does not say which signal killed it")
+    else:
+        print("  ok     a crashed audibility gate says so, and names its load")
+
+    # And it must not read as a verdict about the patch. "Makes no sound" is a
+    # claim about the music; this is a claim about the tool.
+    if "makes no sound" in report or "silent" not in report:
+        bad += 1
+        print(f"  WRONG  a crash is worded as a verdict on the patch: {report}")
+    else:
+        print("  ok     a crash is not worded as a verdict on the patch")
+
+    # THROUGH sounds(), not only through the wording. A report nothing reaches
+    # is the same as no report: the first version of this had a correct message
+    # and a branch no test ever entered, which is the defect class that keeps
+    # producing finished features that behave like missing ones.
+    ran += 1
+    import stat
+    import tempfile
+    home = tempfile.mkdtemp()
+    dead = os.path.join(home, "dies")
+    with open(dead, "w") as f:
+        f.write("#!/bin/sh\nkill -SEGV $$\n")
+    os.chmod(dead, os.stat(dead).st_mode | stat.S_IEXEC)
+    gate, pdir = P._build_gate, P._plugin_dir
+    P._build_gate = lambda: dead
+    P._plugin_dir = lambda: home
+    try:
+        ok, got = P.sounds(patch)
+    finally:
+        P._build_gate, P._plugin_dir = gate, pdir
+    if ok:
+        bad += 1
+        print("  WRONG  a gate that died was read as a patch that sounds")
+    elif P.GATE_CRASHED not in got:
+        bad += 1
+        print(f"  WRONG  sounds() turned a crash into {got!r}, which reads as "
+              f"a silent patch and sends the next hour to the wrong place")
+    else:
+        print("  ok     sounds() reports a dead gate as a dead gate")
+    return bad, ran
+
+
+def check_brand_targeting() -> tuple:
+    """Naming a maker is a preference, not a manifest.
+
+    The failure this guards is a 43-module rack nobody asked for. Everything
+    here runs against an invented library, so it asserts behaviour rather than
+    whatever this developer happens to have installed.
+    """
+    bad, ran = 0, 0
+    saved = P.entitlements_cached
+    P.entitlements_cached = lambda *a, **k: set()
+    try:
+        # ── which makers a sentence names, and how hard ──────────────────────
+        cases = [
+            ("use modules from CV funk, Bogaudio and Valley for a drone",
+             {"CV funk": (False, False), "Bogaudio": (False, False),
+              "Valley": (False, False)}),
+            # Exhaustive is read from the sentence, not from invented syntax.
+            ("use all modules from CV funk", {"CV funk": (True, False)}),
+            ("use every module Valley makes", {"Valley": (True, False)}),
+            # Exclusive is a DIFFERENT thing from exhaustive: "only CV funk"
+            # asks for one source, not for all fifty of their modules.
+            ("just CV funk, nothing else", {"CV funk": (False, True)}),
+            ("only modules from Valley", {"Valley": (False, True)}),
+            # A token and the same words are one behaviour. The @ list inserts
+            # the maker's own name, so there is nothing else it could be.
+            ("a patch with @CV funk and @Valley",
+             {"CV funk": (False, False), "Valley": (False, False)}),
+            # A module mention is a MODULE. Reading the maker out of it is
+            # exactly the 43-module dump this distinction exists to prevent.
+            ("@CVfunk/Dunes into a filter", {}),
+            # An ordinary word that happens to be a maker, with nothing around
+            # it saying vendor, is an ordinary word.
+            ("a valley of sound with an edge to it", {}),
+            ("an ambient drone patch with reverb", {}),
+        ]
+        for prompt, want in cases:
+            ran += 1
+            got = {b: (s["exhaustive"], s["exclusive"])
+                   for b, s in P.brand_mentions(prompt, BRAND_CAT).items()}
+            if got != want:
+                bad += 1
+                print(f"  WRONG  brand_mentions({prompt!r})\n"
+                      f"         wanted {want}, got {got}")
+        if not bad:
+            print("  ok     a maker is read from tokens and from prose alike")
+
+        # ── the expansion is BOUNDED ─────────────────────────────────────────
+        ran += 1
+        inv = {"CVfunk": {"name": "CV funk", "modules": {}}}
+        brief = P.brand_brief("a drone from CV funk, Bogaudio and Valley",
+                              inv, BRAND_CAT, BRAND_MIDX)
+        listed = brief.count("\n- `")
+        if listed > P.BRAND_TOTAL_LIMIT:
+            bad += 1
+            print(f"  WRONG  {listed} modules reached the prompt; the ceiling "
+                  f"is {P.BRAND_TOTAL_LIMIT}")
+        elif "SOURCING PREFERENCE" not in brief or "not a checklist" not in brief:
+            bad += 1
+            print("  WRONG  the brief never says a maker is a preference, so "
+                  "the model is free to read it as a manifest")
+        else:
+            print(f"  ok     three makers expand to {listed} bounded choices")
+
+        # A maker whose modules number more than the share must be CUT, and
+        # what survives the cut must cover their range rather than the letter A.
+        ran += 1
+        rows, total = P.brand_module_rows(["Bogaudio"], "a mixer patch", {},
+                                          BRAND_CAT, BRAND_MIDX, 6)
+        if total != 40 or len(rows) != 6:
+            bad += 1
+            print(f"  WRONG  Bogaudio: wanted 6 of 40, got {len(rows)} of {total}")
+        else:
+            print("  ok     a maker's list is cut to the share it was given")
+
+        ran += 1
+        # Ranked WITHIN the maker by relevance, never truncated alphabetically:
+        # that exact cut buried four brands the prompt had named.
+        rows, _ = P.brand_module_rows(["Valley"], "a plate reverb", {},
+                                      BRAND_CAT, BRAND_MIDX, 1)
+        if not rows or rows[0]["module"] != "Plateau":
+            bad += 1
+            print(f"  WRONG  a one-module cut for 'a plate reverb' chose "
+                  f"{rows[0]['module'] if rows else 'nothing'}, not Plateau")
+        else:
+            print("  ok     a cut list is ranked by the request, not the alphabet")
+
+        # ── exhaustive brings everything, preference does not ────────────────
+        ran += 1
+        few = P.brand_brief("a drone from CV funk", inv, BRAND_CAT, BRAND_MIDX)
+        every = P.brand_brief("use all modules from CV funk", inv, BRAND_CAT,
+                              BRAND_MIDX)
+        if few.count("\n- `") >= 31 or every.count("\n- `") != 31:
+            bad += 1
+            print(f"  WRONG  preference listed {few.count(chr(10) + '- `')} and "
+                  f"exhaustive listed {every.count(chr(10) + '- `')} of 31; "
+                  f"asking for a maker must not bring their whole catalogue")
+        elif "ALL of this maker's modules" not in every:
+            bad += 1
+            print("  WRONG  an exhaustive request is not stated as one")
+        else:
+            print("  ok     'all modules from X' brings everything and a bare "
+                  "mention does not")
+
+        # ── an unsatisfiable exclusive request names the gap ─────────────────
+        ran += 1
+        only = P.brand_brief("only CV funk", inv, BRAND_CAT, BRAND_MIDX)
+        if "SAY SO" not in only or "Do not substitute in silence" not in only:
+            bad += 1
+            print("  WRONG  an exclusive request does not tell the model to "
+                  "name a gap it cannot fill, which is the quiet substitution "
+                  "that produced lookalike modules")
+        else:
+            print("  ok     an exclusive request is told to name its gaps")
+
+        # ── availability is marked, and nothing unowned is offered ───────────
+        ran += 1
+        paid = P.brand_brief("a filter from Vult", {}, BRAND_CAT, BRAND_MIDX)
+        if "PAID and not owned" not in paid:
+            bad += 1
+            print("  WRONG  a paid plugin this user does not own was not "
+                  "marked as such")
+        else:
+            print("  ok     what it would take to obtain each module is stated")
+
+        # ── a rejection does not quietly drop the makers ─────────────────────
+        ran += 1
+        # Measured on a real run: a prompt naming Bogaudio produced six
+        # Bogaudio modules, the audibility gate rejected the wiring, and the
+        # retry rebuilt the whole patch out of the safest modules on the
+        # machine. The maker survived the prompt and not the retry.
+        keep = P.retry_note("a bass from Bogaudio", BRAND_CAT, last=False)
+        give = P.retry_note("a bass from Bogaudio", BRAND_CAT, last=True)
+        quiet = P.retry_note("a bass patch", BRAND_CAT, last=False)
+        if "keep the modules" not in keep or "Bogaudio" not in keep:
+            bad += 1
+            print(f"  WRONG  a rejected attempt is not told to keep the maker: "
+                  f"{keep!r}")
+        elif "LAST attempt" not in give or "SAY SO" not in give:
+            bad += 1
+            print(f"  WRONG  the last attempt may substitute but is not told "
+                  f"to name what it substituted: {give!r}")
+        elif quiet:
+            bad += 1
+            print(f"  WRONG  a prompt naming no maker was given a note about "
+                  f"makers: {quiet!r}")
+        else:
+            print("  ok     a rejection keeps the makers, and the last attempt "
+                  "names what it had to swap")
+
+        # ── the report counts, and never rejects ─────────────────────────────
+        ran += 1
+        patch = {"modules": [{"plugin": "CVfunk", "model": "M1"},
+                             {"plugin": "CVfunkSands", "model": "Dunes"},
+                             {"plugin": "Bogaudio", "model": "B1"},
+                             {"plugin": "Core", "model": "AudioInterface"}]}
+        lines = P.brand_report(patch, P.brand_mentions("only CV funk", BRAND_CAT))
+        text = "\n".join(lines)
+        if "CV funk: 2 module(s)" not in text:
+            bad += 1
+            print(f"  WRONG  the report miscounted the maker's modules: {text}")
+        elif "Bogaudio" not in text:
+            bad += 1
+            print(f"  WRONG  an exclusive request filled from elsewhere was "
+                  f"not reported: {text}")
+        elif "Core" in text:
+            bad += 1
+            print(f"  WRONG  the audio interface was reported as a "
+                  f"substitution: {text}")
+        else:
+            print("  ok     the patch is measured against the makers named")
+    finally:
+        P.entitlements_cached = saved
+    return bad, ran
+
+
 def check_library_brief() -> tuple:
     """The model must be told what this machine has, and told accurately.
 
@@ -1444,13 +1713,15 @@ def main():
     parts_bad, parts_ran = check_buildable_from_parts()
     acq_bad, acq_ran = check_acquisition()
     lb_bad, lb_ran = check_library_brief()
+    br_bad, br_ran = check_brand_targeting()
+    gc_bad, gc_ran = check_gate_crash_is_not_silence()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
     fresh_bad, fresh_ran = check_fresh_machine()
     ship_bad, ship_ran = check_shipped_generator()
     ver_bad, ver_ran = check_version_stamping()
-    acq_bad += lb_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
-    acq_ran += lb_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
+    acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
+    acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

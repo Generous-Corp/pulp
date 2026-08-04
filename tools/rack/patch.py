@@ -2042,6 +2042,28 @@ def configure_audio(patch: dict) -> str | None:
     return touched
 
 
+#: The marker a crashed gate leaves in its report, so every reader agrees on
+#: what happened rather than each matching its own wording.
+GATE_CRASHED = "the audibility gate CRASHED"
+
+
+def gate_crash_report(signal: int, patch: dict) -> str:
+    """What to say when the gate dies instead of judging.
+
+    Names the plugins it was asked to load, because the crash is in one of them
+    and the list is the only lead there is.
+    """
+    plugins = sorted({m.get("plugin", "") for m in patch.get("modules", [])
+                      if m.get("plugin")})
+    return (f"{GATE_CRASHED} on signal {signal}. It did not judge this patch, "
+            f"so nothing here says the patch is silent -- only that the check "
+            f"could not be run.\n"
+            f"  It was loading: {', '.join(plugins)}\n"
+            f"  Reproduce it with:\n"
+            f"    {os.path.join(CACHE_DIR, 'patch-gate')} <patch.vcv> "
+            f"{PLUGIN_DIRS[0] if PLUGIN_DIRS else '<plugin dir>'}")
+
+
 def sounds(patch: dict) -> tuple[bool, str]:
     """Does this patch actually make a sound? Returns (ok, report).
 
@@ -2072,6 +2094,14 @@ def sounds(patch: dict) -> tuple[bool, str]:
                            timeout=300,
                            env=dict(os.environ, DYLD_LIBRARY_PATH=SDK,
                                     PATCH_GATE_TRACE="1"))
+        # A CRASH IS NOT SILENCE. The gate dies on SIGSEGV loading some
+        # third-party plugins, and a negative return code with no output was
+        # read as "this patch makes no sound" -- so a correct patch was
+        # rejected, the model was handed an empty explanation, and the run
+        # ended in "gave up after 3 attempts" with nothing anywhere saying a
+        # process had died. Six generations were spent on that reading.
+        if r.returncode < 0:
+            return False, gate_crash_report(-r.returncode, patch)
         return r.returncode == 0, r.stdout + r.stderr
     except subprocess.TimeoutExpired:
         return False, "the patch did not finish running within 300 s"
@@ -2101,6 +2131,373 @@ def model_failure(stdout: str, stderr: str) -> str:
             "    security unlock-keychain ~/Library/Keychains/login.keychain-db")
     return "model call failed: " + (said[:400] if said else
                                     "it exited non-zero and said nothing at all")
+
+
+# ── naming a maker ───────────────────────────────────────────────────────────
+#
+# A MAKER NAMED IN A PROMPT IS A SOURCING PREFERENCE, NOT A MANIFEST.
+#
+# "use modules from CV funk, Bogaudio and Valley" means draw from these where
+# they fit. It must never dump all 43 CV funk modules into a rack. "use ALL
+# modules from CV funk" is the rare, explicit, exhaustive request, and only
+# then does everything come in. Getting that backwards produces a 43-module
+# patch nobody asked for.
+#
+# Naming a maker half-worked before this: library_brief() matched prompt words
+# against brand names, so the brand SORTED to the front of a list of brand
+# names. The model was left recognising a name rather than choosing from a
+# list, which is how a prompt naming Valley got a Forge-built lookalike. What
+# a maker's name has to buy is that maker's modules, with what it would take
+# to obtain each one written beside it.
+
+#: Words that mean "the next name is a maker". A short brand -- 4ms, Vult,
+#: Edge, Prism -- is a word people also use for other things, so in ordinary
+#: prose it needs one of these before it before it counts as naming a vendor.
+BRAND_CUES = {"from", "by", "use", "using", "with", "prefer", "prefers",
+              "preferred", "only", "just", "all", "every", "maker", "makers",
+              "brand", "brands", "vendor", "vendors", "modules", "module"}
+
+#: Punctuation that continues a list of makers rather than ending one, so that
+#: the cue in "modules from CV funk, Bogaudio and Valley" reaches all three.
+BRAND_JOINERS = {"and", "or", "plus", "&", "+", ",", ";"}
+
+#: "all modules from X" -- everything they publish.
+EXHAUSTIVE_WORDS = {"all", "every", "everything", "entire", "complete", "whole"}
+
+#: "only X" -- draw from this maker and no other. A different thing from
+#: exhaustive: "only CV funk" asks for one source, not for fifty modules.
+EXCLUSIVE_WORDS = {"only", "just", "exclusively", "solely", "purely"}
+
+#: How far back a qualifier reaches. "use all modules from CV funk" puts three
+#: words between "all" and the maker; a longer window starts collecting the
+#: qualifiers of the previous clause.
+QUALIFIER_WINDOW = 4
+
+#: A maker named with no cue must be this distinctive before it counts. Below
+#: it, "an edge of noise" and "a valley of sound" would each name a vendor.
+BRAND_BARE_FOLD = 6
+
+#: How many of a maker's modules reach the prompt when they were preferred
+#: rather than demanded, and the ceiling across every maker named. Three makers
+#: at fifty modules each is a brief nobody can choose from.
+BRAND_MODULE_LIMIT = 24
+BRAND_TOTAL_LIMIT = 72
+
+
+def fold_name(text: str) -> str:
+    """Case and separators removed, which is how a maker spells their own name.
+
+    "CV funk" on the panel, "CVfunk" in the slug, "cv-funk" in a repository.
+    Somebody typing picks whichever they remember and all three have to land.
+    """
+    return "".join(c for c in text.lower() if c.isalnum())
+
+
+def brand_directory(cat: dict) -> dict:
+    """Folded maker name -> {"brand": display name, "slugs": [plugin slugs]}.
+
+    A maker can publish several plugins -- Stoermelder ships four -- so the
+    maker is the level a person names and the plugin is the level the library
+    is keyed by. This is the join between the two.
+    """
+    out: dict = {}
+    for slug, p in cat.items():
+        brand = p.get("brand") or p.get("name") or slug
+        key = fold_name(brand)
+        if not key:
+            continue
+        entry = out.setdefault(key, {"brand": brand, "slugs": []})
+        entry["slugs"].append(slug)
+    return out
+
+
+def brand_mentions(prompt: str, cat: dict) -> dict:
+    """Which makers this prompt names, and how hard.
+
+    Returns display name -> {"slugs", "exhaustive", "exclusive"}, in the order
+    they were named.
+
+    ONE BEHAVIOUR, WHETHER THE MAKER ARRIVED AS A TOKEN OR AS WORDS. The @ list
+    inserts a maker as "@CV funk", which is the maker's own name with a marker
+    in front of it, so the same scan reads both and there is a single thing to
+    reason about. The marker only removes the burden of proof: an @ is somebody
+    picking a row, while bare prose has to look like a vendor rather than like
+    an ordinary word.
+    """
+    directory = brand_directory(cat)
+    if not directory:
+        return {}
+    raw = prompt.split()
+    # Module mentions are modules. "@CVfunk/Sphinx" names one module, and
+    # reading it as naming the maker is exactly the 43-module dump this whole
+    # distinction exists to prevent.
+    tokens = [w for w in raw if "/" not in w]
+    stripped = [w.strip("@,.;:()[]\"'!?") for w in tokens]
+    folded = [fold_name(w) for w in stripped]
+
+    found: dict = {}
+    cue = False
+    i = 0
+    while i < len(tokens):
+        hit = None
+        for n in (3, 2, 1):
+            if i + n > len(tokens):
+                continue
+            phrase = " ".join(stripped[i:i + n])
+            key = fold_name(phrase)
+            entry = directory.get(key)
+            if not entry:
+                continue
+            explicit = tokens[i].startswith("@")
+            distinctive = (len(key) >= BRAND_BARE_FOLD and
+                           stripped[i][:1].isupper())
+            if explicit or cue or distinctive:
+                hit = (n, entry)
+            break
+        if not hit:
+            word = folded[i]
+            if word in BRAND_CUES:
+                cue = True
+            elif word not in BRAND_JOINERS and word:
+                cue = False
+            i += 1
+            continue
+        n, entry = hit
+        # What was asked for, read from the words in front of the name. The
+        # English is clearer than any syntax we could invent -- and a model
+        # reads "all modules from CV funk" reliably, which is more than it
+        # would do with "@all:CVfunk".
+        window = [w for w in folded[max(0, i - QUALIFIER_WINDOW):i]]
+        state = found.setdefault(entry["brand"], {
+            "slugs": entry["slugs"], "exhaustive": False, "exclusive": False})
+        if any(w in EXHAUSTIVE_WORDS for w in window):
+            state["exhaustive"] = True
+        if any(w in EXCLUSIVE_WORDS for w in window):
+            state["exclusive"] = True
+        cue = True                      # a list of makers keeps its qualifier
+        i += n
+    return found
+
+
+def brand_module_rows(slugs: list, prompt: str, inv: dict, cat: dict,
+                      midx: dict, limit: int) -> tuple:
+    """A maker's modules, best first, cut to `limit`. Returns (rows, total).
+
+    RANKED WITHIN THE MAKER BY RELEVANCE TO THE REQUEST, never truncated
+    alphabetically -- that exact cut buried Valley, Sapphire, Squinky and
+    Stoermelder behind "+51 more" once already, all four named in the prompt.
+
+    When the request says nothing that reaches any of them -- "an ambient drone
+    patch" against a maker of sequencers -- there is no relevance signal at all,
+    and the cut falls back to a SPREAD ACROSS THEIR RANGE rather than to the
+    letter A: one from each kind of module they make, so the model sees what
+    the maker is for instead of the first two dozen names.
+    """
+    owned = entitlements_cached()
+    words = {w.strip(".,:;()").lower()
+             for w in prompt.split() if len(w.strip(".,:;()")) > 3}
+    rows = []
+    for pslug in slugs:
+        entry = cat.get(pslug, {}) or {}
+        premium = bool(entry.get("premium"))
+        have = inv.get(pslug, {}).get("modules", {})
+        mods = dict(midx.get(pslug, {}))
+        # Installed but unpublished -- our own modules above all -- are in the
+        # inventory and in no library database.
+        for mslug, m in have.items():
+            mods.setdefault(mslug, {"name": m.get("name", mslug),
+                                    "tags": m.get("tags", []),
+                                    "description": m.get("description", "")})
+        for mslug, m in mods.items():
+            installed = mslug in have
+            if installed:
+                cost, mark = 0, "installed"
+            elif premium and pslug in owned:
+                cost, mark = 1, "owned, not installed"
+            elif premium:
+                cost, mark = 3, "PAID and not owned"
+            elif not installable_here(entry):
+                continue           # no build for this machine, at any price
+            else:
+                cost, mark = 2, "free"
+            name = m.get("name", mslug)
+            tags = m.get("tags") or []
+            desc = m.get("description") or ""
+            hay = f"{mslug} {name} {' '.join(tags)} {desc}".lower()
+            score = 0
+            for w in words:
+                if w in name.lower() or w in mslug.lower():
+                    score += 3
+                elif w in " ".join(tags).lower():
+                    score += 2
+                elif w in hay:
+                    score += 1
+            rows.append({"plugin": pslug, "module": mslug, "name": name,
+                         "tags": tags, "description": desc, "mark": mark,
+                         "score": score, "cost": cost,
+                         "group": (tags[0] if tags else "")})
+    total = len(rows)
+    rows.sort(key=lambda r: (-r["score"], r["cost"], r["name"]))
+    if total <= limit:
+        return rows, total
+    # Round-robin over what kind of module each one is, so a cut list covers
+    # the maker's range. Groups are visited in the order their best module
+    # appears, so a relevant module still comes first.
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(r["group"], []).append(r)
+    order = list(groups)
+    out = []
+    while len(out) < limit:
+        took = False
+        for g in order:
+            if not groups[g]:
+                continue
+            out.append(groups[g].pop(0))
+            took = True
+            if len(out) >= limit:
+                break
+        if not took:
+            break
+    return out, total
+
+
+def brand_brief(prompt: str, inv: dict, cat: dict, midx: dict,
+                mentions: dict | None = None) -> str:
+    """The makers this prompt named, expanded into modules the model can pick.
+
+    THE EXPANSION HAPPENS HERE, IN THE PROMPT INVENTORY, AND NOT IN THE PATCH.
+    A maker's name becomes "prefer modules from CV funk" plus that maker's
+    modules with what it would take to obtain each one, so the model chooses
+    from a real list. Nothing about naming a maker places a module.
+    """
+    if mentions is None:
+        mentions = brand_mentions(prompt, cat)
+    if not mentions:
+        return ""
+    exclusive = [b for b, s in mentions.items() if s["exclusive"]]
+    # One share, computed once and the same for every maker. Spending a running
+    # budget as the list is walked gives the maker named first three times the
+    # room of the one named last, which is an ordering nobody asked for.
+    share = min(BRAND_MODULE_LIMIT,
+                max(6, BRAND_TOTAL_LIMIT // max(1, len(mentions))))
+    out = ["\n---\n\n## The makers this request named\n"]
+    out.append(
+        "Naming a maker is a SOURCING PREFERENCE, not a checklist. Draw from "
+        "the modules below where they fit the patch and leave the rest out. "
+        "Do NOT place every module listed.\n")
+    for brand, state in mentions.items():
+        limit = 10 ** 6 if state["exhaustive"] else share
+        rows, total = brand_module_rows(state["slugs"], prompt, inv, cat,
+                                        midx, limit)
+        if not rows:
+            out.append(f"\n### {brand}\nNothing by this maker can be used on "
+                       f"this machine.\n")
+            continue
+        ready = sum(1 for r in rows if r["mark"] == "installed")
+        if state["exhaustive"]:
+            head = (f"\n### {brand} — the user asked for ALL of this maker's "
+                    f"modules\nAll {total} of them are listed. Use every one "
+                    f"that can be wired.\n")
+        else:
+            shown = (f"{len(rows)} of them, chosen for this request"
+                     if len(rows) < total else f"all {total}")
+            head = (f"\n### {brand} — prefer modules from this maker\n"
+                    f"{total} published, {ready} already installed here. "
+                    f"Showing {shown}. Use the ones that fit.\n")
+        out.append(head)
+        for r in rows:
+            # One line each. A description carrying its own newlines -- Valley
+            # writes them into the library manifest -- turns the list into
+            # ragged prose the model has to re-parse.
+            blurb = " ".join(r["description"].split())
+            desc = f" — {blurb[:70]}" if blurb else ""
+            tags = f"  [{', '.join(r['tags'][:3])}]" if r["tags"] else ""
+            out.append(f"- `{r['plugin']}/{r['module']}` {r['name']}{desc}"
+                       f"{tags}  ({r['mark']})")
+        out.append("")
+    if exclusive:
+        # NAME THE GAP, DO NOT SUBSTITUTE IN SILENCE. Quietly reaching for
+        # another vendor when the named one has no module for a role is the
+        # same move that produced self-built lookalikes of famous modules.
+        out.append(
+            f"\n### Only {', '.join(exclusive)}\nThe user asked for this maker "
+            f"and no other. Build the patch from the modules above wherever "
+            f"you can. Core Audio and Core MIDI are infrastructure and are "
+            f"always allowed. If a role genuinely cannot be filled from them, "
+            f"USE THE CLOSEST INSTALLED ALTERNATIVE AND SAY SO in your reasons "
+            f"— name the role and the maker that filled it instead. Do not "
+            f"substitute in silence, and do not abandon the patch.\n")
+    return "\n".join(out) + "\n"
+
+
+def retry_note(prompt: str, cat: dict, last: bool) -> str:
+    """What a rejected attempt is told about the makers that were named.
+
+    A REJECTION IS NOT PERMISSION TO DROP THE MAKERS. Measured: a prompt naming
+    Bogaudio produced six Bogaudio modules, the audibility gate rejected the
+    patch for a wiring fault, and the retry threw away every one of them and
+    rebuilt the whole thing out of the safest modules on the machine. The maker
+    survived the prompt and not the retry, so the finished patch had none of
+    what was asked for.
+
+    NAME THE GAP, THEN CONTINUE. Holding that line to the very last attempt is
+    the opposite failure: the run ends with no patch at all, and somebody who
+    asked for Bogaudio gets nothing rather than something. So the makers are
+    held for every attempt but the last, and the last may substitute on
+    condition that it says what it substituted and why.
+    """
+    named = brand_mentions(prompt, cat)
+    if not named:
+        return ""
+    who = ", ".join(named)
+    if not last:
+        return ("\n\nThe request named " + who + ". That still holds. What was "
+                "rejected was the WIRING, not the choice of maker: fix the "
+                "connection or the missing trigger, and keep the modules. "
+                "Replacing them with something safer is not the correction "
+                "being asked for.")
+    return ("\n\nThis is the LAST attempt. The request named " + who + " and "
+            "keeping to it has not produced a patch that makes a sound, so a "
+            "patch that works now matters more. Keep every module of theirs "
+            "you can. Where you must reach outside them, SAY SO in your "
+            "reasons: name the role and what filled it. Do not substitute in "
+            "silence.")
+
+
+def brand_report(patch: dict, mentions: dict) -> list:
+    """What the finished patch actually did with the makers that were named.
+
+    VERIFY AND REPORT, DO NOT REJECT. A model asked for all 43 of a maker's
+    modules and returning 40 has not failed at anything worth throwing a good
+    patch away over -- but nobody should have to count the modules themselves
+    to find that out.
+    """
+    if not mentions:
+        return []
+    used: dict = {}
+    for m in patch.get("modules", []):
+        used.setdefault(m.get("plugin", ""), 0)
+        used[m.get("plugin", "")] += 1
+    lines = []
+    claimed = set()
+    for brand, state in mentions.items():
+        n = sum(used.get(s, 0) for s in state["slugs"])
+        claimed.update(state["slugs"])
+        if state["exhaustive"]:
+            lines.append(f"  {brand}: {n} module(s) placed; all of them were "
+                         f"asked for.")
+        else:
+            lines.append(f"  {brand}: {n} module(s) drawn from this maker.")
+    if any(s["exclusive"] for s in mentions.values()):
+        # Core is the audio and MIDI interface; a patch without it is silent,
+        # and calling it a substitution would be noise rather than a report.
+        outside = sorted(p for p, n in used.items()
+                         if n and p not in claimed and p != "Core")
+        if outside:
+            lines.append("  filled from outside the makers named: " +
+                         ", ".join(outside))
+    return lines
 
 
 def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
@@ -2228,6 +2625,10 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
             "infrastructure the patch needs but is not about.",
     }.get(st.get("module_source", "prefer_existing"))
     out.append(f"\n### How to choose\n{policy}\n")
+    # A maker the prompt named, expanded into that maker's modules. Last,
+    # because it is the most specific thing said about this request and the
+    # closest to the task that follows it.
+    out.append(brand_brief(prompt, inv, cat, module_index()))
     return "".join(out)
 
 
@@ -2271,6 +2672,15 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             parts.append("\n\n## Your previous attempt was REJECTED. Fix it.\n\n"
                          "Return both blocks again, corrected. Do not explain.\n\n"
                          "```\n" + ctx + "\n```")
+            # A REJECTION IS NOT PERMISSION TO DROP THE MAKERS.
+            #
+            # Measured: a prompt naming Bogaudio produced six Bogaudio modules,
+            # the audibility gate rejected the patch for a wiring fault, and the
+            # retry threw away every one of them and rebuilt the whole patch out
+            # of the safest modules on the machine. The maker survived the
+            # prompt and not the retry, so the finished patch had none of what
+            # was asked for and only the count at the end said so.
+            parts.append(retry_note(prompt, catalog(), attempt >= retries))
         # The enriched environment matters here, not only for finding claude:
         # claude runs its own plugin hooks with node, and a non-interactive SSH
         # session has no Homebrew on PATH. The hook dies naming node, which
@@ -2382,11 +2792,23 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     continue
                 print(f"  idiom holds: {claimed}")
             return patch, why
-        keep_attempt(patch, report, attempt + 1, "silent")
-        print(f"  builds, but makes no sound (attempt {attempt + 1}):", flush=True)
-        for line in report.splitlines():
-            if "FAIL" in line or "silent" in line:
+        # A crash and a silent patch are different failures and only one of
+        # them is about the patch. Saying "makes no sound" over a dead process
+        # sends the next hour to the wrong place.
+        crashed = GATE_CRASHED in report
+        keep_attempt(patch, report, attempt + 1,
+                     "gate-crashed" if crashed else "silent")
+        if crashed:
+            print(f"  the audibility check could not run (attempt "
+                  f"{attempt + 1}):", flush=True)
+            for line in report.splitlines():
                 print(f"    {line.strip()}", flush=True)
+        else:
+            print(f"  builds, but makes no sound (attempt {attempt + 1}):",
+                  flush=True)
+            for line in report.splitlines():
+                if "FAIL" in line or "silent" in line:
+                    print(f"    {line.strip()}", flush=True)
         # The measured output of EVERY module is in the report, so the reason
         # can be pointed at rather than guessed. A VCA reading exactly 0.000 is
         # not a level set too low -- a low level still passes something. It is
@@ -2732,6 +3154,11 @@ def main(argv):
                   open(out[:-4] + ".why.json", "w"), indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
+        # What the patch did with the makers that were named. Reported, never
+        # enforced: a patch is not worse for using six of a maker's modules
+        # than for using seven, and the count is the only way to know which.
+        for line in brand_report(patch, brand_mentions(argv[2], cat)):
+            print(line)
         # What was asked for and left out, said AFTER the patch exists.
         #
         # A finishing effect nobody has is not a reason to refuse a voice that

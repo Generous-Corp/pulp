@@ -50,8 +50,23 @@ struct MentionCandidate {
     /// positional, and a field added in the middle breaks all of them.
     std::string alias;
 
-    /// Only an installed module can be wired into a patch that will sound.
-    bool insertable() const { return state == Availability::ready; }
+    /// What this row names.
+    ///
+    /// A MAKER IS A ROW IN ITS OWN RIGHT. Typing `@CV` offers "CV funk, 50
+    /// modules" above the individual hits, and picking it inserts the maker
+    /// rather than a module -- because naming a maker is a sourcing
+    /// preference, and the thing that expands it is the prompt inventory, not
+    /// the patch. Nothing about picking this row places 50 modules.
+    ///
+    /// Also last, for the same reason as `alias`.
+    enum class Kind { module_, brand };
+    Kind kind = Kind::module_;
+
+    /// Only an installed module can be wired into a patch that will sound. A
+    /// maker is always pickable: it costs nothing and installs nothing.
+    bool insertable() const {
+        return kind == Kind::brand || state == Availability::ready;
+    }
 };
 
 /// Where candidates come from. A function rather than a baked list so the

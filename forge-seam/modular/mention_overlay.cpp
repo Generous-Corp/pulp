@@ -213,7 +213,16 @@ void MentionOverlay::choose(std::size_t index) {
     //
     // So the name goes in the prompt, and anything not installed is announced
     // rather than silently dropped.
-    if (!c.insertable() && on_refused) on_refused(c);
+    // A MAKER IS A PREFERENCE, AND HAS TO SAY SO. Picking one that publishes
+    // fifty modules looks, from the outside, exactly like asking for fifty
+    // modules -- so the row that inserts it states what it will actually do
+    // before the patch comes back and settles the question.
+    const bool is_brand = c.kind == MentionCandidate::Kind::brand;
+    if (is_brand)
+        show_notice(c.brand + " preferred. Its modules will be used where they "
+                              "fit, not all " + c.name + ".", Tone::progress);
+    else if (!c.insertable() && on_refused)
+        on_refused(c);
     // Set across on_choose, whose whole job is to rewrite the field.
     inserting_ = true;
     if (on_choose) on_choose(c.slug);
@@ -321,7 +330,17 @@ void MentionOverlay::rebuild_rows() {
             row->add_child(std::move(alias));
         }
 
-        if (!c.insertable()) {
+        if (c.kind == MentionCandidate::Kind::brand) {
+            // Said outright, because "CV funk / 50 modules" otherwise reads as
+            // a module called "50 modules". This row picks the MAKER, and what
+            // that does is bias the prompt rather than place fifty modules.
+            auto badge = std::make_unique<Label>("MAKER");
+            badge->set_font_family(forge::design::type::mono);
+            badge->set_font_size(9);
+            badge->set_text_color(text_faint);
+            badge->flex().flex_shrink = 0;
+            row->add_child(std::move(badge));
+        } else if (!c.insertable()) {
             // "GET" said only that you could not pick it. It reads as a
             // paywall when the module is free, which most are — the library
             // index this comes from carries open-source plugins. Say which.
