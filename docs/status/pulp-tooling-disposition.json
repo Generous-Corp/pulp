@@ -2181,6 +2181,22 @@
         ],
         "subcommands": [
           {
+            "name": "audit",
+            "arguments": [
+              {
+                "name": "artifact",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "profiles",
             "arguments": [],
             "subcommands": []
