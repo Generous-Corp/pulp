@@ -1030,6 +1030,7 @@ public:
         ++create_count;
         return ScriptedCustomViewProcessor::create_view();
     }
+    void on_view_closed(view::View&) override { scripted_session.reset(); }
 };
 
 class ReloadingScriptedProcessor final : public StubProcessor {
@@ -1062,6 +1063,7 @@ public:
         if (!session->load(&error)) return nullptr;
         return root;
     }
+    void on_view_closed(view::View&) override { session.reset(); }
 };
 }  // namespace
 
@@ -1132,6 +1134,7 @@ TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
     proc.define_parameters(store);
     format::ViewBridge bridge(proc, store);
     REQUIRE(bridge.open());
+    bridge.notify_attached();
     auto* stable_root = bridge.view();
     auto* stable_session = proc.session.get();
     REQUIRE(stable_root != nullptr);
@@ -1159,6 +1162,8 @@ TEST_CASE("ViewBridge reloads processor-owned scripted sessions in place",
     REQUIRE(stable_root->child_count() == 1);
     REQUIRE(dynamic_cast<view::Label*>(stable_root->child_at(0))->text()
             == "after");
+    bridge.close();
+    REQUIRE(proc.session == nullptr);
 }
 
 TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
@@ -1169,6 +1174,7 @@ TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
     proc.define_parameters(store);
     format::ViewBridge bridge(proc, store);
     REQUIRE(bridge.open());
+    bridge.notify_attached();
     auto* stable_root = bridge.view();
     REQUIRE(stable_root != nullptr);
     REQUIRE(proc.create_count == 1);
@@ -1177,6 +1183,8 @@ TEST_CASE("ViewBridge keeps legacy scripted processors on create-view reload",
     REQUIRE(bridge.poll_editor_reload());
     REQUIRE(bridge.view() == stable_root);
     REQUIRE(proc.create_count == 2);
+    bridge.close();
+    REQUIRE(proc.scripted_session == nullptr);
 }
 
 TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bridge][reload][issue-1_9]") {

@@ -62,6 +62,7 @@ def wire_literals(text: str) -> list[tuple[int, str]]:
 
 def unmapped_literals(root: pathlib.Path, registry: pathlib.Path) -> list[tuple[pathlib.Path, int, str]]:
     registered = registered_methods(registry)
+    generated_header = root / "inspect/include/pulp/inspect/protocol.hpp"
     failures: list[tuple[pathlib.Path, int, str]] = []
     sources = list((root / "inspect").rglob("*"))
     sources.extend((root / "core").rglob("*"))
@@ -75,7 +76,7 @@ def unmapped_literals(root: pathlib.Path, registry: pathlib.Path) -> list[tuple[
             continue
         # protocol.hpp materializes constants from the registry and contains
         # documentation examples; it is not an independent dispatch surface.
-        if source.name == "protocol.hpp":
+        if source == generated_header:
             continue
         text = source.read_text(encoding="utf-8")
         for offset, method in wire_literals(text):
@@ -107,10 +108,13 @@ def self_test() -> int:
         source = root / "inspect/src/handler.cpp"
         rust_source = root / "experimental/pulp-rs/src/shared_inspector_client.rs"
         cpp_client_source = root / "tools/cli/new_inspector_client.cpp"
+        generated_header = root / "inspect/include/pulp/inspect/protocol.hpp"
+        same_named_source = root / "tools/mcp/protocol.hpp"
         registry.parent.mkdir(parents=True)
         source.parent.mkdir(parents=True)
         rust_source.parent.mkdir(parents=True)
         cpp_client_source.parent.mkdir(parents=True)
+        same_named_source.parent.mkdir(parents=True)
         registry.write_text(
             'PULP_INSPECT_METHOD(Known, "Known.method", Observe, SessionDescribe, No)\n',
             encoding="utf-8",
@@ -118,6 +122,10 @@ def self_test() -> int:
         source.write_text('auto method = "Known.method";\n', encoding="utf-8")
         rust_source.write_text('let method = "Known.method";\n', encoding="utf-8")
         cpp_client_source.write_text('auto method = "Known.method";\n', encoding="utf-8")
+        generated_header.write_text(
+            'auto example = "GeneratedHeader.example";\n', encoding="utf-8"
+        )
+        same_named_source.write_text('auto method = "Known.method";\n', encoding="utf-8")
         if unmapped_literals(root, registry):
             print("self-test rejected a registered method", file=sys.stderr)
             return 1
@@ -152,6 +160,18 @@ def self_test() -> int:
         failures = unmapped_literals(root, registry)
         if len(failures) != 1 or failures[0][2] != "Runtime.app":
             print("self-test allowed a protocol-looking filename suffix", file=sys.stderr)
+            return 1
+        cpp_client_source.write_text('auto method = "Known.method";\n', encoding="utf-8")
+        same_named_source.write_text(
+            'auto method = "PhaseEight.sameNamedHeader";\n', encoding="utf-8"
+        )
+        failures = unmapped_literals(root, registry)
+        if len(failures) != 1 or failures[0] != (
+            pathlib.Path("tools/mcp/protocol.hpp"),
+            1,
+            "PhaseEight.sameNamedHeader",
+        ):
+            print("self-test exempted an unrelated protocol.hpp", file=sys.stderr)
             return 1
     print("inspector protocol registry checker self-test passed")
     return 0
