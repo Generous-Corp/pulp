@@ -92,7 +92,17 @@ check_has_binary() {
         echo "missing: $bundle/Contents/MacOS -- not a bundle" >&2
         return 1
     fi
-    binary=$(find "$macos" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)
+    # NOT `head -1`. Contents/MacOS also holds libwgpu_native.dylib, copied in
+    # beside the executable, and it sorts first -- so the checks below ran
+    # against the WebGPU runtime and reported the bundle as the wrong shell
+    # while the actual binary was correct. Prefer the file named after the
+    # bundle, which is what CFBundleExecutable points at.
+    local want="${bundle##*/}"; want="${want%.*}"
+    binary="$macos/$want"
+    if [[ ! -f "$binary" ]]; then
+        binary=$(find "$macos" -maxdepth 1 -type f -perm -u+x ! -name "*.dylib" \
+                 2>/dev/null | head -1)
+    fi
     if [[ -z "$binary" ]]; then
         echo "EMPTY BUNDLE: $bundle has no executable in Contents/MacOS." >&2
         echo "  Its target was configured but never built. Build it first:" >&2
@@ -111,7 +121,14 @@ check_has_binary() {
     # size and relocatability check passed while the product inside was wrong.
     # This string exists only in the current shell (forge-seam), which makes it
     # the cheapest available proof that the binary is the one we mean.
-    if ! strings "$binary" 2>/dev/null | grep -qF "$SHELL_MARKER"; then
+    # `grep -qF` would be the obvious spelling and is WRONG here: it exits on
+    # the first match, SIGPIPEs `strings`, and under `set -o pipefail` the
+    # whole pipeline then reports failure -- so a binary that DOES carry the
+    # marker is rejected for carrying it. Count instead, which drains the
+    # stream and cannot be killed early.
+    local hits
+    hits=$(strings "$binary" 2>/dev/null | grep -cF "$SHELL_MARKER" || true)
+    if [[ "${hits:-0}" -eq 0 ]]; then
         echo "WRONG SHELL: $binary does not contain \"$SHELL_MARKER\"." >&2
         echo "  This is the old examples/forge-modular shell, not the Forge one." >&2
         echo "  Build the Forge worktree and point --build-dir at it:" >&2
