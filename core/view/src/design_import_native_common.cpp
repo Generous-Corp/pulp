@@ -44,6 +44,71 @@ bool ends_with(std::string_view value, std::string_view suffix) {
            value.substr(value.size() - suffix.size()) == suffix;
 }
 
+/// Convert a CSS `clip-path` shape function to SVG path data in view-local
+/// coordinates, or nullopt when the value is not a shape this understands.
+///
+/// `View::set_clip_path` takes SVG path data, and CSS gives a shape function,
+/// so the two need a translation that nobody had written. Without it the raw
+/// `polygon(...)` text reached the path parser, failed to parse, and the clip
+/// silently did nothing — an element that should have been clipped to an ADSR
+/// curve painted as a full rectangle instead.
+///
+/// Percentages resolve against the element's own box, which is why the box
+/// size has to be passed in rather than read later at paint time.
+std::optional<std::string> css_clip_path_to_svg(const std::string& value,
+                                                float box_w, float box_h) {
+    const auto open = value.find('(');
+    if (open == std::string::npos || !ends_with(value, ")")) return std::nullopt;
+    std::string fn = value.substr(0, open);
+    // Trim, and drop a leading fill-rule if present (`polygon(evenodd, …)`).
+    while (!fn.empty() && std::isspace(static_cast<unsigned char>(fn.front())))
+        fn.erase(fn.begin());
+    while (!fn.empty() && std::isspace(static_cast<unsigned char>(fn.back())))
+        fn.pop_back();
+    if (fn != "polygon") return std::nullopt;
+    if (!(box_w > 0.0f) || !(box_h > 0.0f)) return std::nullopt;
+
+    std::string args = value.substr(open + 1, value.size() - open - 2);
+    if (const auto rule = args.find(','); rule != std::string::npos) {
+        const auto head = args.substr(0, rule);
+        if (head.find("evenodd") != std::string::npos ||
+            head.find("nonzero") != std::string::npos)
+            args = args.substr(rule + 1);
+    }
+
+    // One `x y` pair per comma-separated vertex.
+    auto to_px = [](const std::string& token, float basis) -> std::optional<float> {
+        if (token.empty()) return std::nullopt;
+        try {
+            const auto number = std::stof(token);
+            if (token.find('%') != std::string::npos) return number * 0.01f * basis;
+            return number;  // px, or a bare number treated as px
+        } catch (const std::exception&) { return std::nullopt; }
+    };
+
+    std::ostringstream out;
+    std::size_t start = 0;
+    bool first = true;
+    while (start <= args.size()) {
+        auto comma = args.find(',', start);
+        if (comma == std::string::npos) comma = args.size();
+        std::istringstream pair(args.substr(start, comma - start));
+        std::string xs, ys, extra;
+        pair >> xs >> ys;
+        if (pair >> extra) return std::nullopt;  // more than two components
+        const auto x = to_px(xs, box_w);
+        const auto y = to_px(ys, box_h);
+        if (!x || !y) return std::nullopt;
+        out << (first ? "M " : " L ") << *x << " " << *y;
+        first = false;
+        if (comma == args.size()) break;
+        start = comma + 1;
+    }
+    if (first) return std::nullopt;  // no vertices parsed
+    out << " Z";
+    return out.str();
+}
+
 std::string node_id(const IRNode& node, std::string_view path) {
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
         return *node.stable_anchor_id;
@@ -1367,8 +1432,22 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (const auto mode = css_blend_mode(*style.mix_blend_mode))
             view.set_mix_blend_mode(*mode);
     }
-    if (style.clip_path)
-        view.set_clip_path(*style.clip_path);
+    if (style.clip_path) {
+        // `set_clip_path` takes SVG path data, but CSS gives a shape function.
+        // Handing `polygon(4% 87%, …)` straight through produced a string the
+        // path parser could not read, so the clip silently did nothing and the
+        // element painted as a full rectangle: an ADSR envelope drawn as a
+        // clipped gradient came out as solid blocks covering its own labels.
+        const auto box_w = style.width.value_or(0.0f);
+        const auto box_h = style.height.value_or(0.0f);
+        auto path = css_clip_path_to_svg(*style.clip_path, box_w, box_h);
+        if (path) view.set_clip_path(*path);
+        else if (style.clip_path->find("polygon") == std::string::npos)
+            // Anything not a shape function is already path data (or a url()
+            // reference we cannot resolve); pass it through unchanged rather
+            // than dropping a clip that used to work.
+            view.set_clip_path(*style.clip_path);
+    }
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
     // the source stroke as border_color/border_width, but the stroke is already
     // baked into the raster. Drawing it again paints a spurious box outline —
