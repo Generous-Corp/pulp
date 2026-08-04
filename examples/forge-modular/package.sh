@@ -41,7 +41,27 @@ done
 [[ -n "$BUILD_DIR" ]] || { echo "--build-dir is required" >&2; exit 2; }
 [[ -n "$OUT_DIR" ]] || { echo "--out is required" >&2; exit 2; }
 
-APP="$BUILD_DIR/examples/forge-modular/Forge Modular.app"
+# THERE ARE TWO FORGE MODULAR APPS, and this script shipped the wrong one.
+#
+#   $BUILD_DIR/modular/…              the Forge worktree build. The real shell.
+#   $BUILD_DIR/examples/forge-modular/ a separate, much older example shell.
+#
+# The real UI lives in forge-seam/modular/modular_shell.cpp and is compiled in
+# a Forge worktree (forge-seam/populate.sh -> /tmp/forge-cur), NOT in the pulp
+# tree. Hardcoding the examples/ path meant no --build-dir value could ever
+# reach it, so a 0.12.0 installer shipped a build with none of the product's
+# UI in it and every payload the right SIZE. Size was never the question.
+#
+# Prefer the Forge layout, fall back to the pulp one, and SAY WHICH -- a
+# silent choice between two apps of the same name is what caused this.
+if [[ -n "${APP_OVERRIDE:-}" ]]; then
+    APP="$APP_OVERRIDE"
+elif [[ -d "$BUILD_DIR/modular/Forge Modular.app" ]]; then
+    APP="$BUILD_DIR/modular/Forge Modular.app"
+else
+    APP="$BUILD_DIR/examples/forge-modular/Forge Modular.app"
+fi
+echo "[installer] app: $APP"
 AU="$BUILD_DIR/AU/Forge Modular.component"
 VST3="$BUILD_DIR/VST3/Forge Modular.vst3"
 CLAP="$BUILD_DIR/CLAP/Forge Modular.clap"
@@ -62,6 +82,9 @@ RACK_PLUGIN=$(ls "$BUILD_DIR"/rack/ForgeModular-*.vcvplugin 2>/dev/null | head -
 # each of these; a real one is ~19 MB, and anything under a megabyte means the
 # link never happened.
 MIN_BINARY_BYTES=1000000
+# Present only in the current (forge-seam) shell; absent from the old
+# examples/forge-modular one. Update if the UI copy ever drops it.
+SHELL_MARKER="Browse marketplace"
 
 check_has_binary() {
     local bundle="$1" macos="$1/Contents/MacOS" binary size
@@ -81,6 +104,19 @@ check_has_binary() {
     if (( size < MIN_BINARY_BYTES )); then
         echo "STUB BINARY: $binary is ${size} bytes (expected >= ${MIN_BINARY_BYTES})." >&2
         echo "  A real build links Skia and Dawn statically and is far larger." >&2
+        return 1
+    fi
+    # IDENTITY, not just size. The 0.12.0 installer shipped four payloads of
+    # entirely correct size containing an older, different shell -- so every
+    # size and relocatability check passed while the product inside was wrong.
+    # This string exists only in the current shell (forge-seam), which makes it
+    # the cheapest available proof that the binary is the one we mean.
+    if ! strings "$binary" 2>/dev/null | grep -qF "$SHELL_MARKER"; then
+        echo "WRONG SHELL: $binary does not contain \"$SHELL_MARKER\"." >&2
+        echo "  This is the old examples/forge-modular shell, not the Forge one." >&2
+        echo "  Build the Forge worktree and point --build-dir at it:" >&2
+        echo "    forge-seam/populate.sh && cmake --build /tmp/forge-cur/build -j8" >&2
+        echo "    package.sh --build-dir /tmp/forge-cur/build …" >&2
         return 1
     fi
     return 0
