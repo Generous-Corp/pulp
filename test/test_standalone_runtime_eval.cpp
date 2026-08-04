@@ -24,6 +24,12 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 using namespace pulp::test::standalone_inspector;
 
+#if PULP_TEST_STANDALONE_INSPECTOR
+// Production executables receive this link declaration only from the generated
+// product shipping marker. Unit tests exercise the composition root directly.
+extern "C" void pulp_inspector_shipping_declaration_v1() {}
+#endif
+
 TEST_CASE("Standalone inspector runtime evaluation requires an active controller profile",
           "[standalone][inspect][runtime-eval][negative]") {
     StandaloneApp app(null_processor_factory);

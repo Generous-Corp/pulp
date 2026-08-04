@@ -347,7 +347,7 @@ if(TARGET pulp::inspect AND NOT IOS)
 
     pulp_add_test_suite(pulp-test-standalone-runtime-eval
         SOURCES test_standalone_runtime_eval.cpp
-        LIBRARIES pulp::standalone pulp::inspect-client
+        LIBRARIES pulp::standalone-inspector-runtime-eval pulp::inspect-client
         PROPERTIES PROCESSORS 8)
     target_compile_definitions(pulp-test-standalone-runtime-eval PRIVATE
         PULP_TEST_STANDALONE_INSPECTOR=1
