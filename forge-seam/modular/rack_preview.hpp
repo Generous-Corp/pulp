@@ -23,6 +23,19 @@
 
 namespace forge_modular {
 
+/// How wide the panel in this artwork is, in HP, or 0 when it does not say.
+///
+/// A panel SVG is drawn at the true size of the thing it is a picture of --
+/// every Eurorack panel is 128.5 mm tall, and its width is its HP -- so the
+/// artwork knows a module's width even when the patch, the plugin manifest and
+/// the port map all fail to. Read from the root tag's own aspect rather than
+/// from either dimension alone, so it does not matter whether a vendor wrote
+/// their panel in millimetres, in points, or in bare user units.
+///
+/// Exposed so a test can put a real vendor's header in and get the width its
+/// module actually is.
+int panel_hp_from_artwork(const std::string& svg);
+
 /// How close a pointer has to be to a cable to count as pointing at it, in
 /// view points. Generous enough to grab a 4-point cable without a steady hand,
 /// small enough that the gap between two cables is still a gap.
@@ -39,7 +52,10 @@ public:
     /// The emitter already writes one per module -- the preview simply was not
     /// reading them, which is why a finished module showed an empty box with
     /// its name on it and none of the knobs it had just been given.
-    void set_panel_directory(std::string dir) { panel_dir_ = std::move(dir); }
+    void set_panel_directory(std::string dir) {
+        panel_dir_ = std::move(dir);
+        resolve_panel_widths();
+    }
 
     /// Is there artwork for this module, ours or the vendor's? Exposed so a
     /// test can ask whether a panel will be DRAWN rather than infer it from
@@ -130,6 +146,11 @@ private:
 
     /// Read `<dir>/<slug>.svg`, preferring the light face Rack shows.
     static std::string read_panel(const std::string& dir, const std::string& slug);
+
+    /// Give every module whose width nobody measured the width its own artwork
+    /// is drawn at. Runs whenever either half -- the rack or the directory the
+    /// panels are read from -- arrives, because the two arrive in either order.
+    void resolve_panel_widths();
     /// One knob, in panel millimetres, as the module's manifest declares it.
     /// One control. Ours arrive in millimetres from a manifest; a vendor's
     /// arrive in panel points from CARTOG, and converting either into the

@@ -58,15 +58,46 @@ RackLayout layout_rack(const std::vector<RackModule>& modules,
     // Normalised, because Rack saves absolute grid coordinates around an
     // offset of its own -- a real patch has positions in the thousands, and
     // laying those out literally puts the rack off the side of the world.
-    float span_x = 0.0f;
     int rows = 1;
     for (std::size_t i = 0; i < modules.size(); ++i) {
         cell[i].first -= min_x;
         cell[i].second -= min_y;
-        span_x = std::max(span_x, static_cast<float>(cell[i].first +
-                                                     std::max(1, modules[i].hp)));
         rows = std::max(rows, cell[i].second + 1);
     }
+
+    // Two panels cannot occupy the same HP: a rack is a rail, and a module
+    // screwed to it takes up the width it is.
+    //
+    // Stored positions overlap whenever whoever wrote them did not know a
+    // module's true width -- a patch that spaced five modules 8 HP apart and
+    // then found them to be 15, 30, 14, 15 and 24 HP has every one of them
+    // sitting inside its neighbour. Drawing that literally stacks the panels
+    // on top of each other, so each row is walked left to right and anything
+    // that would start inside the panel before it is moved to just after it.
+    // Order and true width are both kept; only the gap that was never there
+    // is given up.
+    std::vector<std::size_t> order(modules.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](std::size_t a, std::size_t b) {
+                         if (cell[a].second != cell[b].second)
+                             return cell[a].second < cell[b].second;
+                         return cell[a].first < cell[b].first;
+                     });
+    int row_of_last = -1, right_edge = 0;
+    for (const auto i : order) {
+        if (cell[i].second != row_of_last) {
+            row_of_last = cell[i].second;
+            right_edge = cell[i].first;
+        }
+        cell[i].first = std::max(cell[i].first, right_edge);
+        right_edge = cell[i].first + std::max(1, modules[i].hp);
+    }
+
+    float span_x = 0.0f;
+    for (std::size_t i = 0; i < modules.size(); ++i)
+        span_x = std::max(span_x, static_cast<float>(cell[i].first +
+                                                     std::max(1, modules[i].hp)));
     out.total_width = span_x * kHorizontalPitch;
     out.rows = rows;
     if (out.total_width <= 0.0f) return out;

@@ -9,6 +9,7 @@
 #include <pulp/canvas/svg_dom_cache.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -22,6 +23,82 @@ namespace color = forge::design::color;
 
 using pulp::canvas::Canvas;
 using pulp::canvas::Color;
+
+namespace {
+
+/// One attribute off an XML start tag, as a number, ignoring any unit suffix.
+/// Zero when the attribute is not there or does not begin with a number.
+float tag_number(const std::string& tag, const std::string& attr) {
+    // `attr="` rather than `attr`, so `width` does not match `stroke-width`
+    // and `height` does not match a `height`-suffixed name either. Searched
+    // from the start of the tag with the quote included because an SVG root
+    // carries several attributes whose names end in the ones wanted.
+    for (std::size_t at = tag.find(attr); at != std::string::npos;
+         at = tag.find(attr, at + 1)) {
+        // A real attribute name begins the token: the character before it is
+        // whitespace or the tag name's own space.
+        if (at > 0 && !std::isspace(static_cast<unsigned char>(tag[at - 1])))
+            continue;
+        std::size_t p = at + attr.size();
+        while (p < tag.size() && std::isspace(static_cast<unsigned char>(tag[p]))) ++p;
+        if (p >= tag.size() || tag[p] != '=') continue;
+        ++p;
+        while (p < tag.size() && (std::isspace(static_cast<unsigned char>(tag[p])) ||
+                                  tag[p] == '"' || tag[p] == '\'')) ++p;
+        try {
+            std::size_t used = 0;
+            const float v = std::stof(tag.substr(p, 32), &used);
+            if (used > 0) return v;
+        } catch (...) {
+            // Not a number. Keep looking rather than giving up: an SVG root
+            // may carry the same suffix twice.
+        }
+    }
+    return 0.0f;
+}
+
+}  // namespace
+
+int panel_hp_from_artwork(const std::string& svg) {
+    const auto open = svg.find("<svg");
+    if (open == std::string::npos) return 0;
+    const auto close = svg.find('>', open);
+    if (close == std::string::npos) return 0;
+    const std::string tag = svg.substr(open, close - open);
+
+    // The viewBox first, because its two numbers are certainly in the same
+    // units as each other. `width` and `height` normally are too -- both in
+    // millimetres, or both bare -- but they are two attributes and can differ,
+    // and a width in millimetres divided by a height in points is a number
+    // with no meaning that still looks like a plausible module.
+    float w = 0.0f, h = 0.0f;
+    const auto vb = tag.find("viewBox");
+    if (vb != std::string::npos) {
+        const auto q = tag.find_first_of("\"'", vb);
+        if (q != std::string::npos) {
+            std::istringstream in(tag.substr(q + 1, 96));
+            float x = 0, y = 0;
+            in >> x >> y >> w >> h;
+            if (!in) { w = 0.0f; h = 0.0f; }
+        }
+    }
+    if (!(w > 0.0f) || !(h > 0.0f)) {
+        w = tag_number(tag, "width");
+        h = tag_number(tag, "height");
+    }
+    if (!(w > 0.0f) || !(h > 0.0f)) return 0;
+
+    // Only the aspect is used, and the height is a constant of the format --
+    // every 3U panel is 128.5 mm tall, whatever units it was drawn in.
+    const float hp = (w / h) * (kPanelHeightMm / kHorizontalPitchMm);
+    const int rounded = static_cast<int>(std::lround(hp));
+    // A rack rail is 84 HP and the widest module anyone ships is well inside
+    // that. Anything outside this is not a Eurorack panel -- an icon, a logo,
+    // a file that happens to be beside the panels -- and guessing from it
+    // would be worse than the fallback it replaced.
+    if (rounded < 1 || rounded > 200) return 0;
+    return rounded;
+}
 
 namespace {
 
@@ -653,6 +730,7 @@ void RackPreview::set_rack(std::vector<RackModule> modules,
                            std::vector<Connection> connections) {
     modules_ = std::move(modules);
     connections_ = std::move(connections);
+    resolve_panel_widths();
 
     // The SVG cache must hold a WHOLE RACK, or it holds nothing useful.
     //
@@ -684,6 +762,29 @@ void RackPreview::set_rack(std::vector<RackModule> modules,
     }
 
     request_repaint();
+}
+
+void RackPreview::resolve_panel_widths() {
+    // The artwork is the last thing that knows how wide a module is, and it is
+    // the only one of the four that is always right there: a .vcv carries no
+    // width, a plugin.json carries no width, and a module nobody has run
+    // CARTOG over has no entry in the port map. A plugin fetched five minutes
+    // ago has none of the three -- which is exactly when somebody is looking
+    // at the preview to see what they just got.
+    //
+    // Every panel it draws is a picture of the real thing at its real size, so
+    // its own aspect is the module's width, and the units it was drawn in do
+    // not matter.
+    static const std::string kOurs = "ForgeModular";
+    for (auto& m : modules_) {
+        if (m.width_measured) continue;
+        const std::string& svg =
+            m.brand == kOurs ? panel_svg(m.name) : vendor_svg(m.brand, m.name);
+        const int hp = panel_hp_from_artwork(svg);
+        if (hp <= 0) continue;   // no artwork, or not a panel: keep the fallback
+        m.hp = hp;
+        m.width_measured = true;
+    }
 }
 
 void RackPreview::set_highlight(std::optional<std::size_t> index) {
