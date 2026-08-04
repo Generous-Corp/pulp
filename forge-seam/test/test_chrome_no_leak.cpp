@@ -2335,6 +2335,60 @@ TEST_CASE("the generation preferences live in Settings, on Permissions",
     shell.on_view_closed(*view);
 }
 
+TEST_CASE("the provider-permissions card is only shown where it applies",
+          "[prefs][seam]") {
+    // The card says permissions are managed by the local provider and that
+    // Forge cannot bypass its approval prompts. True of a product that hands
+    // a provider work to do; not true here, where the model is asked for a
+    // patch and answers with one. Shown anyway it names a limitation the user
+    // will never meet, on the very tab they went to in order to change how
+    // modules are fetched.
+    const std::string kPhrase = "cannot bypass provider approval prompts";
+    auto sheet_words = [](pulp::view::View& view, forge::ForgeChrome& chrome) {
+        chrome.open_permissions_settings();
+        return flatten(rendered_text(&view));
+    };
+
+    {
+        HermeticProjects isolated;
+        forge_modular::ForgeModularShell shell;
+        pulp::state::StateStore store;
+        shell.set_state_store(&store);
+        shell.define_parameters(store);
+        pulp::format::PrepareContext pc;
+        pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+        pc.input_channels = 1; pc.output_channels = 2;
+        shell.prepare(pc);
+        auto view = shell.create_view();
+        REQUIRE(view != nullptr);
+        REQUIRE(shell.chrome() != nullptr);
+        const auto words = sheet_words(*view, *shell.chrome());
+        // The tab itself is still there and still has this product's rows on
+        // it: the card went, not the pane.
+        CHECK(words.find("Module source") != std::string::npos);
+        CHECK(words.find(kPhrase) == std::string::npos);
+        CHECK(words.find("Provider permissions") == std::string::npos);
+        shell.on_view_closed(*view);
+    }
+
+    // And the products it IS true of keep it. This is the whole risk in
+    // changing shared chrome: one product's copy quietly leaving another's.
+    {
+        HermeticProjects isolated;
+        forge::ForgeFxShell shell;
+        pulp::format::PrepareContext pc;
+        pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+        pc.input_channels = 1; pc.output_channels = 2;
+        shell.prepare(pc);
+        auto view = shell.create_view();
+        REQUIRE(view != nullptr);
+        REQUIRE(shell.chrome() != nullptr);
+        const auto words = sheet_words(*view, *shell.chrome());
+        CHECK(words.find(kPhrase) != std::string::npos);
+        shell.on_view_closed(*view);
+    }
+}
+
 TEST_CASE("products that contribute no settings rows keep their sheet as-is",
           "[prefs][seam]") {
     // The hook must cost the three original products nothing: no heading,

@@ -177,6 +177,15 @@ public:
     /// over words, values and callbacks, never a view.
     std::vector<forge::ForgeShell::SettingsChoice> settings_choices() override;
 
+    /// This product never meets a provider's approvals.
+    ///
+    /// A patch is one question with one text answer: the model is asked for
+    /// JSON and the JSON is read here. Nothing it returns is executed and
+    /// nothing it does asks the user to approve a tool, so the Permissions
+    /// tab's card explaining that approval prompts cannot be bypassed would
+    /// be describing a prompt nobody using this will ever see.
+    bool has_provider_permissions() const override { return false; }
+
     /// What the controls currently show, for tests.
     const std::string& module_source_shown() const { return module_source_; }
     const std::string& auto_download_shown() const { return auto_download_; }
