@@ -178,6 +178,148 @@ TEST_CASE("grant issue rejects unavailable and non-grantable capabilities",
           ControlGrantStatus::CapabilityUnavailable);
 }
 
+TEST_CASE("grant requests fail closed for missing identity consent scope and ttl",
+          "[inspect][control][grants]") {
+    GrantFixture fixture;
+
+    auto missing_client = fixture.request();
+    missing_client.client_id = ControlClientId{"missing-client"};
+    CHECK(fixture.grants.issue(
+              std::move(missing_client), GrantFixture::consent()).status ==
+          ControlGrantStatus::ClientUnavailable);
+
+    auto missing_registration = fixture.request();
+    missing_registration.registration_id =
+        ControlRegistrationId{"missing-registration"};
+    CHECK(fixture.grants.issue(
+              std::move(missing_registration),
+              GrantFixture::consent()).status ==
+          ControlGrantStatus::RegistrationUnavailable);
+
+    CHECK(fixture.grants.issue(
+              fixture.request(),
+              ControlConsentDecision{false,
+                                     ControlConsentAuthority::TrustedPulpCli,
+                                     "denied"}).status ==
+          ControlGrantStatus::ConsentRequired);
+    CHECK(fixture.grants.issue(
+              fixture.request(),
+              ControlConsentDecision{true,
+                                     ControlConsentAuthority::TrustedPulpCli,
+                                     {}}).status ==
+          ControlGrantStatus::ConsentRequired);
+    CHECK(fixture.grants.issue(
+              fixture.request({}),
+              GrantFixture::consent()).status ==
+          ControlGrantStatus::CapabilityUnavailable);
+
+    auto zero_ttl = fixture.request();
+    zero_ttl.ttl = 0ms;
+    CHECK(fixture.grants.issue(
+              std::move(zero_ttl),
+              GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                                    "zero-ttl")).status ==
+          ControlGrantStatus::InvalidRequest);
+    auto excessive_ttl = fixture.request();
+    excessive_ttl.ttl = 25h;
+    CHECK(fixture.grants.issue(
+              std::move(excessive_ttl),
+              GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                                    "excessive-ttl")).status ==
+          ControlGrantStatus::InvalidRequest);
+}
+
+TEST_CASE("grant revocation APIs are idempotent and scope their authority",
+          "[inspect][control][grants]") {
+    GrantFixture fixture;
+    CHECK(fixture.grants.revoke({}, {}) ==
+          ControlGrantStatus::InvalidRequest);
+    CHECK(fixture.grants.revoke(ControlGrantId{"missing"}, "revoke") ==
+          ControlGrantStatus::NotFound);
+
+    auto direct = fixture.grants.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "direct"));
+    REQUIRE(direct.grant.has_value());
+    CHECK(fixture.grants.grant(direct.grant->grant_id).has_value());
+    CHECK(fixture.grants.revoke(direct.grant->grant_id, "revoke") ==
+          ControlGrantStatus::Revoked);
+    CHECK(fixture.grants.revoke(direct.grant->grant_id, "revoke-again") ==
+          ControlGrantStatus::Revoked);
+    CHECK_FALSE(fixture.grants.grant(direct.grant->grant_id));
+
+    auto by_client = fixture.grants.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "by-client"));
+    REQUIRE(by_client.grant.has_value());
+    CHECK(fixture.grants.revoke_client({}, "decision") == 0);
+    CHECK(fixture.grants.revoke_client(fixture.client.client_id,
+                                       "client-revoke") == 1);
+    CHECK_FALSE(fixture.grants.is_granted(
+        by_client.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id,
+        InspectorCapability::StateRead));
+
+    auto by_registration = fixture.grants.issue(
+        fixture.request(),
+        GrantFixture::consent(ControlConsentAuthority::TrustedPulpCli,
+                              "by-registration"));
+    REQUIRE(by_registration.grant.has_value());
+    CHECK(fixture.grants.revoke_registration({}, "decision") == 0);
+    CHECK(fixture.grants.revoke_registration(
+              fixture.registration.registration_id,
+              "registration-revoke") == 1);
+    CHECK_FALSE(fixture.grants.grant(by_registration.grant->grant_id));
+}
+
+TEST_CASE("interactive consent replay history is bounded",
+          "[inspect][control][grants]") {
+    GrantFixture fixture;
+    ControlGrantStore bounded(
+        fixture.identities, fixture.audit,
+        ControlGrantStoreConfig{4, 1, 1h},
+        [&] { return fixture.now; });
+    REQUIRE(bounded.issue(
+                fixture.request(),
+                GrantFixture::consent(ControlConsentAuthority::TrustedHostUi,
+                                      "first-decision")).status ==
+            ControlGrantStatus::Granted);
+    CHECK(bounded.issue(
+              fixture.request(),
+              GrantFixture::consent(ControlConsentAuthority::TrustedHostUi,
+                                    "second-decision")).status ==
+          ControlGrantStatus::ResourceExhausted);
+}
+
+TEST_CASE("grant status identifiers are stable",
+          "[inspect][control][grants]") {
+    CHECK(control_grant_status_id(ControlGrantStatus::Granted) == "granted");
+    CHECK(control_grant_status_id(ControlGrantStatus::InvalidRequest) ==
+          "invalid-request");
+    CHECK(control_grant_status_id(ControlGrantStatus::BrokerMismatch) ==
+          "broker-mismatch");
+    CHECK(control_grant_status_id(ControlGrantStatus::ClientUnavailable) ==
+          "client-unavailable");
+    CHECK(control_grant_status_id(
+              ControlGrantStatus::RegistrationUnavailable) ==
+          "registration-unavailable");
+    CHECK(control_grant_status_id(ControlGrantStatus::ConsentRequired) ==
+          "consent-required");
+    CHECK(control_grant_status_id(ControlGrantStatus::ConsentReplay) ==
+          "consent-replay");
+    CHECK(control_grant_status_id(
+              ControlGrantStatus::CapabilityUnavailable) ==
+          "capability-unavailable");
+    CHECK(control_grant_status_id(ControlGrantStatus::ResourceExhausted) ==
+          "resource-exhausted");
+    CHECK(control_grant_status_id(ControlGrantStatus::NotFound) ==
+          "not-found");
+    CHECK(control_grant_status_id(ControlGrantStatus::Expired) == "expired");
+    CHECK(control_grant_status_id(ControlGrantStatus::Revoked) == "revoked");
+}
+
 TEST_CASE("grant expiry revocation and disconnect remove authority",
           "[inspect][control][grants]") {
     GrantFixture fixture;

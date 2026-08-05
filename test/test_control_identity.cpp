@@ -217,6 +217,91 @@ TEST_CASE("registration rejects forged manifests and artifact identities",
           ControlIdentityStatus::InvalidRequest);
 }
 
+TEST_CASE("client and registration lifecycle require the owning peer",
+          "[inspect][control][identity]") {
+    auto audit = std::make_shared<ControlSecurityAuditLog>();
+    ControlIdentityRegistry identities({}, audit);
+    const auto client_peer = peer(ControlPeerRole::Client, 46, "client-start");
+    const auto rogue_peer = peer(ControlPeerRole::Client, 47, "rogue-start");
+    auto ticket = identities.issue_bootstrap(client_peer);
+    REQUIRE(ticket.ticket.has_value());
+    auto connected = identities.redeem_bootstrap(
+        ticket.ticket->ticket_id, ticket.ticket->secret.bytes(), client_peer);
+    REQUIRE(connected.client.has_value());
+
+    CHECK_FALSE(identities.refresh_client(
+        connected.client->client_id, rogue_peer));
+    CHECK(identities.refresh_client(connected.client->client_id, client_peer));
+    CHECK(identities.disconnect_client(connected.client->client_id));
+    CHECK_FALSE(identities.disconnect_client(connected.client->client_id));
+
+    const auto host = peer(ControlPeerRole::StandaloneHost, 48, "host-start");
+    const auto other_host =
+        peer(ControlPeerRole::StandaloneHost, 49, "other-host-start");
+    auto registered = identities.register_instance(
+        host, registration_request());
+    REQUIRE(registered.registration.has_value());
+    CHECK_FALSE(identities.unregister_instance(
+        registered.registration->registration_id, other_host));
+    CHECK(identities.unregister_instance(
+        registered.registration->registration_id, host));
+    CHECK_FALSE(identities.registration(
+        "session-a", "instance-a", "publication-a"));
+
+    const auto events = audit->snapshot();
+    CHECK(std::ranges::any_of(events, [](const auto& event) {
+        return event.action == "client.disconnect" &&
+               event.outcome == ControlSecurityOutcome::Revoked;
+    }));
+    CHECK(std::ranges::any_of(events, [](const auto& event) {
+        return event.action == "registration.unregister" &&
+               event.outcome == ControlSecurityOutcome::Denied;
+    }));
+}
+
+TEST_CASE("registration rejects peer roles and duplicate exact publications",
+          "[inspect][control][identity]") {
+    ControlIdentityRegistry identities;
+    const auto client = peer(ControlPeerRole::Client, 54, "client-start");
+    CHECK(identities.register_instance(
+              client, registration_request()).status ==
+          ControlIdentityStatus::PeerRoleMismatch);
+
+    const auto host = peer(ControlPeerRole::StandaloneHost, 55, "host-start");
+    REQUIRE(identities.register_instance(
+                host, registration_request()).registration.has_value());
+    CHECK(identities.register_instance(
+              host, registration_request()).status ==
+          ControlIdentityStatus::IdentityMismatch);
+}
+
+TEST_CASE("identity status identifiers are stable",
+          "[inspect][control][identity]") {
+    CHECK(control_identity_status_id(ControlIdentityStatus::Accepted) ==
+          "accepted");
+    CHECK(control_identity_status_id(ControlIdentityStatus::InvalidRequest) ==
+          "invalid-request");
+    CHECK(control_identity_status_id(ControlIdentityStatus::PeerRoleMismatch) ==
+          "peer-role-mismatch");
+    CHECK(control_identity_status_id(ControlIdentityStatus::HostUnavailable) ==
+          "host-unavailable");
+    CHECK(control_identity_status_id(
+              ControlIdentityStatus::AttestationUnavailable) ==
+          "attestation-unavailable");
+    CHECK(control_identity_status_id(ControlIdentityStatus::IdentityMismatch) ==
+          "identity-mismatch");
+    CHECK(control_identity_status_id(ControlIdentityStatus::NotFound) ==
+          "not-found");
+    CHECK(control_identity_status_id(ControlIdentityStatus::Expired) ==
+          "expired");
+    CHECK(control_identity_status_id(ControlIdentityStatus::Replay) ==
+          "replay");
+    CHECK(control_identity_status_id(ControlIdentityStatus::ResourceExhausted) ==
+          "resource-exhausted");
+    CHECK(control_identity_status_id(ControlIdentityStatus::EntropyUnavailable) ==
+          "entropy-unavailable");
+}
+
 TEST_CASE("identity registry bounds clients registrations and challenges",
           "[inspect][control][identity]") {
     ControlIdentityRegistryConfig config;
