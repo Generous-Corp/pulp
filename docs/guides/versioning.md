@@ -111,6 +111,31 @@ Skill-Update: skip skill=<name> reason="mechanical rename, no new lesson"
 
 The script's self-check also fails if any directory under `.agents/skills/` lacks an entry in the map — the map is deliberately explicit so it's reviewed alongside skill changes.
 
+### `skill_path_map_lint.py`
+
+Checks the map itself. The gate above is only as good as its rules, and a
+rule that matches nothing does not report a problem — it reports nothing,
+which is indistinguishable from a clean run. Runs from `gates.sh`, the
+pre-push hook, and the `version-skill-check` workflow; pure stdlib and
+sub-second.
+
+| Rule | Scope | What it rejects | Escape hatch |
+|------|-------|-----------------|--------------|
+| `schema` | whole-tree | The map violating `skill_path_map.schema.json`, or that file being absent. Catches an entry written as a bare array (parses to zero patterns), an unknown key, a malformed pattern, a placeholder annotation. | none |
+| `submodule` | whole-tree | A pattern rooted inside a git submodule. The superproject's diff carries the `planning` gitlink, never a path beneath it, so such a pattern cannot fire for any commit. | none — no annotation makes it reachable |
+| `empty` | whole-tree | A pattern matching no tracked file. Whole-tree because the usual cause is the tree moving out from under a pattern nobody edited. | `_doc.empty-ok`, restricted to `external/` SDK paths and to entries claiming no paths at all |
+| `co-claim` | diff-scoped | *Newly* claiming an entire `<root>/<sub>/**` subsystem another skill already claims. Every edit under it would then demand several SKILL.md updates, which trains reflexive `Skill-Update: skip` trailers. | `_doc.scope` on the entry, saying why |
+
+The schema is validated by `json_schema_lite.py`, a small stdlib
+validator for the JSON Schema subset Pulp's config schemas use. A keyword
+it does not implement raises rather than being skipped, so a schema
+author cannot write a constraint that is silently never checked.
+
+Fixture and real-map tests live in `tools/scripts/test_skill_path_map_lint.py`
+and `tools/scripts/test_skill_path_map.py`, both imported by
+`tools/scripts/test_gates.py` — the module CI's "Gate-script fixture tests"
+step runs. A `TestCase` not imported there runs nowhere.
+
 ---
 
 ## Pre-push hook
@@ -396,7 +421,29 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.80.2 — the merge queue made it load-bearing
+### Why the pin sits at v0.83.0 — fleet health and the merge queue are load-bearing
+
+v0.83.0 adds fail-closed formal-stack inspection to every Shipyard merge or
+enqueue mutation boundary, including the cross-repository runner steward. Pulp
+can therefore run a small native GitHub stacked-PR pilot without allowing an
+unattended steward tick to send one layer through the legacy unstacked queue
+path. Shipyard remains observe-only for formal stacks until it durably models
+GitHub's asynchronous stack-merge request and completion lifecycle.
+
+v0.81.4 preserves v0.81.3's attached supervised PR push and regenerates Pulp's
+SSH-signing setup from `release.post_tag_hook.ssh_signing_setup_script`, so a
+pin refresh cannot silently remove signed bot commits. The signing helper now
+writes repository-local Git config, preventing its temporary key path from
+poisoning later jobs on a shared runner. v0.81.3 keeps v0.81.1's valid shell tag
+extraction and v0.81.2's fully qualified release-bot refspec, then attaches the
+deterministic PR branch before supervised push so Pulp's pre-push hook sees both
+a branch and `SHIPYARD_PR_RUNNING=1`. v0.81.0 makes `runner fleet-status` account for the full registered-runner
+inventory and configured expected metal hosts, including machines that have not
+registered yet. It also fails visibly when Tart disk headroom falls below its
+admission floor, ccache exceeds its configured maximum, or a merge-group Linux
+job remains on `ubuntu-latest` while compatible self-hosted capacity is idle.
+Pulp relies on these checks for the MacPro Linux pool and unfinished Mac Mini
+Intel lane, so expected-host config must not land ahead of this pin.
 
 The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
 **Shipyard's post-tag hook could no longer push.**
@@ -439,3 +486,15 @@ it in a comment that goes stale — which is exactly what happened here.
 Keep the three in step — the pin, the installed binary on every fleet Mac, and
 `push_mode` — because a host still on an older Shipyard silently ignores
 `push_mode` and reverts to a direct push that the ruleset then rejects.
+
+v0.80.3 fixes the local queue scheduler so a worker slot is refilled as
+soon as its target finishes rather than only after the entire dispatched batch.
+That is a throughput dependency for Pulp's shared Macs, not a cosmetic upgrade.
+The same release expands Shipyard's own version trigger to root-level
+`src/*.rs`; without it, the scheduler fix could merge without creating the CLI
+release referenced by this pin.
+
+v0.80.4 keeps Git-over-SSH pushes alive during Pulp's long pre-push proof while
+preserving any explicitly configured SSH identity or proxy command. Without it,
+a successful local proof can still end in an expired SSH connection and waste
+the entire validation cycle.

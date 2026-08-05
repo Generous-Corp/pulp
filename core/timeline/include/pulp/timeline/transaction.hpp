@@ -96,6 +96,10 @@ class DirtySet {
 };
 
 /// Stable reason a transaction cannot be reduced or committed.
+///
+/// The ordinals are part of the observable surface: the MCP transaction-failure
+/// envelope emits them verbatim as numeric_code. New causes are appended at the
+/// end so an existing code never renumbers.
 enum class ConflictCode : std::uint8_t {
     InvalidIdentifier,
     EmptyTransaction,
@@ -118,6 +122,21 @@ enum class ConflictCode : std::uint8_t {
     SequenceExhausted,
     ModelInvariant,
     JournalDurability,
+    /// A replay checkpoint matched the journal base revision but is not the
+    /// document the journal was built on. A caller precondition failure --
+    /// recoverable by supplying the right checkpoint -- and never evidence that
+    /// the journal itself is damaged.
+    CheckpointMismatch,
+    /// Replaying a recorded entry did not reproduce what was recorded: the entry
+    /// no longer reduces, or its re-reduction yielded a different DirtySet.
+    /// Always a journal-integrity or reducer-nondeterminism failure, never a
+    /// caller error. transaction names the first diverging entry; item,
+    /// related_item, and model_error, when present, carry the reducer's account
+    /// of the second pass.
+    ReplayDivergence,
+    /// Never produced deliberately. A TransactionError carrying it was returned
+    /// without its cause being assigned, which is a Pulp bug.
+    Unspecified,
 };
 
 /// Structured transaction rejection.
@@ -125,9 +144,13 @@ enum class ConflictCode : std::uint8_t {
 /// transaction and command identify the rejected operation; item and
 /// related_item identify model targets when applicable. expected_revision and
 /// current_revision describe optimistic-concurrency failures. model_error
-/// carries the underlying invariant rejection for ModelInvariant.
+/// carries the underlying invariant rejection for ModelInvariant, and for
+/// ReplayDivergence when the diverging entry was refused by the model.
+///
+/// code defaults to Unspecified so that a producer which forgets to assign it
+/// reports an obviously wrong value instead of a plausible real cause.
 struct TransactionError {
-    ConflictCode code = ConflictCode::ModelInvariant;
+    ConflictCode code = ConflictCode::Unspecified;
     TransactionId transaction;
     CommandId command;
     ItemId item;
@@ -150,12 +173,15 @@ struct ReducedTransaction {
 /// Immutable state published by a successful session commit.
 ///
 /// snapshot and revision are an atomic pair and remain valid independently of
-/// later commits. applied_commands lists IDs in transaction order.
+/// later commits. predecessor_snapshot is the exact immutable snapshot reduced
+/// by this commit, allowing downstream incremental consumers to prove lineage.
+/// applied_commands lists IDs in transaction order.
 struct CommitResult {
     std::shared_ptr<const Project> snapshot;
     DocumentRevision revision;
     DirtySet dirty;
     std::vector<CommandId> applied_commands;
+    std::shared_ptr<const Project> predecessor_snapshot;
 };
 
 /// Purely applies a transaction to a project without session publication.

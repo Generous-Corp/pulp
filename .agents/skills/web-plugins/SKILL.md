@@ -179,6 +179,15 @@ Consequences for anything on the web lane that publishes program state:
   the `AudioContext` survives — the new Worker republishes generation 1, and a
   consumer comparing generations alone refuses every publish from then on and
   renders a stale program with no diagnostic to distinguish it from silence.
+- **Decide a lane `Unchanged` on its `instance_token` too, not on
+  `(lane_id, generation)`.** The epoch separates producers; it does not separate
+  two programs from one producer, and that is the common case — a worklet's
+  Worker recompiling. `generation` is supplied by the caller rather than minted
+  per compile, so everything else about the lane can be identical. Each
+  `ProgramWireAutomationLaneRecord` carries the producer's own token for exactly
+  this; compare it for equality only, and only against a token from the same
+  `producer_epoch`. Keeping cursor state on a lane whose token moved renders the
+  stale curve with nothing malformed for the decoder to reject.
 
 ## Capability tiers are shared with mobile — do not mint a browser-local enum
 
@@ -328,6 +337,31 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   both pass while every string measures at **zero width**. Probe font usability
   by drawing a glyph (`unicharToGlyph('A') != 0`), never by counting families.
 
+### The bundled-font list exists TWICE, and the web copy is the one that breaks
+
+There is no platform font manager in a browser, so embedded blobs ARE the font
+stack. Two files declare which faces get embedded:
+
+- `core/canvas/CMakeLists.txt` for desktop
+- `tools/cmake/PulpWebUi.cmake` for web / WASM
+
+`core/canvas/src/bundled_fonts.cpp` names every blob symbol directly and is
+compiled into BOTH. So adding a face to the desktop list and not the web one is
+not a missing glyph at runtime, it is a **compile error**:
+
+```
+error: no member named 'Jost_Regular_ttf' in namespace 'pulp_bundled_fonts'
+```
+
+in a lane nobody runs locally, discovered by CI on a PR about something else.
+The desktop list carries a comment telling you to keep it aligned with
+`bundled_fonts.cpp`; the web copy had no comment and no way to know it existed.
+
+Guarded now by the `bundled-font-lists-agree` ctest
+(`tools/scripts/check_bundled_font_lists.py`), which compares the two lists and
+names the file to fix. If you add a font, add it in both places and the lint
+will tell you when you have not.
+
 ## Browser-host rules
 
 - **Probe for WebGL2; a browser without it is a shipping configuration.**
@@ -442,6 +476,22 @@ per-ABI entry point for it.** Go through the plugin's own state:
   no-exceptions proof together. Hand-editing any of the four consumer lists for a
   timeline unit is not just unnecessary, it is wrong.
 
+- **This skill owns the engines' web-ABI source closure, not the engines.**
+  `skill_path_map.json` maps `web-plugins` to
+  `core/timeline/PulpTimelineSources.cmake`,
+  `core/playback/PulpPlaybackSources.cmake`, `PulpWam.cmake` (which carries the
+  literal `core/timebase/src` list) and `PulpWclap.cmake` — the surfaces that
+  decide what the browser lanes compile. It does **not** claim
+  `core/timebase/**`, `core/timeline/**`, or `core/playback/**` wholesale.
+  Adding or splitting an engine TU still lands on this skill, because it edits
+  one of those lists; editing an existing engine TU does not, because nothing
+  here goes stale. Whole-subsystem claims made the gate fire on every engine
+  edit, which trains reflexive `Skill-Update: skip` trailers — and that reflex
+  is how a genuinely missed skill update gets waved through. `web-timeline-
+  source-closure` (a ctest, not this gate) is what proves the closure itself.
+  `tools/scripts/test_skill_sync.py::RealSkillPathMapOwnershipTests` asserts
+  the boundary from both sides, so widening it back fails a test.
+
 - Sequence-level document state (markers, regions) is portable engine data, so
   its migration and reducer units — `sequence_schema_migrations.cpp`,
   `transaction_marker_internal.cpp` — belong in the shared timeline source
@@ -526,6 +576,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   `ProgramCompileRequest::maximum_note_events_per_track`: wasm's memory ceiling
   makes an unbounded ratchet fan-out especially dangerous. This engine support
   does not by itself add a JavaScript authoring surface.
+
+- Sequence groove rendering and compile-context invalidation are equally
+  portable. Built-in MIDI subscribes to `CompileContextKind::Groove`; its owner
+  sequence timing displacement and velocity accent are compiled before the
+  bounded ratchet expansion. WAM and WebCLAP therefore inherit the same note
+  program without browser-only math. Keep `CommitResult` predecessor provenance,
+  registry snapshots, and MIDI compile-structure tokens in the shared timeline /
+  playback lane so sparse reuse cannot publish stale browser programs. This also
+  does not create a JavaScript authoring surface by itself.
 
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its

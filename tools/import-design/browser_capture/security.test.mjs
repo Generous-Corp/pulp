@@ -215,6 +215,76 @@ test("capture snapshots redact the private loopback token", () => {
   });
 });
 
+test("redaction carries the authored frame through unchanged", () => {
+  // The capture is deliberately larger than the design, so `authored_frame` is
+  // the only thing that says where the design sits inside the image. A consumer
+  // that loses it has to GUESS the offset, and a centred guess is wrong because
+  // the growth is asymmetric — which is how a visually-close panel once scored
+  // as 73% different. Redaction runs over the whole envelope, so this asserts
+  // the geometry survives it: four numbers carry no path and no URL, and a null
+  // frame must stay null rather than collapsing to a zero offset.
+  const snapshot = {
+    reference: {
+      path: "browser.png",
+      device_scale_factor: 2,
+      authored_frame: { x: 120, y: 120, width: 760, height: 886.0625 },
+    },
+    unresolved: { authored_frame: null },
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, ""), snapshot);
+});
+
+test("path redaction keeps the CSS alpha separator intact", () => {
+  const snapshot = {
+    strings: [
+      "oklab(0.876866 -0.205044 0.134253 / 0.34)",
+      "oklab(0.53 -0.07 0.045 / 0.26) 0px 1px 0px 0px inset",
+      "linear-gradient(135deg, oklab(0.2 -0.005 0.003 / 0.9), rgb(10, 10, 10))",
+      "rgb(184 248 192 / 62%)",
+    ],
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, "").strings, snapshot.strings);
+});
+
+test("path redaction leaves panel text that starts with a slash alone", () => {
+  // Note-division labels are ordinary panel copy: every arpeggiator, delay and
+  // LFO writes "/16". Redacting them replaced the user's own text with
+  // "<local-path>", which no validator can see because the panel still renders
+  // and the string is still a string.
+  //
+  // A leading slash does not name a file. A path has segments, so requiring a
+  // second one separates "/16" from "/Users/someone/panel.html" without asking
+  // the sanitizer to know which field it is looking at.
+  const snapshot = {
+    strings: [
+      "/16",
+      "/8",
+      "1/16",
+      "OF 16",
+      "SYNC /4",
+      "rate: /32 dotted",
+    ],
+  };
+  assert.deepEqual(sanitizeSnapshot(snapshot, "").strings, snapshot.strings);
+});
+
+test("path redaction still removes real local paths", () => {
+  const snapshot = {
+    strings: [
+      "failed at /Users/someone/Code/panel.html",
+      "spawn /opt/homebrew/bin/node ENOENT",
+      "C:\\Users\\someone\\panel.html",
+    ],
+  };
+  const sanitized = sanitizeSnapshot(snapshot, "").strings;
+  for (const value of sanitized) {
+    assert.ok(
+      !/Users|homebrew/u.test(value),
+      `expected the local path to be redacted, got ${value}`);
+    assert.match(value, /<local-path>/u);
+  }
+});
+
 test("capture errors redact tokenized URLs from messages and health", () => {
   const prefix = "http://127.0.0.1:43123/private-token/";
   const error = new Error(

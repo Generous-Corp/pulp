@@ -839,13 +839,13 @@ void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
 // FillRule::evenodd and as a disc under FillRule::nonzero — the same split
 // fill_current_path() has always honored. Degenerate input (null, or fewer
 // than three points — no enclosed area) draws nothing, matching
-// CgCanvas::fill_path.
+// CgCanvas::fill_path. The rule goes to SkPathBuilder's CONSTRUCTOR — the inline
+// `setFillType` is a no-op against the pinned libskia.a (`skia-gpu-build` skill).
 void SkiaCanvas::fill_path(const Point2D* points, size_t count, FillRule rule) {
     GUARD_CANVAS;
     if (!points || count < 3) return;
-    SkPathBuilder builder;
-    builder.setFillType(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
-                                                  : SkPathFillType::kWinding);
+    SkPathBuilder builder(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
+                                                    : SkPathFillType::kWinding);
     builder.moveTo(points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         builder.lineTo(points[i].x, points[i].y);

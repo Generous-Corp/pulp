@@ -6,7 +6,8 @@
 add_library(pulp-browser-capture-backend STATIC
     browser_capture_backend.cpp
     browser_discovery.cpp
-    browser_capture_diagnostics.cpp)
+    browser_capture_diagnostics.cpp
+    node_runtime.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)
 target_include_directories(pulp-browser-capture-backend PUBLIC
@@ -25,8 +26,11 @@ add_executable(pulp-import-design
     browser_html_import.cpp
     browser_capture_workspace.cpp
     browser_capture_ir.cpp
+    browser_capture_styles.cpp
+    browser_capture_tree.cpp
     browser_capture_validation.cpp
     browser_knob_sprites.cpp
+    svg_shape_lowering.cpp
     claude_html_dependencies.cpp
     html_project_stager.cpp
     html_intake.cpp

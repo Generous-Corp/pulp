@@ -156,12 +156,28 @@ tools/scripts/release_routing.sh github linux-arm64        # -> back to GitHub
 GitHub-hosted. So `github <leg>` is a complete revert and takes effect on the next
 tag. If the local pool is down, getting back to GitHub is one command.
 
+The lightweight resolver jobs in `release-cli.yml` and `sign-and-release.yml`
+also reuse trusted Linux capacity. They prefer
+`PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` selector, and fall back to `ubuntu-latest` when
+both are unset. These workflows accept only a version-tag push or maintainer
+dispatch; pull-request and merge-queue code never reaches this persistent pool.
+The artifact-consuming build, smoke, signing, and publication jobs keep their
+separate routing and security boundaries.
+
 **Why this exists.** Only the macOS legs used to be variable-driven; every other leg
 fell through to `|| matrix.os` — a literal GitHub-hosted label. That single
 fallthrough is the *entire* reason Linux and Windows releases could not use the
 self-hosted VMs that were already booted and idle. Measured on v0.663.1: the local
 macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**, while the hosted
 legs took **39-72 min to execute** and `darwin-x64` sat **127 minutes** in the queue.
+
+Both Darwin rows now prefer the dedicated
+`PULP_RELEASE_MACOS_RUNS_ON_JSON` Tart pool. For `darwin-x64`, the precedence is
+the per-leg `PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON` override, the shared release
+pool, the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` override, then hosted
+`macos-15`. The x64 row still cross-compiles on ARM and smokes under Rosetta;
+the native Intel Mac Mini remains a separate advisory/nightly portability lane.
 
 ### What can and cannot go local
 

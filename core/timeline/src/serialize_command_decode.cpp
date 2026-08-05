@@ -375,6 +375,29 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             std::move(decoded_expected).value(), std::move(decoded_replacement).value(),
             std::move(expected_modifiers), std::move(replacement_modifiers)}));
     }
+    if (type.value() == "pulp.timeline.command.set_note_events") {
+        auto decoded = ids();
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!decoded || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        // Both arrays are note arrays, decoded exactly as a clip's notes are, so
+        // a malformed note is rejected here rather than at the reducer. Whether
+        // the two arrays pair up is a reduction question, not a decode one: it
+        // needs the clip they name.
+        auto decoded_expected =
+            decode_command_notes(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_notes(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(Command(SetNoteEvents{decoded.value()[0], decoded.value()[1],
+                                                 decoded.value()[2],
+                                                 std::move(decoded_expected).value(),
+                                                 std::move(decoded_replacement).value()}));
+    }
     if (type.value() == "pulp.timeline.command.set_clip_playback_properties") {
         auto decoded = ids();
         auto expected = required(command, "expected", data_path);
@@ -519,9 +542,11 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             replacement.value()->kind != JsonValue::Kind::Array)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         auto decoded_expected =
-            decode_chord_scale_lane(expected.value(), context, data_path + "/expected");
+            decode_chord_scale_lane(expected.value(), MemberPolicy::Optional, context,
+                                    data_path + "/expected");
         auto decoded_replacement =
-            decode_chord_scale_lane(replacement.value(), context, data_path + "/replacement");
+            decode_chord_scale_lane(replacement.value(), MemberPolicy::Optional, context,
+                                    data_path + "/replacement");
         if (!decoded_expected)
             return runtime::Err(decoded_expected.error());
         if (!decoded_replacement)
@@ -552,7 +577,8 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         auto region = required(command, "region", data_path);
         if (!sequence || !region)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
-        auto decoded = decode_region(*region.value(), context, data_path + "/region");
+        auto decoded = decode_region(*region.value(), MemberPolicy::Optional, context,
+                                     data_path + "/region");
         if (!decoded)
             return runtime::Err(decoded.error());
         return runtime::Ok(Command(InsertRegion{sequence.value(), std::move(decoded).value()}));

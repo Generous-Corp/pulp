@@ -4,6 +4,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/runtime/zip.hpp>
 
 #ifdef __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
@@ -113,6 +114,48 @@ std::vector<uint8_t> encode_raw_rgba_png(const std::vector<uint8_t>& pixels,
 #endif
 
 }  // namespace
+
+TEST_CASE("PNG metadata rejects gzip-wrapped IDAT data",
+          "[view][compare][png-validation]") {
+    const auto append_be32 = [](std::vector<uint8_t>& out, uint32_t value) {
+        out.push_back(static_cast<uint8_t>(value >> 24u));
+        out.push_back(static_cast<uint8_t>(value >> 16u));
+        out.push_back(static_cast<uint8_t>(value >> 8u));
+        out.push_back(static_cast<uint8_t>(value));
+    };
+    const auto crc32 = [](const uint8_t* data, size_t size) {
+        uint32_t crc = 0xffffffffu;
+        for (size_t i = 0; i < size; ++i) {
+            crc ^= data[i];
+            for (int bit = 0; bit < 8; ++bit)
+                crc = (crc >> 1u) ^ (0xedb88320u & (0u - (crc & 1u)));
+        }
+        return ~crc;
+    };
+    const auto make_png = [&](const std::vector<uint8_t>& idat) {
+        std::vector<uint8_t> png{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+        const auto append_chunk = [&](const char (&type)[5],
+                                      const std::vector<uint8_t>& payload) {
+            append_be32(png, static_cast<uint32_t>(payload.size()));
+            const size_t crc_start = png.size();
+            png.insert(png.end(), type, type + 4);
+            png.insert(png.end(), payload.begin(), payload.end());
+            append_be32(png, crc32(png.data() + crc_start, png.size() - crc_start));
+        };
+        append_chunk("IHDR", {0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0});
+        append_chunk("IDAT", idat);
+        append_chunk("IEND", {});
+        return png;
+    };
+
+    const std::vector<uint8_t> scanline{0, 0, 0, 0, 255};
+    const auto zlib = pulp::runtime::zlib_compress(scanline.data(), scanline.size());
+    const auto gzip = pulp::runtime::gzip_compress(scanline.data(), scanline.size());
+    REQUIRE(zlib.has_value());
+    REQUIRE(gzip.has_value());
+    REQUIRE(inspect_png_metadata(make_png(*zlib)).valid);
+    REQUIRE_FALSE(inspect_png_metadata(make_png(*gzip)).valid);
+}
 
 TEST_CASE("CompareResult passes with high similarity", "[view][compare]") {
     CompareResult r;

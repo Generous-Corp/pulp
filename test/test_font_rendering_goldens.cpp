@@ -236,11 +236,71 @@ void expect_digest_matches(const Digest& actual, const Digest& expected,
 // from the INFO line into the constants below, rebuild, rerun,
 // expect green.
 
+// Regenerated when the bundled faces reached the paint path, which is the
+// same cause that moved the 'Hello'/Inter digest — that change regenerated
+// the Latin golden and missed this one.
+//
+// Bundled Inter carries no CJK, so 日本語 now leaves the primary face and is
+// served by the system fallback cascade. Previously the requested "Inter"
+// resolved through CoreText to a substitute that covered CJK itself, so no
+// fallback happened and the digest recorded the substitute's glyphs. The
+// near-doubling (190→365 opaque, 24749→46850 darkness) is a denser fallback
+// face, not extra ink on the same one.
+//
+// Verified by LOOKING at the dumped render, not by accepting the number: three
+// well-formed glyphs on one baseline, no doubling, no ghosting, no .notdef
+// tofu. That check matters because a ~2x ink jump is also what a run painted
+// twice looks like, and this branch changed fallback-run baseline seating.
+// Deterministic across repeated runs.
+//
+// THE AUTHORITY FOR THESE NUMBERS IS THE GATE VM, NOT A DEV MACHINE.
+//
+// The required macOS check runs on an ephemeral Tart VM from the
+// `pulp-build-runner` golden image, whose Xcode is pinned in
+// `.shipyard/vm-image.toml` precisely so these goldens are reproducible. A
+// Mac Studio or laptop can be several Xcode point releases ahead of it, and
+// this file has already recorded one toolchain bump moving a digest past the
+// 5% band. So "captured on my machine" is NOT the same claim as "correct for
+// CI", and the reference-host line below is the pin, not wherever a value
+// happened to be measured.
+//
+// These CJK values were measured on macos-arm64 / Xcode 26.6 (17F113), which
+// is AHEAD of the pinned gate toolchain. Treat them as provisional until a
+// gate run confirms them; if it disagrees, harvest the real numbers from the
+// `actual=` values the failure prints rather than guessing again, and do NOT
+// respond by widening the tolerance — that would weaken a test that is
+// currently doing its job.
+//
+// CJK fallback face selection is host-dependent in a way the Latin goldens are
+// not, so a host whose cascade picks a different CJK face needs its own
+// baseline.
+//
+// This constant used to sit OUTSIDE the `#if defined(__linux__)` split that
+// `kHelloInter14` and `kHelloWorldMono12` live inside, so one macOS measurement
+// silently governed Linux too. The bundled-faces change is macOS-only in effect
+// — the paint path already bridged the bundled faces on platforms with no font
+// DB of their own, which is why the Linux Hello digest never moved — so leaving
+// them shared would have made the Linux expectation wrong the moment that host
+// gained a CJK face. Split, with Linux holding the value it always had.
+//
+// Linux is believed to soft-skip today (its image carries fontconfig but no CJK
+// font package, and the case completes far faster than a real render), so this
+// arm is currently latent rather than exercised. It is NOT a claim that
+// FreeType/fontconfig produces this number — it is the pre-existing value,
+// preserved rather than extrapolated from a macOS capture.
+#if defined(__linux__)
 constexpr Digest kCjkInter14 {
     /*width=*/128, /*height=*/32,
     /*opaque_pixels=*/190,
     /*darkness_sum=*/24749,
 };
+#else
+constexpr Digest kCjkInter14 {
+    /*width=*/128, /*height=*/32,
+    /*opaque_pixels=*/365,
+    /*darkness_sum=*/46850,
+};
+#endif
 
 // Hosted Linux x64 renders the bundled Latin fonts through
 // FreeType/fontconfig, which produces stable but lighter AA than
@@ -262,8 +322,17 @@ constexpr Digest kHelloWorldMono12 {
 #else
 constexpr Digest kHelloInter14 {
     /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/244,
-    /*darkness_sum=*/31403,
+    // Regenerated 2026-08-02 when the bundled faces reached the SkParagraph
+    // path. 244/31403 was NOT bundled Inter: the paragraph collection only
+    // learned the bundled faces on platforms with no font DB of their own, so
+    // macOS resolved "Inter" through CoreText to a substitute. Verified against
+    // Chrome rendering this exact string at this exact size from this repo's
+    // own Inter-Regular.ttf — ink width 32.00px vs Chrome's 32.50px (-1.5%),
+    // where the old render was 31.00px (-4.6%), and the letterforms now match.
+    // The Linux digest below never moved: FreeType always used the bundled
+    // face, and macOS's opaque count converging on it is the corroboration.
+    /*opaque_pixels=*/210,
+    /*darkness_sum=*/30518,
 };
 
 constexpr Digest kHelloWorldMono12 {

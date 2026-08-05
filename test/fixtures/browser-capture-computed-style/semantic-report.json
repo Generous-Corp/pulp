@@ -1,0 +1,161 @@
+{
+  "schema": "pulp-browser-semantics-v1",
+  "version": 1,
+  "viewport": {
+    "width": 640,
+    "height": 300,
+    "device_scale_factor": 2
+  },
+  "summary": {
+    "candidates": 4,
+    "resolved": 2,
+    "unresolved": 2,
+    "bound": 2,
+    "conflicted": 0
+  },
+  "limitations": [
+    "Canvas and WebGL internal hit regions are not recoverable from the DOM; their host surface is reported as one unresolved candidate when clickable."
+  ],
+  "candidates": [
+    {
+      "id": "browser-node:8",
+      "backend_node_id": 21,
+      "source_node_id": "",
+      "tag": "div",
+      "role": "",
+      "name": "DRIVE",
+      "kind": "knob",
+      "bounds": {
+        "left": 68,
+        "top": 68,
+        "width": 98,
+        "height": 123
+      },
+      "paint_bounds": {
+        "left": 68,
+        "top": 68,
+        "width": 98,
+        "height": 98
+      },
+      "accent": "#39ff6a",
+      "data_pulp": {
+        "param": "drive",
+        "value": "0.62"
+      },
+      "evidence": [
+        {
+          "kind": "data-pulp",
+          "value": "{\"param\":\"drive\",\"value\":\"0.62\"}",
+          "strength": "strong"
+        }
+      ],
+      "confidence": 0.9,
+      "resolved": true,
+      "binding_status": "bound",
+      "conflicts": [],
+      "source_index": 8
+    },
+    {
+      "id": "browser-node:9",
+      "backend_node_id": 4,
+      "source_node_id": "",
+      "tag": "div",
+      "role": "",
+      "name": "",
+      "kind": "unknown",
+      "bounds": {
+        "left": 68,
+        "top": 68,
+        "width": 98,
+        "height": 98
+      },
+      "paint_bounds": null,
+      "accent": "#39ff6a",
+      "data_pulp": {
+        "paint": ""
+      },
+      "evidence": [
+        {
+          "kind": "data-pulp",
+          "value": "{\"paint\":\"\"}",
+          "strength": "strong"
+        }
+      ],
+      "confidence": 0.35,
+      "resolved": false,
+      "binding_status": "unbound",
+      "conflicts": [],
+      "source_index": 9
+    },
+    {
+      "id": "browser-node:11",
+      "backend_node_id": 28,
+      "source_node_id": "",
+      "tag": "div",
+      "role": "",
+      "name": "TONE",
+      "kind": "knob",
+      "bounds": {
+        "left": 200,
+        "top": 68,
+        "width": 98,
+        "height": 123
+      },
+      "paint_bounds": {
+        "left": 200,
+        "top": 68,
+        "width": 98,
+        "height": 98
+      },
+      "accent": "#39ff6a",
+      "data_pulp": {
+        "param": "tone",
+        "value": "0.41"
+      },
+      "evidence": [
+        {
+          "kind": "data-pulp",
+          "value": "{\"param\":\"tone\",\"value\":\"0.41\"}",
+          "strength": "strong"
+        }
+      ],
+      "confidence": 0.9,
+      "resolved": true,
+      "binding_status": "bound",
+      "conflicts": [],
+      "source_index": 11
+    },
+    {
+      "id": "browser-node:12",
+      "backend_node_id": 5,
+      "source_node_id": "",
+      "tag": "div",
+      "role": "",
+      "name": "",
+      "kind": "unknown",
+      "bounds": {
+        "left": 200,
+        "top": 68,
+        "width": 98,
+        "height": 98
+      },
+      "paint_bounds": null,
+      "accent": "#39ff6a",
+      "data_pulp": {
+        "paint": ""
+      },
+      "evidence": [
+        {
+          "kind": "data-pulp",
+          "value": "{\"paint\":\"\"}",
+          "strength": "strong"
+        }
+      ],
+      "confidence": 0.35,
+      "resolved": false,
+      "binding_status": "unbound",
+      "conflicts": [],
+      "source_index": 12
+    }
+  ]
+}

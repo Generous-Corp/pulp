@@ -12,13 +12,16 @@ class View;
 
 /// Color parser callback: maps a single CSS color token (hex / rgb() / rgba())
 /// to a canvas::Color. When omitted, apply_css_background_gradient() uses a
-/// built-in parser covering #RGB / #RRGGBB / #RRGGBBAA, rgb(), rgba(), and
-/// `transparent`. The JS WidgetBridge passes its own richer parser so named
-/// colors continue to resolve there.
+/// built-in parser covering #RGB / #RRGGBB / #RRGGBBAA, rgb(), rgba(), hsl(),
+/// hsla(), oklab(), oklch(), and `transparent`. The JS WidgetBridge passes its
+/// own richer parser so named colors continue to resolve there.
 using CssColorParser = std::function<canvas::Color(const std::string&)>;
 
 /// The built-in CSS color parser: `#RGB` / `#RRGGBB` / `#RRGGBBAA`, `rgb()`,
-/// `rgba()`, and `transparent`. Returned opaque white on an unrecognized token.
+/// `rgba()`, `hsl()`, `hsla()`, `oklab()`, `oklch()`, and `transparent`.
+/// `oklab()` / `oklch()` matter because Chromium serializes every modern colour
+/// syntax into them, so a captured design reaches this parser in Oklab whatever
+/// it was authored in. Returns opaque white on an unrecognized token.
 /// Exposed so other import lanes (e.g. the materializer's hairline-stroke path)
 /// can resolve `rgba(...)` strokes that `parse_hex_color` does not cover.
 canvas::Color parse_css_color(const std::string& token);

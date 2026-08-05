@@ -1,5 +1,18 @@
 // SPDX-License-Identifier: MIT
 
+// The properties the capture asks Chromium to resolve, in request order.
+//
+// A property absent from this list is one no consumer can ever draw: the box
+// arrives with the appearance silently defaulted, which renders as a plausible
+// wrong picture rather than as an error. The list is therefore sized for
+// reproducing a whole panel, not for describing a control -- collecting a
+// property costs one string per node, while re-capturing a corpus to add one
+// later costs every design.
+//
+// Order is load-bearing in a narrow sense only: `layout.styles` rows are
+// positional, so the request order is written into the snapshot as
+// `computedStyleNames` and every consumer keys by name from there. Inserting a
+// property anywhere in this list is safe; hardcoding a parallel copy is not.
 export const COMPUTED_STYLES = [
   "display",
   "visibility",
@@ -9,6 +22,15 @@ export const COMPUTED_STYLES = [
   "background-color",
   "background-image",
   "background-blend-mode",
+  // A gradient with a hard stop, tiled, is the standard CSS grid idiom. The
+  // repeat length lives entirely in background-size: without it the same
+  // declaration lowers to one hairline instead of eight columns, and nothing
+  // downstream can tell that the value was never read rather than default.
+  "background-size",
+  "background-position",
+  "background-repeat",
+  "background-clip",
+  "background-origin",
   "border-top-color",
   "border-right-color",
   "border-bottom-color",
@@ -17,10 +39,20 @@ export const COMPUTED_STYLES = [
   "border-right-width",
   "border-bottom-width",
   "border-left-width",
+  // All four edges. Reading only the top edge and applying it to the box makes
+  // a dashed left border vanish, and makes a mixed-edge box uniformly wrong in
+  // a way that looks like a paint bug rather than a missing input.
   "border-top-style",
+  "border-right-style",
+  "border-bottom-style",
+  "border-left-style",
   "border-radius",
   "box-shadow",
   "text-shadow",
+  "outline-color",
+  "outline-style",
+  "outline-width",
+  "outline-offset",
   "filter",
   "backdrop-filter",
   "transform",
@@ -38,12 +70,38 @@ export const COMPUTED_STYLES = [
   "font-variation-settings",
   "text-align",
   "letter-spacing",
+  "word-spacing",
   "line-height",
   "text-transform",
   "text-decoration-line",
+  "text-decoration-color",
+  "text-decoration-style",
+  "text-decoration-thickness",
+  "text-underline-offset",
   "white-space",
+  // Generated content. The snapshot reports ::before / ::after as their own
+  // nodes with their own layout entries, so the text they inject is only
+  // recoverable through this property -- there is no DOM text node to read.
+  "content",
   "cursor",
   "pointer-events",
+  // SVG paint. An inline `<svg>` icon carries its colour three different ways —
+  // a presentation attribute, a stylesheet rule, or `currentColor` inherited
+  // from the box around it — and only the browser knows which one won. Reading
+  // the authored attribute back off the DOM gets a CSS-styled icon wrong and
+  // gets `currentColor` wrong every time, so the resolved value is the only
+  // usable input. `fill` / `stroke` are `none` on a non-SVG box, which costs a
+  // shared string.
+  "fill",
+  "fill-opacity",
+  "fill-rule",
+  "stroke",
+  "stroke-opacity",
+  "stroke-width",
+  // Not drawn by the vector lowering, but READ by it: a dashed or dotted stroke
+  // rendered solid is a wrong picture, so its presence sends the subtree to the
+  // element fallback instead.
+  "stroke-dasharray",
 ];
 
 export function semanticExpression(snapshotClickableIndexes = []) {
@@ -106,30 +164,49 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return null;
     }
   };
-  // The moving part of the control, when the author marked it with
-  // data-pulp-indicator: the dot, hairline or wedge the design draws to show
-  // where the value sits. Null when unmarked, for the same reason paintBox is
-  // null when unmarked -- a capture is one flat picture, so nothing in it says
-  // which pixels are the pointer and which are the face, and guessing installs
-  // a live pointer over a design that has none.
+  // The design's OWN pointer, when the author marked it with
+  // data-pulp-indicator. Same contract as paintBox above and for the same
+  // reason: only the author knows which child is the pointer, and inferring it
+  // (the thinnest child, the one whose class says "needle") would hard-code one
+  // design system's vocabulary into the importer.
   //
-  // Page coordinates, same frame as the candidate's own bounds and its paint
-  // box, so a consumer can express the pointer relative to the dial without a
-  // second coordinate system.
+  // Null when unmarked, which is the common case and NOT a defect: a design
+  // that draws no pointer gets the widget's derived tick instead. Bounds are
+  // page coordinates, the same frame as the candidate's own bounds and its
+  // paint box, so a consumer can express the pointer relative to the dial
+  // without a second coordinate system.
   //
-  // The colour is resolved by the browser rather than declared, on the same
-  // reasoning as accentColor: a pack default is not what this control ended up
-  // painted in. background-color first (a dot or wedge is a filled box), then
-  // the border and text colours (a hairline drawn as a border, or a glyph).
-  // An author whose pointer is a gradient or a mask -- where no single computed
-  // colour is the right answer -- states it as the attribute's own value.
+  // A zero-extent box is treated as unmarked: it carries no axis, so the
+  // lowering has no direction to sweep it along.
   const indicatorBox = element => {
     try {
       const marked = element.querySelector('[data-pulp-indicator]');
       if (!marked) return null;
       const box = marked.getBoundingClientRect();
       if (!(box.width > 0) || !(box.height > 0)) return null;
+      return {
+        left: box.left + window.scrollX,
+        top: box.top + window.scrollY,
+        width: box.width,
+        height: box.height
+      };
+    } catch (e) {
+      return null;
+    }
+  };
+  // The pointer's resolved colour, read the same way the accent is: from
+  // computed style, so a value set anywhere up the tree arrives resolved.
+  //
+  // background-color first (a dot or wedge is a filled box), then the border
+  // and text colours (a hairline drawn as a border, or a glyph). An author
+  // whose pointer is a gradient or a mask -- where no single computed colour is
+  // the right answer -- states it as the attribute's own value, which wins.
+  const indicatorColor = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked) return '';
       const declared = (marked.getAttribute('data-pulp-indicator') || '').trim();
+      if (declared) return declared;
       const style = window.getComputedStyle(marked);
       const opaque = value => {
         const text = (value || '').trim();
@@ -139,19 +216,11 @@ export function semanticExpression(snapshotClickableIndexes = []) {
           return '';
         return text;
       };
-      const color = declared ||
-        opaque(style.backgroundColor) ||
+      return opaque(style.backgroundColor) ||
         opaque(style.borderTopColor) ||
         opaque(style.color);
-      return {
-        left: box.left + window.scrollX,
-        top: box.top + window.scrollY,
-        width: box.width,
-        height: box.height,
-        color: color
-      };
     } catch (e) {
-      return null;
+      return '';
     }
   };
   // The accent this control is actually drawn in, resolved by the browser.
@@ -340,10 +409,12 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // only the author knows which child is the painted control. Inferring it
       // would hard-code one design system's class vocabulary into the importer.
       paint_bounds: paintBox(element),
-      // The pointer inside that box, when the author marked one. Declared for
-      // the same reason the paint box is: the capture cannot tell a pointer
-      // from the face it sits on.
-      indicator: indicatorBox(element),
+      // The design's own pointer geometry, when it declared one. The lowering
+      // turns it into the same knob_ind_* vocabulary the Figma lane already
+      // writes, so the consumer has ONE name for the thing rather than one per
+      // importer.
+      indicator_bounds: indicatorBox(element),
+      indicator_color: indicatorColor(element),
       accent: accentColor(element),
       data_pulp: data,
       evidence,
@@ -357,31 +428,123 @@ export function semanticExpression(snapshotClickableIndexes = []) {
 })()`;
 }
 
-function elementBackendIds(snapshot) {
+// The snapshot node indexes that correspond, one for one and in order, to the
+// elements `document.querySelectorAll('*')` returns in the page. Everything a
+// candidate carries from the snapshot -- its backend id, its paint order -- is
+// looked up through this correspondence, so a single extra node shifts every
+// later element onto its neighbour's data.
+//
+// nodeType === 1 alone is NOT that correspondence. The snapshot also emits
+// pseudo-element boxes (::before / ::after) as element nodes, and
+// querySelectorAll cannot return them, so one ::before anywhere on the page
+// re-points every control after it at the node before its own -- a control
+// that still resolves, still has plausible data, and is simply the wrong node.
+// Shadow-tree content is excluded for the same reason: querySelectorAll does
+// not pierce a shadow root.
+//
+// parentIndex is emitted in document order, so a node's parent always appears
+// before it and the shadow-tree flag is settled by the time a child is read.
+function snapshotElementNodes(snapshot) {
   const nodes = snapshot.documents?.[0]?.nodes;
   if (!nodes) return [];
+  const total = nodes.nodeType?.length ?? 0;
+  const pseudoNodes = new Set(nodes.pseudoType?.index ?? []);
+  const shadowRoots = new Set(nodes.shadowRootType?.index ?? []);
+  const parents = nodes.parentIndex ?? [];
+  const inShadowTree = new Array(total).fill(false);
   const result = [];
-  for (let index = 0; index < (nodes.nodeType?.length ?? 0); index++) {
-    if (nodes.nodeType[index] === 1) {
-      result.push(nodes.backendNodeId?.[index] ?? null);
-    }
+  for (let index = 0; index < total; index++) {
+    const parent = parents[index] ?? -1;
+    inShadowTree[index] = shadowRoots.has(index) ||
+      (parent >= 0 && parent < index && inShadowTree[parent]);
+    if (nodes.nodeType[index] !== 1) continue;
+    if (pseudoNodes.has(index) || inShadowTree[index]) continue;
+    result.push(index);
   }
   return result;
 }
 
-function clickableElementIndexes(snapshot) {
+function elementBackendIds(snapshot) {
   const nodes = snapshot.documents?.[0]?.nodes;
   if (!nodes) return [];
-  const clickableNodeIndexes = new Set(nodes.isClickable?.index ?? []);
-  const result = [];
-  let elementIndex = 0;
-  for (let nodeIndex = 0;
-       nodeIndex < (nodes.nodeType?.length ?? 0);
-       nodeIndex++) {
-    if (nodes.nodeType[nodeIndex] !== 1) continue;
-    if (clickableNodeIndexes.has(nodeIndex)) result.push(elementIndex);
-    elementIndex++;
+  return snapshotElementNodes(snapshot).map(
+    (index) => nodes.backendNodeId?.[index] ?? null);
+}
+
+// Lowercased element names in the same order, so a candidate can be checked
+// against the node it was matched to instead of trusting the correspondence.
+function elementTagNames(snapshot) {
+  const nodes = snapshot.documents?.[0]?.nodes;
+  const strings = snapshot.strings;
+  if (!nodes || !Array.isArray(strings)) return [];
+  return snapshotElementNodes(snapshot).map((index) => {
+    const name = strings[nodes.nodeName?.[index]];
+    return typeof name === "string" ? name.toLowerCase() : "";
+  });
+}
+
+// Chromium's own answer to "what paints on top of what", one integer per laid
+// out node, taken from the paint order the capture already requests with
+// includePaintOrder.
+//
+// This is consumed, never recomputed. Re-deriving order from z-index is the
+// same mistake as re-solving layout from computed styles: stacking contexts,
+// opacity, transforms, filters, will-change and position all create or escape
+// contexts, so a z-index sort agrees with Chromium on simple pages and diverges
+// silently on exactly the layered panels this exists for.
+//
+// Returns an array parallel to the element ordering the candidate walk uses,
+// holding null for elements with no layout entry.
+function elementPaintOrders(snapshot) {
+  const document = snapshot.documents?.[0];
+  const nodes = document?.nodes;
+  const layout = document?.layout;
+  if (!nodes) return [];
+  const nodeIndex = layout?.nodeIndex;
+  const paintOrders = layout?.paintOrders;
+  // A capture that asked for paint order and did not get it must not resolve to
+  // a tree of nulls that reads as "this page has no layering". Chromium omits
+  // paintOrders only when includePaintOrder was not requested, so a laid out
+  // document without it means the request and the reader have drifted apart.
+  if (Array.isArray(nodeIndex) && nodeIndex.length > 0) {
+    if (!Array.isArray(paintOrders)) {
+      const error = new Error(
+        "DOMSnapshot returned layout without paintOrders; the capture must " +
+        "request includePaintOrder");
+      error.code = "capture-paint-order-missing";
+      throw error;
+    }
+    if (paintOrders.length !== nodeIndex.length) {
+      const error = new Error(
+        `DOMSnapshot paintOrders length ${paintOrders.length} does not match ` +
+        `layout nodeIndex length ${nodeIndex.length}`);
+      error.code = "capture-paint-order-mismatch";
+      throw error;
+    }
   }
+  // Layout entries are not one per node: a box that also lays out an inline
+  // text box contributes two entries for the same node index (a ::before with
+  // generated text does exactly this). The first entry is the node's own box,
+  // so keeping it makes the choice defined rather than last-write-wins.
+  const orderByNode = new Map();
+  for (let entry = 0; entry < (nodeIndex?.length ?? 0); entry++) {
+    const order = paintOrders[entry];
+    if (typeof order !== "number") continue;
+    if (!orderByNode.has(nodeIndex[entry])) {
+      orderByNode.set(nodeIndex[entry], order);
+    }
+  }
+  return snapshotElementNodes(snapshot).map(
+    (index) => (orderByNode.has(index) ? orderByNode.get(index) : null));
+}
+
+function clickableElementIndexes(snapshot) {
+  const clickableNodeIndexes = new Set(
+    snapshot.documents?.[0]?.nodes?.isClickable?.index ?? []);
+  const result = [];
+  snapshotElementNodes(snapshot).forEach((nodeIndex, elementIndex) => {
+    if (clickableNodeIndexes.has(nodeIndex)) result.push(elementIndex);
+  });
   return result;
 }
 
@@ -392,8 +555,27 @@ export async function evaluateSemantics(cdp, snapshot, viewport) {
   });
   const candidates = result.result?.value ?? [];
   const backendIds = elementBackendIds(snapshot);
+  const paintOrders = elementPaintOrders(snapshot);
+  const tagNames = elementTagNames(snapshot);
   for (const candidate of candidates) {
+    // The page walk and the snapshot walk have to agree on which element index
+    // N is, and when they disagree every value below is a neighbour's. The
+    // element name is the cheap witness both sides already carry, so the
+    // mismatch surfaces here rather than as a control wearing another node's
+    // paint order.
+    const snapshotTag = tagNames[candidate.dom_index];
+    if (snapshotTag && candidate.tag && snapshotTag !== candidate.tag) {
+      const error = new Error(
+        `page element ${candidate.dom_index} is <${candidate.tag}> but the ` +
+        `DOM snapshot has <${snapshotTag}> at that index; the element walks ` +
+        "have drifted apart");
+      error.code = "capture-node-alignment-mismatch";
+      throw error;
+    }
     candidate.backend_node_id = backendIds[candidate.dom_index] ?? null;
+    // Explicitly null rather than absent when the element has no layout entry,
+    // so a consumer can distinguish "not painted" from "order not collected".
+    candidate.paint_order = paintOrders[candidate.dom_index] ?? null;
     candidate.source_index = candidate.dom_index;
     delete candidate.dom_index;
   }
@@ -410,6 +592,11 @@ export async function evaluateSemantics(cdp, snapshot, viewport) {
         (candidate) => candidate.binding_status === "bound").length,
       conflicted: candidates.filter(
         (candidate) => candidate.conflicts.length > 0).length,
+      // Visible in the artifact so a wholesale paint-order miss shows up as a
+      // count of zero next to a non-zero candidate count, rather than as a
+      // field every reader quietly treats as optional.
+      paint_ordered: candidates.filter(
+        (candidate) => candidate.paint_order !== null).length,
     },
     limitations: [
       "Canvas and WebGL internal hit regions are not recoverable from the DOM; " +

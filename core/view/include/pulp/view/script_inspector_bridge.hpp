@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,8 +23,9 @@ class ScriptEngine;
 // drains queued evaluate requests in pump(), which a host runs once per frame
 // from ScriptedUiSession::poll(). A background evaluate() enqueues a request
 // and blocks (with a timeout) until pump() fulfills it; if evaluate() is itself
-// called on the engine thread it runs inline to avoid deadlocking on a pump
-// that can never come. Only one evaluation is in flight at a time — a
+// called on the engine thread it runs inline, with a watchdog using the
+// backend's cross-thread interrupt seam to enforce the same deadline. Only one
+// evaluation is in flight at a time — including owner-thread calls — and a
 // concurrent request returns `busy`.
 //
 // This is deliberately NOT a step debugger: mainline QuickJS (Pulp's bundled
@@ -34,7 +36,7 @@ class ScriptInspectorBridge {
 public:
     struct EvalResult {
         bool ok = false;          ///< evaluation completed without throwing
-        bool timed_out = false;   ///< the engine thread did not drain in time
+        bool timed_out = false;   ///< the request exceeded its deadline
         bool busy = false;        ///< another evaluation was already in flight
         bool detached = false;    ///< no engine is attached
         std::string json;         ///< result serialized as JSON when ok
@@ -46,7 +48,7 @@ public:
     // from any thread without touching the engine.
     struct Capabilities {
         std::string engine;              ///< "QuickJS" / "JavaScriptCore" / "V8" / ""
-        bool can_evaluate = false;       ///< Runtime.evaluate is wired
+        bool can_evaluate = false;       ///< bounded Runtime.evaluate is available
         bool can_interrupt = false;      ///< a runaway eval can be aborted
         bool can_break = false;          ///< source-line breakpoints (never on mainline QuickJS)
         bool can_step = false;           ///< step in/over/out
@@ -66,21 +68,29 @@ public:
     // recorded as the engine thread for inline-eval detection.
     void attach(ScriptEngine* engine);
 
-    // [engine thread] Detach the engine. Any evaluation that has not yet been
-    // picked up by pump() will fail with `detached`.
+    // [engine thread] Detach the engine. Queued work fails with `detached`;
+    // running work is interrupted and detach waits for engine quiescence.
     void detach();
+
+    // [engine thread] Install the host-owned realm reset run after evaluated
+    // code has stopped but before its result is published. Returning a
+    // non-empty string fails the request closed with that reset error.
+    using EvaluationDeadline = std::chrono::steady_clock::time_point;
+    void set_post_evaluation_reset(
+        std::function<std::string(EvaluationDeadline)> reset);
 
     // [any thread] Evaluate `code`, marshaled to the engine thread. Blocks up
     // to `timeout`. On timeout the running evaluation is interrupted (if the
     // engine supports it) so a runaway loop cannot wedge the bridge forever.
     EvalResult evaluate(const std::string& code,
-                        std::chrono::milliseconds timeout = kDefaultTimeout);
+                        std::chrono::milliseconds timeout = kDefaultTimeout,
+                        std::size_t max_result_bytes = 1024 * 1024);
 
     // [any thread] Capability snapshot (empty engine name when detached).
     Capabilities capabilities() const;
 
-    // [any thread] Cooperatively abort the in-flight evaluation. Returns false
-    // if nothing is running, the engine can't interrupt, or none is attached.
+    // [any thread] Cancel queued work or cooperatively abort running work.
+    // Returns false when there is no cancellable request.
     bool interrupt();
 
     // [engine thread] Drain the pending evaluate request, if any. Returns true
@@ -91,26 +101,62 @@ public:
     bool is_busy() const;
 
 private:
+    enum class RequestState { queued, running, finished };
+
     struct Request {
         std::string code;
-        std::mutex m;
+        std::size_t max_result_bytes = 0;
         std::condition_variable cv;
-        bool done = false;
+        RequestState state = RequestState::queued;
+        bool timeout_requested = false;
+        bool detach_requested = false;
+        bool interrupt_requested = false;
+        bool interrupt_consumed = false;
+        bool evaluation_finished = false;
+        EvaluationDeadline deadline{};
+        ScriptEngine* engine = nullptr;
+        bool can_interrupt = false;
+        // Protected by mutex_. A cancelling thread closes the window and arms
+        // the engine interrupt while holding that mutex; the engine thread
+        // takes the same mutex before closing/draining at quiescence. That
+        // ordering prevents a cancel flag from being armed after the drain.
+        bool interrupt_window_open = false;
         EvalResult result;
     };
 
     // Runs engine->evaluate on the engine thread, serializing the result or the
     // thrown exception into an EvalResult. Takes the engine explicitly so the
     // caller's snapshot is the one used. Caller guarantees engine-thread.
-    EvalResult serialize_eval(ScriptEngine* engine, const std::string& code) const;
+    EvalResult serialize_eval(ScriptEngine* engine, const std::string& code,
+                              std::size_t max_result_bytes) const;
+    // [engine thread] Execute, reset, normalize, and publish one already
+    // claimed request. Inline evaluation and pump share this state machine.
+    EvalResult run_claimed_request(const std::shared_ptr<Request>& request,
+                                   ScriptEngine* engine);
+
+    // mutex_ must be held. Publishes a terminal result and releases the
+    // single-flight slot. Request waiters use the same mutex, so completion and
+    // cancellation have one ordering point.
+    void finish_locked(const std::shared_ptr<Request>& request, EvalResult result);
+    // mutex_ must be held. The engine interrupt seam is explicitly nonblocking;
+    // retaining the lock through the call prevents detach() from returning and
+    // the caller-owned engine from being destroyed before the dereference.
+    static bool interrupt_if_active_locked(const std::shared_ptr<Request>& request);
+
+    friend struct ScriptInspectorBridgeTestAccess;
 
     mutable std::mutex mutex_;
+    std::condition_variable state_cv_;
     ScriptEngine* engine_ = nullptr;
     Capabilities caps_{};
     std::thread::id engine_thread_{};
     bool have_engine_thread_ = false;
     bool in_flight_ = false;
+    bool reset_in_progress_ = false;
+    std::thread::id reset_thread_{};
     std::shared_ptr<Request> pending_;  // single-slot queue, drained by pump()
+    std::shared_ptr<Request> running_;  // engine remains attached until this clears
+    std::function<std::string(EvaluationDeadline)> post_evaluation_reset_;
 };
 
 } // namespace pulp::view

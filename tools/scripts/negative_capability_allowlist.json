@@ -16,6 +16,13 @@
       "reason": "A clip authored with expression lanes stops lowering the moment a SequenceRef trims it, because a lane point before the retained window can still be the value sounding inside it and neither dropping nor carrying it is right; the refusal stands until a chase rule decides what the window inherits."
     },
     {
+      "code": "TrimmedGrooveUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "A nested MIDI leaf with authored groove refuses when SequenceRef trimming changes its source window, because groove displacement can move events across either retained boundary and the compiler has no defined chase, clip or discard rule; the refusal stands until source-window groove inheritance is specified."
+    },
+    {
       "code": "NestedSequenceUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",

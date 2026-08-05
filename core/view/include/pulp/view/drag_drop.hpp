@@ -1,14 +1,13 @@
 #pragma once
 
 #include <pulp/view/geometry.hpp>
+#include <pulp/view/view.hpp>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace pulp::view {
-
-class View;
 
 // ── Drop data types ──────────────────────────────────────────────────────────
 
@@ -174,8 +173,32 @@ void unregister_drop_target(void* native_view);
 
 // Per-drag hover state owned by the platform backend (a member of the window
 // host / drop target). Reset between drags happens automatically via exit/drop.
+namespace detail {
+struct DragSessionAccess;
+
+class DragSessionState {
+private:
+    ViewCapture identity_;
+    // Last compatibility-pointer value imported into identity_. A pointer that
+    // still equals this value after identity_ expires is stale and must not be
+    // rebound merely because an allocator reused the address.
+    DropReceiver* observed_public_hover_ = nullptr;
+    std::uint64_t generation_ = 0;
+
+    friend struct DragSessionAccess;
+};
+}
+
 struct DragSession {
-    DropReceiver* hover = nullptr;  // receiver currently claiming hover, or null
+    // Preserve the installed public pointer surface exactly. Dispatch resolves
+    // this compatibility pointer through the current root before every
+    // dereference. A newly observed value is imported once; an expired capture
+    // is never rebound from an unchanged address.
+    DropReceiver* hover = nullptr;
+    // Public only so DragSession remains an aggregate and preserves designated
+    // initialization of `.hover`; bookkeeping is private to dispatch.
+    detail::DragSessionState state_{};
+
 };
 
 // Hover lifecycle for visual feedback (DropReceiver highlight). Returns true if a

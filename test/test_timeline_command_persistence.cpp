@@ -48,9 +48,9 @@ const JsonValue& member(const JsonValue& value, std::string_view name) {
     return *found;
 }
 
-std::string envelope(std::string_view type, std::string data) {
+std::string envelope(std::string_view type, std::string data, int version = 1) {
     return "{\"data\":" + std::move(data) + ",\"type_name\":\"" + std::string(type) +
-           "\",\"version\":1}";
+           "\",\"version\":" + std::to_string(version) + "}";
 }
 
 } // namespace
@@ -189,6 +189,12 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
             "pulp.timeline.command.move_track",
             R"({"expected_before_track_id":"34","replacement_before_track_id":"35",)"
             R"("sequence_id":"5","track_id":"6"})"),
+        // Appended, like every entry before it: the assertions below are keyed
+        // by index into this list, so a new envelope anywhere but the end
+        // renumbers all of them.
+        envelope("pulp.timeline.command.set_note_events",
+                 R"({"clip_id":"7","expected":[)" + note + R"(],"replacement":[)" +
+                     transformed_note + R"(],"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -248,6 +254,18 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<MoveTrack>(commands[38]));
     REQUIRE(std::get<MoveTrack>(commands[38]).expected_before_track_id == ItemId{34});
     REQUIRE(std::get<MoveTrack>(commands[38]).replacement_before_track_id == ItemId{35});
+    REQUIRE(std::holds_alternative<SetNoteEvents>(commands[39]));
+    // Both arrays decode to the note they name, and the pitch is what the two
+    // fixtures differ in — asserting the sizes alone would pass on a decoder
+    // that read the same array twice.
+    const auto& note_events = std::get<SetNoteEvents>(commands[39]);
+    REQUIRE(note_events.clip_id == ItemId{7});
+    REQUIRE(note_events.expected.size() == 1);
+    REQUIRE(note_events.replacement.size() == 1);
+    REQUIRE(note_events.expected[0].id == ItemId{10});
+    REQUIRE(note_events.expected[0].pitch == 60);
+    REQUIRE(note_events.replacement[0].id == ItemId{10});
+    REQUIRE(note_events.replacement[0].pitch == 72);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
@@ -415,6 +433,88 @@ TEST_CASE("A note-content envelope without the modifier fields still decodes") {
     auto rejected = deserialize_commands(overlong, registry);
     REQUIRE_FALSE(rejected);
     CHECK(rejected.error().code == PersistenceErrorCode::LimitExceeded);
+}
+
+namespace {
+
+// The same clip with note ten raised an octave, so the replacement array below
+// is encoder output too rather than JSON written to match the decoder.
+Project moved_payload_project() {
+    auto content = take(MidiContent::create(
+        {{{10}, {0}, {25}, 32768, 72, 0}, {{11}, {25}, {25}, 32768, 64, 0}}));
+    auto value = take(Clip::create({7}, {0}, {100}, std::move(content)));
+    auto track = take(Track::create({6}, "authored", {value}));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    return take(Project::create(ProjectInput{{1}, "moved payloads", 12, {5}, {}, {sequence}}));
+}
+
+// Returns a copy of the clip's encoded note array, so the caller holds bytes
+// rather than a view into a parse that ends with this call.
+std::string clip_notes_json(const Project& project, const SchemaRegistry& registry) {
+    const auto snapshot = take(serialize_project(project, registry)).json;
+    const auto parsed = take(parse_json(snapshot));
+    const auto& sequence = member(member(parsed->root(), "data"), "sequences").array[0];
+    const auto& track = member(member(sequence, "data"), "tracks").array[0];
+    const auto& clip = member(member(track, "data"), "clips").array[0];
+    const auto& content = member(member(clip, "data"), "content");
+    return std::string(parsed->raw(member(member(content, "data"), "notes")));
+}
+
+} // namespace
+
+TEST_CASE("A set-note-events envelope reduces through the authoritative document session") {
+    const auto registry = builtins();
+    const auto before = clip_notes_json(modifier_payload_project(), registry);
+    const auto after = clip_notes_json(moved_payload_project(), registry);
+
+    const auto batch = "[" +
+                       envelope("pulp.timeline.command.set_note_events",
+                                R"({"clip_id":"7","expected":)" + before + R"(,"replacement":)" +
+                                    after + R"(,"sequence_id":"5","track_id":"6"})") +
+                       "]";
+    auto commands = take(deserialize_commands(batch, registry));
+    REQUIRE(commands.size() == 1);
+    const auto& decoded = std::get<SetNoteEvents>(commands[0]);
+    REQUIRE(decoded.expected.size() == 2);
+    REQUIRE(decoded.replacement.size() == 2);
+    CHECK(decoded.expected[0].pitch == 60);
+    CHECK(decoded.replacement[0].pitch == 72);
+
+    auto session = take(DocumentSession::create(modifier_payload_project()));
+    auto writer = take(session->register_writer());
+    Transaction submitted;
+    submitted.id = writer.allocate_transaction_id();
+    submitted.expected_revision = session->revision();
+    submitted.commands.push_back({writer.allocate_command_id(), std::move(commands[0])});
+    REQUIRE(session->submit(writer, std::move(submitted)));
+
+    const auto& content = std::get<MidiContent>(
+        session->snapshot()->find_sequence({5})->find_track({6})->find_clip({7})->content());
+    REQUIRE(content.notes().size() == 2);
+    CHECK(content.notes()[0].id == ItemId{10});
+    CHECK(content.notes()[0].pitch == 72);
+    CHECK(content.notes()[1].pitch == 64);
+    // The payload is notes, and the document's modifiers and seed are not in it.
+    CHECK(content.modifier_seed() == 0xABCDEF);
+    REQUIRE(content.modifiers().size() == 2);
+    REQUIRE(content.modifier_for({10}) != nullptr);
+    CHECK(content.modifier_for({10})->probability == 0x4000);
+    REQUIRE(content.modifier_for({11}) != nullptr);
+    CHECK(content.modifier_for({11})->ratchet_count == 3);
+
+    // Command decode gates on exact version equality and has no upgrade hook, so
+    // this type is pinned at 1 the same way every other command is. A future
+    // widening has to arrive as optional fields, not a version.
+    auto bumped = deserialize_commands(
+        "[" +
+            envelope("pulp.timeline.command.set_note_events",
+                     R"({"clip_id":"7","expected":)" + before + R"(,"replacement":)" + after +
+                         R"(,"sequence_id":"5","track_id":"6"})",
+                     2) +
+            "]",
+        registry);
+    REQUIRE_FALSE(bumped);
+    CHECK(bumped.error().code == PersistenceErrorCode::UnsupportedSchemaVersion);
 }
 
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {

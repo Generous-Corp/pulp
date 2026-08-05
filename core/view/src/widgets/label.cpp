@@ -5,6 +5,7 @@
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>  // font_registration_generation() for the shaped-layout cache key
 #include <choc/text/choc_JSON.h>
@@ -18,6 +19,139 @@
 namespace pulp::view {
 
 // ── Label ────────────────────────────────────────────────────────────────────
+
+namespace {
+/// Not atomic: every caller is the paint/layout thread, and a counter that
+/// pretended to be thread-safe would invite use from somewhere it is not.
+Label::LineBreakPathCounts& line_break_counts() {
+    static Label::LineBreakPathCounts counts;
+    return counts;
+}
+}  // namespace
+
+Label::LineBreakPathCounts Label::line_break_path_counts() {
+    return line_break_counts();
+}
+
+void Label::reset_line_break_path_counts() { line_break_counts() = {}; }
+
+void Label::set_cached_line_boxes(std::vector<CachedLineBox> boxes,
+                                  float basis_width, std::string basis_face) {
+    cached_line_boxes_ = std::move(boxes);
+    cached_line_basis_width_ = basis_width;
+    cached_line_basis_face_ = std::move(basis_face);
+    shaped_cache_valid_ = false;
+}
+
+/// Slice a UTF-8 string by a UTF-16 offset and length.
+///
+/// Captured line offsets count UTF-16 code units, because that is how the
+/// browser protocol indexes strings, while the text is UTF-8. Treating one as
+/// the other splits a multi-byte sequence the moment a paragraph contains a
+/// dash, a curly apostrophe or a multiplication sign, and emits bytes that are
+/// not valid UTF-8 at all — not merely an off-by-one.
+static std::string utf16_slice(const std::string& text, int start, int length) {
+    if (start < 0 || length <= 0) return {};
+    const auto begin = static_cast<size_t>(start);
+    const auto count = static_cast<size_t>(length);
+    size_t units = 0;
+    size_t byte_begin = std::string::npos;
+    size_t i = 0;
+    while (i <= text.size()) {
+        if (units == begin && byte_begin == std::string::npos) byte_begin = i;
+        if (byte_begin != std::string::npos && units == begin + count)
+            return text.substr(byte_begin, i - byte_begin);
+        if (i >= text.size()) break;
+        const auto lead = static_cast<unsigned char>(text[i]);
+        size_t bytes = 1;
+        if      ((lead & 0x80u) == 0x00u) bytes = 1;
+        else if ((lead & 0xE0u) == 0xC0u) bytes = 2;
+        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
+        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
+        units += (bytes == 4) ? 2 : 1;  // astral codepoints are a surrogate pair
+        i += bytes;
+    }
+    if (byte_begin == std::string::npos) return {};
+    return text.substr(byte_begin);
+}
+
+bool Label::cached_line_layout_usable(const std::string& display_text) const {
+    if (cached_line_boxes_.empty()) return false;
+
+    // 1. The face. Not the requested family — a family is a REQUEST, and the
+    //    same request resolves to different faces on different machines or
+    //    after a register_font. An empty basis face means the capture recorded
+    //    none, which is unverifiable and therefore unusable.
+    if (cached_line_basis_face_.empty()) return false;
+    const std::string family =
+        font_family_.empty() ? std::string("Inter") : font_family_;
+    if (canvas::resolved_face_identity(
+            family, static_cast<float>(effective_font_weight())) !=
+        cached_line_basis_face_) {
+        return false;
+    }
+
+    // 2. The width the text was broken at. A break is a function of the box,
+    //    so a box of a different width has different breaks — including the
+    //    auto-width case this exists for, where the box was sized BY the text.
+    if (std::abs(bounds().width - cached_line_basis_width_) > 0.5f) return false;
+
+    // 3. The text itself. Offsets index the string the capture broke, so any
+    //    edit — a translation, a text-transform, a bound value — makes every
+    //    slice below name the wrong characters rather than merely re-breaking.
+    int units = 0;
+    for (size_t i = 0; i < display_text.size();) {
+        const auto lead = static_cast<unsigned char>(display_text[i]);
+        size_t bytes = 1;
+        if      ((lead & 0xE0u) == 0xC0u) bytes = 2;
+        else if ((lead & 0xF0u) == 0xE0u) bytes = 3;
+        else if ((lead & 0xF8u) == 0xF0u) bytes = 4;
+        units += (bytes == 4) ? 2 : 1;
+        i += bytes;
+    }
+    for (const auto& box : cached_line_boxes_) {
+        if (box.start < 0 || box.length <= 0) return false;
+        if (box.start + box.length > units) return false;
+    }
+    // Deliberately NOT invalidated on: font SIZE and letter-spacing. Both are
+    // already folded into the resolved advances the browser broke with, and a
+    // Label whose size or tracking changed after import has a different box
+    // too, which condition 2 catches. Size is not tracked separately because
+    // doing so without tracking every other advance input would look like a
+    // completeness this check does not have.
+    return true;
+}
+
+canvas::ShapedLayout Label::layout_from_cached_lines(
+    const std::string& text, float line_height) const {
+    canvas::ShapedLayout layout;
+    layout.lines.reserve(cached_line_boxes_.size());
+    for (const auto& box : cached_line_boxes_) {
+        canvas::ShapedLayout::Line line;
+        line.text = utf16_slice(text, box.start, box.length);
+        line.width = box.width;
+        line.x_offset = box.left;
+        // Stack the lines on the Label's own line height rather than the
+        // captured tops. The captured rects agree with that stacking when the
+        // basis holds, and driving one geometry from two sources is how the
+        // two drift apart later.
+        line.y = line_height * static_cast<float>(layout.lines.size());
+        line.first_segment = 0;
+        line.segment_count = 0;
+        layout.total_width = std::max(layout.total_width, line.width);
+        layout.lines.push_back(std::move(line));
+    }
+    layout.line_count = static_cast<int>(layout.lines.size());
+    layout.total_height = line_height * static_cast<float>(layout.line_count);
+    return layout;
+}
+
+int Label::effective_font_weight() const {
+    if (has_own_font_weight_) return font_weight_;
+    if (auto inherited = inheritable_font_weight(); inherited.has_value())
+        return inherited.value();
+    return font_weight_;
+}
 
 float Label::intrinsic_height() const {
     // Cascade font_size before computing height so descendants of a parent
@@ -52,7 +186,8 @@ float Label::intrinsic_height() const {
 
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
-                                   effective_family, effective_font_size);
+                                   effective_family, effective_font_size,
+                                   effective_font_weight());
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     float lh;
     if (line_height_ > 0) {
@@ -153,7 +288,8 @@ float Label::measured_height(float available_width) const {
 
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, family, effective_font_size);
+    auto prepared = shaper.prepare(display_text, family, effective_font_size,
+                                   effective_font_weight());
 
     // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
     // Label paint reads `View::word_break()` at draw time, the measure path
@@ -203,7 +339,8 @@ float Label::baseline_y() const {
     // collapse — feed the shaper a single space to pin the metric.
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
-                                   effective_family, effective_font_size);
+                                   effective_family, effective_font_size,
+                                   effective_font_weight());
     float ascent = prepared.ascent();
     if (ascent <= 0.0f) {
         // Fallback when shaper metrics aren't real (no Skia, family
@@ -289,13 +426,23 @@ float Label::intrinsic_width() const {
     if (effective_family.empty()) effective_family = "Inter";
 
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, effective_family, effective_font_size);
+    auto prepared = shaper.prepare(display_text, effective_family,
+                                   effective_font_size, effective_font_weight());
     float width = prepared.total_width();
 
-    // Letter-spacing adds extra advance per glyph break that isn't
-    // captured by HarfBuzz shaping. Count UTF-8 *code points*, not
-    // bytes — using `size()` over-applies spacing on multibyte input
-    // (CJK, accented Latin, emoji) and inflates intrinsic width.
+    // Letter-spacing adds extra advance that HarfBuzz shaping does not carry.
+    // CSS adds it AFTER EVERY character, not between them, so a run of N
+    // characters gets N steps and a single character still gets one. Counting
+    // the gaps instead reserves one step too few, while SkParagraph — which
+    // paints the run — adds all N: the text then draws wider than the box
+    // layout sized for it. Measured against Chrome's own line boxes over 89
+    // letter-spaced runs in the design corpus, N steps lands on -0.02% median
+    // error and N-1 steps on -2.86%; on a single-character run the gap
+    // convention is off by up to 21%.
+    //
+    // Count UTF-8 *code points*, not bytes — using `size()` over-applies
+    // spacing on multibyte input (CJK, accented Latin, emoji) and inflates
+    // intrinsic width.
     if (effective_letter_spacing != 0 && !display_text.empty()) {
         std::size_t glyph_count = 0;
         for (unsigned char c : display_text) {
@@ -303,9 +450,7 @@ float Label::intrinsic_width() const {
             // (0b10xxxxxx) — that's one glyph per code point.
             if ((c & 0xC0) != 0x80) ++glyph_count;
         }
-        if (glyph_count > 1) {
-            width += effective_letter_spacing * static_cast<float>(glyph_count - 1);
-        }
+        width += effective_letter_spacing * static_cast<float>(glyph_count);
     }
 
     // Sub-pixel-safe ceil so layout never clips on rounding.
@@ -328,11 +473,7 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             rs.font_size = inh.value();
     }
-    rs.font_weight = font_weight_;
-    if (!has_own_font_weight_) {
-        if (auto inh = inheritable_font_weight(); inh.has_value())
-            rs.font_weight = inh.value();
-    }
+    rs.font_weight = effective_font_weight();
     rs.letter_spacing = letter_spacing_;
     if (!has_own_letter_spacing_) {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
@@ -614,11 +755,7 @@ void Label::paint(canvas::Canvas& canvas) {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-    int effective_font_weight = font_weight_;
-    if (!has_own_font_weight_) {
-        if (auto inh = inheritable_font_weight(); inh.has_value())
-            effective_font_weight = inh.value();
-    }
+    const int weight = effective_font_weight();
     float effective_letter_spacing = letter_spacing_;
     if (!has_own_letter_spacing_) {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
@@ -629,7 +766,7 @@ void Label::paint(canvas::Canvas& canvas) {
     // the canvas backend so JS calls actually change rasterised glyphs. Empty
     // font_family_ falls back to the default theme face.
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
-    canvas.set_font_full(family, effective_font_size, effective_font_weight,
+    canvas.set_font_full(family, effective_font_size, weight,
                           font_style_, effective_letter_spacing);
 
     // Apply the CSS font-variant CSV as SkShaper OpenType feature tags.
@@ -718,13 +855,25 @@ void Label::paint(canvas::Canvas& canvas) {
         // Without it a Label that first shaped against the fallback face would
         // serve that stale wrap until some other key field happened to change.
         ShapedLayoutKey key{display_text, family, effective_font_size,
-                            bounds().width, lh, static_cast<int>(break_mode),
+                            effective_font_weight(), bounds().width, lh,
+                            static_cast<int>(break_mode),
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
-            auto prepared = shaper.prepare(display_text, family, effective_font_size);
-            shaped_cache_layout_ = shaper.layout_with_lines(
-                prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+            // A captured layout is used verbatim while the conditions that
+            // produced it still hold, and reflowed the moment they do not.
+            if (cached_line_layout_usable(display_text)) {
+                ++line_break_counts().cached;
+                shaped_cache_layout_ =
+                    layout_from_cached_lines(display_text, lh);
+            } else {
+                if (cached_line_boxes_.empty()) ++line_break_counts().uncached;
+                else ++line_break_counts().reflowed;
+                auto prepared = shaper.prepare(display_text, family,
+                                               effective_font_size, effective_font_weight());
+                shaped_cache_layout_ = shaper.layout_with_lines(
+                    prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+            }
             shaped_cache_key_ = std::move(key);
             shaped_cache_valid_ = true;
         }
@@ -849,7 +998,7 @@ void Label::paint(canvas::Canvas& canvas) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                canvas.fill_text(line, x, y);
+                canvas.fill_text(line, x + shaped_line.x_offset, y);
                 y += lh;
                 ++emitted;
             }

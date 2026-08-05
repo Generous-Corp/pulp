@@ -11,8 +11,10 @@
 // (reached at runtime by the WidgetBridge theme API); re-exported here so
 // existing includers of this header still see them.
 #include <pulp/view/w3c_tokens.hpp>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pulp::view {
 
@@ -41,7 +43,30 @@ std::string export_css_variables(const Theme& theme);
 std::string token_css_var(const std::string& token_name);
 
 /// Convert IR tokens to a Pulp Theme.
-Theme ir_tokens_to_theme(const IRTokens& tokens);
+///
+/// Token names are copied across verbatim, then the widget keys Pulp's own
+/// primitives resolve (`control.fill`, `knob.arc`, `meter.green`, …) are
+/// filled from the design tokens that mean the same thing — `accent`,
+/// `line-strong`, `signal-low` and the shadcn / Material spellings of each.
+/// Every widget key is a direct copy of a colour the design stated: nothing is
+/// hue-shifted, blended, or defaulted, so a design's palette reaches its
+/// primitives without Pulp adding a colour of its own.
+///
+/// A widget key the design supplies no source for is left UNSET, and its name
+/// is appended to @p unresolved_widget_tokens when that is non-null. The widget
+/// then paints its own built-in default — an honest "the design did not say" —
+/// rather than a synthesized colour that would drift from the design's palette.
+/// A design that names a widget key itself always keeps its own value.
+Theme ir_tokens_to_theme(const IRTokens& tokens,
+                         std::vector<std::string>* unresolved_widget_tokens = nullptr);
+
+/// The diagnostic naming the widget keys a design supplied no colour for, or
+/// nothing when it supplied them all. Takes the `unresolved_widget_tokens` that
+/// ir_tokens_to_theme filled. One diagnostic lists every key, because a design
+/// with no tokens at all leaves them all unset and one warning per key would
+/// bury the rest of the import's diagnostics.
+std::optional<ImportDiagnostic> unmapped_widget_token_diagnostic(
+    const std::vector<std::string>& unresolved);
 
 /// Convert a Pulp Theme to W3C-compatible IR tokens.
 IRTokens theme_to_ir_tokens(const Theme& theme);

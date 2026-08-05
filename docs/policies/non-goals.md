@@ -68,6 +68,21 @@ own stack.
   (via the opt-in vendor carve-out in `CLAUDE.md`). LV2 read support
   is partial (see parity audit for details).
 
+### Plugin-to-plugin scene transport
+
+Pulp does not provide a collaboration broker, peer-discovery API, or shared
+scene bus for coordinating plugin instances. Scene and macro coordination uses
+host parameter mappings, automation, or controller facilities.
+
+- **Why:** The host already owns plugin-instance placement, project state,
+  automation, undo, and sandbox boundaries. A Pulp transport would duplicate
+  those responsibilities and create new identity, real-time, and security
+  contracts without an unserved product requirement.
+- **What we DO support:** Stable host-facing parameters, bounded automation
+  events, host gesture/undo integration, and normal per-instance state restore.
+- **Decision and reopen gate:** See
+  [ADR: Use host parameter mappings for plugin scene coordination](plugin-collaboration.md).
+
 ---
 
 ## Process for changing a non-goal

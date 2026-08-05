@@ -405,6 +405,163 @@ TEST_CASE("browser version metadata redacts successful subprocess output",
     CHECK(result.product.find("/opt/acme") == std::string::npos);
     CHECK(result.product.find("<local-path>") != std::string::npos);
 }
+
+TEST_CASE("redaction keeps a leading-slash token that is not a path",
+          "[import-design][browser-capture][security]") {
+    // "/16" is a note division, not a filename, and panels are full of them.
+    // The capture runtime's mirror of this rule replaced such text with
+    // "<local-path>", so a delay panel shipped with its labels destroyed —
+    // invisible to every validator, because the string was still a string.
+    //
+    // Both halves matter: the label survives AND a genuine path on the same
+    // line is still redacted. Asserting only the first would pass a sanitizer
+    // that had simply stopped working.
+    TempTree tree("slash-token-redaction");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo \"Google Chrome /16 sync path:/opt/acme secret/browser "
+        "123.0.0.0\" >&2\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    REQUIRE(result.compatible);
+    INFO("redacted product: " << result.product);
+    CHECK(result.product.find("/16") != std::string::npos);
+    CHECK(result.product.find("/opt/acme") == std::string::npos);
+    CHECK(result.product.find("<local-path>") != std::string::npos);
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("a transient version read is retried instead of rejecting a browser",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-retry");
+    // Fail the first version read the way a transient probe failure looks,
+    // then answer normally — the browser itself was never the problem.
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "marker=\"$(dirname \"$0\")/version-attempted\"\n"
+        "if [ -f \"$marker\" ]; then\n"
+        "  echo 'Google Chrome 123.0.0.0'\n"
+        "  exit 0\n"
+        "fi\n"
+        ": > \"$marker\"\n"
+        "exit 1\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    CHECK(result.compatible);
+    CHECK(result.major_version == 123);
+}
+
+TEST_CASE("an unreadable version is never reported as a version verdict",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-unreadable");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'no version here' >&2\n"
+        "exit 3\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure_kind ==
+          capture::BrowserProbeFailure::browser_version_unreadable);
+    // The observed evidence has to survive into the report, or the next
+    // occurrence costs another investigation.
+    CHECK(discovery.probes[0].failure.find("exited 3") != std::string::npos);
+    CHECK(discovery.probes[0].failure.find("attempt 2") != std::string::npos);
+
+    CHECK(discovery.diagnostic.code == "browser-version-unreadable");
+    const auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("too old") == std::string::npos);
+    CHECK(human.find("Retry the import") != std::string::npos);
+}
+
+TEST_CASE("a browser below the supported floor is reported as too old",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-too-old");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'Chromium 90.0.0.0'\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure_kind ==
+          capture::BrowserProbeFailure::browser_incompatible);
+    CHECK(discovery.diagnostic.code == "browser-incompatible");
+    CHECK(discovery.probes[0].failure.find("found 90, need 109")
+          != std::string::npos);
+}
+
+TEST_CASE("no upper bound rejects a browser for being newer than expected",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-newer");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'Google Chrome 999.0.0.0'\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    CHECK(result.compatible);
+    CHECK(result.major_version == 999);
+}
 #endif
 
 TEST_CASE("missing browser guidance is actionable and explains its narrow use",
@@ -501,13 +658,25 @@ TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",
         capture::BrowserProbeFailure::node_incompatible,
     });
 
+    discovery.node.failure = capture::NodeResolutionFailure::incompatible;
+    discovery.node.attempts.push_back(
+        {"/usr/local/bin/node", "Homebrew or installer", "20.0.0", 20,
+         "too old (need 22 or newer)"});
+
     auto human = capture::browser_unavailable_human(discovery);
     CHECK(human.find("nodejs.org/en/download") != std::string::npos);
     CHECK(human.find("Install Google Chrome") == std::string::npos);
+    // The failure is about Node.js, so the report names the Node.js
+    // installations that were checked — not the browsers.
+    CHECK(human.find("Node.js installations checked") != std::string::npos);
+    CHECK(human.find("/usr/local/bin/node") != std::string::npos);
+    CHECK(human.find("v20.0.0") != std::string::npos);
+    CHECK(human.find("/Applications/Google Chrome") == std::string::npos);
     auto json = capture::browser_unavailable_json(discovery);
     CHECK(json.find("\"code\":\"node-incompatible\"") != std::string::npos);
     CHECK(json.find("\"remediation\":\"install-node-22\"")
           != std::string::npos);
+    CHECK(json.find("\"version\":\"20.0.0\"") != std::string::npos);
 
     discovery.diagnostic = {
         "capture-runtime-unavailable",
@@ -524,6 +693,50 @@ TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",
     CHECK(json.find("\"code\":\"capture-runtime-unavailable\"")
           != std::string::npos);
     CHECK(json.find("\"remediation\":\"pulp-upgrade\"")
+          != std::string::npos);
+}
+
+TEST_CASE("a missing Node explains the GUI PATH and lists searched locations",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryResult discovery;
+    discovery.diagnostic = {
+        "node-unavailable",
+        "Node.js was not found; faithful HTML import needs Node.js 22 or "
+        "newer.",
+        "runtime-discovery",
+    };
+    // A browser probe is present and reports the Node failure, exactly as the
+    // real discovery pass leaves it.
+    discovery.probes.push_back({
+        {"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+         capture::BrowserOrigin::system},
+        false,
+        "Google Chrome",
+        "123.0.0.0",
+        123,
+        "Node.js was not found; browser capture needs Node.js 22 or newer",
+        capture::BrowserProbeFailure::node_unavailable,
+    });
+    discovery.node.failure = capture::NodeResolutionFailure::not_found;
+    discovery.node.searched = {
+        {"PATH", "node on PATH"},
+        {"Homebrew", "/opt/homebrew/bin/node"},
+        {"mise", "/home/u/.local/share/mise/installs/node/*/bin/node"},
+    };
+
+    const auto human = capture::browser_unavailable_human(discovery);
+    INFO(human);
+    CHECK(human.find("minimal PATH") != std::string::npos);
+    CHECK(human.find("Searched for Node.js in") != std::string::npos);
+    CHECK(human.find("/opt/homebrew/bin/node") != std::string::npos);
+    CHECK(human.find("mise") != std::string::npos);
+    // The browser list is what made the old message confusing: it named
+    // Chrome when the missing prerequisite was Node.js.
+    CHECK(human.find("Google Chrome") == std::string::npos);
+
+    const auto json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find("\"code\":\"node-unavailable\"") != std::string::npos);
+    CHECK(json.find("\"location\":\"/opt/homebrew/bin/node\"")
           != std::string::npos);
 }
 
@@ -704,7 +917,17 @@ TEST_CASE("capture deadline leaves time for runtime-owned cleanup",
         capture::capture_document(fixture_browser(), request);
 
     REQUIRE_FALSE(result.ok());
+    // The runtime reports its browser build before the diagnostic line, so the
+    // code has to be recovered from the line that carries it, not from the
+    // start of stderr.
     CHECK(result.diagnostic.code == "browser-capture-timeout");
+    // A stalled capture must name the stage it died in rather than reporting a
+    // bare timeout.
+    CHECK(result.diagnostic.message.find("stalled=Page.captureScreenshot")
+          != std::string::npos);
+    CHECK(result.diagnostic.message.find(
+              "last-completed=DOMSnapshot.captureSnapshot")
+          != std::string::npos);
     CHECK_FALSE(result.process.timed_out);
     CHECK(result.process.exit_code == 124);
     const auto output = fs::canonical(request.output_directory);

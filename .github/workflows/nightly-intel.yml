@@ -6,11 +6,10 @@ name: Nightly Intel
 # de-duplicated tracking issue that auto-closes on green (pattern from
 # auto-release-watchdog.yml / nightly-full-build.yml):
 #
-#   Job A — NATIVE Intel on `macos-15-intel` (real Intel CPU + toolchain, no
-#           Rosetta): full Release build + ctest. This runner has known flake
-#           reports (C++ linker-image errors, 100% CPU pegging), so a red run is
-#           classified: an *infra* signature is labelled `runner-infra` and does
-#           NOT page; a product failure does.
+#   Job A — NATIVE Intel on the dedicated physical Intel pool when
+#           PULP_NATIVE_INTEL_RUNS_ON_JSON is enabled, otherwise on the hosted
+#           `macos-15-intel` fallback: full Release build + ctest. A red run is
+#           classified as runner infra or a product failure before it can page.
 #
 #           Its build is bounded by a STEP-level `timeout`, deliberately, rather
 #           than by the job timeout. Letting the JOB time out makes GitHub mark it
@@ -25,9 +24,10 @@ name: Nightly Intel
 #           on every shipped bundle/dylib, and `arch -x86_64 auval`. Job B keeps
 #           the x86_64 signal alive whenever Job A's flaky runner is down.
 #
-# Runner priority is honored: zero Intel work ever routes to the self-hosted
-# Mac Studios that host the required `macos` gate; no Namespace, ever. Both
-# jobs run on free-for-public-repos GitHub-hosted macOS runners.
+# Runner priority is honored: native Intel uses labels dedicated to the Intel
+# Mac and can never match the self-hosted Mac Studios that host the required
+# `macos` gate. The independent universal job stays GitHub-hosted. No Intel
+# work uses Namespace.
 
 on:
   schedule:
@@ -35,6 +35,12 @@ on:
     # top-of-hour scheduler stampede; distinct from nightly-full-build's 09:13.
     - cron: '41 7 * * *'
   workflow_dispatch:
+    inputs:
+      use_physical_intel:
+        description: "Run the native build on the dedicated Intel Mac mini"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,13 +53,14 @@ concurrency:
 jobs:
   # ── Job A: native Intel (flake-tolerant) ─────────────────────────────────
   native-intel:
-    name: Native Intel build + test (macos-15-intel)
+    name: Native Intel build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
-    runs-on: macos-15-intel
+    runs-on: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.use_physical_intel && '["self-hosted","macOS","X64","pulp-intel-native","pulp-host-macmini"]') || (github.event_name != 'workflow_dispatch' && vars.PULP_NATIVE_INTEL_RUNS_ON_JSON) || '"macos-15-intel"') }}
     timeout-minutes: 120
     outputs:
       result: ${{ steps.report.outputs.result }}
       infra: ${{ steps.report.outputs.infra }}
+      runner: ${{ steps.report.outputs.runner }}
     env:
       BUILD_DIR: build-intel-native
 
@@ -64,6 +71,14 @@ jobs:
 
       - name: Install ccache + ninja
         run: |
+          if command -v ccache >/dev/null 2>&1 && command -v ninja >/dev/null 2>&1; then
+            echo "Using preinstalled ccache and ninja"
+            exit 0
+          fi
+          command -v brew >/dev/null 2>&1 || {
+            echo "::error::ccache and ninja are missing, and Homebrew is unavailable"
+            exit 1
+          }
           brew install ccache ninja || {
             brew update
             brew install ccache ninja
@@ -102,8 +117,9 @@ jobs:
       # that release-cli relies on) SUCCEEDS every night. The good signal was there
       # the whole time, buried under a run conclusion poisoned by this leg.
       #
-      # The `macos-15-intel` image is known to CPU-peg (see this file's header). So
-      # bound the build with a STEP-level timeout well inside the job limit. The job
+      # The hosted fallback is known to CPU-peg (see this file's header). Keep the
+      # same bound on either route so a sick physical host also cannot poison the
+      # run. Bound the build with a STEP-level timeout well inside the job limit. The job
       # then finishes NORMALLY with a loud, explicit infra-skip — never a silent
       # cancel — and the run can reach a conclusive success/failure that reflects the
       # signal that actually works.
@@ -114,12 +130,12 @@ jobs:
           set -o pipefail
           # Comfortably inside `timeout-minutes: 120` so WE decide the outcome, not
           # GitHub's canceller.
-          if timeout 75m cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
+          if python3 tools/ci/run_with_timeout.py 4500 cmake --build "${BUILD_DIR}" -- -k 0 2>&1 | tee build-intel-native.log; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
           elif [ "${PIPESTATUS[0]}" = "124" ]; then
-            # 124 == GNU timeout killed it. The macos-15-intel image pegged again.
-            # Infra, not product. Say so LOUDLY and let the run conclude.
-            echo "::warning::native Intel build exceeded 75m on macos-15-intel (the image CPU-pegs). Classified INFRA, not a product failure — the universal cross-check is the authoritative Intel signal."
+            # 124 == GNU timeout killed it. This is runner infra, not a product
+            # failure. Say so LOUDLY and let the run conclude.
+            echo "::warning::native Intel build exceeded 75m on ${RUNNER_NAME}. Classified INFRA, not a product failure — the universal cross-check is the authoritative Intel signal."
             echo "status=infra-timeout" >> "$GITHUB_OUTPUT"
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
@@ -139,11 +155,11 @@ jobs:
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
           fi
-          # ctest is informational on the nightly: this GitHub-hosted VM lacks a
-          # representative GPU and registered AU components, so GPU/golden/auval
-          # tests fail here even when the x86_64 code is fine. The run's verdict
-          # gates on BUILD (the #2462-style "does it even compile natively on
-          # Intel" concern).
+          # ctest is informational on the nightly because registered AU components
+          # and other host state differ between the physical and hosted routes.
+          # The run's verdict gates on BUILD (the #2462-style "does it even compile
+          # natively on Intel" concern), while the log retains the real-hardware
+          # signal when the Mac mini serves the job.
 
       - name: Compute result + classify infra vs product
         id: report
@@ -157,9 +173,9 @@ jobs:
           else
             result="failure"
           fi
-          # Infra signature: the macos-15-intel image's known failure modes are
-          # C++ linker-image errors and CPU-peg/timeout. A build failure whose
-          # log matches these is runner-infra, not a Pulp product regression.
+          # Infra signatures cover the hosted image's known linker-image failures
+          # and a sick route's timeout. A matching build failure is runner infra,
+          # not a Pulp product regression.
           infra="false"
           # A bounded-build timeout is infra BY CONSTRUCTION — we killed it, the
           # product did not fail. Mark it before the log-sniffing heuristic below.
@@ -173,7 +189,8 @@ jobs:
           fi
           echo "result=${result}" >> "$GITHUB_OUTPUT"
           echo "infra=${infra}"   >> "$GITHUB_OUTPUT"
-          echo "native-intel: build=${build} result=${result} infra=${infra}"
+          echo "runner=${RUNNER_NAME}" >> "$GITHUB_OUTPUT"
+          echo "native-intel: runner=${RUNNER_NAME} build=${build} result=${result} infra=${infra}"
 
       - name: Upload native-Intel logs
         if: always()
@@ -365,6 +382,7 @@ jobs:
       A_RESULT: ${{ needs.native-intel.result }}
       A_VERDICT: ${{ needs.native-intel.outputs.result }}
       A_INFRA: ${{ needs.native-intel.outputs.infra }}
+      A_RUNNER: ${{ needs.native-intel.outputs.runner }}
       B_RESULT: ${{ needs.universal-crosscheck.result }}
       B_VERDICT: ${{ needs.universal-crosscheck.outputs.result }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -380,8 +398,8 @@ jobs:
 
           # Native-Intel verdict: a job that did not COMPLETE (timeout/cancel →
           # A_RESULT != success with an empty A_VERDICT) is treated as infra,
-          # since the macos-15-intel runner's known failure mode is exactly a
-          # pegged/hung run. An explicit product failure is A_VERDICT=failure
+          # because a pegged/hung route is an infrastructure failure. An explicit
+          # product failure is A_VERDICT=failure
           # with A_INFRA=false.
           a_infra="false"
           if [ "$A_INFRA" = "true" ]; then
@@ -439,7 +457,7 @@ jobs:
             echo
             echo "| Job | Runner | Verdict |"
             echo "|-----|--------|---------|"
-            echo "| Native Intel | \`macos-15-intel\` | ${A_VERDICT:-did-not-complete} (job=${A_RESULT}${A_INFRA:+, infra=${A_INFRA}}) |"
+            echo "| Native Intel | \`${A_RUNNER:-unknown}\` | ${A_VERDICT:-did-not-complete} (job=${A_RESULT}${A_INFRA:+, infra=${A_INFRA}}) |"
             echo "| Universal cross-check | \`macos-15\` | ${B_VERDICT:-did-not-complete} (job=${B_RESULT}) |"
             echo
             if [ "$a_product_fail" = "true" ]; then

@@ -646,10 +646,11 @@ Three pieces, and the boundaries between them matter:
   refuses a duplicate type rather than overwriting — two renderers disagreeing
   about what a content kind reads would make invalidation depend on registration
   order. An unregistered type reads nothing, which is correct: no renderer
-  compiles it, so there is no program that could go stale. Built-in content
-  (media, notes, empty) is not registered and declares nothing, so the contract
-  cannot change the invalidation of anything that predates it.
-- `ContextSubscriberIndex::build()` is the kind → reader-track reverse index.
+  compiles it, so there is no program that could go stale. Built-in MIDI is the
+  deliberate exception: the program compiler reads its owning sequence groove,
+  so `MidiContent` always subscribes to `Groove` without plugin registration.
+  Media and empty content read none.
+- `CompileInvalidationIndex::build()` is the kind → reader-track reverse index.
   Rebuild it when the document's **structure** changes; a context edit alone does
   not invalidate it, because editing a lane's contents does not change who reads
   it. It walks clips through the exhaustive `ClipContentCases` visitor, so a new
@@ -663,8 +664,37 @@ Three pieces, and the boundaries between them matter:
   trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
   structural sequence edit and also sets `all`.
 
+Production callers construct `ProgramCompileRequest::invalidation` from the
+shared registry and exact `CommitResult`. Its constructor binds the dirty set to
+that result's target snapshot, revision, exact predecessor snapshot, and an
+immutable registry copy. Sparse reuse is allowed only when the predecessor is
+the currently published project; a restored or forked lineage rebuilds in full.
+`submit()` resolves that pinned input and remembers the generation that reached
+publication. A different registry generation forces a full compile, including
+at the same document revision. Do not resolve
+outside the request and then drop the registry generation before submission.
+Completion is keyed by `CompileTicket::submission_epoch` and
+`CompilerStatus::latest_published_epoch`; revision equality is insufficient for
+a same-document registry refresh. Treat the latter as a successful-publication
+watermark: `latest_published_epoch >= submission_epoch` is terminal for a ticket,
+meaning its request published or was superseded by a later successful
+publication. Callers requiring exact-current document identity must also
+require epoch equality and compare the published program identity/revision.
+Epochs are scoped to one compiler instance: destroying the facade forfeits
+completion observation, and a replacement compiler starts a new epoch domain.
+If `busy` is false, an error with the watermark still below the ticket is
+terminal failure.
+
+Built-in note compilation applies the owning sequence groove at the original
+owner-sequence onset. Move note-on/off by one shared displacement, intersect the
+pair with the owning clip's half-open window, scale velocity half-up with
+saturation, then subdivide the retained span for ratchets. Nested leaves carry
+their owner sequence and source onset through lowering; never compose parent and
+child groove. A trimmed nested MIDI leaf with authored groove is refused as
+`TrimmedGrooveUnsupported` until source-window chase semantics are specified.
+
 **Adding a `CompileContextKind` is a data change, with one trap.** Both
-`ContextSubscriberIndex::build()` and the `CompileContextSubscriptions` bitset
+`CompileInvalidationIndex::build()` and the `CompileContextSubscriptions` bitset
 loop over `[0, kCompileContextKindCount)`, so a new kind needs no new case in
 either — but it does need `kCompileContextKindCount` bumped in lockstep with the
 enum. Forget that and the new kind is never indexed, never dirtied, and every
@@ -749,22 +779,34 @@ Things worth knowing before changing it:
   addressed — a generation wire that inlined it would republish gigabytes per
   edit), the audio clip programs (derived, and carrying derived-cache pointers),
   `AudioRendererLimits` (mostly offline-stretch and converter budgets governing
-  the compiler's host), and `AutomationProgram`'s instance token (a
-  producer-process-local counter that a consuming realm has no token space to
-  compare against). Excluding the token is also what makes one document encode
-  to exactly one byte range.
-- **`producer_epoch` is what replaces the token across the boundary, and it is
-  not optional.** The token's in-process job is to stop an equal-generation
-  replacement from masquerading as the active program — `AutomationCursor`
-  decides `Unchanged` on the lane key *and* the token together. Across a realm
-  that guard cannot be the token, so the wire carries a producer epoch instead
-  and a consumer decides on `(producer_epoch, generation)`. Neither half is
-  sufficient alone: `generation` is minted per store and **restarts at 1**, so a
-  producer that is torn down and recreated looks non-monotonic to a surviving
-  consumer and would be refused forever on generation alone; and two producers
-  of one document both minting generation 1 would look like one publication
-  without the epoch. A zero epoch is refused at both ends rather than acting as
-  a wildcard.
+  the compiler's host). The instance token is **not** excluded — see below.
+- **Lane identity on the wire is `(producer_epoch, lane_id, generation,
+  instance_token)`, and no proper subset works.** The token's in-process job is
+  to stop an equal-generation replacement from masquerading as the active
+  program — `AutomationCursor` decides `Unchanged` on the lane key *and* the
+  token together — so `ProgramWireAutomationLaneRecord` carries it and a
+  consumer gets to reach the same answer the cursor does. `producer_epoch`
+  covers a different case and only that case: `generation` is minted per store
+  and **restarts at 1**, so a producer torn down and recreated looks
+  non-monotonic to a surviving consumer and would be refused forever on
+  generation alone, and two producers of one document both minting generation 1
+  would look like one publication without the epoch. Zero is refused for both
+  rather than acting as a wildcard — the epoch at encode and decode, the token
+  at decode only, since the compiler owns `AutomationProgram`'s constructor and
+  always mints a nonzero one, so an encoder-side check would be unreachable.
+- **A foreign token is comparable — within one epoch.** The objection to
+  carrying it was that a process-local counter names nothing a consuming realm
+  can look up. True and beside the point: a consumer never compares a foreign
+  token to one of its own, only two foreign tokens to each other under one
+  `producer_epoch`, where they came from one counter. Across epochs they are
+  incomparable, and across epochs the epoch has already decided. Equality only —
+  a larger token does not mean newer, since ordering is
+  `(producer_epoch, generation)`'s job.
+- **Per lane, not per publication.** The incremental compiler reuses a lane's
+  program when that lane did not change, so its token is stable across a publish
+  that touched only its neighbours. That is what lets a consumer re-adopt the
+  lanes that moved and keep cursor state for the rest, instead of re-seeding
+  everything on every publish.
 - **Version growth is additive by section, not by version bump.** An unknown
   section marked `kProgramWireSectionOptional` is skipped; an unknown section
   without it is rejected. Bump `min_reader_version` only when an older reader
@@ -772,11 +814,43 @@ Things worth knowing before changing it:
 - **The byte golden is the guard that matters.** An encoder and a decoder that
   are wrong in the same direction still round-trip; only the pinned digest in
   `test/test_playback_program_wire.cpp` catches a reordered field. If you change
-  the layout on purpose, re-pin it in the same change and say so.
+  the layout on purpose, re-pin it in the same change and say so. The digest is
+  taken over a payload whose lane instance tokens have been normalised to their
+  ordinals, because the token is minted per compile and would otherwise make the
+  digest depend on how many programs the process built first. Normalise any
+  future per-publication field the same way — write a fixed value into it rather
+  than skipping the bytes, so its offset and width stay covered.
 - The tempo map travels as its editable `TempoPoint`s, because
   `CompiledTempoMap`'s segments are private and derived. `encode_program_wire`
   therefore takes the points and refuses any that did not compile the program's
   map — `CompiledTempoMap::matches()` is what keeps the two honest.
+
+### Check that a replacement identifier answers the same question, not a nearby one
+
+The wire shipped without `instance_token` on the reasoning that `producer_epoch`
+"replaces that guard across a realm." It did not, and the way it failed is worth
+keeping.
+
+`producer_epoch` answers *is this a different producer?* `instance_token`
+answered *is this a different program from the same producer?* Adjacent
+questions, and the substitution is sound for the case it was written against — a
+producer torn down and recreated. It silently dropped the more common one: a
+single worker recompiling. `generation` is **caller-supplied**, not minted per
+compile, so two compiles of one document by one producer at one epoch agreed on
+every field the wire carried and encoded to byte-identical payloads. A consumer
+computing `Unchanged` from them reached the opposite answer to the in-process
+`AutomationCursor` — a silently wrong render, not a decode error, which is the
+class of bug a validating decoder cannot catch for you because nothing is
+malformed.
+
+Two habits come out of it:
+
+- Before excluding a field from a wire, write down the question it answers and
+  the question its stand-in answers. If the sentences differ, the exclusion is
+  dropping a case, and the case it drops is the one nobody listed.
+- Distrust a canonicality argument that is doing double duty. "Omitting it is
+  also what makes one document encode to one byte range" was true and was a
+  reason to want the exclusion; it was not evidence the exclusion was safe.
 
 ## A refusal of something authorable costs a written reason
 
@@ -823,6 +897,10 @@ longer exists, so a reason cannot outlive its code.
 `target_link_libraries` in its `CMakeLists.txt`. Both axes must stay inside the
 declared set, so reaching for a format, host, or view type fails the gate even
 when the build would have linked.
+
+`project_package` has its own floor above Timeline: it may reach timeline,
+timebase, platform, and runtime, but it must not reach playback. Package
+publication or recovery must not widen playback's row.
 
 **The link axis is transitive, and playback is the module that shows why.** The
 check follows what a linked library itself links, to a fixed point, so a row
@@ -889,6 +967,17 @@ today, and the outbound gate is right to stay green about it: nothing in
 editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
+
+**"Every Pulp plugin links `playback`" is true of a desktop configure only.**
+The chain runs through `pulp-host`, and `core/host` is behind `NOT IOS` — iOS
+disallows dlopen of third-party plugins, so hosting is not built there and the
+`pulp-view-core -> pulp::host` edge is dropped too. One guard therefore removes
+`host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
+plugin's only route to all three. Anything asserting `playback` is present in a
+plugin binary must say which configure it means; entries a guard can remove
+must be appended to `PULP_LINK_FLOOR_DEBT_<target>` under that same condition
+rather than declared unconditionally, which reads their absence as rot. See the
+`timeline` skill for the full rule.
 
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor
@@ -967,3 +1056,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

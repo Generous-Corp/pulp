@@ -725,7 +725,7 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
     // pointer's moves/ends, so a finger that drifts off the canvas still routes
     // to the gesture owner (mirrors the mac plugin host's _dragTarget, but
     // per-pointer for multi-touch).
-    std::unordered_map<int, pulp::view::View*> _dragTargets;
+    std::unordered_map<int, pulp::view::ViewCapture> _dragTargets;
 }
 + (Class)layerClass { return [CAMetalLayer class]; }
 - (CAMetalLayer *)metalLayer { return (CAMetalLayer *)self.layer; }
@@ -778,21 +778,23 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         if (root->dispatch_gesture_pointer_event(me)) continue;
         pulp::view::View* target = root->hit_test(me.window_position);
         if (!target) continue;
-        _dragTargets[pid] = target;
+        auto& capture = _dragTargets[pid];
+        capture.set(target);
         if (target->focusable()) target->claim_input_focus();
-        pulp::view::MouseEvent local = me;
-        local.position = ios_root_to_local(me.window_position, target);
-        target->on_mouse_event(local);  // fires on_pointer_event → JS pointerdown
-        // Also drive the native press virtual so View subclasses that init
-        // drag state in on_mouse_down (knobs, faders) work in the GPU host —
-        // mirrors mac's pulp_plugin_mouse_down.
-        target->on_mouse_down(local.position);
-        for (pulp::view::View* b = target->parent(); b; b = b->parent()) {
-            if (!b->on_pointer_event) continue;
-            pulp::view::MouseEvent bme = me;
-            bme.position = ios_root_to_local(me.window_position, b);
-            b->on_pointer_event(bme);
-        }
+        target = capture.live_in(*root);
+        if (!target) { _dragTargets.erase(pid); continue; }
+        const pulp::view::PointerAttributes pointer{
+            .type = me.pointer_type,
+            .pressure = me.pressure,
+            .pointer_id = pid,
+            .altitude_angle = me.altitude_angle,
+            .azimuth_angle = me.azimuth_angle,
+        };
+        if (!pulp::view::deliver_mouse_down(
+                *root, target, me.window_position, me.modifiers,
+                static_cast<int>(me.click_count), true,
+                pulp::view::MouseButton::left, {}, pointer))
+            _dragTargets.erase(pid);
       } catch (const std::exception& e) {
         std::fprintf(stderr, "[plugin-gpu-host] touchesBegan handler threw: %s\n", e.what());
       } catch (...) {
@@ -814,21 +816,36 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
         if (root->dispatch_gesture_pointer_event(me)) continue;
         auto it = _dragTargets.find(pid);
         if (it == _dragTargets.end()) continue;
-        pulp::view::View* target = it->second;
-        if (!ios_view_in_tree(target, root)) { _dragTargets.erase(it); continue; }
+        const auto live_target = [&]() -> pulp::view::View* {
+            auto current = _dragTargets.find(pid);
+            return current == _dragTargets.end()
+                       ? nullptr
+                       : current->second.live_in(*root);
+        };
+        pulp::view::View* target = live_target();
+        if (!target) { _dragTargets.erase(it); continue; }
         me.position = ios_root_to_local(me.window_position, target);
-        target->on_mouse_drag(me.position);  // legacy single-pointer native path
-        // Identity-preserving pointermove (real pointerId + pointerType:'touch')
-        // — this, not on_drag, is what lets OrbitControls track two fingers for
-        // pinch-zoom. on_pointer_move also fans out the mouse equivalents, so we
-        // deliberately do NOT also call on_drag (that would double-fire
-        // pointermove under a phantom pointerId:0/mouse identity).
-        if (target->on_pointer_move) target->on_pointer_move(me);
-        for (pulp::view::View* b = target->parent(); b; b = b->parent()) {
-            if (!b->on_pointer_move) continue;
+        target->on_mouse_drag(me.position);
+        target = live_target();
+        if (!target) { _dragTargets.erase(pid); continue; }
+        auto target_move = target->on_pointer_move;
+        if (target_move) target_move(me);
+        target = live_target();
+        if (!target) { _dragTargets.erase(pid); continue; }
+        std::vector<pulp::view::ViewCapture> bubble;
+        for (auto* parent = target->parent(); parent; parent = parent->parent()) {
+            pulp::view::ViewCapture captured;
+            captured.set(parent);
+            bubble.push_back(std::move(captured));
+        }
+        for (auto& captured : bubble) {
+            auto* parent = captured.live_in(*root);
+            if (!parent) continue;
+            auto parent_move = parent->on_pointer_move;
+            if (!parent_move) continue;
             pulp::view::MouseEvent bme = me;
-            bme.position = ios_root_to_local(me.window_position, b);
-            b->on_pointer_move(bme);
+            bme.position = ios_root_to_local(me.window_position, parent);
+            parent_move(bme);
         }
       } catch (const std::exception& e) {
         std::fprintf(stderr, "[plugin-gpu-host] touchesMoved handler threw: %s\n", e.what());
@@ -852,37 +869,52 @@ pulp::view::MouseEvent ios_mouse_event_from_touch(
       try {
         const int pid = [self stableIdForTouch:touch];
         auto it = _dragTargets.find(pid);
-        pulp::view::View* target = (it != _dragTargets.end()) ? it->second : nullptr;
+        const auto live_target = [&]() -> pulp::view::View* {
+            if (!root) return nullptr;
+            auto current = _dragTargets.find(pid);
+            return current == _dragTargets.end()
+                       ? nullptr
+                       : current->second.live_in(*root);
+        };
+        pulp::view::View* target =
+            (root && it != _dragTargets.end()) ? live_target() : nullptr;
         if (root) {
             auto gesture_me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/false,
                                                         self.pointTransform);
             gesture_me.is_cancelled = cancelled;
             gesture_me.phase = pulp::view::MousePhase::release;
             if (root->dispatch_gesture_pointer_event(gesture_me)) {
-                if (it != _dragTargets.end()) _dragTargets.erase(it);
+                _dragTargets.erase(pid);
                 [self removeTouchId:touch];
                 continue;
             }
+            target = live_target();
         }
-        if (root && target && ios_view_in_tree(target, root)) {
+        if (root && target) {
             auto me = ios_mouse_event_from_touch(self, touch, pid, /*is_down=*/false,
                                                  self.pointTransform);
             me.is_cancelled = cancelled;
             me.phase = pulp::view::MousePhase::release;
-            me.position = ios_root_to_local(me.window_position, target);
-            // Distinct native cancel path so widgets can roll back in-progress
-            // gestures instead of treating a cancel as a commit.
-            if (cancelled) target->on_mouse_cancel(me.position);
-            else target->on_mouse_up(me.position);
-            target->on_mouse_event(me);  // fires on_pointer_event → JS pointerup/cancel
-            for (pulp::view::View* b = target->parent(); b; b = b->parent()) {
-                if (!b->on_pointer_event) continue;
-                pulp::view::MouseEvent bme = me;
-                bme.position = ios_root_to_local(me.window_position, b);
-                b->on_pointer_event(bme);
+            const pulp::view::PointerAttributes pointer{
+                .type = me.pointer_type,
+                .pressure = me.pressure,
+                .pointer_id = pid,
+                .altitude_angle = me.altitude_angle,
+                .azimuth_angle = me.azimuth_angle,
+            };
+            if (cancelled) {
+                pulp::view::deliver_mouse_cancel(
+                    *root, target, me.window_position, me.modifiers,
+                    static_cast<int>(me.click_count),
+                    pulp::view::MouseButton::left, pointer);
+            } else {
+                pulp::view::deliver_mouse_up(
+                    *root, target, me.window_position, me.modifiers,
+                    static_cast<int>(me.click_count), {},
+                    pulp::view::MouseButton::left, pointer);
             }
         }
-        if (it != _dragTargets.end()) _dragTargets.erase(it);
+        _dragTargets.erase(pid);
         [self removeTouchId:touch];
       } catch (const std::exception& e) {
         std::fprintf(stderr, "[plugin-gpu-host] touchesEnded handler threw: %s\n", e.what());

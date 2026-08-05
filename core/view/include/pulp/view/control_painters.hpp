@@ -39,6 +39,19 @@ struct KnobStyle {
     float ring_width = 4.0f;
     float indicator_width = 2.5f;
     float radius_scale = 0.5f;        ///< arc radius as a fraction of min(w,h)
+    /// Where the pointer STARTS, as a fraction of min(w,h). Zero is the box
+    /// centre, which is the stock knob's look and the behaviour every existing
+    /// caller gets.
+    ///
+    /// A knob whose body was drawn by a DESIGN needs a different answer. Its
+    /// box is the design's body box, so a pointer from the centre is a spoke
+    /// straight across the art — the same violation of "the design owns the
+    /// body" that the ring's own radius had, one element over. Such a caller
+    /// starts the pointer at the body edge and gets a radial TICK instead.
+    float indicator_inner_scale = 0.0f;
+    /// Where the pointer ENDS, as a fraction of min(w,h). Zero means "the ring
+    /// radius", which is where it has always ended.
+    float indicator_outer_scale = 0.0f;
 };
 
 /// Draw a rotary knob whose active ring sweeps from `start_angle_deg` by

@@ -38,6 +38,7 @@
     "clip.empty": { "level": "none", "refusal": "empty positioned clips" },
     "clip.media": { "level": "none", "refusal": "media clips" },
     "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
+    "clip.midi-expression-lane": { "level": "none", "refusal": "per-clip controller and expression streams" },
     "tempo.ramp": { "level": "none", "refusal": "continuous tempo ramps" },
     "marker": { "level": "none", "refusal": "arrangement markers" },
     "automation.device-param": { "level": "none", "refusal": "automation lanes" },
@@ -81,6 +82,11 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"
+    },
+    "clip.midi-expression-lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"
     },
     "clip.launch": {
       "level": "drop",
@@ -210,6 +216,36 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "the bounded writer does not apply or serialize authored groove context"
+    },
+    "sequence.section-role": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer emits a region's name and span but not the part it names"
+    },
+    "context.chord-bass": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "context.chord-extension": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "context.chord-voicing": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "tuning.project": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no document-wide tuning statement"
+    },
+    "tuning.instrument": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no per-instrument tuning statement"
     }
   }
 }

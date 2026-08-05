@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: #111; }
+  #panel { position: relative; width: 400px; height: 400px; background:#222; overflow:hidden; }
+  #bar { position:absolute; left:150px; top:190px; width:100px; height:20px;
+         background:#e33; transform: rotate(45deg); }
+  #label { position:absolute; left:4px; top:2px; color:#fff; font:12px sans-serif; }
+  #scaled { position:absolute; left:120px; top:60px; width:50px; height:50px;
+            background:#3e3; transform: scale(2); }
+</style>
+<div id="panel">
+  <div id="bar"><span id="label">ROT</span></div>
+  <div id="scaled"></div>
+</div>

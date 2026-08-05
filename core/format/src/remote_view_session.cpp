@@ -63,16 +63,6 @@ RemoteViewSession::~RemoteViewSession() {
 }
 
 void RemoteViewSession::install_handlers_(Processor& processor) {
-    // view.param_set: remote wants to change a parameter.
-    peer_->on_notification("view.param_set",
-        [this](std::string_view params_json) {
-            auto id = parse_u32(params_json, "id");
-            auto v  = parse_f32(params_json, "normalized");
-            if (id && v) {
-                store_.set_normalized(*id, *v);
-            }
-        });
-
     // view.param_get: remote asks for the current value.
     peer_->register_method("view.param_get",
         [this](std::string_view params_json) -> runtime::JsonRpcResult {

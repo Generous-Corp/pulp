@@ -21,6 +21,12 @@ using namespace pulp_test_cli;
 
 namespace {
 
+std::string standalone_artifact_marker() {
+    std::string marker = "PULP_STANDALONE_";
+    marker += "COMPONENT_V1";
+    return marker;
+}
+
 std::string repo_project_version_for_shellout_tests() {
     const auto repo_root = fs::weakly_canonical(fs::current_path() / ".." / "..");
     auto cmake = read_file(repo_root / "CMakeLists.txt");
@@ -1561,8 +1567,55 @@ TEST_CASE("pulp macos validates local operator arguments before gh calls",
     REQUIRE(status_missing_pr.stderr_output.find("--pr requires a value") != std::string::npos);
 }
 
+TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shellout][overflow]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto help = run_pulp({"overflow", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("pulp overflow") != std::string::npos);
+    REQUIRE(help.stdout_output.find("threshold [N]") != std::string::npos);
+
+    auto unknown = run_pulp({"overflow", "wat"}, 10000);
+    REQUIRE_FALSE(unknown.timed_out);
+    REQUIRE(unknown.exit_code == 1);
+    REQUIRE(unknown.stderr_output.find("unknown subcommand") != std::string::npos);
+
+    auto threshold_extra = run_pulp({"overflow", "threshold", "1", "2"}, 10000);
+    REQUIRE_FALSE(threshold_extra.timed_out);
+    REQUIRE(threshold_extra.exit_code == 1);
+    REQUIRE(threshold_extra.stderr_output.find("too many args") != std::string::npos);
+
+    auto threshold_negative = run_pulp({"overflow", "threshold", "-1"}, 10000);
+    REQUIRE_FALSE(threshold_negative.timed_out);
+    REQUIRE(threshold_negative.exit_code == 1);
+    REQUIRE(threshold_negative.stderr_output.find("must be >= 0") != std::string::npos);
+
+    auto threshold_bad = run_pulp({"overflow", "threshold", "nope"}, 10000);
+    REQUIRE_FALSE(threshold_bad.timed_out);
+    REQUIRE(threshold_bad.exit_code == 1);
+    REQUIRE(threshold_bad.stderr_output.find("is not a number") != std::string::npos);
+
+    auto enable_missing_to = run_pulp({"overflow", "enable", "--to"}, 10000);
+    REQUIRE_FALSE(enable_missing_to.timed_out);
+    REQUIRE(enable_missing_to.exit_code == 2);
+    REQUIRE(enable_missing_to.stderr_output.find("--to requires a value") != std::string::npos);
+
+    auto enable_flag_value = run_pulp({"overflow", "enable", "--to", "--flag"}, 10000);
+    REQUIRE_FALSE(enable_flag_value.timed_out);
+    REQUIRE(enable_flag_value.exit_code == 2);
+    REQUIRE(enable_flag_value.stderr_output.find("--to requires a value") != std::string::npos);
+}
+
+#if PULP_TEST_INSPECTOR_ENABLED
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
-          "[cli][shellout][inspect][issue-643][issue-641]") {
+          "[cli][shellout][inspect][orientation]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
         return;
@@ -1574,7 +1627,9 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
     auto help = run_pulp({"inspect", "--help"}, 10000);
     REQUIRE_FALSE(help.timed_out);
     REQUIRE(help.exit_code == 0);
-    REQUIRE(help.stdout_output.find("Usage: pulp inspect [options]") != std::string::npos);
+    REQUIRE(help.stdout_output.find(
+                "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]") !=
+            std::string::npos);
     REQUIRE(help.stdout_output.find("--port PORT") != std::string::npos);
     REQUIRE(help.stdout_output.find("--output FILE") != std::string::npos);
 
@@ -1592,12 +1647,12 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
 
     REQUIRE_FALSE(missing.timed_out);
     REQUIRE(missing.exit_code == 1);
-    REQUIRE(missing.stderr_output.find("no running Pulp inspector found") != std::string::npos);
-    REQUIRE(missing.stderr_output.find("specify --port") != std::string::npos);
+    REQUIRE(missing.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
-TEST_CASE("pulp inspect explicit port failure does not require a server",
+TEST_CASE("pulp inspect explicit port filters discovery without bypassing authentication",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
@@ -1609,6 +1664,12 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     auto base = unique_temp_dir("pulp-inspect-explicit-port");
     fs::create_directories(base);
+#if defined(_WIN32)
+    ScopedEnvVar temp_dir("TEMP");
+#else
+    ScopedEnvVar temp_dir("TMPDIR");
+#endif
+    temp_dir.set(base.string());
     auto output = base / "inspect-response.json";
 
     auto r = run_pulp({"inspect", "--host", "127.0.0.1", "--port", "1", "--command",
@@ -1619,8 +1680,11 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 1);
-    REQUIRE(r.stdout_output.find("Connecting to 127.0.0.1:1") != std::string::npos);
-    REQUIRE(r.stderr_output.find("could not connect to 127.0.0.1:1") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Connecting to") == std::string::npos);
+    REQUIRE(r.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
+    REQUIRE(r.stderr_output.find("requested host 127.0.0.1 port 1") !=
+            std::string::npos);
     REQUIRE_FALSE(wrote_output);
 }
 
@@ -1677,6 +1741,33 @@ TEST_CASE("pulp inspect rejects invalid arguments before networking",
     REQUIRE(unknown.stderr_output.find("unknown inspect argument") != std::string::npos);
     REQUIRE(unknown.stdout_output.find("Connecting to") == std::string::npos);
 }
+#else
+TEST_CASE("pulp inspect fails explicitly when the inspector component is disabled",
+          "[cli][shellout][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const std::string diagnostic =
+        "this Pulp SDK was built without the optional development inspector component "
+        "(PULP_ENABLE_INSPECTOR=OFF)";
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"inspect", "--help"},
+             {"inspect"},
+             {"inspect", "--port"},
+         }) {
+        auto result = run_pulp(args, 10000);
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 1);
+        REQUIRE(result.stderr_output.find(diagnostic) != std::string::npos);
+        REQUIRE(result.stdout_output.empty());
+    }
+}
+#endif
 
 TEST_CASE("pulp create scaffolds a no-build app project with Android files",
           "[cli][shellout][create][issue-643]") {
@@ -2666,6 +2757,11 @@ TEST_CASE("pulp run --help advertises the headless/screenshot/frames/watch flags
     REQUIRE(r.stdout_output.find("--screenshot") != std::string::npos);
     REQUIRE(r.stdout_output.find("--frames") != std::string::npos);
     REQUIRE(r.stdout_output.find("--watch") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--inspect") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--inspect-capability") != std::string::npos);
+    REQUIRE(r.stdout_output.find("GPU-enabled desktop build") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--inspect-runtime-eval") != std::string::npos);
+    REQUIRE(r.stdout_output.find("HIGH RISK") != std::string::npos);
     // Live Audio Inspector discoverability (the human + agent launch paths).
     REQUIRE(r.stdout_output.find("--audio-inspector") != std::string::npos);
     REQUIRE(r.stdout_output.find("--audio-probe-json") != std::string::npos);
@@ -2870,12 +2966,9 @@ TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)", "[cli][shellou
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
 
-// The CLI delegates `import-design` to the sibling pulp-import-design binary
-// via std::system (cli_common.cpp run()/delegate_to_build_binary). std::system
-// returns a waitpid status, not the child exit code, so a child exit of 2 would
-// truncate to 0 unless decoded. This guards that a delegated non-zero exit code
-// (an unsupported --format → exit 2) survives the delegation boundary instead
-// of silently reading as success.
+// POSIX delegates through std::system, whose waitpid status must be decoded;
+// Windows bypasses cmd.exe so user arguments reach the helper literally.
+// Either route must preserve a delegated non-zero exit code.
 TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --format)",
           "[cli][shellout][delegate]") {
     if (!binary_exists()) {
@@ -2883,11 +2976,34 @@ TEST_CASE("pulp delegates a non-zero child exit code intact (import-design --for
         return;
     }
 
-    auto r = run_pulp({"import-design", "--export-tokens", "--format", "bogus-format"}, 30000);
+    pulp_setenv("PULP_DELEGATE_EXPAND", "expanded-by-shell", 1);
+    auto r = run_pulp(
+        {"import-design", "--export-tokens", "--format", "%PULP_DELEGATE_EXPAND%"},
+        30000);
+    pulp_unsetenv("PULP_DELEGATE_EXPAND");
     REQUIRE_FALSE(r.timed_out);
     // Exit 2 must survive: NOT collapsed to 0 by an undecoded wait status.
     REQUIRE(r.exit_code == 2);
-    REQUIRE(r.stderr_output.find("unsupported --format") != std::string::npos);
+    REQUIRE(r.stderr_output.find("unsupported --format value '%PULP_DELEGATE_EXPAND%'") !=
+            std::string::npos);
+}
+
+// This is the exact delegated invocation used by the release smoke. On
+// Windows, every argument is quoted, so the old command began with a quoted
+// executable and contained a second quote; cmd.exe stripped the leading quote
+// and never launched the sibling, even though `--help` has no spaces.
+TEST_CASE("pulp import-design --help survives the Windows cmd leading-quote rule",
+          "[cli][shellout][delegate]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    auto r = run_pulp({"import-design", "--help"}, 30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE((r.stdout_output + r.stderr_output).find("import-design") !=
+            std::string::npos);
 }
 
 // `pulp ci-host` is the optional Tart-VM host-onboarding wrapper around
@@ -2939,4 +3055,265 @@ TEST_CASE("pulp validate --json reports install_ready and a summary", "[cli][she
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.stdout_output.find("\"install_ready\":") != std::string::npos);
     REQUIRE(r.stdout_output.find("\"summary\":") != std::string::npos);
+}
+
+TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
+          "[cli][shellout][validate][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto dir = unique_temp_dir("pulp-validate-inspector-scope");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    auto auv3 = run_pulp({"validate", "--target", "all", "--json",
+                          (dir / "Missing.appex").string()});
+    REQUIRE_FALSE(auv3.timed_out);
+    REQUIRE(auv3.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
+    REQUIRE(auv3.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
+
+    const auto first = dir / "First.app" / "Contents/MacOS";
+    const auto second = dir / "Second.app" / "Contents/MacOS";
+    fs::create_directories(first);
+    fs::create_directories(second);
+    {
+        std::ofstream executable(first / "First", std::ios::binary);
+        executable << standalone_artifact_marker() << " ordinary standalone";
+    }
+    {
+        std::ofstream executable(second / "Second", std::ios::binary);
+        executable << standalone_artifact_marker() << " ordinary standalone";
+    }
+    {
+        std::ofstream manifest(first / "First.inspector-capabilities.json");
+        manifest << R"({"product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    auto multiple = run_pulp({"validate", "--target", "standalone", "--json",
+                              (dir / "First.app").string(),
+                              (dir / "Second.app").string()});
+    REQUIRE_FALSE(multiple.timed_out);
+    REQUIRE(multiple.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(multiple.exit_code != 0);
+
+    {
+        std::ofstream executable(first / "First", std::ios::binary);
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
+    auto stale = run_pulp({"validate", "--target", "standalone", "--json",
+                           (dir / "First.app").string()});
+    REQUIRE_FALSE(stale.timed_out);
+    REQUIRE(stale.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(stale.exit_code != 0);
+
+    auto stale_plain = run_pulp({"validate", "--target", "standalone",
+                                 (dir / "First.app").string()});
+    REQUIRE_FALSE(stale_plain.timed_out);
+    REQUIRE(stale_plain.stderr_output.find(
+        "Inspector capability evidence incomplete") != std::string::npos);
+    REQUIRE(stale_plain.exit_code != 0);
+
+    const auto raw = dir / "RawStandalone";
+    {
+        std::ofstream executable(raw, std::ios::binary);
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
+    {
+        std::ofstream sidecar(dir / "RawStandalone.inspector-capabilities.json");
+        sidecar << R"({"product_name":"RawStandalone","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    auto raw_stale = run_pulp(
+        {"validate", "--target", "standalone", "--json", raw.string()});
+    REQUIRE_FALSE(raw_stale.timed_out);
+    REQUIRE(raw_stale.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(raw_stale.exit_code != 0);
+}
+
+TEST_CASE("pulp validate accepts a manifest-free empty build report",
+          "[cli][shellout][validate][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-validate-empty-build");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream manifest(project / "pulp.toml");
+        manifest << "[project]\nname = \"Empty\"\n";
+    }
+    auto result = run_pulp_in_directory(project, {"validate", "--json"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": true") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
+
+    const auto artifact_dir =
+        project / "build" / "products" / "Stale.app" / "Contents/MacOS";
+    fs::create_directories(artifact_dir);
+    {
+        std::ofstream sidecar(
+            artifact_dir / "Stale.inspector-capabilities.json");
+        sidecar << R"({"product_name":"Stale","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
+    }
+    {
+        std::ofstream executable(artifact_dir / "Stale", std::ios::binary);
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
+    auto incomplete = run_pulp_in_directory(project, {"validate"});
+    REQUIRE_FALSE(incomplete.timed_out);
+    REQUIRE(incomplete.exit_code != 0);
+    REQUIRE(incomplete.stderr_output.find(
+        "Inspector capability evidence incomplete") != std::string::npos);
+}
+
+TEST_CASE("pulp ship check android ignores standalone inspector manifests",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-ship-check-android-inspector");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "artifacts");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(Android)\n";
+    }
+    {
+        std::ofstream apk(project / "artifacts" / "fixture.apk", std::ios::binary);
+        apk << "unsigned fixture";
+    }
+    auto result = run_pulp_in_directory(
+        project, {"ship", "check", "--target", "android", "--json"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output.find("\"inspector_capabilities\": []") !=
+            std::string::npos);
+    REQUIRE(result.stderr_output.find("inspector capability manifest") ==
+            std::string::npos);
+}
+
+TEST_CASE("pulp ship share requires inspector acknowledgements before dry run",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+#if !defined(__APPLE__)
+    SUCCEED("skipped: ship share is macOS-only");
+#else
+    auto project = unique_temp_dir("pulp-ship-share-inspector");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(Share)\n";
+    }
+    {
+        std::ofstream cache(project / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
+    }
+    const auto executable_dir =
+        project / "build" / "Share.app" / "Contents/MacOS";
+    fs::create_directories(executable_dir);
+    {
+        std::ofstream executable(executable_dir / "Share", std::ios::binary);
+        executable << standalone_artifact_marker()
+                   << " PULP_INSPECT_SHIPPING_MANIFEST_V1 "
+                      "PULP_INSPECT_CAPABILITY_UI_READ_V1";
+    }
+    fs::permissions(executable_dir / "Share", fs::perms::owner_exec,
+                    fs::perm_options::add);
+    {
+        std::ofstream sidecar(executable_dir / "Share.inspector-capabilities.json");
+        sidecar << R"({"product_name":"Share","shipping_override":true,"unsafe_runtime_eval_acknowledged":false,"capabilities":["ui.read"]})";
+    }
+    const auto app = project / "build" / "Share.app";
+    auto refused = run_pulp_in_directory(
+        project, {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(refused.timed_out);
+    REQUIRE(refused.exit_code != 0);
+    REQUIRE(refused.stderr_output.find("requires --ship-inspector") !=
+            std::string::npos);
+
+    auto acknowledged = run_pulp_in_directory(
+        project, {"ship", "share", app.string(), "--dry-run",
+                  "--ship-inspector"});
+    REQUIRE_FALSE(acknowledged.timed_out);
+    REQUIRE(acknowledged.exit_code == 0);
+    REQUIRE(acknowledged.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
+
+    const auto dmg_source = project / "build" / "dmg-source";
+    fs::create_directories(dmg_source);
+    fs::copy(app, dmg_source / app.filename(), fs::copy_options::recursive);
+    const auto dmg = project / "build" / "Share.dmg";
+    const auto create_dmg = "hdiutil create -quiet -fs HFS+ -srcfolder \"" +
+        dmg_source.string() + "\" \"" + dmg.string() + "\"";
+    REQUIRE(std::system(create_dmg.c_str()) == 0);
+    auto container_refused = run_pulp_in_directory(
+        project, {"ship", "share", dmg.string(), "--dry-run"});
+    REQUIRE_FALSE(container_refused.timed_out);
+    REQUIRE(container_refused.exit_code == 0);
+    REQUIRE(container_refused.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
+
+    auto container_acknowledged = run_pulp_in_directory(
+        project, {"ship", "share", dmg.string(), "--dry-run",
+                  "--ship-inspector"});
+    REQUIRE_FALSE(container_acknowledged.timed_out);
+    REQUIRE(container_acknowledged.exit_code == 0);
+    REQUIRE(container_acknowledged.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
+
+    const auto placeholder_dmg = project / "build" / "Placeholder.dmg";
+    {
+        std::ofstream placeholder(placeholder_dmg, std::ios::binary);
+        placeholder << "not a disk image";
+    }
+    auto placeholder_plan = run_pulp_in_directory(
+        project, {"ship", "share", placeholder_dmg.string(), "--dry-run"});
+    REQUIRE_FALSE(placeholder_plan.timed_out);
+    REQUIRE(placeholder_plan.exit_code == 0);
+    REQUIRE(placeholder_plan.stdout_output.find("pulp ship share plan") !=
+            std::string::npos);
+#endif
+}
+
+TEST_CASE("pulp ship package json remains structured on inspector refusal",
+          "[cli][shellout][ship][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+    auto project = unique_temp_dir("pulp-ship-package-json-error");
+    fs::create_directories(project / "core");
+    fs::create_directories(project / "build");
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.24)\nproject(PackageJson)\n";
+    }
+    {
+        std::ofstream cache(project / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << project.string() << "\n";
+    }
+
+    auto result = run_pulp_in_directory(
+        project, {"ship", "package", "--json", "--ship-inspector"});
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
+    REQUIRE(result.stdout_output.find("\"error\":") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"exit_code\":") != std::string::npos);
+    pulp::cli::pkg::JsonParser parser{result.stdout_output, 0};
+    REQUIRE(parser.parse().type == pulp::cli::pkg::JsonValue::Object);
 }

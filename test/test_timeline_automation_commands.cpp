@@ -184,7 +184,7 @@ TEST_CASE("Journal checkpoint equivalence includes automation lane content") {
 
     auto rejected = session->journal().replay(automation_project(true, 0.5f), {});
     REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().code == ConflictCode::CheckpointMismatch);
 
     auto signed_zero_session =
         std::move(DocumentSession::create(automation_project(true, 0.0f))).value();
@@ -195,5 +195,5 @@ TEST_CASE("Journal checkpoint equivalence includes automation lane content") {
     auto signed_zero_rejected =
         signed_zero_session->journal().replay(automation_project(true, -0.0f), {});
     REQUIRE_FALSE(signed_zero_rejected);
-    REQUIRE(signed_zero_rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(signed_zero_rejected.error().code == ConflictCode::CheckpointMismatch);
 }

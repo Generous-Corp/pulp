@@ -96,6 +96,25 @@ WidgetPromotionSignal classify_interactive_signal(const IRNode& node) {
         return WidgetPromotionSignal::none;
     }
 
+    // A node lowered from a browser capture carries `paint_class`, and its
+    // appearance is the browser's own solved appearance — the whole contract of
+    // that lane is that the panel is reproduced, not re-designed. Promoting it
+    // to a widget hands it the widget's DEFAULT chrome, which paints over the
+    // captured fill instead of alongside it: a green `STEREO` toggle and a
+    // borderless nav icon both come out as the same grey rounded box.
+    //
+    // `cursor: pointer` is the signal that does the damage, because in a web
+    // design it is on EVERY clickable thing — tabs, cards, nav items, mode
+    // switches — none of which the browser draws any differently for it. It is
+    // a hover affordance, not ink.
+    //
+    // Interactivity on that lane does not come from sniffing appearance
+    // anyway: the semantic report names the controls, and they are lowered
+    // separately by `lower_semantic_controls`.
+    if (node.attributes.count("paint_class")) {
+        return WidgetPromotionSignal::none;
+    }
+
     if (node.attributes.count("onclick") || node.attributes.count("onClick")) {
         return WidgetPromotionSignal::onclick_attribute;
     }

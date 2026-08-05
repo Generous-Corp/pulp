@@ -15,6 +15,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/value_channel_set.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -82,6 +83,15 @@ TEST_CASE("ReloadableShell hot-swaps DSP through the Processor path", "[reload][
     // Initial DSP: unity gain * 0.5.
     REQUIRE(render_one(shell) == 0.5f);
     REQUIRE(shell.has_active_dsp());
+    view::ValueChannelTelemetryAttachment initial_telemetry;
+    shell.visit_value_channels([&](view::ValueChannelSet* channels) {
+        REQUIRE(channels != nullptr);
+        REQUIRE(channels->scalar("unity_signal") != nullptr);
+        initial_telemetry = channels->attach_telemetry();
+    });
+    REQUIRE(initial_telemetry.valid());
+    REQUIRE(initial_telemetry.channels().size() == 1);
+    REQUIRE(initial_telemetry.source_alive(0));
 
     // Force a reload to the compatible 2x build (contract matches): the DSP
     // swaps live and the parameter value is preserved (2x * 0.5 == 1.0).
@@ -90,6 +100,18 @@ TEST_CASE("ReloadableShell hot-swaps DSP through the Processor path", "[reload][
     REQUIRE(good.ok());
     REQUIRE(render_steady(shell) == 1.0f);      // drain the crossfade → 2x * 0.5
     REQUIRE(store.get_value(1) == 0.5f);
+    shell.visit_value_channels([](view::ValueChannelSet* channels) {
+        REQUIRE(channels != nullptr);
+        REQUIRE(channels->scalar("compatible_signal") != nullptr);
+        REQUIRE(channels->scalar("unity_signal") == nullptr);
+    });
+
+    // The old processor remains alive only for the click-free fade. Once the
+    // audio thread finishes that fade, the watcher reclaims it on the control
+    // thread and the telemetry attachment reports its source as retired.
+    for (int i = 0; i < 100 && initial_telemetry.source_alive(0); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE_FALSE(initial_telemetry.source_alive(0));
     // >= 1, not == 1: the background watcher may also have detected the same
     // mtime change and swapped before reload_now() forced its swap. Either way
     // the DSP is the 2x build; the count just isn't deterministic here.
