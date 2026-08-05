@@ -1,0 +1,9 @@
+# Local reading corpus: fetched sources we may READ and DERIVE from, and may
+# never redistribute. The Synth Secrets mirror carries no licence and the
+# copyright is Sound On Sound's and Gordon Reid's; cookbook-sc is its
+# author's and is itself derived from a copyrighted book. Committing any of it
+# would republish somebody else's text.
+#
+# tools/rack/corpus.py fetches it; the anchor check reads it; nothing else in
+# the repo depends on it existing.
+.corpus/

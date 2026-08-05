@@ -6,12 +6,17 @@
     "recurring failure in this family is a modulator patched to a destination",
     "that was never in the audio path, so the patch is correct and inaudible."
   ],
-
   "idioms": [
     {
       "slug": "vibrato",
-      "names": ["vibrato"],
-      "implies": ["wobble the pitch", "pitch wobble", "gentle pitch movement"],
+      "names": [
+        "vibrato"
+      ],
+      "implies": [
+        "wobble the pitch",
+        "pitch wobble",
+        "gentle pitch movement"
+      ],
       "is": "A slow oscillator modulating pitch by a small amount, so the note wavers around itself rather than moving to another note.",
       "sounds_right_when": "the pitch moves periodically and stays recognisably one note.",
       "source": "Standard practice",
@@ -19,31 +24,61 @@
         "family": "modulation-rate-and-index",
         "position": "below hearing, so the movement is heard as movement",
         "set_by": "the modulator's rate, and how much of it reaches the frequency input — both knobs; every position on this axis patches a source to an oscillator's frequency input and they sound nothing alike",
-        "neighbours": {"more": "fm-voice"},
+        "neighbours": {
+          "more": "fm-voice"
+        },
         "$comment": "The rate at which a modulator stops being heard as a wobble and starts being heard as a timbre is somewhere around the bottom of hearing, and it is a knob. This library keeps a record on either side of it because the two are different requests, and marks them as one continuum because a checker reading cables cannot tell them apart."
       },
-      "at_least": {"lfo": 1},
+      "at_least": {
+        "lfo": 1
+      },
       "topology": [
-        {"id": "lfo-to-pitch", "from_module": "lfo", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "cv_in",
-         "describe": "the modulator has to reach the oscillator's frequency input"},
-        {"id": "heard", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "any", "to_port": "audio_in",
-         "describe": "the oscillator has to reach the audio path, or the vibrato is inaudible"}
+        {
+          "id": "lfo-to-pitch",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "cv_in",
+          "describe": "the modulator has to reach the oscillator's frequency input"
+        },
+        {
+          "id": "heard",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the oscillator has to reach the audio path, or the vibrato is inaudible"
+        }
       ],
-      "behaviour": {"spectrally_varying": true},
+      "behaviour": {
+        "spectrally_varying": true
+      },
       "common_mistakes": [
-        {"id": "no-modulation", "do": "cut", "requirement": "lfo-to-pitch",
-         "message": "nothing modulates the pitch"},
-        {"id": "unheard", "do": "cut", "requirement": "heard",
-         "message": "the modulated oscillator is not in the audio path"}
-      ]
+        {
+          "id": "no-modulation",
+          "do": "cut",
+          "requirement": "lfo-to-pitch",
+          "message": "nothing modulates the pitch"
+        },
+        {
+          "id": "unheard",
+          "do": "cut",
+          "requirement": "heard",
+          "message": "the modulated oscillator is not in the audio path"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "tremolo",
-      "names": ["tremolo"],
-      "implies": ["wobble the volume", "pulsing volume", "amplitude wobble"],
+      "names": [
+        "tremolo"
+      ],
+      "implies": [
+        "wobble the volume",
+        "pulsing volume",
+        "amplitude wobble"
+      ],
       "is": "A slow oscillator modulating an amplifier, so loudness moves periodically.",
       "sounds_right_when": "the level pulses at a steady rate.",
       "source": "Standard practice",
@@ -51,81 +86,165 @@
         "family": "amplitude-modulation-rate",
         "position": "below hearing, heard as a pulsing level",
         "set_by": "the modulator's rate — a knob; both positions on this axis patch a source into an amplifier's control input",
-        "neighbours": {"more": "ring-modulated-texture"},
+        "neighbours": {
+          "more": "ring-modulated-texture"
+        },
         "$comment": "Push the modulator's rate up through the bottom of hearing and the pulsing stops being a pulse and becomes sum and difference tones. Same three jacks, entirely different sound, and nothing in the cables says which one you have."
       },
-      "at_least": {"lfo": 1, "amplifier": 1},
+      "at_least": {
+        "lfo": 1,
+        "amplifier": 1
+      },
       "topology": [
-        {"id": "lfo-to-vca", "from_module": "lfo", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "the modulator has to reach the amplifier's control input"},
-        {"id": "signal-through", "from_module": "any", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "something has to pass through the amplifier to be tremoloed"}
+        {
+          "id": "lfo-to-vca",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "the modulator has to reach the amplifier's control input"
+        },
+        {
+          "id": "signal-through",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "something has to pass through the amplifier to be tremoloed"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "no-modulation", "do": "cut", "requirement": "lfo-to-vca",
-         "message": "nothing modulates the amplifier"},
-        {"id": "nothing-through", "do": "cut", "requirement": "signal-through",
-         "message": "no audio passes through the amplifier"}
-      ]
+        {
+          "id": "no-modulation",
+          "do": "cut",
+          "requirement": "lfo-to-vca",
+          "message": "nothing modulates the amplifier"
+        },
+        {
+          "id": "nothing-through",
+          "do": "cut",
+          "requirement": "signal-through",
+          "message": "no audio passes through the amplifier"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "filter-sweep",
-      "names": ["filter sweep", "sweeping filter"],
-      "implies": ["sweep the cutoff", "opening filter", "moving brightness"],
+      "names": [
+        "filter sweep",
+        "sweeping filter"
+      ],
+      "implies": [
+        "sweep the cutoff",
+        "opening filter",
+        "moving brightness"
+      ],
       "is": "A modulator moving a filter's cutoff, so brightness changes over time.",
       "sounds_right_when": "the harmonic content changes audibly while the pitch does not.",
       "source": "Standard practice",
-      "at_least": {"filter": 1},
+      "at_least": {
+        "filter": 1
+      },
       "topology": [
-        {"id": "modulated", "from_module": "any", "from_port": "cv_out",
-         "to_module": "filter", "to_port": "cv_in",
-         "describe": "something has to move the cutoff"},
-        {"id": "audio-through", "from_module": "any", "from_port": "audio_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "audio has to pass through the filter"}
+        {
+          "id": "modulated",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "something has to move the cutoff"
+        },
+        {
+          "id": "audio-through",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "audio has to pass through the filter"
+        }
       ],
-      "behaviour": {"spectrally_varying": true},
+      "behaviour": {
+        "spectrally_varying": true
+      },
       "common_mistakes": [
-        {"id": "static", "do": "cut", "requirement": "modulated",
-         "message": "nothing moves the cutoff, so the filter is static"},
-        {"id": "no-audio", "do": "cut", "requirement": "audio-through",
-         "message": "no audio passes through the filter"}
-      ]
+        {
+          "id": "static",
+          "do": "cut",
+          "requirement": "modulated",
+          "message": "nothing moves the cutoff, so the filter is static"
+        },
+        {
+          "id": "no-audio",
+          "do": "cut",
+          "requirement": "audio-through",
+          "message": "no audio passes through the filter"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "envelope-follower",
-      "names": ["envelope follower"],
-      "implies": ["follow the amplitude", "react to the input level"],
+      "names": [
+        "envelope follower"
+      ],
+      "implies": [
+        "follow the amplitude",
+        "react to the input level"
+      ],
       "is": "An audio signal converted to a control voltage that tracks its loudness, then used to move something else.",
       "sounds_right_when": "the destination moves in step with how loud the source is.",
       "source": "Standard practice",
-      "at_least": {"slew": 1},
+      "at_least": {
+        "slew": 1
+      },
       "topology": [
-        {"id": "audio-in", "from_module": "any", "from_port": "audio_out",
-         "to_module": "slew", "to_port": "audio_in",
-         "describe": "audio has to reach the follower"},
-        {"id": "cv-out", "from_module": "slew", "from_port": "cv_out",
-         "to_module": "any", "to_port": "cv_in",
-         "describe": "the follower's voltage has to control something"}
+        {
+          "id": "audio-in",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "slew",
+          "to_port": "audio_in",
+          "describe": "audio has to reach the follower"
+        },
+        {
+          "id": "cv-out",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the follower's voltage has to control something"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "no-source", "do": "cut", "requirement": "audio-in",
-         "message": "the follower has nothing to follow"},
-        {"id": "controls-nothing", "do": "cut", "requirement": "cv-out",
-         "message": "the follower controls nothing"}
-      ]
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "audio-in",
+          "message": "the follower has nothing to follow"
+        },
+        {
+          "id": "controls-nothing",
+          "do": "cut",
+          "requirement": "cv-out",
+          "message": "the follower controls nothing"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "attenuverted-modulation",
-      "names": ["attenuverter", "attenuverted"],
-      "implies": ["scale the modulation", "invert the modulation", "control the depth"],
+      "names": [
+        "attenuverter",
+        "attenuverted"
+      ],
+      "implies": [
+        "scale the modulation",
+        "invert the modulation",
+        "control the depth"
+      ],
       "is": "A modulation source passed through an attenuverter so its depth — and direction — can be set before it reaches its destination.",
       "sounds_right_when": "the modulation is present but clearly bounded.",
       "source": "Standard practice; the reason attenuverters exist",
@@ -135,28 +254,55 @@
         "set_by": "the processor's gain and offset knobs — a knob, not a cable, so every position on this axis patches identically",
         "$comment": "A voltage through a processor and on to its destination. Attenuating, inverting and offsetting are the same three jacks; what differs is where the knobs sit."
       },
-      "at_least": {"attenuator": 1},
+      "at_least": {
+        "attenuator": 1
+      },
       "topology": [
-        {"id": "into", "from_module": "any", "from_port": "cv_out",
-         "to_module": "attenuator", "to_port": "cv_in",
-         "describe": "a modulation source has to reach the attenuverter"},
-        {"id": "out-of", "from_module": "attenuator", "from_port": "cv_out",
-         "to_module": "any", "to_port": "cv_in",
-         "describe": "the scaled voltage has to reach a destination — attenuating a voltage nobody uses changes nothing"}
+        {
+          "id": "into",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "attenuator",
+          "to_port": "cv_in",
+          "describe": "a modulation source has to reach the attenuverter"
+        },
+        {
+          "id": "out-of",
+          "from_module": "attenuator",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the scaled voltage has to reach a destination — attenuating a voltage nobody uses changes nothing"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "bypassed", "do": "cut", "requirement": "out-of",
-         "message": "the attenuverter's output goes nowhere"},
-        {"id": "no-input", "do": "cut", "requirement": "into",
-         "message": "the attenuverter has no input"}
-      ]
+        {
+          "id": "bypassed",
+          "do": "cut",
+          "requirement": "out-of",
+          "message": "the attenuverter's output goes nowhere"
+        },
+        {
+          "id": "no-input",
+          "do": "cut",
+          "requirement": "into",
+          "message": "the attenuverter has no input"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "cross-modulation",
-      "names": ["cross modulation", "cross modulated"],
-      "implies": ["each modulates the other", "mutual modulation", "two way modulation"],
+      "names": [
+        "cross modulation",
+        "cross modulated"
+      ],
+      "implies": [
+        "each modulates the other",
+        "mutual modulation",
+        "two way modulation"
+      ],
       "is": "Two sources each modulating the other, so neither is simply the modulator — the pair produces behaviour neither has alone.",
       "sounds_right_when": "the result is unpredictable in a way that changes with either source's settings.",
       "source": "Strange's treatment of interdependent modulation",
@@ -164,81 +310,176 @@
         "sounds_like": "two voices that will not settle into a relationship — each one audibly bending the other, so the result keeps arriving at places neither would reach alone",
         "confusable_with": "one-way modulation, which is predictable once you know the modulator; cut either cable here and the character collapses, not just half of it"
       },
-      "at_least": {"oscillator": 2},
+      "at_least": {
+        "oscillator": 2
+      },
       "topology": [
-        {"id": "a-to-b", "from_module": "oscillator", "from_port": "any_out",
-         "to_module": "oscillator", "to_port": "cv_in", "different_module": true,
-         "describe": "one source has to modulate the other"},
-        {"id": "b-to-a", "from_module": "oscillator", "from_port": "any_out",
-         "to_module": "oscillator", "to_port": "cv_in", "different_module": true,
-         "describe": "and the other has to modulate it back, or this is ordinary one-way modulation"}
+        {
+          "id": "a-to-b",
+          "from_module": "oscillator",
+          "from_port": "any_out",
+          "to_module": "oscillator",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "one source has to modulate the other"
+        },
+        {
+          "id": "b-to-a",
+          "from_module": "oscillator",
+          "from_port": "any_out",
+          "to_module": "oscillator",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "and the other has to modulate it back, or this is ordinary one-way modulation"
+        }
       ],
-      "behaviour": {"varies_timing": true},
+      "behaviour": {
+        "varies_timing": true
+      },
       "common_mistakes": [
-        {"id": "one-way", "do": "cut", "requirement": "a-to-b",
-         "message": "the modulation only goes one way"}
-      ]
+        {
+          "id": "one-way",
+          "do": "cut",
+          "requirement": "a-to-b",
+          "message": "the modulation only goes one way"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "slewed-random",
-      "names": ["slewed random", "smooth random"],
-      "implies": ["smooth random voltage", "drifting voltage", "wandering modulation"],
+      "names": [
+        "slewed random",
+        "smooth random"
+      ],
+      "implies": [
+        "smooth random voltage",
+        "drifting voltage",
+        "wandering modulation"
+      ],
       "is": "A stepped random voltage passed through a slew limiter, so it glides between values instead of jumping.",
       "sounds_right_when": "the destination drifts rather than stepping.",
       "source": "Standard practice; the difference between sampled and smooth random",
-      "at_least": {"random": 1, "slew": 1},
+      "at_least": {
+        "random": 1,
+        "slew": 1
+      },
       "topology": [
-        {"id": "into-slew", "from_module": "random", "from_port": "cv_out",
-         "to_module": "slew", "to_port": "cv_in",
-         "describe": "the random voltage has to pass through the slew"},
-        {"id": "out-to-dest", "from_module": "slew", "from_port": "cv_out",
-         "to_module": "any", "to_port": "cv_in",
-         "describe": "the smoothed voltage has to control something"}
+        {
+          "id": "into-slew",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "slew",
+          "to_port": "cv_in",
+          "describe": "the random voltage has to pass through the slew"
+        },
+        {
+          "id": "out-to-dest",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the smoothed voltage has to control something"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "unsmoothed", "do": "cut", "requirement": "into-slew",
-         "message": "the random voltage never reaches the slew, so it steps rather than drifts"},
-        {"id": "unused", "do": "cut", "requirement": "out-to-dest",
-         "message": "the smoothed voltage controls nothing"}
-      ]
+        {
+          "id": "unsmoothed",
+          "do": "cut",
+          "requirement": "into-slew",
+          "message": "the random voltage never reaches the slew, so it steps rather than drifts"
+        },
+        {
+          "id": "unused",
+          "do": "cut",
+          "requirement": "out-to-dest",
+          "message": "the smoothed voltage controls nothing"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "sidechain-duck",
-      "names": ["sidechain", "ducking"],
-      "implies": ["duck under the kick", "pump", "pumping"],
+      "names": [
+        "sidechain",
+        "ducking"
+      ],
+      "implies": [
+        "duck under the kick",
+        "pump",
+        "pumping"
+      ],
       "is": "A trigger-driven envelope closing an amplifier on a different signal, so one part steps aside for another.",
       "sounds_right_when": "the ducked part dips in time with the trigger and recovers.",
       "source": "Standard practice, borrowed from mixing",
-      "at_least": {"envelope": 1, "amplifier": 1, "clock": 1},
+      "at_least": {
+        "envelope": 1,
+        "amplifier": 1,
+        "clock": 1
+      },
       "topology": [
-        {"id": "trigger", "from_module": "any", "from_port": "gate_out",
-         "to_module": "envelope", "to_port": "gate_in",
-         "describe": "something has to trigger the duck"},
-        {"id": "ducks", "from_module": "envelope", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "the envelope has to control the amplifier being ducked"},
-        {"id": "signal", "from_module": "any", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "the ducked signal has to pass through that amplifier"}
+        {
+          "id": "trigger",
+          "from_module": "any",
+          "from_port": "gate_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "something has to trigger the duck"
+        },
+        {
+          "id": "ducks",
+          "from_module": "envelope",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "the envelope has to control the amplifier being ducked"
+        },
+        {
+          "id": "signal",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "the ducked signal has to pass through that amplifier"
+        }
       ],
-      "behaviour": {"rhythmic": true},
+      "behaviour": {
+        "rhythmic": true
+      },
       "common_mistakes": [
-        {"id": "untriggered", "do": "cut", "requirement": "trigger",
-         "message": "nothing triggers the duck"},
-        {"id": "ducks-nothing", "do": "cut", "requirement": "ducks",
-         "message": "the envelope does not control an amplifier"},
-        {"id": "no-signal", "do": "cut", "requirement": "signal",
-         "message": "no audio passes through the ducked amplifier"}
-      ]
+        {
+          "id": "untriggered",
+          "do": "cut",
+          "requirement": "trigger",
+          "message": "nothing triggers the duck"
+        },
+        {
+          "id": "ducks-nothing",
+          "do": "cut",
+          "requirement": "ducks",
+          "message": "the envelope does not control an amplifier"
+        },
+        {
+          "id": "no-signal",
+          "do": "cut",
+          "requirement": "signal",
+          "message": "no audio passes through the ducked amplifier"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "modulated-modulator",
-      "names": ["modulated modulator", "modulation of modulation"],
-      "implies": ["modulate the lfo", "changing modulation rate", "lfo modulating an lfo"],
+      "names": [
+        "modulated modulator",
+        "modulation of modulation"
+      ],
+      "implies": [
+        "modulate the lfo",
+        "changing modulation rate",
+        "lfo modulating an lfo"
+      ],
       "is": "One modulator moving another's rate or depth, so the modulation itself is never constant.",
       "sounds_right_when": "the sense of motion changes over time rather than staying periodic.",
       "source": "Strange; the standard way to defeat obvious periodicity",
@@ -254,47 +495,99 @@
           }
         ]
       },
-      "at_least": {"lfo": 2},
+      "at_least": {
+        "lfo": 2
+      },
       "topology": [
-        {"id": "lfo-to-lfo", "from_module": "lfo", "from_port": "cv_out",
-         "to_module": "lfo", "to_port": "cv_in", "different_module": true,
-         "describe": "one modulator has to move the other's rate"},
-        {"id": "reaches-something", "from_module": "lfo", "from_port": "cv_out",
-         "to_module": "any", "to_port": "cv_in",
-         "describe": "the modulated modulator has to control something"}
+        {
+          "id": "lfo-to-lfo",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "lfo",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "one modulator has to move the other's rate"
+        },
+        {
+          "id": "reaches-something",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the modulated modulator has to control something"
+        }
       ],
-      "behaviour": {"varies_timing": true},
+      "behaviour": {
+        "varies_timing": true
+      },
       "common_mistakes": [
-        {"id": "flat", "do": "cut", "requirement": "lfo-to-lfo",
-         "message": "no modulator moves another, so the motion is perfectly periodic"},
-        {"id": "unused", "do": "cut", "requirement": "reaches-something",
-         "message": "the modulation reaches no destination"}
-      ]
+        {
+          "id": "flat",
+          "do": "cut",
+          "requirement": "lfo-to-lfo",
+          "message": "no modulator moves another, so the motion is perfectly periodic"
+        },
+        {
+          "id": "unused",
+          "do": "cut",
+          "requirement": "reaches-something",
+          "message": "the modulation reaches no destination"
+        }
+      ],
+      "provenance": "canon"
     },
-
     {
       "slug": "voltage-controlled-mixing",
-      "names": ["voltage controlled mixing", "crossfade"],
-      "implies": ["fade between two sources", "blend under voltage", "morph between"],
+      "names": [
+        "voltage controlled mixing",
+        "crossfade"
+      ],
+      "implies": [
+        "fade between two sources",
+        "blend under voltage",
+        "morph between"
+      ],
       "is": "Two signals through amplifiers under opposing control, so a voltage moves the balance between them.",
       "sounds_right_when": "one source gives way to the other continuously rather than switching.",
       "source": "Standard practice",
-      "at_least": {"amplifier": 2, "mixer": 1},
+      "at_least": {
+        "amplifier": 2,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "controlled", "from_module": "any", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "a voltage has to control the balance"},
-        {"id": "summed", "from_module": "amplifier", "from_port": "audio_out",
-         "to_module": "mixer", "to_port": "audio_in",
-         "describe": "the two paths have to be summed"}
+        {
+          "id": "controlled",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "a voltage has to control the balance"
+        },
+        {
+          "id": "summed",
+          "from_module": "amplifier",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the two paths have to be summed"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "no-control", "do": "cut", "requirement": "controlled",
-         "message": "nothing controls the balance"},
-        {"id": "unsummed", "do": "cut", "requirement": "summed",
-         "message": "the two paths are never summed"}
-      ]
+        {
+          "id": "no-control",
+          "do": "cut",
+          "requirement": "controlled",
+          "message": "nothing controls the balance"
+        },
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the two paths are never summed"
+        }
+      ],
+      "provenance": "canon"
     }
   ]
 }

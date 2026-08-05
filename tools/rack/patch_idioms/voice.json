@@ -78,7 +78,8 @@
      "module": "amplifier",
      "message": "there is no amplifier, so nothing shapes the loudness"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "west-coast-voice",
@@ -141,7 +142,8 @@
      "requirement": "envelope-opens",
      "message": "nothing opens the gate, so the voice sustains instead of plucking"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "sequenced-voice",
@@ -226,7 +228,8 @@
      "requirement": "pitch",
      "message": "the sequence never reaches a pitch input"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "drone-voice",
@@ -266,7 +269,8 @@
      "requirement": "reaches-output",
      "message": "the oscillator is not patched into anything"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "fm-voice",
@@ -328,7 +332,8 @@
      "requirement": "carrier-out",
      "message": "the carrier never reaches an amplifier"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "quantized-voice",
@@ -381,7 +386,8 @@
      "requirement": "into-quantizer",
      "message": "the quantizer has no input"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "keyboard-voice",
@@ -434,7 +440,8 @@
      "requirement": "pitch",
      "message": "nothing sets the oscillator's pitch"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "paraphonic-voice",
@@ -486,7 +493,8 @@
      "requirement": "shared-filter",
      "message": "the mix never reaches a filter"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "sub-bass-voice",
@@ -541,7 +549,8 @@
      "requirement": "fast-envelope",
      "message": "nothing shapes the bass, so it drones"
     }
-   ]
+   ],
+   "provenance": "canon"
   },
   {
    "slug": "vocal-formant-voice",
@@ -597,7 +606,17 @@
      "requirement": "source",
      "message": "nothing feeds the formant filters"
     }
-   ]
+   ],
+   "provenance": "canon",
+   "axis": {
+    "family": "fixed-resonance-bank",
+    "position": "tuned to the formants of a vowel",
+    "set_by": "where the filters are tuned and how sharp they are — knobs, so the patch that makes a vowel and the patch that makes an instrument body are the same cables",
+    "neighbours": {
+     "less": "body-resonance-bank"
+    },
+    "$comment": "A bank of parallel band-pass filters summed. Tuned to the vowel formants it reads as a voice; tuned to an instrument's body resonances it reads as that instrument. One structure, and the tuning is what a checker cannot see."
+   }
   },
   {
    "slug": "acid-voice",
@@ -710,7 +729,8 @@
      "module": "slew",
      "message": "there is no slew in the patch, so the slide the idiom is named for cannot exist"
     }
-   ]
+   ],
+   "provenance": "canon"
   }
  ]
 }

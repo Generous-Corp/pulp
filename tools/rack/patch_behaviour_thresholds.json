@@ -2,12 +2,19 @@
   "$comment": [
     "Which numbers a behaviour flag needs. Data, on purpose.",
     "",
-    "EVERY VALUE IN HERE IS A GUESS. They are first cuts chosen to be",
-    "reasonable, and not one of them has been tuned against a patch a person",
-    "has actually listened to. They live in a data file so that tuning one is",
-    "an edit somebody can review and revert, rather than a constant buried in",
-    "a compiled gate. Treat a number here as a hypothesis about music, and",
-    "when it disagrees with a listener, the listener is right.",
+    "MOST VALUES IN HERE ARE STILL GUESSES, and the ones that are not now say",
+    "so. A first cut chosen to be reasonable and never tuned against a patch a",
+    "person listened to is a hypothesis about music; a number derived from what",
+    "a synthesis teacher chose in order to DEMONSTRATE the effect is something",
+    "better, and the two should not look alike. So a condition may carry a",
+    "`grounding`: where its number comes from, and what it would take to",
+    "dislodge it. A condition with no `grounding` is still a guess.",
+    "",
+    "They live in a data file so that tuning one is an edit somebody can review",
+    "and revert, rather than a constant buried in a compiled gate. Treat an",
+    "ungrounded number as a hypothesis about music, and when it disagrees with",
+    "a listener, the listener is right. A grounded one still loses to a",
+    "listener; it just costs an argument first.",
     "",
     "The flags are the ones the idiom library actually carries. Two names from",
     "the original sketch are spelled differently in the data and are the same",
@@ -25,87 +32,161 @@
     "melodic": {
       "means": "plays a tune rather than holding a note",
       "needs": [
-        {"field": "pitch.voiced_fraction", "op": ">=", "value": 0.25,
-         "says": "a pitch could only be tracked for {actual:.0%} of the run, so there is no melody to judge either way"}
+        {
+          "field": "pitch.voiced_fraction",
+          "op": ">=",
+          "value": 0.25,
+          "says": "a pitch could only be tracked for {actual:.0%} of the run, so there is no melody to judge either way"
+        }
       ],
       "all_of": [
-        {"field": "pitch.distinct_pitches", "op": ">=", "value": 3,
-         "says": "only {actual:.0f} distinct pitch(es) in the whole run; the sequencer's step values ARE the melody, so write them and make them differ"},
-        {"field": "pitch.pitch_changes", "op": ">=", "value": 4,
-         "says": "the pitch changed {actual:.0f} time(s); a melody moves more than that"}
+        {
+          "field": "pitch.distinct_pitches",
+          "op": ">=",
+          "value": 3,
+          "says": "only {actual:.0f} distinct pitch(es) in the whole run; the sequencer's step values ARE the melody, so write them and make them differ"
+        },
+        {
+          "field": "pitch.pitch_changes",
+          "op": ">=",
+          "value": 4,
+          "says": "the pitch changed {actual:.0f} time(s); a melody moves more than that"
+        }
       ]
     },
     "rhythmic": {
       "means": "there are attacks, and they land on a pulse",
       "all_of": [
-        {"field": "onsets.onsets", "op": ">=", "value": 4,
-         "says": "only {actual:.0f} attack(s) in the run; nothing is being struck or gated repeatedly"},
-        {"field": "onsets.periodicity", "op": ">=", "value": 0.35,
-         "says": "the attacks do not fall on a pulse (autocorrelation {actual:.2f}); clock the sequencer or the envelope from something steady"}
+        {
+          "field": "onsets.onsets",
+          "op": ">=",
+          "value": 4,
+          "says": "only {actual:.0f} attack(s) in the run; nothing is being struck or gated repeatedly"
+        },
+        {
+          "field": "onsets.periodicity",
+          "op": ">=",
+          "value": 0.35,
+          "says": "the attacks do not fall on a pulse (autocorrelation {actual:.2f}); clock the sequencer or the envelope from something steady"
+        }
       ]
     },
     "keeps_going": {
       "means": "still sounding at the end of the run",
       "all_of": [
-        {"field": "dynamics.end_over_peak", "op": ">=", "value": 0.1,
-         "says": "the last half second is {actual:.2f} of the loudest moment; the patch fires once and dies rather than running"}
+        {
+          "field": "dynamics.end_over_peak",
+          "op": ">=",
+          "value": 0.1,
+          "says": "the last half second is {actual:.2f} of the loudest moment; the patch fires once and dies rather than running"
+        }
       ]
     },
     "sustained": {
       "means": "a held sound rather than a series of events",
       "all_of": [
-        {"field": "dynamics.duty_cycle", "op": ">=", "value": 0.8,
-         "says": "sound is present for only {actual:.0%} of the run; a sustained patch does not have gaps"},
-        {"field": "onsets.per_second", "op": "<=", "value": 1.0,
-         "says": "{actual:.1f} attacks a second is a rhythm, not a drone"}
+        {
+          "field": "dynamics.duty_cycle",
+          "op": ">=",
+          "value": 0.8,
+          "says": "sound is present for only {actual:.0%} of the run; a sustained patch does not have gaps"
+        },
+        {
+          "field": "onsets.per_second",
+          "op": "<=",
+          "value": 1.0,
+          "says": "{actual:.1f} attacks a second is a rhythm, not a drone",
+          "grounding": "Derived, not guessed. cookbook-sc (microcosm/cookbook-sc, '3. Envelopes.sc') demonstrates a slow/pad shape as Env.adsr(1.5, 1.5, 0.5, 4) and a fast/plucked one as Env.adsr(0.3, 0.3, 0.9, 1.2). Attack+decay is 3.0s for the pad and 0.6s for the pluck, so a patch using the pad shape cannot start more than about 0.33 notes a second and one using the pluck can manage about 1.7. This threshold sits between them, which is the useful place for it: it separates the two envelope shapes a teacher chose to demonstrate the difference with. Move it only with a reason that beats that."
+        }
       ]
     },
     "spectrally_varying": {
       "means": "the timbre moves across the run",
       "needs": [
-        {"field": "spectrum.active_windows", "op": ">=", "value": 20,
-         "says": "only {actual:.0f} windows carried enough signal to have a spectrum, so brightness over time was not really measured"}
+        {
+          "field": "spectrum.active_windows",
+          "op": ">=",
+          "value": 20,
+          "says": "only {actual:.0f} windows carried enough signal to have a spectrum, so brightness over time was not really measured"
+        }
       ],
       "any_of": [
-        {"field": "spectrum.centroid_range_octaves", "op": ">=", "value": 0.5,
-         "says": "brightness spans {actual:.2f} octaves; nothing is opening or closing"},
-        {"field": "spectrum.centroid_cv", "op": ">=", "value": 0.15,
-         "says": "brightness barely varies (cv {actual:.2f})"}
+        {
+          "field": "spectrum.centroid_range_octaves",
+          "op": ">=",
+          "value": 0.5,
+          "says": "brightness spans {actual:.2f} octaves; nothing is opening or closing",
+          "grounding": "Derived, not guessed. cookbook-sc ('2. Filters.sc') sweeps a filter over MouseY.kr(110, 16000) to demonstrate what sweeping sounds like -- a span of 7.2 octaves. This asks for 0.5, about a fourteenth of that, which is a deliberate floor rather than a target: a patch's CENTROID moves far less than its cutoff, because the harmonics the filter removes were only part of the spectrum. If this ever rejects a patch a listener calls evolving, it is too high."
+        },
+        {
+          "field": "spectrum.centroid_cv",
+          "op": ">=",
+          "value": 0.15,
+          "says": "brightness barely varies (cv {actual:.2f})"
+        }
       ]
     },
     "accelerating": {
       "means": "the events get closer together",
       "needs": [
-        {"field": "onsets.onsets", "op": ">=", "value": 5,
-         "says": "{actual:.0f} attacks is too few to say whether the tempo is moving"}
+        {
+          "field": "onsets.onsets",
+          "op": ">=",
+          "value": 5,
+          "says": "{actual:.0f} attacks is too few to say whether the tempo is moving"
+        }
       ],
       "all_of": [
-        {"field": "onsets.interval_trend", "op": "<=", "value": -0.4,
-         "says": "the gaps between attacks trend {actual:+.2f} across the run; nothing is speeding up"}
+        {
+          "field": "onsets.interval_trend",
+          "op": "<=",
+          "value": -0.4,
+          "says": "the gaps between attacks trend {actual:+.2f} across the run; nothing is speeding up"
+        }
       ]
     },
     "varies_timing": {
       "means": "the events are not on a grid",
       "needs": [
-        {"field": "onsets.onsets", "op": ">=", "value": 5,
-         "says": "{actual:.0f} attacks is too few to say whether the timing varies"}
+        {
+          "field": "onsets.onsets",
+          "op": ">=",
+          "value": 5,
+          "says": "{actual:.0f} attacks is too few to say whether the timing varies"
+        }
       ],
       "all_of": [
-        {"field": "onsets.interval_cv", "op": ">=", "value": 0.15,
-         "says": "the attacks are metronomically even (cv {actual:.2f}); nothing is humanising or randomising the timing"},
-        {"field": "onsets.interval_trend", "op": ">=", "value": -0.4,
-         "says": "the timing is not varying, it is accelerating (trend {actual:+.2f}), which is a different thing"}
+        {
+          "field": "onsets.interval_cv",
+          "op": ">=",
+          "value": 0.15,
+          "says": "the attacks are metronomically even (cv {actual:.2f}); nothing is humanising or randomising the timing"
+        },
+        {
+          "field": "onsets.interval_trend",
+          "op": ">=",
+          "value": -0.4,
+          "says": "the timing is not varying, it is accelerating (trend {actual:+.2f}), which is a different thing"
+        }
       ]
     },
     "unmetered": {
       "means": "sounds happen, but not to a pulse",
       "needs": [
-        {"field": "onsets.onsets", "op": ">=", "value": 4,
-         "says": "{actual:.0f} attacks is too few to say whether there is a metre"}
+        {
+          "field": "onsets.onsets",
+          "op": ">=",
+          "value": 4,
+          "says": "{actual:.0f} attacks is too few to say whether there is a metre"
+        }
       ],
       "all_of": [
-        {"field": "onsets.periodicity", "op": "<=", "value": 0.35,
-         "says": "the attacks fall on a clear pulse (autocorrelation {actual:.2f}) when the idiom asks for free time"}
+        {
+          "field": "onsets.periodicity",
+          "op": "<=",
+          "value": 0.35,
+          "says": "the attacks fall on a clear pulse (autocorrelation {actual:.2f}) when the idiom asks for free time"
+        }
       ]
     }
   }

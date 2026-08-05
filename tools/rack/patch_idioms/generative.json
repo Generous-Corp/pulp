@@ -80,7 +80,8 @@
           "module": "random",
           "message": "there is no random source at all"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "turing-machine",
@@ -139,7 +140,8 @@
           "requirement": "drives-pitch",
           "message": "the sequence never reaches a pitch input, so nothing plays it"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "sample-and-hold-melody",
@@ -156,16 +158,16 @@
       "sounds_right_when": "each clock brings a new, unrelated pitch, held steady until the next one.",
       "source": "Allen Strange's account of sample-and-hold as a source of stepped voltage",
       "listen_for": {
-       "sounds_like": "a new, unrelated note on every tick, each held dead steady until the next — no glide, no pattern, and no note more likely than any other",
-       "confusable_with": "a sampled periodic source, which comes back around; if you can hear the phrase repeat, the sample-and-hold is not being fed noise",
-       "expect": [
-        {
-         "field": "pitch.distinct_pitches",
-         "op": ">=",
-         "value": 3,
-         "why": "fewer than three pitches from a random source across a whole run means the sample-and-hold is barely being clocked"
-        }
-       ]
+        "sounds_like": "a new, unrelated note on every tick, each held dead steady until the next — no glide, no pattern, and no note more likely than any other",
+        "confusable_with": "a sampled periodic source, which comes back around; if you can hear the phrase repeat, the sample-and-hold is not being fed noise",
+        "expect": [
+          {
+            "field": "pitch.distinct_pitches",
+            "op": ">=",
+            "value": 3,
+            "why": "fewer than three pitches from a random source across a whole run means the sample-and-hold is barely being clocked"
+          }
+        ]
       },
       "at_least": {
         "sample_and_hold": 1
@@ -213,7 +215,8 @@
           "requirement": "noise-in",
           "message": "the sample-and-hold has nothing to sample"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "rungler",
@@ -269,7 +272,8 @@
           "requirement": "osc-clocks-register",
           "message": "nothing clocks the register from the audio path"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "wandering-drone",
@@ -345,7 +349,8 @@
           "requirement": "voice-sounds",
           "message": "the oscillator never reaches the filter"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "generative-clock-divider",
@@ -408,7 +413,8 @@
         "position": "divided into slower pulses",
         "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
         "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
-      }
+      },
+      "provenance": "canon"
     }
   ]
 }

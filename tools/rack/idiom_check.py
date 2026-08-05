@@ -72,6 +72,26 @@ KINDS = ("whole", "fragment")
 # listing is derived from it (`fragments_for`).
 SLOTS = ("pitch", "timbre", "level", "timing", "space", "control")
 
+# How this record came to be written, which is NOT the same question as whether
+# it is correct.
+#
+#   read      the text is in `.corpus/` and the record quotes it in `anchor`.
+#             provenance_check.py verifies the quote and demotes anything that
+#             fails, so this tier is the only one that can be trusted without
+#             taking somebody's word.
+#   canon     standard technique written from general knowledge of the
+#             practice. The honest label for most of a library like this, and
+#             not a lesser one — a technique being canon is what makes it worth
+#             recording. It does not become `read` because the technique also
+#             appears in a book somebody could have consulted; it almost always
+#             does, and that is the whole reason it is canon.
+#   inferred  reasoned out from an adjacent technique.
+#
+# These strings feed a published acknowledgements notice. That is why the
+# distinction is enforced rather than trusted: a notice built from citations
+# nobody verified thanks authors for work that was never read.
+PROVENANCE = ("read", "canon", "inferred")
+
 
 # --------------------------------------------------------------------------
 # the library
@@ -1142,7 +1162,32 @@ def library_problems(idioms: dict | None = None,
                     bad.append(f"{slug} puts {other} on the {mine} axis, but "
                                f"{other} is on {theirs!r}")
 
-        # 6. The calibration. Free text is what a person hears; `expect` is
+        # 6. Provenance. `source` has always been prose, and prose cannot be
+        #    sorted: "Standard practice" and "Allen Strange's account of…" are
+        #    the same type to a program, so a notice generated from that field
+        #    alone would either flatten everything into an implied citation or
+        #    need somebody to sort the strings by hand every time the library
+        #    grows. `provenance` is the sortable half. Whether a `read` claim
+        #    is TRUE is provenance_check.py's job, against the corpus; whether
+        #    it is well formed is this one's.
+        tier = idiom.get("provenance")
+        if tier not in PROVENANCE:
+            bad.append(f"{slug} has provenance {tier!r}, which is not one of "
+                       f"{PROVENANCE}")
+        elif tier == "read":
+            anchor = idiom.get("anchor")
+            if not isinstance(anchor, dict) or not anchor.get("doc") \
+                    or not anchor.get("quote"):
+                bad.append(f"{slug} says it was read and carries no anchor, so "
+                           f"nothing can ever check it")
+        elif idiom.get("anchor"):
+            bad.append(f"{slug} is {tier} and still carries an anchor; an "
+                       f"anchor is the evidence for a `read` claim and means "
+                       f"nothing without one")
+        if len(str(idiom.get("source") or "")) < 10:
+            bad.append(f"{slug} does not say where it came from")
+
+        # 7. The calibration. Free text is what a person hears; `expect` is
         #    the same claim in the numbers the gate reports, and it is the only
         #    ground truth the thresholds have. It has to be comparable to them,
         #    and it must not CONTRADICT the ones this idiom already asks for --

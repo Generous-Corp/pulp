@@ -74,7 +74,8 @@
           "module": "function_generator",
           "message": "there is no function generator, so nothing bounces"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "euclidean-rhythm",
@@ -134,7 +135,8 @@
         "position": "spread as evenly as the step count allows",
         "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
         "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
-      }
+      },
+      "provenance": "canon"
     },
     {
       "slug": "kick-drum",
@@ -204,7 +206,8 @@
           "requirement": "triggered",
           "message": "nothing triggers the drum"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "snare-drum",
@@ -272,7 +275,8 @@
           "requirement": "triggered",
           "message": "nothing triggers the drum"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "hi-hat",
@@ -327,7 +331,8 @@
           "requirement": "shaped",
           "message": "nothing shapes the hat, so it hisses continuously"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "swung-clock",
@@ -388,7 +393,8 @@
         "position": "alternate pulses delayed",
         "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
         "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
-      }
+      },
+      "provenance": "canon"
     },
     {
       "slug": "ratcheting",
@@ -442,7 +448,8 @@
           "requirement": "gated-in",
           "message": "the ratchet never reaches the voice"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "polymetric-sequence",
@@ -496,7 +503,8 @@
           "requirement": "second-plays",
           "message": "the sequences never reach a voice"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "trigger-burst",
@@ -551,7 +559,8 @@
           "requirement": "output",
           "message": "the burst triggers nothing"
         }
-      ]
+      ],
+      "provenance": "canon"
     },
     {
       "slug": "clock-multiplied-voice",
@@ -611,7 +620,8 @@
         "position": "multiplied into faster pulses",
         "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
         "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
-      }
+      },
+      "provenance": "canon"
     }
   ]
 }

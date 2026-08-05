@@ -611,6 +611,147 @@ def check_fragments() -> int:
     return bad
 
 
+# ---------------------------------------------------------------------------
+# the anchor check, broken on purpose
+#
+# This is the check that decides whether a published notice may say "derived
+# from". It has exactly the failure mode it exists to prevent: a run that
+# demotes nothing looks identical whether every citation is honest or the
+# checker is inert, and we have no independent way to know which. So it is
+# given citations that are definitely false and required to catch each one.
+#
+# Every case runs against a throwaway copy of the library and a throwaway
+# corpus. Nothing on disk in the repo is touched.
+
+def _sandbox(idioms: list, docs: dict):
+    """(idiom_dir, corpus_dir) holding exactly what a case needs."""
+    import json
+    import tempfile
+    root = tempfile.mkdtemp(prefix="pulp-prov-")
+    idir = os.path.join(root, "patch_idioms")
+    cdir = os.path.join(root, "corpus")
+    os.makedirs(idir)
+    os.makedirs(cdir)
+    with open(os.path.join(idir, "cases.json"), "w") as f:
+        json.dump({"family": "texture", "idioms": idioms}, f, indent=2)
+    for name, body in docs.items():
+        with open(os.path.join(cdir, name), "w") as f:
+            f.write(body)
+    return idir, cdir
+
+
+def _swept(idioms: list, docs: dict, write: bool = True):
+    """Run the anchor check over a sandbox, and give back what it decided."""
+    import json
+    import provenance_check as pc
+    idir, cdir = _sandbox(idioms, docs)
+    old = pc.IDIOM_DIR, pc.CORPUS
+    pc.IDIOM_DIR, pc.CORPUS = idir, cdir
+    try:
+        counts, demoted = pc.sweep(write=write)
+        with open(os.path.join(idir, "cases.json")) as f:
+            after = {i["slug"]: i for i in json.load(f)["idioms"]}
+    finally:
+        pc.IDIOM_DIR, pc.CORPUS = old
+    return counts, demoted, after
+
+
+REAL = "the modulator has to reach the oscillator's frequency input and nothing else"
+DOCS = {"part-99.md": f"Some preamble. {REAL}. Some more text.",
+        "other.md": "An entirely unrelated document about kettle drums."}
+
+
+def _entry(slug, **over):
+    base = {"slug": slug, "names": [slug], "is": "x" * 50,
+            "sounds_right_when": "y", "source": "a source sentence",
+            "provenance": "read",
+            "anchor": {"doc": "part-99.md", "quote": REAL},
+            "topology": [], "common_mistakes": []}
+    base.update(over)
+    return base
+
+
+def check_provenance() -> int:
+    import provenance_check as pc
+    bad = 0
+
+    # The shipped library, as it stands, against the real corpus.
+    if pc.main(["provenance_check.py", "--check"]) != 0:
+        print("  WRONG  the library as shipped has a `read` citation that does "
+              "not verify")
+        bad += 1
+    else:
+        print("  ok     every shipped `read` citation verifies")
+
+    CASES = [
+        ("a quote that is nowhere in the corpus",
+         _entry("invented", anchor={"doc": "part-99.md",
+                                    "quote": "the oscillator has to reach the "
+                                             "envelope's decay input, which it "
+                                             "never does"}),
+         "does not occur"),
+        ("a real quote attributed to the wrong document",
+         _entry("misattributed", anchor={"doc": "other.md", "quote": REAL}),
+         "does not occur"),
+        ("a document that is not in the corpus at all",
+         _entry("unfetched", anchor={"doc": "strange-chapter-4.md",
+                                     "quote": REAL}),
+         "not in the corpus"),
+        # A paraphrase is the interesting one: it is what an honest but
+        # remembered citation looks like, and it must not pass.
+        ("a paraphrase rather than a quote",
+         _entry("remembered", anchor={"doc": "part-99.md",
+                                      "quote": "the modulator must reach the "
+                                               "oscillator's frequency input "
+                                               "and nothing more"}),
+         "does not occur"),
+        ("a quote too short to identify a passage",
+         _entry("threadbare", anchor={"doc": "part-99.md", "quote": "the "
+                                                                    "modulator"}),
+         "short enough"),
+        ("a `read` claim with no anchor at all",
+         _entry("bare", anchor=None),
+         "no anchor"),
+    ]
+    for name, entry, expect in CASES:
+        if entry["anchor"] is None:
+            del entry["anchor"]
+        counts, demoted, after = _swept([entry], DOCS)
+        if not demoted:
+            print(f"  WRONG  {name}: the check passed it")
+            bad += 1
+        elif not any(expect in d for d in demoted):
+            print(f"  WRONG  {name}: demoted, but not for {expect!r}: {demoted}")
+            bad += 1
+        elif after[entry["slug"]].get("provenance") != "canon":
+            print(f"  WRONG  {name}: reported but not rewritten on disk")
+            bad += 1
+        elif "anchor" in after[entry["slug"]]:
+            print(f"  WRONG  {name}: demoted to canon and kept its anchor")
+            bad += 1
+        else:
+            print(f"  ok     {name}")
+
+    # The control. A citation that IS true must survive, or the check would
+    # score perfectly by demoting everything.
+    counts, demoted, after = _swept([_entry("honest")], DOCS)
+    if demoted or after["honest"]["provenance"] != "read":
+        print(f"  WRONG  a true citation was demoted: {demoted}")
+        bad += 1
+    else:
+        print("  ok     a citation that is true survives")
+
+    # A fresh clone has no corpus. Treating that as "the citation is false"
+    # would delete every verified citation in the library on first run.
+    counts, demoted, after = _swept([_entry("honest")], {})
+    if demoted or after["honest"]["provenance"] != "read":
+        print("  WRONG  an absent corpus demoted a citation nobody could check")
+        bad += 1
+    else:
+        print("  ok     an absent corpus demotes nothing")
+    return bad
+
+
 def main() -> int:
     if "--capture-vendor" in sys.argv:
         return capture_vendor()
@@ -648,6 +789,9 @@ def main() -> int:
 
     print("\nthe library's own lint can fail:")
     bad += check_library_lint()
+
+    print("\ncitations can be caught:")
+    bad += check_provenance()
 
     print("\nfragments compose:")
     bad += check_fragments()
