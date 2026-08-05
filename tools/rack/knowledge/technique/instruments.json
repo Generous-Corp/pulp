@@ -1,0 +1,2755 @@
+{
+  "$comment": [
+    "Named instrument and sound recipes, read out of a settings catalogue in the local corpus by extract_recipes.py.",
+    "",
+    "TECHNIQUE, not realisation: what the sound IS and the values that make it recognisable, with no module, jack or cable anywhere. The idiom library says how to wire one HERE.",
+    "",
+    "Generated, and regenerating is how they are corrected -- edit the extractor, not these records. Every number carries the line it was read from, so the anchor check can confirm it against the book on the machine that has one."
+  ],
+  "entries": [
+    {
+      "kind": "settings",
+      "id": "instrument-banjo",
+      "names": [
+        "banjo"
+      ],
+      "what": "A banjo in the subtractive tradition: tremolo at about 10 Hz, a low-pass cutoff around 2900 Hz, no resonance, the envelope opening the filter by about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable banjo rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "10 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triang le Cutoff: 2.9khz 72% 1.5khz 63%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "2900 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triang le Cutoff: 2.9khz 72% 1.5khz 63%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Banjo recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : Triang le Cutoff: 2.9khz 72% 1.5khz 63%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-cello",
+      "names": [
+        "cello"
+      ],
+      "what": "A cello in the subtractive tradition: tremolo at about 7.5 Hz, a low-pass cutoff around 40 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable cello rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Cello recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-double-bass",
+      "names": [
+        "double bass"
+      ],
+      "what": "A double bass in the subtractive tradition: vibrato at about 5 Hz, a low-pass cutoff around 1600 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable double bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 1.6khz 63% 750hz 52%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1600 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 1.6khz 63% 750hz 52%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Double Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 octave Wave: Triangle Cutoff: 1.6khz 63% 750hz 52%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-dulcimer",
+      "names": [
+        "dulcimer"
+      ],
+      "what": "A dulcimer in the subtractive tradition: tremolo at about 1.5 Hz, a low-pass cutoff around 600 Hz, no resonance, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable dulcimer rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "1.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -7 semi Wave: Triangle Cutoff: 600hz 49% 200hz 33%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "600 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -7 semi Wave: Triangle Cutoff: 600hz 49% 200hz 33%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Dulcimer recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -7 semi Wave: Triangle Cutoff: 600hz 49% 200hz 33%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-guitar-acoustic",
+      "names": [
+        "guitar acoustic"
+      ],
+      "what": "A guitar acoustic in the subtractive tradition: a low-pass cutoff around 3100 Hz, no resonance, the envelope opening the filter by about 70%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable guitar acoustic rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "3100 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave : - Cutoff: 3.1khz 73% 2.0khz 6 7%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Guitar Acoustic recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave : - Cutoff: 3.1khz 73% 2.0khz 6 7%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-guitar-electric",
+      "names": [
+        "guitar electric"
+      ],
+      "what": "A guitar electric in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable guitar electric rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave : - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Guitar Electric recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave : - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-harp",
+      "names": [
+        "harp"
+      ],
+      "what": "A harp in the subtractive tradition: tremolo at about 7.5 Hz, a low-pass cutoff around 40 Hz, resonance about 5%, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable harp rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Harp recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-ute",
+      "names": [
+        "ute"
+      ],
+      "what": "A ute in the subtractive tradition: vibrato at about 5 Hz, a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable ute rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Triangle Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Triangle Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the ute recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: +1 octave Wave: Triangle Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-mandocello",
+      "names": [
+        "mandocello"
+      ],
+      "what": "A mandocello in the subtractive tradition: tremolo at about 3 Hz, a low-pass cutoff around 12000 Hz, resonance about 30%, the envelope opening the filter by about 35%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable mandocello rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "3 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Tr iangle Cutoff: 12khz 92% 12khz 92%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "12000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Tr iangle Cutoff: 12khz 92% 12khz 92%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Mandocello recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Tr iangle Cutoff: 12khz 92% 12khz 92%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-standup-bass",
+      "names": [
+        "standup bass"
+      ],
+      "what": "A standup bass in the subtractive tradition: tremolo at about 15 Hz, a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable standup bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "15 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 40 hz 10% 40 hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 40 hz 10% 40 hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Standup Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 octave Wave: Triangle Cutoff: 40 hz 10% 40 hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-viola",
+      "names": [
+        "viola"
+      ],
+      "what": "A viola in the subtractive tradition: vibrato at about 4 Hz, a low-pass cutoff around 4900 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable viola rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "4 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave: Triangle Cutoff: 4.9khz 80% 2.3khz 69%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "4900 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave: Triangle Cutoff: 4.9khz 80% 2.3khz 69%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the Viola recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave: Triangle Cutoff: 4.9khz 80% 2.3khz 69%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-iolin",
+      "names": [
+        "iolin"
+      ],
+      "what": "A iolin in the subtractive tradition: vibrato at about 5 Hz, a low-pass cutoff around 3200 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable iolin rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 3.2khz 73% 1.9khz 66%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "3200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 3.2khz 73% 1.9khz 66%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Strings section — the iolin recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 3.2khz 73% 1.9khz 66%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-bagpipes",
+      "names": [
+        "bagpipes"
+      ],
+      "what": "A bagpipes in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable bagpipes rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Bagpipes recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-bassoon",
+      "names": [
+        "bassoon"
+      ],
+      "what": "A bassoon in the subtractive tradition: tremolo at about 7.5 Hz, a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable bassoon rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff : 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff : 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Bassoon recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff : 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-clarinet",
+      "names": [
+        "clarinet"
+      ],
+      "what": "A clarinet in the subtractive tradition: vibrato at about 7.5 Hz, a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 55%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable clarinet rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Clarinet recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-conch-shell",
+      "names": [
+        "conch shell"
+      ],
+      "what": "A conch shell in the subtractive tradition: tremolo at about 2 Hz, a low-pass cutoff around 1000 Hz, no resonance, the envelope opening the filter by about 55%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable conch shell rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "2 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave : Triangle Cutoff: 1khz 56% 400hz 43%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave : Triangle Cutoff: 1khz 56% 400hz 43%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Conch Shell recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave : Triangle Cutoff: 1khz 56% 400hz 43%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-didgeridoo",
+      "names": [
+        "didgeridoo"
+      ],
+      "what": "A didgeridoo in the subtractive tradition: a moving filter at about 1 Hz, a low-pass cutoff around 1500 Hz, resonance about 80%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable didgeridoo rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "1 Hz, applied to filter",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -1 octave Wave: Triangle Cutoff: 1.5khz 62% 800hz 53%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1500 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -1 octave Wave: Triangle Cutoff: 1.5khz 62% 800hz 53%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Didgeridoo recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : -1 octave Wave: Triangle Cutoff: 1.5khz 62% 800hz 53%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-engl5",
+      "names": [
+        "engl5"
+      ],
+      "what": "A engl5 in the subtractive tradition: vibrato at about 7.5 Hz, a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable engl5 rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Engl5 recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-piccolo",
+      "names": [
+        "piccolo"
+      ],
+      "what": "A piccolo in the subtractive tradition: tremolo at about 5 Hz, a low-pass cutoff around 40 Hz, resonance about 50%, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable piccolo rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Woodwinds section — the Piccolo recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-penny-whistle",
+      "names": [
+        "penny whistle"
+      ],
+      "what": "A penny whistle in the subtractive tradition: tremolo at about 90 Hz, a low-pass cutoff around 1100 Hz, resonance about 80%, the envelope opening the filter by about 77%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable penny whistle rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "90 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: T riangle Cutoff: 1.1khz 58% 800 hz 53%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1100 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: T riangle Cutoff: 1.1khz 58% 800 hz 53%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Brass section — the Penny Whistle recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: T riangle Cutoff: 1.1khz 58% 800 hz 53%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-saxophone",
+      "names": [
+        "saxophone"
+      ],
+      "what": "A saxophone in the subtractive tradition: vibrato at about 7.5 Hz, a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 90%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable saxophone rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Brass section — the Saxophone recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-tuba",
+      "names": [
+        "tuba"
+      ],
+      "what": "A tuba in the subtractive tradition: tremolo at about 204 Hz, a low-pass cutoff around 40 Hz, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable tuba rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "204 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Brass section — the Tuba recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : Triangle Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-ccordion",
+      "names": [
+        "ccordion"
+      ],
+      "what": "A ccordion in the subtractive tradition: tremolo at about 13 Hz, a low-pass cutoff around 8200 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable ccordion rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "13 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Tr iangle Cutoff: 8.2 khz 87% 6.0khz 82%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "8200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Tr iangle Cutoff: 8.2 khz 87% 6.0khz 82%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the ccordion recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Tr iangle Cutoff: 8.2 khz 87% 6.0khz 82%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-celeste",
+      "names": [
+        "celeste"
+      ],
+      "what": "A celeste in the subtractive tradition: a low-pass cutoff around 1200 Hz, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable celeste rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 1.2khz 59% 500hz 46%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the Celeste recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 1.2khz 59% 500hz 46%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-clavichord",
+      "names": [
+        "clavichord"
+      ],
+      "what": "A clavichord in the subtractive tradition: vibrato at about 1 Hz, a low-pass cutoff around 1800 Hz, no resonance, the envelope opening the filter by about 70%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable clavichord rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "1 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle Cutoff: . 1.8khz 65% 1khz 57%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1800 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle Cutoff: . 1.8khz 65% 1khz 57%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the Clavichord recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : Triangle Cutoff: . 1.8khz 65% 1khz 57%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-electric-piano",
+      "names": [
+        "electric piano"
+      ],
+      "what": "A electric piano in the subtractive tradition: a low-pass cutoff around 630 Hz, no resonance, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable electric piano rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "630 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : - Cutoff: 630hz 50% 275hz 38%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the Electric Piano recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : - Cutoff: 630hz 50% 275hz 38%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-organ",
+      "names": [
+        "organ"
+      ],
+      "what": "A organ in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable organ rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave: - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the Organ recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave: - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-piano",
+      "names": [
+        "piano"
+      ],
+      "what": "A piano in the subtractive tradition: a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable piano rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave : - Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Keyboards section — the Piano recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave : - Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-choir",
+      "names": [
+        "choir"
+      ],
+      "what": "A choir in the subtractive tradition: vibrato at about 2.4 Hz, a low-pass cutoff around 1700 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable choir rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "2.4 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 octaves Wave: Triangle Cutoff: 1.7khz 64% 1.0khz 56%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1700 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 octaves Wave: Triangle Cutoff: 1.7khz 64% 1.0khz 56%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Vocals section — the Choir recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 octaves Wave: Triangle Cutoff: 1.7khz 64% 1.0khz 56%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-vocal-female",
+      "names": [
+        "vocal female"
+      ],
+      "what": "A vocal female in the subtractive tradition: vibrato at about 204 Hz, a low-pass cutoff around 1200 Hz, resonance about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable vocal female rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "204 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 1.2khz 59% 1.2khz 59%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 1.2khz 59% 1.2khz 59%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Vocals section — the Vocal Female recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 1.2khz 59% 1.2khz 59%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-vocal-male",
+      "names": [
+        "vocal male"
+      ],
+      "what": "A vocal male in the subtractive tradition: vibrato at about 204 Hz, a low-pass cutoff around 2000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable vocal male rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "204 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 2.0khz 67% 1.2khz 59%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "2000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: Triangle Cutoff: 2.0khz 67% 1.2khz 59%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Vocals section — the Vocal Male recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 octave Wave: Triangle Cutoff: 2.0khz 67% 1.2khz 59%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-bell",
+      "names": [
+        "bell"
+      ],
+      "what": "A bell in the subtractive tradition: tremolo at about 7.5 Hz, a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable bell rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 20khz 100% 20hz 100%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle Cutoff: 20khz 100% 20hz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Tuned Percussion section — the Bell recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle Cutoff: 20khz 100% 20hz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-conga",
+      "names": [
+        "conga"
+      ],
+      "what": "A conga in the subtractive tradition: a low-pass cutoff around 300 Hz, resonance about 40%, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable conga rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "300 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - . Wave : - Cutoff: 300hz 39% 150hz 29 %"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Tuned Percussion section — the Conga recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - . Wave : - Cutoff: 300hz 39% 150hz 29 %"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-glockenspiel",
+      "names": [
+        "glockenspiel"
+      ],
+      "what": "A glockenspiel in the subtractive tradition: a low-pass cutoff around 3800 Hz, the envelope opening the filter by about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable glockenspiel rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "3800 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 3.8khz 76% 1.9khz 66%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Tuned Percussion section — the Glockenspiel recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 3.8khz 76% 1.9khz 66%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-impani",
+      "names": [
+        "impani"
+      ],
+      "what": "A impani in the subtractive tradition: a low-pass cutoff around 800 Hz, resonance about 45%, the envelope opening the filter by about 35%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable impani rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "800 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: - Cutoff: 800hz 53% 500hz 46%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Tuned Percussion section — the impani recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 octave Wave: - Cutoff: 800hz 53% 500hz 46%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-xylophone",
+      "names": [
+        "xylophone"
+      ],
+      "what": "A xylophone in the subtractive tradition: tremolo at about 7.5 Hz, a low-pass cutoff around 300 Hz, the envelope opening the filter by about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable xylophone rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "7.5 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : +1 octave Wave : Triangle Cutoff: 300hz 39% 100hz 23%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "300 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : +1 octave Wave : Triangle Cutoff: 300hz 39% 100hz 23%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Tuned Percussion section — the Xylophone recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : +1 octave Wave : Triangle Cutoff: 300hz 39% 100hz 23%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-castanets",
+      "names": [
+        "castanets"
+      ],
+      "what": "A castanets in the subtractive tradition: a low-pass cutoff around 7600 Hz, resonance about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable castanets rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "7600 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 7.6khz 86% 7.6khz 86%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Castanets recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 7.6khz 86% 7.6khz 86%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-clap",
+      "names": [
+        "clap"
+      ],
+      "what": "A clap in the subtractive tradition: tremolo at about 32 Hz, a low-pass cutoff around 1600 Hz, resonance about 30%, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable clap rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "32 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Square Cutoff: 1.6khz 63% 1.1khz 58%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1600 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Square Cutoff: 1.6khz 63% 1.1khz 58%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Clap recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Square Cutoff: 1.6khz 63% 1.1khz 58%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-claves",
+      "names": [
+        "claves"
+      ],
+      "what": "A claves in the subtractive tradition: a low-pass cutoff around 2100 Hz, resonance about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable claves rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "2100 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 2.1khz 67% 2.1khz 67%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Claves recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 2.1khz 67% 2.1khz 67%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-cowbell",
+      "names": [
+        "cowbell"
+      ],
+      "what": "A cowbell in the subtractive tradition: a low-pass cutoff around 8800 Hz, resonance about 55%, the envelope opening the filter by about 65%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable cowbell rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "8800 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 8.8khz 88% 8.8khz 88%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Cowbell recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 8.8khz 88% 8.8khz 88%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-cowbell-analog-drum-machine",
+      "names": [
+        "cowbell (analog drum machine)"
+      ],
+      "what": "A cowbell (analog drum machine) in the subtractive tradition: a low-pass cutoff around 8100 Hz, no resonance, the envelope opening the filter by about 65%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable cowbell (analog drum machine) rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "8100 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 8.1khz 87% 304khz 74%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Cowbell (analog drum machine) recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 8.1khz 87% 304khz 74%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-side-stick",
+      "names": [
+        "side stick"
+      ],
+      "what": "A side stick in the subtractive tradition: a low-pass cutoff around 2700 Hz, resonance about 100%, the envelope opening the filter by about 85%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable side stick rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "2700 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : - Cutoff: 2.7khz 71% 2.7khz i l%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Side Stick recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : - Cutoff: 2.7khz 71% 2.7khz i l%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-snare-drum",
+      "names": [
+        "snare drum"
+      ],
+      "what": "A snare drum in the subtractive tradition: a low-pass cutoff around 20000 Hz.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable snare drum rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 octave Wave: - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Snare Drum recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 octave Wave: - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-tambourine",
+      "names": [
+        "tambourine"
+      ],
+      "what": "A tambourine in the subtractive tradition: a low-pass cutoff around 5300 Hz, resonance about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable tambourine rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "5300 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 5.3khz 81% 5.3khz 8 1%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Tambourine recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 5.3khz 81% 5.3khz 8 1%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-wheels-of-steel",
+      "names": [
+        "wheels of steel"
+      ],
+      "what": "A wheels of steel in the subtractive tradition: a low-pass cutoff around 40 Hz, resonance about 40%, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable wheels of steel rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Untuned Percussion section — the Wheels of Steel recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-rass-section",
+      "names": [
+        "rass section"
+      ],
+      "what": "A rass section in the subtractive tradition: a low-pass cutoff around 40 Hz, no resonance, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable rass section rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5.5 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -10 cents Wave: Tr iangle / Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -10 cents Wave: Tr iangle / Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Leads section — the rass Section recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -10 cents Wave: Tr iangle / Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-mellow-70-s-lead",
+      "names": [
+        "mellow 70's lead"
+      ],
+      "what": "A mellow 70's lead in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable mellow 70's lead rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -10 cents Wave: - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Leads section — the Mellow 70's Lead recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -10 cents Wave: - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-mono-solo",
+      "names": [
+        "mono solo"
+      ],
+      "what": "A mono solo in the subtractive tradition: vibrato at about 4.5 Hz, a low-pass cutoff around 40 Hz, resonance about 45%, the envelope opening the filter by about 80%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable mono solo rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "4.5 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle / Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle / Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Leads section — the Mono Solo recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle / Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-screaming-siync",
+      "names": [
+        "screaming siync"
+      ],
+      "what": "A screaming siync in the subtractive tradition: vibrato at about 0.66 Hz, a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable screaming siync rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.66 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 oct Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 oct Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Leads section — the screaming Siync recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 oct Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-trance-5th",
+      "names": [
+        "trance 5th"
+      ],
+      "what": "A trance 5th in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable trance 5th rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "6 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : - Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Leads section — the Trance 5th recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : - Wave : Triangle / Sine Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-acid-bass",
+      "names": [
+        "acid bass"
+      ],
+      "what": "A acid bass in the subtractive tradition: a low-pass cutoff around 450 Hz, resonance about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable acid bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "450 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +10 cents Wave: - Cutoff: 450hz 45% 330hz 40%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Acid Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: +10 cents Wave: - Cutoff: 450hz 45% 330hz 40%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-detroit-bass",
+      "names": [
+        "detroit bass"
+      ],
+      "what": "A detroit bass in the subtractive tradition: a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable detroit bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -1 oct Wave : - Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Detroit Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : -1 oct Wave : - Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-deutsche-bass",
+      "names": [
+        "deutsche bass"
+      ],
+      "what": "A deutsche bass in the subtractive tradition: a low-pass cutoff around 800 Hz, resonance about 35%, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable deutsche bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "800 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -2 oct Wave: - Cutoff: 800hz 53% 500hz 46%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Deutsche Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : -2 oct Wave: - Cutoff: 800hz 53% 500hz 46%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-digital-bass",
+      "names": [
+        "digital bass"
+      ],
+      "what": "A digital bass in the subtractive tradition: a low-pass cutoff around 122 Hz, no resonance, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable digital bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "122 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -1 oct Wave: - Cutoff: 122hz 26% 75hz 19%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Digital Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -1 oct Wave: - Cutoff: 122hz 26% 75hz 19%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-funk-bass",
+      "names": [
+        "funk bass"
+      ],
+      "what": "A funk bass in the subtractive tradition: a low-pass cutoff around 40 Hz, resonance about 50%, the envelope opening the filter by about 85%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable funk bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave: - Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Funk Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 oct Wave: - Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-growling-bass",
+      "names": [
+        "growling bass"
+      ],
+      "what": "A growling bass in the subtractive tradition: a low-pass cutoff around 122 Hz, no resonance, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable growling bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "122 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave: - Cutoff: 122hz 26 % 75hz 19%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Growling Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 oct Wave: - Cutoff: 122hz 26 % 75hz 19%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-rez-bass",
+      "names": [
+        "rez bass"
+      ],
+      "what": "A rez bass in the subtractive tradition: a low-pass cutoff around 6500 Hz, resonance about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable rez bass rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "10 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tu ne : -2 oct Wave: Triangle I Sine Cutoff: 6.5khz 84% 6.5khz 84%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "6500 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tu ne : -2 oct Wave: Triangle I Sine Cutoff: 6.5khz 84% 6.5khz 84%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Bass section — the Rez Bass recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tu ne : -2 oct Wave: Triangle I Sine Cutoff: 6.5khz 84% 6.5khz 84%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-ndroid-dreams",
+      "names": [
+        "ndroid dreams"
+      ],
+      "what": "A ndroid dreams in the subtractive tradition: a low-pass cutoff around 2400 Hz, resonance about 30%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable ndroid dreams rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.25 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave : Triangle I Sine Cutoff: 2.4khz 69% 1.7khz 64%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "2400 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave : Triangle I Sine Cutoff: 2.4khz 69% 1.7khz 64%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the ndroid Dreams recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 oct Wave : Triangle I Sine Cutoff: 2.4khz 69% 1.7khz 64%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-celestial-wash",
+      "names": [
+        "celestial wash"
+      ],
+      "what": "A celestial wash in the subtractive tradition: a low-pass cutoff around 1000 Hz, resonance about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable celestial wash rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "5.5 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Square Cutoff: 1khz 57% 500hz 46%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Square Cutoff: 1khz 57% 500hz 46%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Celestial Wash recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Square Cutoff: 1khz 57% 500hz 46%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-icy",
+      "names": [
+        "icy"
+      ],
+      "what": "A icy in the subtractive tradition: a low-pass cutoff around 300 Hz, no resonance, the envelope opening the filter by about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable icy rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "4 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave: Triangle I Sine Cutoff: 300hz 39% 200hz 33%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "300 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave: Triangle I Sine Cutoff: 300hz 39% 200hz 33%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the ICy recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 oct Wave: Triangle I Sine Cutoff: 300hz 39% 200hz 33%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-aurora",
+      "names": [
+        "aurora"
+      ],
+      "what": "A aurora in the subtractive tradition: a low-pass cutoff around 40 Hz, resonance about 65%, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable aurora rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "4 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +10 cents Wave: Triangle I Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +10 cents Wave: Triangle I Sine Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Aurora recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: +10 cents Wave: Triangle I Sine Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-galactic-cathedral",
+      "names": [
+        "galactic cathedral"
+      ],
+      "what": "A galactic cathedral in the subtractive tradition: a moving filter at about 0.3 Hz, a low-pass cutoff around 1200 Hz, resonance about 60%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable galactic cathedral rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.3 Hz, applied to filter",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -11 cents Wave : Triangle I Sine Cutoff: 1.2khz 59% 700hz 51%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune : -11 cents Wave : Triangle I Sine Cutoff: 1.2khz 59% 700hz 51%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Galactic Cathedral recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune : -11 cents Wave : Triangle I Sine Cutoff: 1.2khz 59% 700hz 51%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-galactic-chapel",
+      "names": [
+        "galactic chapel"
+      ],
+      "what": "A galactic chapel in the subtractive tradition: a moving filter at about 0.3 Hz, resonance about 65%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable galactic chapel rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.3 Hz, applied to cutoff",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Frequency: 0.3 hz very slow Resonance: 65%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Galactic Chapel recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Frequency: 0.3 hz very slow Resonance: 65%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-portus",
+      "names": [
+        "portus"
+      ],
+      "what": "A portus in the subtractive tradition: a low-pass cutoff around 75 Hz, resonance about 70%, the envelope opening the filter by about 70%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable portus rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "75 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 75hz 19% 75hz 19%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Portus recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 75hz 19% 75hz 19%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-terra-enceladus",
+      "names": [
+        "terra enceladus"
+      ],
+      "what": "A terra enceladus in the subtractive tradition: a low-pass cutoff around 1300 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable terra enceladus rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "1.75 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle I Sine Cutoff: 1.3khz 60% 600hz 49%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1300 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Triangle I Sine Cutoff: 1.3khz 60% 600hz 49%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Pads section — the Terra Enceladus recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Triangle I Sine Cutoff: 1.3khz 60% 600hz 49%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-cat",
+      "names": [
+        "cat"
+      ],
+      "what": "A cat in the subtractive tradition: vibrato at about 1.7 Hz, a low-pass cutoff around 270 Hz, resonance about 65%, the envelope opening the filter by about 65%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable cat rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "1.7 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Sine Wave Cutoff: 270hz 3 7% 160hz 30%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "270 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Sine Wave Cutoff: 270hz 3 7% 160hz 30%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Cat recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: +1 octave Wave: Sine Wave Cutoff: 270hz 3 7% 160hz 30%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-digital-alarm-clock",
+      "names": [
+        "digital alarm clock"
+      ],
+      "what": "A digital alarm clock in the subtractive tradition: a low-pass cutoff around 9500 Hz, no resonance, the envelope opening the filter by about 40%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable digital alarm clock rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "2 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: square Cutoff: 9.5khz 89% 5.7khz 82%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "9500 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: square Cutoff: 9.5khz 89% 5.7khz 82%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Digital Alarm Clock recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: square Cutoff: 9.5khz 89% 5.7khz 82%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-journey-to-the-core",
+      "names": [
+        "journey to the core"
+      ],
+      "what": "A journey to the core in the subtractive tradition: a low-pass cutoff around 120 Hz, resonance about 45%, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable journey to the core rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "120 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 oct Wave : Sawtooth Cutoff: 120hz 26% 120hz 26%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Journey to the Core recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 oct Wave : Sawtooth Cutoff: 120hz 26% 120hz 26%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-kazoo",
+      "names": [
+        "kazoo"
+      ],
+      "what": "A kazoo in the subtractive tradition: vibrato at about 32 Hz, a low-pass cutoff around 1200 Hz, resonance about 30%, the envelope opening the filter by about 50%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable kazoo rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "32 Hz, applied to pitch",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Noise or Saw Cutoff: 1.2khz 59% 600hz 49%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "1200 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: Noise or Saw Cutoff: 1.2khz 59% 600hz 49%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Kazoo recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: Noise or Saw Cutoff: 1.2khz 59% 600hz 49%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-laser",
+      "names": [
+        "laser"
+      ],
+      "what": "A laser in the subtractive tradition: a low-pass cutoff around 40 Hz, resonance about 100%, the envelope opening the filter by about 100%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable laser rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: - Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Laser recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: - Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-motor",
+      "names": [
+        "motor"
+      ],
+      "what": "A motor in the subtractive tradition: tremolo at about 32 Hz, a low-pass cutoff around 20000 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable motor rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "32 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 octaves Wave: Square Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "20000 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: -2 octaves Wave: Square Cutoff: 20khz 100% 20khz 100%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Motor recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: -2 octaves Wave: Square Cutoff: 20khz 100% 20khz 100%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-nerd-o-tron-2000",
+      "names": [
+        "nerd-o-tron 2000"
+      ],
+      "what": "A nerd-o-tron 2000 in the subtractive tradition: a moving filter at about 0.9 Hz, a low-pass cutoff around 680 Hz, resonance about 85%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable nerd-o-tron 2000 rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.9 Hz, applied to filter",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - . Wave: Noise Cutoff: 680hz 51% 680hz 51%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "680 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - . Wave: Noise Cutoff: 680hz 51% 680hz 51%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Nerd-O-Tron 2000 recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - . Wave: Noise Cutoff: 680hz 51% 680hz 51%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-toad",
+      "names": [
+        "toad"
+      ],
+      "what": "A toad in the subtractive tradition: a low-pass cutoff around 40 Hz, no resonance.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable toad rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "32 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "40 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: +1 octave Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Toad recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: +1 octave Wave: Triangle Cutoff: 40hz 10% 40hz 10%"
+      }
+    },
+    {
+      "kind": "settings",
+      "id": "instrument-wind",
+      "names": [
+        "wind"
+      ],
+      "what": "A wind in the subtractive tradition: tremolo at about 0.7 Hz, a low-pass cutoff around 780 Hz, resonance about 75%.",
+      "why": "These are the settings a synthesis teacher chose to make this instrument recognisable, which makes them a demonstrated starting point rather than a preference. What carries the identification is usually the combination rather than any one value: the cutoff sets how bright it is, the modulation rate and depth decide whether it reads as an instrument or as electronics, and the envelope decides whether it was struck, blown or bowed.",
+      "listen_for": {
+        "sounds_like": "a recognisable wind rather than a synthesizer imitating one — the test is whether somebody names the instrument without being told",
+        "confusable_with": "the same settings on the wrong source waveform, which lands somewhere adjacent and unconvincing"
+      },
+      "numbers": [
+        {
+          "quantity": "modulation rate",
+          "value": "0.7 Hz, applied to amplitude",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: No ise Cutoff: 780hz 53% 780hz 53%"
+          },
+          "grounding": "Read from the settings grid this instrument is given in a synthesis catalogue, not chosen here. Cross-checks against the rest of that catalogue: rates its author marks 'moderate' cluster at 4 to 7.5 Hz, 'slow' below 2.5 and 'fast' at 10 and above."
+        },
+        {
+          "quantity": "low-pass cutoff",
+          "value": "780 Hz",
+          "provenance": "read",
+          "anchor": {
+            "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+            "quote": "Tune: - Wave: No ise Cutoff: 780hz 53% 780hz 53%"
+          },
+          "grounding": "From the same grid. Read as a starting point rather than a target: it was chosen against one instrument's oscillator settings, and moving the source changes what the same cutoff does."
+        }
+      ],
+      "provenance": "read",
+      "source": "A synthesizer patch catalogue, the Sound Effects section — the Wind recipe",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "Tune: - Wave: No ise Cutoff: 780hz 53% 780hz 53%"
+      }
+    }
+  ]
+}

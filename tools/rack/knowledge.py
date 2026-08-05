@@ -41,6 +41,22 @@ TECHNIQUE_DIR = os.path.join(HERE, "knowledge", "technique")
 
 PROVENANCE = ("read", "canon", "inferred")
 
+# TWO SHAPES OF ENTRY, and conflating them would overstate what is here.
+#
+#   technique  hand-written: what a technique is, WHY it works, what to listen
+#              for. Six of these took a reading pass each and each one says
+#              something no other entry says.
+#   settings   generated from a catalogue: a named sound and the values that
+#              make it recognisable. Seventy-odd of them, and their prose is
+#              templated -- their whole content is the name and the numbers.
+#
+# Both are useful and they are not the same thing. Reporting 80 "technique
+# entries" would be padding a count with records whose reasoning is a single
+# sentence written once and repeated. A settings record is therefore exempt
+# from the `why` requirement, because demanding one would only produce more of
+# the same sentence, and it is counted separately everywhere.
+KINDS = ("technique", "settings")
+
 # Words that mean this entry has stopped being instrument-agnostic. Checked
 # against OUR prose only -- an anchor quotes the source, and the source is
 # entitled to say "VCA".
@@ -115,11 +131,19 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
         elif entry["provenance"] != "read" and entry.get("anchor"):
             bad.append(f"{eid} is {entry['provenance']} and carries an anchor")
 
+        kind = entry.get("kind", "technique")
+        if kind not in KINDS:
+            bad.append(f"{eid} has kind {kind!r}, which is not one of {KINDS}")
         if len(str(entry.get("what") or "")) < 60:
-            bad.append(f"{eid} does not say what the technique is")
-        if len(str(entry.get("why") or "")) < 60:
+            bad.append(f"{eid} does not say what it is")
+        if kind == "technique" and len(str(entry.get("why") or "")) < 60:
             bad.append(f"{eid} does not say why it works, which is the half an "
                        f"agent cannot derive from a cable list")
+        # A settings record earns its place by carrying values. One with no
+        # measured number is a name and a template.
+        if kind == "settings" and not (entry.get("numbers") or []):
+            bad.append(f"{eid} is a settings record with no measured value in "
+                       f"it, which is a name and a template")
 
         # A NUMBER CARRIES ITS OWN PROVENANCE. A technique can be common
         # knowledge while one of its numbers came out of a specific book, and
@@ -233,7 +257,10 @@ def main(argv: list[str]) -> int:
         bad = problems(load(), idiom_check.load_idioms())
         for b in bad:
             print(f"  {b}")
-        print(f"  {len(load())} technique entries, {len(bad)} problem(s)")
+        e = load()
+        n_t = sum(1 for x in e.values() if x.get("kind", "technique") == "technique")
+        print(f"  {n_t} technique entries + {len(e) - n_t} settings records, "
+              f"{len(bad)} problem(s)")
         return 1 if bad else 0
     if "--for" in argv:
         sys.stdout.write(render_for(argv[argv.index("--for") + 1]))
