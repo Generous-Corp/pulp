@@ -414,6 +414,16 @@ pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
 # statics (test/test_interaction_multiinstance.cpp).
 pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
 
+# Three REAL plugin instances — a MIDI effect, an instrument, and an audio
+# effect — alive in one process at the same time, the shape macOS gives a DAW
+# that loads a product family into one shared AUHostingServiceXPC. Covers what
+# the two suites above stop short of: live `Processor`s with their own state and
+# concurrent render threads, three editors painting side by side, and the
+# pointer-ROUTING verbs the hosts call (which read the process-global popup
+# mirror, not just the per-root slots) (test/test_multi_plugin_coexistence.cpp).
+pulp_add_test_suite(pulp-test-multi-plugin-coexistence
+    LIBRARIES pulp::view pulp::format pulp::state pulp::audio pulp::midi)
+
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing
 # from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and

@@ -217,8 +217,14 @@ bool pulp_plugin_route_to_open_popup(
     pulp::view::View* root, pulp::view::Point pt,
     const std::function<void(pulp::view::MouseEvent&)>& configure,
     pulp::view::ViewCapture* capture = nullptr) {
-    auto* combo = pulp::view::ComboBox::active_popup_;
-    if (!combo || !root) return false;
+    if (!root) return false;
+    // Scoped to THIS editor's root. Several Pulp plugins can be open in one AU
+    // hosting-service process; the process-wide `active_popup_` mirror would
+    // hand this editor's click/wheel/hover to another plugin's open dropdown
+    // whenever the rects overlap, and would leave the drag capture pointing
+    // into a tree this host does not own.
+    auto* combo = pulp::view::ComboBox::active_popup_in(*root);
+    if (!combo) return false;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
     if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return false;
     if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return false;
