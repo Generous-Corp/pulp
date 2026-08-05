@@ -99,7 +99,9 @@
       "is": "broadband noise, the raw material for random and for texture"
     },
     "clock": {
+      "$comment": "Clock is here because it is the tag 11 of the 78 clock-looking modules installed actually publish -- AS/BPMClock, Bidoo/tOCAnTe, JW-Modules/SimpleClock, NYSTHI/TIMEX, mscHack/MasterClockx4 among them -- and the list held only the two-word spellings. A model asked for a melody reached for BPMClock in 3 of 5 attempts and every one was rejected as unclocked while a clock sat in the patch.",
       "tags": [
+        "Clock",
         "Clock generator",
         "Clock modulator",
         "Low-frequency oscillator",
@@ -294,6 +296,10 @@
       ]
     },
     "clock_out": {
+      "$comment": "SQUARE and PULSE spelled out, and Audio ruled out, for the same reasons gate_out carries them. A module's inventory records the jack name it publishes: ForgeModular's LFO publishes \"Square\", not \"SQR\", so the abbreviation alone matched nothing it emits -- and because our own manifest gives that jack an explicit role of Cv, the role test could not match either. Cartographing our own module made it worse off than a vendor LFO nobody cartographed, whose Square infers as Cv+Clock+Gate+Trigger and satisfied this outright. not_ports is what keeps the widened labels from reading an OSCILLATOR's audio-rate pulse as a clock: same label, and it would retrigger an envelope thousands of times a second.",
+      "not_ports": [
+        "Audio"
+      ],
       "ports": [
         "Clock",
         "Gate",
@@ -304,7 +310,9 @@
         "SQR",
         "PLS",
         "OUT",
-        "TRIG"
+        "TRIG",
+        "SQUARE",
+        "PULSE"
       ]
     },
     "cv_in": {
@@ -327,8 +335,10 @@
       ]
     },
     "cv_out": {
+      "$comment": "Pitch is a control voltage. Leaving it out meant the best-named pitch output on the machine -- ForgeModular/SEQ's \"Pitch CV (1V/oct)\", which infers as Pitch -- failed the requirement that a sequencer's pitch reach an oscillator. The label fallback could not rescue it either, because labels are compared whole and \"PITCH CV (1V/OCT)\" is not \"CV\". A sequencer whose jack happened to be called \"Step CV\" passed; the one that says what it carries did not.",
       "ports": [
-        "Cv"
+        "Cv",
+        "Pitch"
       ],
       "labels": [
         "CV",

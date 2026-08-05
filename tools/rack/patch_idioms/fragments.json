@@ -37,6 +37,409 @@
   ],
   "idioms": [
     {
+      "slug": "audio-path-feedback",
+      "slot": "timbre",
+      "names": [
+        "audio feedback",
+        "feedback path"
+      ],
+      "implies": [
+        "send the output back in",
+        "regenerating signal",
+        "feed it back on itself"
+      ],
+      "is": "A stage's output returned to its own input through a summing point, so the signal reprocesses itself and the character depends on how much comes back rather than on any one setting.",
+      "sounds_right_when": "small changes in the return amount change the sound out of proportion to the move.",
+      "source": "Strange on regeneration in the audio path",
+      "at_least": {
+        "filter": 1,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "out-to-the-sum",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the stage's output has to reach a summing point"
+        },
+        {
+          "id": "back-to-the-input",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "the sum has to return to that stage's input, or this is an ordinary chain"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a sound that keeps insisting on itself — resonances build, and the whole thing sits on a knife-edge where a small turn tips it into howling",
+        "confusable_with": "high resonance on a filter, which is bounded; a feedback path is not, and will run away"
+      },
+      "common_mistakes": [
+        {
+          "id": "no-return",
+          "do": "cut",
+          "requirement": "back-to-the-input",
+          "message": "nothing returns to the input, so there is no feedback"
+        },
+        {
+          "id": "no-send",
+          "do": "cut",
+          "requirement": "out-to-the-sum",
+          "message": "the stage's output never reaches the summing point"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "audio-rate-filter-modulation",
+      "slot": "timbre",
+      "names": [
+        "audio rate filter modulation",
+        "filter fm"
+      ],
+      "implies": [
+        "modulate the cutoff at audio rate",
+        "clangorous filter",
+        "filter modulated by an oscillator"
+      ],
+      "is": "An oscillator moving a filter's cutoff fast enough to be heard as pitch rather than as a sweep, which puts sidebands around the filter's own resonance.",
+      "sounds_right_when": "the result is clangorous and inharmonic; nothing about it reads as a filter opening.",
+      "source": "Strange on the perceptual boundary between a sweep and a sideband",
+      "at_least": {
+        "audio_oscillator": 2,
+        "filter": 1
+      },
+      "topology": [
+        {
+          "id": "modulates-cutoff",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "an AUDIO-rate source has to move the cutoff — an LFO here gives a sweep, which is a different technique"
+        },
+        {
+          "id": "audio-through",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "audio has to pass through the filter, or there is nothing for the sidebands to form around"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "metallic, unresolved, more like a struck sheet than a filtered tone; the character changes with the ratio of the two frequencies, not with the modulation amount alone",
+        "confusable_with": "a filter sweep, which is the same three jacks at a slower rate — if you hear it open and close, the modulator is below hearing"
+      },
+      "common_mistakes": [
+        {
+          "id": "static",
+          "do": "cut",
+          "requirement": "modulates-cutoff",
+          "message": "nothing modulates the cutoff at audio rate"
+        },
+        {
+          "id": "nothing-through",
+          "do": "cut",
+          "requirement": "audio-through",
+          "message": "no audio passes through the filter"
+        }
+      ],
+      "provenance": "canon",
+      "realises": [
+        "modulation-rate-boundary"
+      ]
+    },
+    {
+      "slug": "body-resonance-bank",
+      "slot": "timbre",
+      "kind": "fragment",
+      "family": "fragment",
+      "names": [
+        "body resonance",
+        "resonance bank"
+      ],
+      "implies": [
+        "make it sound like a wooden instrument",
+        "fixed resonances",
+        "instrument body"
+      ],
+      "is": "Several band-pass filters in parallel, summed, tuned to fixed frequencies that do not follow the note — the resonances of an instrument's body, which stay where they are however high you play.",
+      "sounds_right_when": "the sound has a consistent character across the range, with certain notes ringing more than their neighbours.",
+      "source": "Synth Secrets, Part 49: Practical Bowed-string Synthesis — the violin body-resonance filter bank",
+      "provenance": "read",
+      "anchor": {
+        "doc": "part-49.md",
+        "quote": "we will set the first two filters to accentuate the body resonances at 300Hz and 700Hz"
+      },
+      "axis": {
+        "family": "fixed-resonance-bank",
+        "position": "tuned to an instrument body's resonances",
+        "set_by": "where the filters are tuned and how sharp they are — knobs, so the patch that makes a violin body and the patch that makes a vowel are the same cables",
+        "neighbours": {
+          "more": "vocal-formant-voice"
+        },
+        "$comment": "A bank of parallel band-pass filters summed. Tuned to 300Hz, 700Hz and a broad peak around 3kHz it reads as a bowed string; tuned to the vowel formants it reads as a voice. One structure, and the tuning is what a checker cannot see."
+      },
+      "at_least": {
+        "audio_oscillator": 1,
+        "filter": 3,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "source-in",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "a harmonically rich source has to reach the filters"
+        },
+        {
+          "id": "summed",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the bands have to be summed — in PARALLEL, so their peaks add; in series they would multiply and narrow to one band, which is a different technique"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a body rather than a filter: the emphasis stays at the same absolute frequencies as you play up and down, so some notes bloom and others sit back, exactly as an acoustic instrument does",
+        "confusable_with": "a filter that tracks the keyboard, where every note has identical colour — the giveaway is whether the uneven-ness across the range survives transposition",
+        "expect": [
+          {
+            "field": "spectrum.centroid_cv",
+            "op": "<=",
+            "value": 0.6,
+            "why": "fixed resonances do not sweep; a large brightness variation over a sustained note means something is modulating the bank, which this technique does not do"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the bands are never summed, so only one resonance is heard"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "source-in",
+          "message": "nothing feeds the filter bank"
+        }
+      ],
+      "realises": [
+        "fixed-body-resonances"
+      ]
+    },
+    {
+      "slug": "chained-envelopes",
+      "slot": "timing",
+      "names": [
+        "chained envelopes",
+        "envelope chain"
+      ],
+      "implies": [
+        "one envelope fires the next",
+        "two stage envelope",
+        "an envelope after an envelope"
+      ],
+      "is": "A function generator whose end-of-cycle fires a second envelope, so one trigger produces a gesture with two stages and a gap the patch decides on.",
+      "sounds_right_when": "one event reliably produces two, in the same order, with the delay between them settable.",
+      "source": "Strange on cascaded function generators",
+      "at_least": {
+        "function_generator": 1,
+        "envelope": 1
+      },
+      "topology": [
+        {
+          "id": "first-finishes",
+          "from_module": "function_generator",
+          "from_port": "cycle_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "different_module": true,
+          "describe": "the first generator's end-of-cycle has to fire a DIFFERENT envelope — a generator whose end-of-cycle retriggers itself is a cycling generator, not a chain, and the two are one cable apart"
+        },
+        {
+          "id": "second-does-something",
+          "from_module": "envelope",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the second envelope has to control something, or the chain ends in nothing"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a two-part gesture from one trigger: something happens, a measured pause, then the second thing",
+        "confusable_with": "a single envelope with a long attack, which is one continuous move rather than two separated events"
+      },
+      "common_mistakes": [
+        {
+          "id": "unchained",
+          "do": "cut",
+          "requirement": "first-finishes",
+          "message": "the first generator never fires the second, so there is one stage and not two"
+        },
+        {
+          "id": "second-idle",
+          "do": "cut",
+          "requirement": "second-does-something",
+          "message": "the second envelope controls nothing"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "composite-modulation",
+      "slot": "control",
+      "names": [
+        "composite modulation",
+        "summed modulation"
+      ],
+      "implies": [
+        "two modulators mixed together",
+        "periodic and random together",
+        "layered modulation"
+      ],
+      "is": "A periodic modulator and an unpredictable one summed before they reach a destination, so the compound movement never repeats even though half of it does.",
+      "sounds_right_when": "you can hear a pulse in the motion and can never quite predict it.",
+      "source": "Strange on compound control voltages",
+      "at_least": {
+        "lfo": 1,
+        "random": 1,
+        "mixer": 1
+      },
+      "topology": [
+        {
+          "id": "periodic-part",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "mixer",
+          "to_port": "any_in",
+          "describe": "a periodic modulator has to reach the summing stage"
+        },
+        {
+          "id": "unpredictable-part",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "mixer",
+          "to_port": "any_in",
+          "describe": "an unpredictable source has to be summed with it — two periodic sources give a longer cycle, not an open one"
+        },
+        {
+          "id": "reaches-destination",
+          "from_module": "mixer",
+          "from_port": "cv_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the summed voltage has to control something"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "movement with a discernible pulse underneath it that still never lands the same way twice",
+        "confusable_with": "one modulator modulating another, where the rate itself wanders; here both rates are steady and it is the sum that is open"
+      },
+      "common_mistakes": [
+        {
+          "id": "no-chance",
+          "do": "cut",
+          "requirement": "unpredictable-part",
+          "message": "nothing unpredictable is summed in, so the motion repeats on the modulator's cycle"
+        },
+        {
+          "id": "no-pulse",
+          "do": "cut",
+          "requirement": "periodic-part",
+          "message": "nothing periodic is summed in, so there is no pulse to hear under the drift"
+        },
+        {
+          "id": "unused",
+          "do": "cut",
+          "requirement": "reaches-destination",
+          "message": "the summed modulation controls nothing"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "constrained-random",
+      "slot": "pitch",
+      "names": [
+        "constrained random",
+        "quantized random"
+      ],
+      "implies": [
+        "random but in tune",
+        "random notes that fit",
+        "chance notes from a scale"
+      ],
+      "is": "An unpredictable voltage passed through a quantizer before it plays anything, so the choice of note is free but the set it is chosen from is not.",
+      "sounds_right_when": "you cannot predict the next note and none of them is out of key.",
+      "source": "Strange on constraining a random source rather than replacing it",
+      "at_least": {
+        "random": 1,
+        "quantizer": 1,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "into-the-quantizer",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "quantizer",
+          "to_port": "cv_in",
+          "describe": "the unpredictable voltage has to reach the quantizer"
+        },
+        {
+          "id": "quantized-to-pitch",
+          "from_module": "quantizer",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the QUANTIZED voltage has to be what plays the oscillator, not the raw one"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "notes you cannot anticipate that nonetheless all belong to one scale — surprise without wrongness",
+        "confusable_with": "raw random pitch, which lands between the notes and reads as detuned rather than as a choice",
+        "expect": [
+          {
+            "field": "pitch.distinct_pitches",
+            "op": ">=",
+            "value": 3,
+            "why": "a random source constrained to fewer than three notes is a constraint that has swallowed the randomness"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "raw",
+          "do": "cut",
+          "requirement": "quantized-to-pitch",
+          "message": "the quantizer's output never reaches the oscillator, so the pitches are unconstrained"
+        },
+        {
+          "id": "nothing-to-constrain",
+          "do": "cut",
+          "requirement": "into-the-quantizer",
+          "message": "no random voltage reaches the quantizer"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
       "slug": "delayed-vibrato",
       "slot": "pitch",
       "names": [
@@ -120,159 +523,278 @@
       ]
     },
     {
-      "slug": "keyboard-tracking",
-      "slot": "timbre",
+      "slug": "distance-cue",
+      "slot": "space",
       "names": [
-        "keyboard tracking",
-        "key tracking",
-        "pitch tracking filter"
+        "distance cue",
+        "sense of distance"
       ],
       "implies": [
-        "brighter as it goes up",
-        "timbre follows the register",
-        "high notes open the filter"
+        "push it further away",
+        "make it sound distant",
+        "far away sound"
       ],
-      "is": "The pitch voltage split so it plays the oscillator and opens the filter at once, so a note's colour follows its register instead of every note sharing one cutoff.",
-      "sounds_right_when": "high notes are brighter than low ones in the same way an acoustic instrument's are, without the filter audibly sweeping.",
-      "source": "Strange on parallel control — one voltage to several destinations",
+      "is": "High frequencies rolled off before a reverb, so the reverberant share rises as the direct sound dulls and the source reads as further away rather than merely quieter.",
+      "sounds_right_when": "it sits back in the picture; turning it up does not bring it forward.",
+      "source": "Strange on the cues that place a sound in a space",
       "at_least": {
-        "multiple": 1,
         "filter": 1,
-        "audio_oscillator": 1
+        "reverb": 1
       },
       "topology": [
         {
-          "id": "split",
+          "id": "rolled-off",
           "from_module": "any",
-          "from_port": "cv_out",
-          "to_module": "multiple",
-          "to_port": "any_in",
-          "describe": "the pitch voltage has to be split, or it can only reach one place"
-        },
-        {
-          "id": "plays-the-note",
-          "from_module": "multiple",
-          "from_port": "cv_out",
-          "to_module": "audio_oscillator",
-          "to_port": "pitch_in",
-          "describe": "one copy has to play the oscillator"
-        },
-        {
-          "id": "opens-the-filter",
-          "from_module": "multiple",
-          "from_port": "cv_out",
+          "from_port": "audio_out",
           "to_module": "filter",
-          "to_port": "cv_in",
-          "describe": "the other copy has to open the filter, which is the whole technique — without it every note has the same colour"
+          "to_port": "audio_in",
+          "describe": "the signal has to lose its top before it is placed"
+        },
+        {
+          "id": "into-the-space",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "reverb",
+          "to_port": "audio_in",
+          "describe": "the dulled signal has to reach a reverb, or there is no space to be far away in"
         }
       ],
       "behaviour": {},
       "listen_for": {
-        "sounds_like": "the top of the range thinner and brighter, the bottom rounder, with no sense that anything is being swept",
-        "confusable_with": "a filter sweep, which moves the colour while a note holds; this one only changes colour when the note does"
+        "sounds_like": "something heard across a room: soft edges, more room than source, and it stays back when you raise the level",
+        "confusable_with": "simply turning it down, which keeps the sound near and small"
       },
       "common_mistakes": [
         {
-          "id": "untracked",
+          "id": "still-bright",
           "do": "cut",
-          "requirement": "opens-the-filter",
-          "message": "the pitch never reaches the filter, so bright and dark notes sound identical"
+          "requirement": "rolled-off",
+          "message": "nothing rolls off the top, so the sound reads as near and quiet rather than distant"
         },
         {
-          "id": "unplayed",
+          "id": "no-space",
           "do": "cut",
-          "requirement": "plays-the-note",
-          "message": "the split voltage never reaches a pitch input"
-        },
-        {
-          "id": "unsplit",
-          "do": "cut",
-          "requirement": "split",
-          "message": "nothing feeds the multiple, so there is nothing to track"
+          "requirement": "into-the-space",
+          "message": "the dulled signal never reaches a reverb"
         }
       ],
       "provenance": "canon"
     },
     {
-      "slug": "portamento",
+      "slug": "ensemble-vibrato",
+      "kind": "fragment",
+      "family": "fragment",
       "slot": "pitch",
       "names": [
-        "portamento",
-        "glide"
+        "ensemble vibrato",
+        "section vibrato"
       ],
       "implies": [
-        "slide between notes",
-        "sliding pitch",
-        "notes that glide"
+        "make it sound like several players",
+        "string section",
+        "many players in unison"
       ],
-      "is": "The pitch voltage passed through a lag before it reaches the oscillator, so a step between notes is travelled rather than jumped.",
-      "sounds_right_when": "you hear the journey between two notes, and the destination still arrives cleanly.",
-      "source": "Welsh's Synthesizer Cookbook, on glide",
+      "is": "Vibrato taken to each of several oscillators tuned in unison rather than to the pair as a whole, so the sound reads as several players who happen to agree rather than one instrument being wobbled.",
+      "sounds_right_when": "it thickens into a section — you hear more than one player, and no single wobble you can follow.",
+      "source": "ARP 2600 Patch Book to Behringer 2600 (Carl Bratcher), the Cello Section patch",
+      "provenance": "read",
+      "anchor": {
+        "doc": "arp2600-patchbook-behringer",
+        "page": 20,
+        "sha256": "76055f3dbc8c3475495573ec1e2e26c6434b2be90b536740000cdbf1b77cc398",
+        "shows": "a panel diagram captioned Cello Section: two oscillators tuned in unison an octave below middle C, a third oscillator running below hearing taken to each of them for vibrato, and a note to add slight portamento"
+      },
       "at_least": {
-        "slew": 1,
-        "audio_oscillator": 1
+        "lfo": 1,
+        "multiple": 1,
+        "audio_oscillator": 2,
+        "mixer": 1
       },
       "topology": [
         {
-          "id": "into-the-lag",
-          "from_module": "any",
+          "id": "split-the-vibrato",
+          "from_module": "lfo",
           "from_port": "cv_out",
-          "to_module": "slew",
-          "to_port": "cv_in",
-          "describe": "the pitch voltage has to reach the lag"
+          "to_module": "multiple",
+          "to_port": "any_in",
+          "describe": "the modulator has to be split, because it has to reach more than one oscillator"
         },
         {
-          "id": "lagged-to-pitch",
-          "from_module": "slew",
+          "id": "to-each-oscillator",
+          "from_module": "multiple",
           "from_port": "cv_out",
           "to_module": "audio_oscillator",
-          "to_port": "pitch_in",
-          "describe": "the LAGGED voltage has to be the one that plays the oscillator — patching the original alongside it defeats the whole thing"
+          "to_port": "cv_in",
+          "describe": "a copy has to reach an oscillator's frequency input — one modulator on one oscillator of a pair is a detuned tone with a wobble in half of it"
+        },
+        {
+          "id": "summed",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the oscillators have to be summed, or there is no ensemble to hear"
         }
       ],
       "behaviour": {},
       "listen_for": {
-        "sounds_like": "each note leaning into the next, the pitch audibly in transit for a moment before it settles",
-        "confusable_with": "vibrato, which returns to where it started; a glide arrives somewhere else and stays"
+        "sounds_like": "a small string section rather than a synthesizer: the players are together on the note and never quite together on the wobble, so the sound breathes without any one movement standing out",
+        "confusable_with": "a single oscillator with vibrato, which has one countable wobble, and a plain detuned pair, which beats at a fixed rate and does not breathe. The source's own instruction is to listen to each oscillator on its own and set its vibrato separately, which is the tell: the vibratos are meant to differ.",
+        "expect": [
+          {
+            "field": "pitch.voiced_fraction",
+            "op": ">=",
+            "value": 0.5,
+            "why": "an ensemble is still playing a note; if the pitch cannot be tracked for half the run the vibrato depth has gone past a section and into a chorus effect"
+          }
+        ]
       },
       "common_mistakes": [
         {
-          "id": "bypassed",
+          "id": "one-voice-only",
           "do": "cut",
-          "requirement": "lagged-to-pitch",
-          "message": "the lagged voltage never reaches the oscillator, so the notes still jump"
+          "requirement": "to-each-oscillator",
+          "message": "the vibrato never reaches an oscillator, so nothing wavers"
         },
         {
-          "id": "no-source",
+          "id": "unsplit",
           "do": "cut",
-          "requirement": "into-the-lag",
-          "message": "the lag has no pitch voltage to smooth"
+          "requirement": "split-the-vibrato",
+          "message": "the modulator is never split, so it can only reach one oscillator and the section is one player wide"
+        },
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the oscillators are never summed, so there is no section"
         }
       ],
-      "provenance": "read",
-      "anchor": {
-        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
-        "quote": "glide, will cause the pitch to change gradually between two consecutively struck keys"
-      }
+      "realises": [
+        "vibrato-rate"
+      ]
     },
     {
-      "slug": "voltage-controlled-depth",
-      "slot": "control",
+      "slug": "glissando",
+      "slot": "pitch",
+      "kind": "fragment",
+      "family": "fragment",
       "names": [
-        "voltage controlled depth",
-        "controlled modulation depth"
+        "glissando",
+        "stepped glide"
       ],
       "implies": [
-        "how much it modulates changes",
-        "depth under voltage control",
-        "vary the amount of modulation"
+        "slide in semitones",
+        "glide that steps",
+        "chromatic run between notes"
       ],
-      "is": "A modulator routed through an amplifier so a third voltage decides how much of it gets through, which makes the amount of modulation a thing the patch can change while it runs.",
-      "sounds_right_when": "the movement is sometimes strong and sometimes absent, without the modulator's rate changing.",
-      "source": "Strange's distinction between a modulator and the depth at which it is applied",
+      "is": "A lagged pitch voltage passed through a quantizer, so the glide between two notes is travelled in steps rather than smoothly — a run up the scale instead of a slide.",
+      "sounds_right_when": "you hear individual semitones going past on the way to the destination.",
+      "source": "Synth Secrets, Part 16: From Sample & Hold To Sample-rate Converters — the quantiser applied to a continuously changing CV",
+      "provenance": "read",
+      "anchor": {
+        "doc": "part-16.md",
+        "quote": "convert a continuously rising or falling CV into a 'stepped' one -- an effect that we often use to convert portamento into glissando"
+      },
+      "at_least": {
+        "slew": 1,
+        "quantizer": 1,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "lagged",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "slew",
+          "to_port": "cv_in",
+          "describe": "the pitch voltage has to be lagged first — with nothing to smooth, the quantizer has nothing to step through"
+        },
+        {
+          "id": "stepped",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "quantizer",
+          "to_port": "cv_in",
+          "describe": "the LAGGED voltage has to reach the quantizer, in that order; quantizing first and lagging afterwards smooths the steps back out"
+        },
+        {
+          "id": "played",
+          "from_module": "quantizer",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the stepped voltage has to play the oscillator"
+        }
+      ],
+      "behaviour": {
+        "melodic": true
+      },
+      "listen_for": {
+        "sounds_like": "a harpist's run rather than a trombone's slide: the same journey between two notes, taken in audible steps, and the number of steps depends on how long the lag takes",
+        "confusable_with": "portamento, which is the same patch without the quantizer and slides continuously",
+        "expect": [
+          {
+            "field": "pitch.distinct_pitches",
+            "op": ">=",
+            "value": 3,
+            "why": "a glissando that passes through fewer than three pitches is a portamento with a rounding error"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "unstepped",
+          "do": "cut",
+          "requirement": "stepped",
+          "message": "the lagged voltage never reaches the quantizer, so this is an ordinary portamento"
+        },
+        {
+          "id": "unlagged",
+          "do": "cut",
+          "requirement": "lagged",
+          "message": "nothing lags the pitch, so there is no journey for the quantizer to step through"
+        },
+        {
+          "id": "unplayed",
+          "do": "cut",
+          "requirement": "played",
+          "message": "the stepped voltage never reaches a pitch input"
+        }
+      ]
+    },
+    {
+      "slug": "growl",
+      "slot": "timbre",
+      "kind": "fragment",
+      "family": "fragment",
+      "names": [
+        "growl",
+        "brass growl"
+      ],
+      "implies": [
+        "rasp at the start of a note",
+        "unstable attack",
+        "parp on the attack"
+      ],
+      "is": "A fast modulator sent to the filter through an amplifier that a short envelope opens, so the note begins unstable and settles — the roughness lasts only as long as the attack, not the note.",
+      "sounds_right_when": "the note starts with a rasp and cleans up; holding the note gives you a steady tone, not a permanent buzz.",
+      "source": "Synth Secrets, Part 25: Synthesizing Brass Instruments — the growl patch",
+      "provenance": "read",
+      "anchor": {
+        "doc": "part-25.md",
+        "quote": "we patch the modulation into the filter through a VCA whose gain is controlled by an AD contour generator"
+      },
+      "hosts": [
+        "subtractive-voice",
+        "keyboard-voice",
+        "sequenced-voice",
+        "acid-voice"
+      ],
       "at_least": {
         "lfo": 1,
-        "amplifier": 1
+        "amplifier": 1,
+        "envelope": 1,
+        "filter": 1
       },
       "topology": [
         {
@@ -281,121 +803,104 @@
           "from_port": "cv_out",
           "to_module": "amplifier",
           "to_port": "audio_in",
-          "describe": "the modulator has to pass through the amplifier"
+          "describe": "the modulator has to pass through an amplifier — that amplifier is what makes the growl temporary"
         },
         {
-          "id": "depth-controlled",
-          "from_module": "any",
+          "id": "envelope-gates-it",
+          "from_module": "envelope",
           "from_port": "cv_out",
           "to_module": "amplifier",
           "to_port": "cv_in",
-          "describe": "something has to control that amplifier, or the depth is a knob rather than a voltage"
+          "describe": "a short envelope has to open it, or the growl runs for the whole note and the patch buzzes"
         },
         {
-          "id": "reaches-destination",
+          "id": "into-the-filter",
           "from_module": "amplifier",
           "from_port": "audio_out",
-          "to_module": "any",
+          "to_module": "filter",
           "to_port": "cv_in",
-          "describe": "the scaled modulation has to reach a destination"
+          "describe": "the gated modulation goes to the FILTER, not to the oscillator — on the oscillator the same cable is frequency modulation, which produces sidebands and destroys the timbre instead of roughening it"
         }
       ],
       "behaviour": {},
       "listen_for": {
-        "sounds_like": "motion that comes and goes in strength while keeping the same rate — the pulse of the modulation stays put, its size does not",
-        "confusable_with": "an attenuverter, which sets a depth once; this one keeps changing it"
+        "sounds_like": "the catch at the front of a blown note, gone within a fraction of a second: a real brass note takes about a dozen cycles to settle, which is roughly fifty milliseconds at middle C, and the growl should not outlast that by much",
+        "confusable_with": "vibrato on the oscillator, which moves the pitch and lasts; this moves only the colour and stops",
+        "expect": [
+          {
+            "field": "spectrum.centroid_cv",
+            "op": ">=",
+            "value": 0.15,
+            "why": "the growl has to move the brightness measurably, but only briefly — a modulator around 80Hz is what the source recommends, which is far above the 25Hz ceiling many LFOs stop at"
+          }
+        ]
       },
       "common_mistakes": [
         {
-          "id": "fixed-depth",
+          "id": "permanent",
           "do": "cut",
-          "requirement": "depth-controlled",
-          "message": "nothing controls the amplifier, so the depth never changes"
+          "requirement": "envelope-gates-it",
+          "message": "nothing gates the growl, so it buzzes for the whole note instead of only the attack"
         },
         {
           "id": "no-modulator",
           "do": "cut",
           "requirement": "modulator-through-vca",
-          "message": "no modulation passes through the amplifier"
+          "message": "no modulator passes through the amplifier"
         },
         {
-          "id": "unused",
+          "id": "wrong-destination",
           "do": "cut",
-          "requirement": "reaches-destination",
-          "message": "the scaled modulation reaches no destination"
+          "requirement": "into-the-filter",
+          "message": "the gated modulation never reaches the filter"
         }
       ],
-      "provenance": "canon"
+      "realises": [
+        "attack-instability",
+        "modulation-rate-boundary"
+      ]
     },
     {
-      "slug": "composite-modulation",
-      "slot": "control",
+      "slug": "hard-sync",
+      "slot": "timbre",
       "names": [
-        "composite modulation",
-        "summed modulation"
+        "hard sync",
+        "oscillator sync",
+        "synced oscillator"
       ],
       "implies": [
-        "two modulators mixed together",
-        "periodic and random together",
-        "layered modulation"
+        "one oscillator restarts the other",
+        "sync sweep",
+        "tearing lead sound"
       ],
-      "is": "A periodic modulator and an unpredictable one summed before they reach a destination, so the compound movement never repeats even though half of it does.",
-      "sounds_right_when": "you can hear a pulse in the motion and can never quite predict it.",
-      "source": "Strange on compound control voltages",
+      "is": "One oscillator restarting another's cycle, so the second keeps the first's pitch and contributes only its own waveform's shape — the timbre moves when its frequency does, and the pitch does not.",
+      "sounds_right_when": "sweeping the synced oscillator changes the colour in hard steps and the note stays put.",
+      "source": "ARP 2600 practice; the 2600 normalled its sync connection, and an unnormalled rack has to patch it",
       "at_least": {
-        "lfo": 1,
-        "random": 1,
-        "mixer": 1
+        "audio_oscillator": 2
       },
       "topology": [
         {
-          "id": "periodic-part",
-          "from_module": "lfo",
-          "from_port": "cv_out",
-          "to_module": "mixer",
-          "to_port": "any_in",
-          "describe": "a periodic modulator has to reach the summing stage"
-        },
-        {
-          "id": "unpredictable-part",
-          "from_module": "random",
-          "from_port": "cv_out",
-          "to_module": "mixer",
-          "to_port": "any_in",
-          "describe": "an unpredictable source has to be summed with it — two periodic sources give a longer cycle, not an open one"
-        },
-        {
-          "id": "reaches-destination",
-          "from_module": "mixer",
-          "from_port": "cv_out",
-          "to_module": "any",
-          "to_port": "cv_in",
-          "describe": "the summed voltage has to control something"
+          "id": "restarts",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "audio_oscillator",
+          "to_port": "sync_in",
+          "different_module": true,
+          "describe": "one oscillator's output has to land on the OTHER's sync input — a frequency input instead gives FM, which sounds nothing like this"
         }
       ],
       "behaviour": {},
       "listen_for": {
-        "sounds_like": "movement with a discernible pulse underneath it that still never lands the same way twice",
-        "confusable_with": "one modulator modulating another, where the rate itself wanders; here both rates are steady and it is the sum that is open"
+        "sounds_like": "a hard, tearing edge on the tone that changes in abrupt steps as the synced oscillator is tuned, with the perceived pitch never moving",
+        "confusable_with": "frequency modulation, where the pitch does move; the giveaway is whether the note wanders when you sweep the modulator"
       },
       "common_mistakes": [
         {
-          "id": "no-chance",
+          "id": "unsynced",
           "do": "cut",
-          "requirement": "unpredictable-part",
-          "message": "nothing unpredictable is summed in, so the motion repeats on the modulator's cycle"
-        },
-        {
-          "id": "no-pulse",
-          "do": "cut",
-          "requirement": "periodic-part",
-          "message": "nothing periodic is summed in, so there is no pulse to hear under the drift"
-        },
-        {
-          "id": "unused",
-          "do": "cut",
-          "requirement": "reaches-destination",
-          "message": "the summed modulation controls nothing"
+          "requirement": "restarts",
+          "message": "nothing reaches a sync input, so the two oscillators are simply detuned"
         }
       ],
       "provenance": "canon"
@@ -474,60 +979,134 @@
       "provenance": "canon"
     },
     {
-      "slug": "chained-envelopes",
-      "slot": "timing",
+      "slug": "keyboard-tracking",
+      "slot": "timbre",
       "names": [
-        "chained envelopes",
-        "envelope chain"
+        "keyboard tracking",
+        "key tracking",
+        "pitch tracking filter"
       ],
       "implies": [
-        "one envelope fires the next",
-        "two stage envelope",
-        "an envelope after an envelope"
+        "brighter as it goes up",
+        "timbre follows the register",
+        "high notes open the filter"
       ],
-      "is": "A function generator whose end-of-cycle fires a second envelope, so one trigger produces a gesture with two stages and a gap the patch decides on.",
-      "sounds_right_when": "one event reliably produces two, in the same order, with the delay between them settable.",
-      "source": "Strange on cascaded function generators",
+      "is": "The pitch voltage split so it plays the oscillator and opens the filter at once, so a note's colour follows its register instead of every note sharing one cutoff.",
+      "sounds_right_when": "high notes are brighter than low ones in the same way an acoustic instrument's are, without the filter audibly sweeping.",
+      "source": "Strange on parallel control — one voltage to several destinations",
       "at_least": {
-        "function_generator": 1,
-        "envelope": 1
+        "multiple": 1,
+        "filter": 1,
+        "audio_oscillator": 1
       },
       "topology": [
         {
-          "id": "first-finishes",
-          "from_module": "function_generator",
-          "from_port": "cycle_out",
-          "to_module": "envelope",
-          "to_port": "gate_in",
-          "different_module": true,
-          "describe": "the first generator's end-of-cycle has to fire a DIFFERENT envelope — a generator whose end-of-cycle retriggers itself is a cycling generator, not a chain, and the two are one cable apart"
+          "id": "split",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "multiple",
+          "to_port": "any_in",
+          "describe": "the pitch voltage has to be split, or it can only reach one place"
         },
         {
-          "id": "second-does-something",
-          "from_module": "envelope",
+          "id": "plays-the-note",
+          "from_module": "multiple",
           "from_port": "cv_out",
-          "to_module": "any",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "one copy has to play the oscillator"
+        },
+        {
+          "id": "opens-the-filter",
+          "from_module": "multiple",
+          "from_port": "cv_out",
+          "to_module": "filter",
           "to_port": "cv_in",
-          "describe": "the second envelope has to control something, or the chain ends in nothing"
+          "describe": "the other copy has to open the filter, which is the whole technique — without it every note has the same colour"
         }
       ],
       "behaviour": {},
       "listen_for": {
-        "sounds_like": "a two-part gesture from one trigger: something happens, a measured pause, then the second thing",
-        "confusable_with": "a single envelope with a long attack, which is one continuous move rather than two separated events"
+        "sounds_like": "the top of the range thinner and brighter, the bottom rounder, with no sense that anything is being swept",
+        "confusable_with": "a filter sweep, which moves the colour while a note holds; this one only changes colour when the note does"
       },
       "common_mistakes": [
         {
-          "id": "unchained",
+          "id": "untracked",
           "do": "cut",
-          "requirement": "first-finishes",
-          "message": "the first generator never fires the second, so there is one stage and not two"
+          "requirement": "opens-the-filter",
+          "message": "the pitch never reaches the filter, so bright and dark notes sound identical"
         },
         {
-          "id": "second-idle",
+          "id": "unplayed",
           "do": "cut",
-          "requirement": "second-does-something",
-          "message": "the second envelope controls nothing"
+          "requirement": "plays-the-note",
+          "message": "the split voltage never reaches a pitch input"
+        },
+        {
+          "id": "unsplit",
+          "do": "cut",
+          "requirement": "split",
+          "message": "nothing feeds the multiple, so there is nothing to track"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "lag-as-envelope",
+      "slot": "level",
+      "names": [
+        "lag envelope",
+        "slew as an envelope"
+      ],
+      "implies": [
+        "make an envelope from a gate",
+        "soften the gate",
+        "rounded gate"
+      ],
+      "is": "A gate passed through a lag so its edges become a rise and a fall, which is an envelope generator made from a slew limiter and nothing else.",
+      "sounds_right_when": "notes fade in and out at a rate you set, rather than switching on and off.",
+      "source": "Strange on the lag processor used as a function generator",
+      "at_least": {
+        "clock": 1,
+        "slew": 1,
+        "amplifier": 1
+      },
+      "topology": [
+        {
+          "id": "gate-into-the-lag",
+          "from_module": "clock",
+          "from_port": "gate_out",
+          "to_module": "slew",
+          "to_port": "audio_in",
+          "describe": "a gate has to reach the lag — the lag's rate is the attack and the decay"
+        },
+        {
+          "id": "shaped-to-a-destination",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "the rounded voltage has to open an amplifier, or nothing is shaped by it"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "soft-edged notes with symmetrical rise and fall — the attack and the release are the same speed, which is the tell that a lag made them",
+        "confusable_with": "a proper envelope generator, whose attack and decay are set separately and are usually not equal"
+      },
+      "common_mistakes": [
+        {
+          "id": "no-gate",
+          "do": "cut",
+          "requirement": "gate-into-the-lag",
+          "message": "no gate reaches the lag, so there are no edges to round"
+        },
+        {
+          "id": "shapes-nothing",
+          "do": "cut",
+          "requirement": "shaped-to-a-destination",
+          "message": "the rounded voltage opens nothing"
         }
       ],
       "provenance": "canon"
@@ -594,70 +1173,244 @@
       "provenance": "canon"
     },
     {
-      "slug": "timbre-sequencing",
-      "slot": "timbre",
+      "slug": "noise-modulated-pitch",
+      "slot": "pitch",
       "names": [
-        "timbre sequencing",
-        "sequenced timbre"
+        "noise modulated pitch",
+        "pitch noise"
       ],
       "implies": [
-        "sequence the brightness",
-        "step the filter",
-        "a sequencer controlling the filter"
+        "unstable pitch",
+        "roughen the tone"
       ],
-      "is": "A clocked sequencer taken to a filter rather than to a pitch input, so the pattern is heard as a progression of colours instead of a tune.",
-      "sounds_right_when": "the colour steps in time with the clock while the pitch stays put.",
-      "source": "Strange on the sequencer as a general control source rather than a note source",
+      "is": "Noise taken to an oscillator's frequency input, so the pitch is never quite still and the tone acquires a roughness that no periodic modulator produces.",
+      "sounds_right_when": "the note is recognisably one note and audibly unsteady, with no rate you can count.",
+      "source": "Strange on noise used as a control source rather than as a sound",
       "at_least": {
-        "sequencer": 1,
-        "filter": 1,
-        "clock": 1
+        "noise": 1,
+        "audio_oscillator": 1
       },
       "topology": [
         {
-          "id": "clocked",
-          "from_module": "clock",
-          "from_port": "clock_out",
-          "to_module": "sequencer",
-          "to_port": "clock_in",
-          "describe": "the sequencer has to be clocked, or it sits on one step"
+          "id": "noise-to-pitch",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "audio_oscillator",
+          "to_port": "cv_in",
+          "describe": "noise has to reach the oscillator's frequency input — this is noise as a CONTROL, not as a sound"
+        }
+      ],
+      "forbidden_topology": [
+        {
+          "id": "not-the-note-itself",
+          "from_module": "noise",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the noise source must not also be what plays the note — a sampled voltage on the 1V/octave jack is a melody, and this library's `cv_in` deliberately includes that jack, so without this the two are the same requirement"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a growl or a rasp riding on the note; the pitch centre holds while the edges refuse to settle",
+        "confusable_with": "vibrato, which has a countable rate; if you can tap along with the wobble it is not noise doing it"
+      },
+      "common_mistakes": [
+        {
+          "id": "steady",
+          "do": "cut",
+          "requirement": "noise-to-pitch",
+          "message": "no noise reaches the oscillator, so the pitch is perfectly steady"
         },
         {
-          "id": "steps-the-colour",
-          "from_module": "sequencer",
+          "id": "plays-the-note",
+          "do": "wire",
+          "requirement": "not-the-note-itself",
+          "message": "the noise source is what plays the note, so this is a random melody rather than a roughened tone"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "portamento",
+      "slot": "pitch",
+      "names": [
+        "portamento",
+        "glide"
+      ],
+      "implies": [
+        "slide between notes",
+        "sliding pitch",
+        "notes that glide"
+      ],
+      "is": "The pitch voltage passed through a lag before it reaches the oscillator, so a step between notes is travelled rather than jumped.",
+      "sounds_right_when": "you hear the journey between two notes, and the destination still arrives cleanly.",
+      "source": "Welsh's Synthesizer Cookbook, on glide",
+      "at_least": {
+        "slew": 1,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "into-the-lag",
+          "from_module": "any",
           "from_port": "cv_out",
-          "to_module": "filter",
+          "to_module": "slew",
           "to_port": "cv_in",
-          "describe": "the sequence has to reach the filter — that is what makes this a timbre sequence rather than a melody"
+          "describe": "the pitch voltage has to reach the lag"
+        },
+        {
+          "id": "lagged-to-pitch",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the LAGGED voltage has to be the one that plays the oscillator — patching the original alongside it defeats the whole thing"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "each note leaning into the next, the pitch audibly in transit for a moment before it settles",
+        "confusable_with": "vibrato, which returns to where it started; a glide arrives somewhere else and stays"
+      },
+      "common_mistakes": [
+        {
+          "id": "bypassed",
+          "do": "cut",
+          "requirement": "lagged-to-pitch",
+          "message": "the lagged voltage never reaches the oscillator, so the notes still jump"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-the-lag",
+          "message": "the lag has no pitch voltage to smooth"
+        }
+      ],
+      "provenance": "read",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "glide, will cause the pitch to change gradually between two consecutively struck keys"
+      }
+    },
+    {
+      "slug": "pulse-width-modulation",
+      "slot": "timbre",
+      "names": [
+        "pulse width modulation",
+        "pwm"
+      ],
+      "implies": [
+        "thicken a square wave",
+        "moving pulse width",
+        "one oscillator sounding like two"
+      ],
+      "is": "A slow modulator moving a pulse wave's width, so the harmonic balance shifts continuously and one oscillator acquires the movement of a detuned pair.",
+      "sounds_right_when": "the tone thickens and swims without its pitch or its loudness moving at all.",
+      "source": "ARP 2600 practice; pulse-width modulation is on the panel of nearly every synthesizer of that generation",
+      "at_least": {
+        "lfo": 1,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "modulates-width",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pwm_in",
+          "describe": "the modulator has to land on the pulse-width input specifically — the frequency input is vibrato, which is a different sound entirely"
         }
       ],
       "behaviour": {
         "spectrally_varying": true
       },
       "listen_for": {
-        "sounds_like": "a repeating pattern you hear entirely as brightness: same note, stepping colour, locked to the clock",
-        "confusable_with": "a filter sweep, which is continuous; this one moves in discrete steps and lands with the pulse",
-        "expect": [
-          {
-            "field": "spectrum.centroid_cv",
-            "op": ">=",
-            "value": 0.15,
-            "why": "the brightness has to move by more than measurement noise, or the sequence is not reaching the cutoff"
-          }
-        ]
+        "sounds_like": "a single square wave that seems to breathe, gaining and losing body; at the extremes it thins to almost nothing",
+        "confusable_with": "two detuned oscillators, which beat at a rate set by their difference; this one moves at the modulator's rate and stays exactly in tune"
       },
       "common_mistakes": [
         {
-          "id": "unclocked",
+          "id": "static-width",
           "do": "cut",
-          "requirement": "clocked",
-          "message": "nothing clocks the sequencer, so the colour never steps"
+          "requirement": "modulates-width",
+          "message": "nothing modulates the pulse width, so the square wave is static"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "random-gate-thinning",
+      "slot": "timing",
+      "names": [
+        "gate thinning",
+        "thinned clock"
+      ],
+      "implies": [
+        "drop some of the hits",
+        "skip beats at random",
+        "not every beat plays"
+      ],
+      "is": "A clock combined with an unpredictable gate through logic, so hits land on the pulse but not on every one of them.",
+      "sounds_right_when": "the rhythm is unmistakably in time and never the same bar twice.",
+      "source": "Strange on logic as a way of conditioning one gate stream with another",
+      "at_least": {
+        "clock": 1,
+        "random": 1,
+        "logic": 1,
+        "envelope": 1
+      },
+      "topology": [
+        {
+          "id": "pulse-in",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "logic",
+          "to_port": "clock_in",
+          "describe": "the pulse has to reach the logic, or the result is not in time"
         },
         {
-          "id": "wrong-destination",
+          "id": "chance-in",
+          "from_module": "random",
+          "from_port": "gate_out",
+          "to_module": "logic",
+          "to_port": "gate_in",
+          "describe": "an unpredictable gate has to decide which pulses survive"
+        },
+        {
+          "id": "survivors-fire",
+          "from_module": "logic",
+          "from_port": "gate_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "what gets through has to trigger something"
+        }
+      ],
+      "behaviour": {
+        "rhythmic": true
+      },
+      "listen_for": {
+        "sounds_like": "a pattern locked to the grid with holes punched in it — every hit is where it should be, and which ones happen keeps changing",
+        "confusable_with": "an unmetered random rhythm, where the hits themselves drift off the grid"
+      },
+      "common_mistakes": [
+        {
+          "id": "no-chance",
           "do": "cut",
-          "requirement": "steps-the-colour",
-          "message": "the sequence never reaches the filter, so nothing sequences the timbre"
+          "requirement": "chance-in",
+          "message": "nothing decides which pulses survive, so every beat plays"
+        },
+        {
+          "id": "no-pulse",
+          "do": "cut",
+          "requirement": "pulse-in",
+          "message": "no clock reaches the logic, so the surviving hits are not in time"
+        },
+        {
+          "id": "fires-nothing",
+          "do": "cut",
+          "requirement": "survivors-fire",
+          "message": "the surviving gates trigger nothing"
         }
       ],
       "provenance": "canon"
@@ -815,535 +1568,6 @@
       "provenance": "canon"
     },
     {
-      "slug": "constrained-random",
-      "slot": "pitch",
-      "names": [
-        "constrained random",
-        "quantized random"
-      ],
-      "implies": [
-        "random but in tune",
-        "random notes that fit",
-        "chance notes from a scale"
-      ],
-      "is": "An unpredictable voltage passed through a quantizer before it plays anything, so the choice of note is free but the set it is chosen from is not.",
-      "sounds_right_when": "you cannot predict the next note and none of them is out of key.",
-      "source": "Strange on constraining a random source rather than replacing it",
-      "at_least": {
-        "random": 1,
-        "quantizer": 1,
-        "audio_oscillator": 1
-      },
-      "topology": [
-        {
-          "id": "into-the-quantizer",
-          "from_module": "random",
-          "from_port": "cv_out",
-          "to_module": "quantizer",
-          "to_port": "cv_in",
-          "describe": "the unpredictable voltage has to reach the quantizer"
-        },
-        {
-          "id": "quantized-to-pitch",
-          "from_module": "quantizer",
-          "from_port": "cv_out",
-          "to_module": "audio_oscillator",
-          "to_port": "pitch_in",
-          "describe": "the QUANTIZED voltage has to be what plays the oscillator, not the raw one"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "notes you cannot anticipate that nonetheless all belong to one scale — surprise without wrongness",
-        "confusable_with": "raw random pitch, which lands between the notes and reads as detuned rather than as a choice",
-        "expect": [
-          {
-            "field": "pitch.distinct_pitches",
-            "op": ">=",
-            "value": 3,
-            "why": "a random source constrained to fewer than three notes is a constraint that has swallowed the randomness"
-          }
-        ]
-      },
-      "common_mistakes": [
-        {
-          "id": "raw",
-          "do": "cut",
-          "requirement": "quantized-to-pitch",
-          "message": "the quantizer's output never reaches the oscillator, so the pitches are unconstrained"
-        },
-        {
-          "id": "nothing-to-constrain",
-          "do": "cut",
-          "requirement": "into-the-quantizer",
-          "message": "no random voltage reaches the quantizer"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "audio-rate-filter-modulation",
-      "slot": "timbre",
-      "names": [
-        "audio rate filter modulation",
-        "filter fm"
-      ],
-      "implies": [
-        "modulate the cutoff at audio rate",
-        "clangorous filter",
-        "filter modulated by an oscillator"
-      ],
-      "is": "An oscillator moving a filter's cutoff fast enough to be heard as pitch rather than as a sweep, which puts sidebands around the filter's own resonance.",
-      "sounds_right_when": "the result is clangorous and inharmonic; nothing about it reads as a filter opening.",
-      "source": "Strange on the perceptual boundary between a sweep and a sideband",
-      "at_least": {
-        "audio_oscillator": 2,
-        "filter": 1
-      },
-      "topology": [
-        {
-          "id": "modulates-cutoff",
-          "from_module": "audio_oscillator",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "cv_in",
-          "describe": "an AUDIO-rate source has to move the cutoff — an LFO here gives a sweep, which is a different technique"
-        },
-        {
-          "id": "audio-through",
-          "from_module": "audio_oscillator",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "audio_in",
-          "describe": "audio has to pass through the filter, or there is nothing for the sidebands to form around"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "metallic, unresolved, more like a struck sheet than a filtered tone; the character changes with the ratio of the two frequencies, not with the modulation amount alone",
-        "confusable_with": "a filter sweep, which is the same three jacks at a slower rate — if you hear it open and close, the modulator is below hearing"
-      },
-      "common_mistakes": [
-        {
-          "id": "static",
-          "do": "cut",
-          "requirement": "modulates-cutoff",
-          "message": "nothing modulates the cutoff at audio rate"
-        },
-        {
-          "id": "nothing-through",
-          "do": "cut",
-          "requirement": "audio-through",
-          "message": "no audio passes through the filter"
-        }
-      ],
-      "provenance": "canon",
-      "realises": [
-        "modulation-rate-boundary"
-      ]
-    },
-    {
-      "slug": "hard-sync",
-      "slot": "timbre",
-      "names": [
-        "hard sync",
-        "oscillator sync",
-        "synced oscillator"
-      ],
-      "implies": [
-        "one oscillator restarts the other",
-        "sync sweep",
-        "tearing lead sound"
-      ],
-      "is": "One oscillator restarting another's cycle, so the second keeps the first's pitch and contributes only its own waveform's shape — the timbre moves when its frequency does, and the pitch does not.",
-      "sounds_right_when": "sweeping the synced oscillator changes the colour in hard steps and the note stays put.",
-      "source": "ARP 2600 practice; the 2600 normalled its sync connection, and an unnormalled rack has to patch it",
-      "at_least": {
-        "audio_oscillator": 2
-      },
-      "topology": [
-        {
-          "id": "restarts",
-          "from_module": "audio_oscillator",
-          "from_port": "audio_out",
-          "to_module": "audio_oscillator",
-          "to_port": "sync_in",
-          "different_module": true,
-          "describe": "one oscillator's output has to land on the OTHER's sync input — a frequency input instead gives FM, which sounds nothing like this"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "a hard, tearing edge on the tone that changes in abrupt steps as the synced oscillator is tuned, with the perceived pitch never moving",
-        "confusable_with": "frequency modulation, where the pitch does move; the giveaway is whether the note wanders when you sweep the modulator"
-      },
-      "common_mistakes": [
-        {
-          "id": "unsynced",
-          "do": "cut",
-          "requirement": "restarts",
-          "message": "nothing reaches a sync input, so the two oscillators are simply detuned"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "pulse-width-modulation",
-      "slot": "timbre",
-      "names": [
-        "pulse width modulation",
-        "pwm"
-      ],
-      "implies": [
-        "thicken a square wave",
-        "moving pulse width",
-        "one oscillator sounding like two"
-      ],
-      "is": "A slow modulator moving a pulse wave's width, so the harmonic balance shifts continuously and one oscillator acquires the movement of a detuned pair.",
-      "sounds_right_when": "the tone thickens and swims without its pitch or its loudness moving at all.",
-      "source": "ARP 2600 practice; pulse-width modulation is on the panel of nearly every synthesizer of that generation",
-      "at_least": {
-        "lfo": 1,
-        "audio_oscillator": 1
-      },
-      "topology": [
-        {
-          "id": "modulates-width",
-          "from_module": "lfo",
-          "from_port": "cv_out",
-          "to_module": "audio_oscillator",
-          "to_port": "pwm_in",
-          "describe": "the modulator has to land on the pulse-width input specifically — the frequency input is vibrato, which is a different sound entirely"
-        }
-      ],
-      "behaviour": {
-        "spectrally_varying": true
-      },
-      "listen_for": {
-        "sounds_like": "a single square wave that seems to breathe, gaining and losing body; at the extremes it thins to almost nothing",
-        "confusable_with": "two detuned oscillators, which beat at a rate set by their difference; this one moves at the modulator's rate and stays exactly in tune"
-      },
-      "common_mistakes": [
-        {
-          "id": "static-width",
-          "do": "cut",
-          "requirement": "modulates-width",
-          "message": "nothing modulates the pulse width, so the square wave is static"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "audio-path-feedback",
-      "slot": "timbre",
-      "names": [
-        "audio feedback",
-        "feedback path"
-      ],
-      "implies": [
-        "send the output back in",
-        "regenerating signal",
-        "feed it back on itself"
-      ],
-      "is": "A stage's output returned to its own input through a summing point, so the signal reprocesses itself and the character depends on how much comes back rather than on any one setting.",
-      "sounds_right_when": "small changes in the return amount change the sound out of proportion to the move.",
-      "source": "Strange on regeneration in the audio path",
-      "at_least": {
-        "filter": 1,
-        "mixer": 1
-      },
-      "topology": [
-        {
-          "id": "out-to-the-sum",
-          "from_module": "filter",
-          "from_port": "audio_out",
-          "to_module": "mixer",
-          "to_port": "audio_in",
-          "describe": "the stage's output has to reach a summing point"
-        },
-        {
-          "id": "back-to-the-input",
-          "from_module": "mixer",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "audio_in",
-          "describe": "the sum has to return to that stage's input, or this is an ordinary chain"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "a sound that keeps insisting on itself — resonances build, and the whole thing sits on a knife-edge where a small turn tips it into howling",
-        "confusable_with": "high resonance on a filter, which is bounded; a feedback path is not, and will run away"
-      },
-      "common_mistakes": [
-        {
-          "id": "no-return",
-          "do": "cut",
-          "requirement": "back-to-the-input",
-          "message": "nothing returns to the input, so there is no feedback"
-        },
-        {
-          "id": "no-send",
-          "do": "cut",
-          "requirement": "out-to-the-sum",
-          "message": "the stage's output never reaches the summing point"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "distance-cue",
-      "slot": "space",
-      "names": [
-        "distance cue",
-        "sense of distance"
-      ],
-      "implies": [
-        "push it further away",
-        "make it sound distant",
-        "far away sound"
-      ],
-      "is": "High frequencies rolled off before a reverb, so the reverberant share rises as the direct sound dulls and the source reads as further away rather than merely quieter.",
-      "sounds_right_when": "it sits back in the picture; turning it up does not bring it forward.",
-      "source": "Strange on the cues that place a sound in a space",
-      "at_least": {
-        "filter": 1,
-        "reverb": 1
-      },
-      "topology": [
-        {
-          "id": "rolled-off",
-          "from_module": "any",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "audio_in",
-          "describe": "the signal has to lose its top before it is placed"
-        },
-        {
-          "id": "into-the-space",
-          "from_module": "filter",
-          "from_port": "audio_out",
-          "to_module": "reverb",
-          "to_port": "audio_in",
-          "describe": "the dulled signal has to reach a reverb, or there is no space to be far away in"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "something heard across a room: soft edges, more room than source, and it stays back when you raise the level",
-        "confusable_with": "simply turning it down, which keeps the sound near and small"
-      },
-      "common_mistakes": [
-        {
-          "id": "still-bright",
-          "do": "cut",
-          "requirement": "rolled-off",
-          "message": "nothing rolls off the top, so the sound reads as near and quiet rather than distant"
-        },
-        {
-          "id": "no-space",
-          "do": "cut",
-          "requirement": "into-the-space",
-          "message": "the dulled signal never reaches a reverb"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "lag-as-envelope",
-      "slot": "level",
-      "names": [
-        "lag envelope",
-        "slew as an envelope"
-      ],
-      "implies": [
-        "make an envelope from a gate",
-        "soften the gate",
-        "rounded gate"
-      ],
-      "is": "A gate passed through a lag so its edges become a rise and a fall, which is an envelope generator made from a slew limiter and nothing else.",
-      "sounds_right_when": "notes fade in and out at a rate you set, rather than switching on and off.",
-      "source": "Strange on the lag processor used as a function generator",
-      "at_least": {
-        "clock": 1,
-        "slew": 1,
-        "amplifier": 1
-      },
-      "topology": [
-        {
-          "id": "gate-into-the-lag",
-          "from_module": "clock",
-          "from_port": "gate_out",
-          "to_module": "slew",
-          "to_port": "audio_in",
-          "describe": "a gate has to reach the lag — the lag's rate is the attack and the decay"
-        },
-        {
-          "id": "shaped-to-a-destination",
-          "from_module": "slew",
-          "from_port": "cv_out",
-          "to_module": "amplifier",
-          "to_port": "cv_in",
-          "describe": "the rounded voltage has to open an amplifier, or nothing is shaped by it"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "soft-edged notes with symmetrical rise and fall — the attack and the release are the same speed, which is the tell that a lag made them",
-        "confusable_with": "a proper envelope generator, whose attack and decay are set separately and are usually not equal"
-      },
-      "common_mistakes": [
-        {
-          "id": "no-gate",
-          "do": "cut",
-          "requirement": "gate-into-the-lag",
-          "message": "no gate reaches the lag, so there are no edges to round"
-        },
-        {
-          "id": "shapes-nothing",
-          "do": "cut",
-          "requirement": "shaped-to-a-destination",
-          "message": "the rounded voltage opens nothing"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "noise-modulated-pitch",
-      "slot": "pitch",
-      "names": [
-        "noise modulated pitch",
-        "pitch noise"
-      ],
-      "implies": [
-        "unstable pitch",
-        "roughen the tone"
-      ],
-      "is": "Noise taken to an oscillator's frequency input, so the pitch is never quite still and the tone acquires a roughness that no periodic modulator produces.",
-      "sounds_right_when": "the note is recognisably one note and audibly unsteady, with no rate you can count.",
-      "source": "Strange on noise used as a control source rather than as a sound",
-      "at_least": {
-        "noise": 1,
-        "audio_oscillator": 1
-      },
-      "topology": [
-        {
-          "id": "noise-to-pitch",
-          "from_module": "noise",
-          "from_port": "any_out",
-          "to_module": "audio_oscillator",
-          "to_port": "cv_in",
-          "describe": "noise has to reach the oscillator's frequency input — this is noise as a CONTROL, not as a sound"
-        }
-      ],
-      "forbidden_topology": [
-        {
-          "id": "not-the-note-itself",
-          "from_module": "noise",
-          "from_port": "cv_out",
-          "to_module": "audio_oscillator",
-          "to_port": "pitch_in",
-          "describe": "the noise source must not also be what plays the note — a sampled voltage on the 1V/octave jack is a melody, and this library's `cv_in` deliberately includes that jack, so without this the two are the same requirement"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "a growl or a rasp riding on the note; the pitch centre holds while the edges refuse to settle",
-        "confusable_with": "vibrato, which has a countable rate; if you can tap along with the wobble it is not noise doing it"
-      },
-      "common_mistakes": [
-        {
-          "id": "steady",
-          "do": "cut",
-          "requirement": "noise-to-pitch",
-          "message": "no noise reaches the oscillator, so the pitch is perfectly steady"
-        },
-        {
-          "id": "plays-the-note",
-          "do": "wire",
-          "requirement": "not-the-note-itself",
-          "message": "the noise source is what plays the note, so this is a random melody rather than a roughened tone"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "random-gate-thinning",
-      "slot": "timing",
-      "names": [
-        "gate thinning",
-        "thinned clock"
-      ],
-      "implies": [
-        "drop some of the hits",
-        "skip beats at random",
-        "not every beat plays"
-      ],
-      "is": "A clock combined with an unpredictable gate through logic, so hits land on the pulse but not on every one of them.",
-      "sounds_right_when": "the rhythm is unmistakably in time and never the same bar twice.",
-      "source": "Strange on logic as a way of conditioning one gate stream with another",
-      "at_least": {
-        "clock": 1,
-        "random": 1,
-        "logic": 1,
-        "envelope": 1
-      },
-      "topology": [
-        {
-          "id": "pulse-in",
-          "from_module": "clock",
-          "from_port": "clock_out",
-          "to_module": "logic",
-          "to_port": "clock_in",
-          "describe": "the pulse has to reach the logic, or the result is not in time"
-        },
-        {
-          "id": "chance-in",
-          "from_module": "random",
-          "from_port": "gate_out",
-          "to_module": "logic",
-          "to_port": "gate_in",
-          "describe": "an unpredictable gate has to decide which pulses survive"
-        },
-        {
-          "id": "survivors-fire",
-          "from_module": "logic",
-          "from_port": "gate_out",
-          "to_module": "envelope",
-          "to_port": "gate_in",
-          "describe": "what gets through has to trigger something"
-        }
-      ],
-      "behaviour": {
-        "rhythmic": true
-      },
-      "listen_for": {
-        "sounds_like": "a pattern locked to the grid with holes punched in it — every hit is where it should be, and which ones happen keeps changing",
-        "confusable_with": "an unmetered random rhythm, where the hits themselves drift off the grid"
-      },
-      "common_mistakes": [
-        {
-          "id": "no-chance",
-          "do": "cut",
-          "requirement": "chance-in",
-          "message": "nothing decides which pulses survive, so every beat plays"
-        },
-        {
-          "id": "no-pulse",
-          "do": "cut",
-          "requirement": "pulse-in",
-          "message": "no clock reaches the logic, so the surviving hits are not in time"
-        },
-        {
-          "id": "fires-nothing",
-          "do": "cut",
-          "requirement": "survivors-fire",
-          "message": "the surviving gates trigger nothing"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
       "slug": "sequencer-reset",
       "slot": "timing",
       "names": [
@@ -1400,6 +1624,65 @@
           "do": "cut",
           "requirement": "advances",
           "message": "the sequencer is never clocked"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "series-filters",
+      "slot": "timbre",
+      "names": [
+        "series filters",
+        "cascaded filters"
+      ],
+      "implies": [
+        "two filters in a row",
+        "steeper filtering",
+        "filter into another filter"
+      ],
+      "is": "One filter feeding another, so the slopes add and a band can be narrowed further than either stage could narrow it alone.",
+      "sounds_right_when": "the rejected part of the spectrum is gone rather than merely reduced.",
+      "source": "Strange on cascaded filtering",
+      "at_least": {
+        "audio_oscillator": 1,
+        "filter": 2
+      },
+      "topology": [
+        {
+          "id": "source-in",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "a source has to reach the first filter"
+        },
+        {
+          "id": "filter-into-filter",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "different_module": true,
+          "describe": "the first filter's output has to feed a SECOND filter — side by side they sum, and summing is a different technique"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a much narrower, more definite band than one filter gives; sweeping it reads as a focused resonance travelling rather than a broad curtain moving",
+        "confusable_with": "two filters in parallel, which produces two bands at once — the formant technique, not this one"
+      },
+      "common_mistakes": [
+        {
+          "id": "not-cascaded",
+          "do": "cut",
+          "requirement": "filter-into-filter",
+          "message": "the filters are not in series, so the slopes never add"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "source-in",
+          "message": "nothing feeds the first filter"
         }
       ],
       "provenance": "canon"
@@ -1464,6 +1747,147 @@
       "provenance": "canon"
     },
     {
+      "slug": "timbre-sequencing",
+      "slot": "timbre",
+      "names": [
+        "timbre sequencing",
+        "sequenced timbre"
+      ],
+      "implies": [
+        "sequence the brightness",
+        "step the filter",
+        "a sequencer controlling the filter"
+      ],
+      "is": "A clocked sequencer taken to a filter rather than to a pitch input, so the pattern is heard as a progression of colours instead of a tune.",
+      "sounds_right_when": "the colour steps in time with the clock while the pitch stays put.",
+      "source": "Strange on the sequencer as a general control source rather than a note source",
+      "at_least": {
+        "sequencer": 1,
+        "filter": 1,
+        "clock": 1
+      },
+      "topology": [
+        {
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "sequencer",
+          "to_port": "clock_in",
+          "describe": "the sequencer has to be clocked, or it sits on one step"
+        },
+        {
+          "id": "steps-the-colour",
+          "from_module": "sequencer",
+          "from_port": "cv_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "the sequence has to reach the filter — that is what makes this a timbre sequence rather than a melody"
+        }
+      ],
+      "behaviour": {
+        "spectrally_varying": true
+      },
+      "listen_for": {
+        "sounds_like": "a repeating pattern you hear entirely as brightness: same note, stepping colour, locked to the clock",
+        "confusable_with": "a filter sweep, which is continuous; this one moves in discrete steps and lands with the pulse",
+        "expect": [
+          {
+            "field": "spectrum.centroid_cv",
+            "op": ">=",
+            "value": 0.15,
+            "why": "the brightness has to move by more than measurement noise, or the sequence is not reaching the cutoff"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "unclocked",
+          "do": "cut",
+          "requirement": "clocked",
+          "message": "nothing clocks the sequencer, so the colour never steps"
+        },
+        {
+          "id": "wrong-destination",
+          "do": "cut",
+          "requirement": "steps-the-colour",
+          "message": "the sequence never reaches the filter, so nothing sequences the timbre"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
+      "slug": "voltage-controlled-depth",
+      "slot": "control",
+      "names": [
+        "voltage controlled depth",
+        "controlled modulation depth"
+      ],
+      "implies": [
+        "how much it modulates changes",
+        "depth under voltage control",
+        "vary the amount of modulation"
+      ],
+      "is": "A modulator routed through an amplifier so a third voltage decides how much of it gets through, which makes the amount of modulation a thing the patch can change while it runs.",
+      "sounds_right_when": "the movement is sometimes strong and sometimes absent, without the modulator's rate changing.",
+      "source": "Strange's distinction between a modulator and the depth at which it is applied",
+      "at_least": {
+        "lfo": 1,
+        "amplifier": 1
+      },
+      "topology": [
+        {
+          "id": "modulator-through-vca",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "the modulator has to pass through the amplifier"
+        },
+        {
+          "id": "depth-controlled",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "something has to control that amplifier, or the depth is a knob rather than a voltage"
+        },
+        {
+          "id": "reaches-destination",
+          "from_module": "amplifier",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "cv_in",
+          "describe": "the scaled modulation has to reach a destination"
+        }
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "motion that comes and goes in strength while keeping the same rate — the pulse of the modulation stays put, its size does not",
+        "confusable_with": "an attenuverter, which sets a depth once; this one keeps changing it"
+      },
+      "common_mistakes": [
+        {
+          "id": "fixed-depth",
+          "do": "cut",
+          "requirement": "depth-controlled",
+          "message": "nothing controls the amplifier, so the depth never changes"
+        },
+        {
+          "id": "no-modulator",
+          "do": "cut",
+          "requirement": "modulator-through-vca",
+          "message": "no modulation passes through the amplifier"
+        },
+        {
+          "id": "unused",
+          "do": "cut",
+          "requirement": "reaches-destination",
+          "message": "the scaled modulation reaches no destination"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
       "slug": "waveshaped-control",
       "slot": "control",
       "names": [
@@ -1516,65 +1940,6 @@
           "do": "cut",
           "requirement": "into-the-shaper",
           "message": "no control voltage reaches the shaping stage"
-        }
-      ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "series-filters",
-      "slot": "timbre",
-      "names": [
-        "series filters",
-        "cascaded filters"
-      ],
-      "implies": [
-        "two filters in a row",
-        "steeper filtering",
-        "filter into another filter"
-      ],
-      "is": "One filter feeding another, so the slopes add and a band can be narrowed further than either stage could narrow it alone.",
-      "sounds_right_when": "the rejected part of the spectrum is gone rather than merely reduced.",
-      "source": "Strange on cascaded filtering",
-      "at_least": {
-        "audio_oscillator": 1,
-        "filter": 2
-      },
-      "topology": [
-        {
-          "id": "source-in",
-          "from_module": "audio_oscillator",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "audio_in",
-          "describe": "a source has to reach the first filter"
-        },
-        {
-          "id": "filter-into-filter",
-          "from_module": "filter",
-          "from_port": "audio_out",
-          "to_module": "filter",
-          "to_port": "audio_in",
-          "different_module": true,
-          "describe": "the first filter's output has to feed a SECOND filter — side by side they sum, and summing is a different technique"
-        }
-      ],
-      "behaviour": {},
-      "listen_for": {
-        "sounds_like": "a much narrower, more definite band than one filter gives; sweeping it reads as a focused resonance travelling rather than a broad curtain moving",
-        "confusable_with": "two filters in parallel, which produces two bands at once — the formant technique, not this one"
-      },
-      "common_mistakes": [
-        {
-          "id": "not-cascaded",
-          "do": "cut",
-          "requirement": "filter-into-filter",
-          "message": "the filters are not in series, so the slopes never add"
-        },
-        {
-          "id": "no-source",
-          "do": "cut",
-          "requirement": "source-in",
-          "message": "nothing feeds the first filter"
         }
       ],
       "provenance": "canon"

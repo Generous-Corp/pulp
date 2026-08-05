@@ -11,6 +11,160 @@
   ],
   "idioms": [
     {
+      "slug": "generative-clock-divider",
+      "names": [
+        "polyrhythm",
+        "clock divider patch"
+      ],
+      "implies": [
+        "several rhythms at once",
+        "cross rhythm",
+        "different speeds from one clock",
+        "different speeds coming from one clock",
+        "several speeds from one clock",
+        "divided clock"
+      ],
+      "is": "One clock divided several ways, each division triggering a different voice, so the parts drift in and out of phase without ever losing the pulse.",
+      "sounds_right_when": "the parts line up periodically rather than randomly, and the whole thing stays in time.",
+      "source": "Standard clock-division practice; Bjørn & Meyer",
+      "at_least": {
+        "clock_modulator": 1
+      },
+      "topology": [
+        {
+          "id": "clock-in",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "clock_modulator",
+          "to_port": "clock_in",
+          "describe": "a clock has to reach the divider"
+        },
+        {
+          "id": "division-triggers",
+          "from_module": "clock_modulator",
+          "from_port": "gate_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "a division has to trigger something, or the divider is dividing into silence"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "rhythmic": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-clock",
+          "do": "cut",
+          "requirement": "clock-in",
+          "message": "the divider has no clock to divide"
+        },
+        {
+          "id": "divides-nothing",
+          "do": "cut",
+          "requirement": "division-triggers",
+          "message": "no division triggers anything"
+        }
+      ],
+      "axis": {
+        "family": "clock-transformation",
+        "position": "divided into slower pulses",
+        "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
+      },
+      "provenance": "canon"
+    },
+    {
+      "slug": "gliding-intervals",
+      "family": "generative",
+      "names": [
+        "gliding intervals",
+        "sliding pattern"
+      ],
+      "implies": [
+        "a pattern that slides between notes",
+        "stepped melody that glides",
+        "intervals that swoop"
+      ],
+      "is": "A sample-and-hold clocked by an oscillator running below hearing, with the held voltage passed through a lag before it plays the note — so a repeating pattern arrives, and every interval in it is travelled rather than jumped.",
+      "sounds_right_when": "a pattern recurs, and each move between its notes is audibly swooped rather than stepped.",
+      "source": "ARP 2600 Patch Book to Behringer 2600 (Carl Bratcher), the Gliding Intervals patch",
+      "provenance": "read",
+      "anchor": {
+        "doc": "arp2600-patchbook-behringer",
+        "page": 75,
+        "sha256": "58dd2ec67f4887b064283ff266ed0343c65677195fd640e4cf407ab46a834856",
+        "shows": "a panel diagram captioned Gliding Intervals, with the third oscillator switched below hearing as the pattern source, the sample-and-hold in the signal path, the voltage processor's lag engaged, and notes to tune that oscillator for the pattern and the sample-and-hold's level for the size of the interval"
+      },
+      "at_least": {
+        "clock": 1,
+        "sample_and_hold": 1,
+        "slew": 1,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "sample_and_hold",
+          "to_port": "clock_in",
+          "describe": "something has to tell the sample-and-hold when to take a value — on the source instrument this is an oscillator switched below hearing, and its frequency is what sets the pattern"
+        },
+        {
+          "id": "lagged",
+          "from_module": "sample_and_hold",
+          "from_port": "cv_out",
+          "to_module": "slew",
+          "to_port": "cv_in",
+          "describe": "the held voltage has to pass through a lag, which is the whole difference between this and a stepped melody"
+        },
+        {
+          "id": "to-pitch",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the LAGGED voltage has to be what plays the note; patching the held voltage straight to pitch alongside it defeats the lag"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true
+      },
+      "listen_for": {
+        "sounds_like": "a line that never arrives cleanly: each note leans into the next, and because the sampled values repeat, the same swoops come round again. How far apart the notes are is one knob — the level of the sampled voltage — and how fast the pattern turns over is another.",
+        "confusable_with": "a stepped random melody, where every note lands square. If you cannot hear the journey between notes, nothing is lagging the voltage.",
+        "expect": [
+          {
+            "field": "pitch.distinct_pitches",
+            "op": ">=",
+            "value": 3,
+            "why": "fewer than three pitches is not a pattern, and the lag would have nothing to travel between"
+          }
+        ]
+      },
+      "common_mistakes": [
+        {
+          "id": "unclocked",
+          "do": "cut",
+          "requirement": "clocked",
+          "message": "nothing clocks the sample-and-hold, so it holds one value and the pattern never advances"
+        },
+        {
+          "id": "no-glide",
+          "do": "cut",
+          "requirement": "lagged",
+          "message": "the held voltage never reaches the lag, so the intervals step rather than glide"
+        },
+        {
+          "id": "unplayed",
+          "do": "cut",
+          "requirement": "to-pitch",
+          "message": "the lagged voltage never reaches a pitch input"
+        }
+      ]
+    },
+    {
       "slug": "krell",
       "names": [
         "krell"
@@ -84,61 +238,58 @@
       "provenance": "canon"
     },
     {
-      "slug": "turing-machine",
+      "slug": "rungler",
       "names": [
-        "turing machine",
-        "looping shift register"
+        "rungler",
+        "benjolin"
       ],
       "implies": [
-        "random loop that slowly changes",
-        "evolving sequence",
-        "shift register melody",
-        "repeats then slowly mutates",
-        "melody that repeats then changes",
-        "loop that drifts",
-        "pattern that mutates"
+        "chaotic",
+        "chaos",
+        "unstable feedback",
+        "cross modulated oscillators"
       ],
-      "is": "A clocked shift register fed by noise, whose loop can be locked or allowed to mutate — a melody that repeats until you let it change.",
-      "sounds_right_when": "a phrase repeats recognisably, then alters by one note rather than becoming a new phrase.",
-      "source": "Music Thing Modular's Turing Machine; the technique is a clocked shift register",
+      "is": "Two oscillators cross-modulating through a shift register, so the register's output steers the oscillators that are clocking it — stepped chaos that never repeats but is never random either.",
+      "sounds_right_when": "the pattern is clearly patterned and clearly unpredictable at the same time; small knob moves change its character completely.",
+      "source": "Rob Hordijk's Rungler and Benjolin designs",
       "at_least": {
-        "random": 1,
-        "clock": 1
+        "audio_oscillator": 2,
+        "random": 1
       },
       "topology": [
         {
-          "id": "clocked",
-          "from_module": "clock",
-          "from_port": "clock_out",
+          "id": "osc-clocks-register",
+          "from_module": "audio_oscillator",
+          "from_port": "any_out",
           "to_module": "random",
           "to_port": "clock_in",
-          "describe": "the register has to be clocked, or the sequence never advances"
+          "describe": "an oscillator has to clock the register — that is what makes the chaos audio-rate rather than a slow random walk"
         },
         {
-          "id": "drives-pitch",
+          "id": "register-steers-osc",
           "from_module": "random",
           "from_port": "cv_out",
           "to_module": "audio_oscillator",
-          "to_port": "pitch_in",
-          "describe": "the register's voltage has to reach a pitch input, or there is no melody to hear"
+          "to_port": "any_in",
+          "describe": "the register has to modulate an oscillator back, or there is no feedback and no chaos"
         }
       ],
       "behaviour": {
         "keeps_going": true,
-        "rhythmic": true
+        "varies_timing": true
       },
       "common_mistakes": [
         {
-          "id": "unclocked",
+          "id": "no-feedback",
           "do": "cut",
-          "requirement": "clocked",
-          "message": "nothing clocks the register, so it holds one value forever"
+          "requirement": "register-steers-osc",
+          "message": "the register never feeds back, so this is a modulated oscillator, not a rungler"
         },
         {
-          "id": "not-pitched",
+          "id": "not-clocked-by-audio",
           "do": "cut",
-          "requirement": "drives-pitch",
-          "message": "the sequence never reaches a pitch input, so nothing plays it"
+          "requirement": "osc-clocks-register",
+          "message": "nothing clocks the register from the audio path"
         }
       ],
       "provenance": "canon"
@@ -219,58 +370,61 @@
       "provenance": "canon"
     },
     {
-      "slug": "rungler",
+      "slug": "turing-machine",
       "names": [
-        "rungler",
-        "benjolin"
+        "turing machine",
+        "looping shift register"
       ],
       "implies": [
-        "chaotic",
-        "chaos",
-        "unstable feedback",
-        "cross modulated oscillators"
+        "random loop that slowly changes",
+        "evolving sequence",
+        "shift register melody",
+        "repeats then slowly mutates",
+        "melody that repeats then changes",
+        "loop that drifts",
+        "pattern that mutates"
       ],
-      "is": "Two oscillators cross-modulating through a shift register, so the register's output steers the oscillators that are clocking it — stepped chaos that never repeats but is never random either.",
-      "sounds_right_when": "the pattern is clearly patterned and clearly unpredictable at the same time; small knob moves change its character completely.",
-      "source": "Rob Hordijk's Rungler and Benjolin designs",
+      "is": "A clocked shift register fed by noise, whose loop can be locked or allowed to mutate — a melody that repeats until you let it change.",
+      "sounds_right_when": "a phrase repeats recognisably, then alters by one note rather than becoming a new phrase.",
+      "source": "Music Thing Modular's Turing Machine; the technique is a clocked shift register",
       "at_least": {
-        "audio_oscillator": 2,
-        "random": 1
+        "random": 1,
+        "clock": 1
       },
       "topology": [
         {
-          "id": "osc-clocks-register",
-          "from_module": "audio_oscillator",
-          "from_port": "any_out",
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
           "to_module": "random",
           "to_port": "clock_in",
-          "describe": "an oscillator has to clock the register — that is what makes the chaos audio-rate rather than a slow random walk"
+          "describe": "the register has to be clocked, or the sequence never advances"
         },
         {
-          "id": "register-steers-osc",
+          "id": "drives-pitch",
           "from_module": "random",
           "from_port": "cv_out",
           "to_module": "audio_oscillator",
-          "to_port": "any_in",
-          "describe": "the register has to modulate an oscillator back, or there is no feedback and no chaos"
+          "to_port": "pitch_in",
+          "describe": "the register's voltage has to reach a pitch input, or there is no melody to hear"
         }
       ],
       "behaviour": {
         "keeps_going": true,
-        "varies_timing": true
+        "rhythmic": true
       },
       "common_mistakes": [
         {
-          "id": "no-feedback",
+          "id": "unclocked",
           "do": "cut",
-          "requirement": "register-steers-osc",
-          "message": "the register never feeds back, so this is a modulated oscillator, not a rungler"
+          "requirement": "clocked",
+          "message": "nothing clocks the register, so it holds one value forever"
         },
         {
-          "id": "not-clocked-by-audio",
+          "id": "not-pitched",
           "do": "cut",
-          "requirement": "osc-clocks-register",
-          "message": "nothing clocks the register from the audio path"
+          "requirement": "drives-pitch",
+          "message": "the sequence never reaches a pitch input, so nothing plays it"
         }
       ],
       "provenance": "canon"
@@ -350,70 +504,6 @@
           "message": "the oscillator never reaches the filter"
         }
       ],
-      "provenance": "canon"
-    },
-    {
-      "slug": "generative-clock-divider",
-      "names": [
-        "polyrhythm",
-        "clock divider patch"
-      ],
-      "implies": [
-        "several rhythms at once",
-        "cross rhythm",
-        "different speeds from one clock",
-        "different speeds coming from one clock",
-        "several speeds from one clock",
-        "divided clock"
-      ],
-      "is": "One clock divided several ways, each division triggering a different voice, so the parts drift in and out of phase without ever losing the pulse.",
-      "sounds_right_when": "the parts line up periodically rather than randomly, and the whole thing stays in time.",
-      "source": "Standard clock-division practice; Bjørn & Meyer",
-      "at_least": {
-        "clock_modulator": 1
-      },
-      "topology": [
-        {
-          "id": "clock-in",
-          "from_module": "clock",
-          "from_port": "clock_out",
-          "to_module": "clock_modulator",
-          "to_port": "clock_in",
-          "describe": "a clock has to reach the divider"
-        },
-        {
-          "id": "division-triggers",
-          "from_module": "clock_modulator",
-          "from_port": "gate_out",
-          "to_module": "envelope",
-          "to_port": "gate_in",
-          "describe": "a division has to trigger something, or the divider is dividing into silence"
-        }
-      ],
-      "behaviour": {
-        "keeps_going": true,
-        "rhythmic": true
-      },
-      "common_mistakes": [
-        {
-          "id": "no-clock",
-          "do": "cut",
-          "requirement": "clock-in",
-          "message": "the divider has no clock to divide"
-        },
-        {
-          "id": "divides-nothing",
-          "do": "cut",
-          "requirement": "division-triggers",
-          "message": "no division triggers anything"
-        }
-      ],
-      "axis": {
-        "family": "clock-transformation",
-        "position": "divided into slower pulses",
-        "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
-        "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
-      },
       "provenance": "canon"
     }
   ]

@@ -827,6 +827,45 @@ def check_provenance() -> int:
     return bad
 
 
+# A file may be named for what it CONTAINS, never for where it came from.
+# Two files here were called patchbook_2600.json and synth_secrets.json, and a
+# name like that implies the file holds that work. It does not -- the sentences
+# and the structures are ours -- but the name invites exactly the assumption we
+# have gone to trouble to make false, and a directory listing is the first thing
+# an audit reads. Provenance belongs in the record, where it is checkable and
+# feeds the notice; in a filename it is decorative and misleading.
+#
+# Fragments, not whole names, so a future `strange_techniques.json` is caught
+# too. `karplus-strong` as a SLUG is fine and deliberately absent: that is the
+# standard technical name of an algorithm, the way any textbook writes it.
+FORBIDDEN_IN_FILENAMES = (
+    "strange", "welsh", "roads", "reid", "bjorn", "meyer", "elsea",
+    "synth_secrets", "synthsecrets", "patch_tweak", "patchtweak",
+    "cookbook", "patchbook", "sos", "soundonsound", "arp", "2600",
+    "buchla", "serge", "moog", "behringer", "korg", "bjooks",
+)
+
+
+def check_filenames() -> int:
+    bad = 0
+    for root in ("patch_idioms", os.path.join("knowledge", "technique")):
+        path = os.path.join(HERE, root)
+        if not os.path.isdir(path):
+            continue
+        for name in sorted(os.listdir(path)):
+            stem = os.path.splitext(name)[0].lower()
+            hit = [w for w in FORBIDDEN_IN_FILENAMES
+                   if w in stem.replace("-", "_")]
+            if hit:
+                print(f"  WRONG  {root}/{name} is named after a source "
+                      f"({', '.join(hit)}); name a file for what it contains "
+                      f"and leave provenance in the record")
+                bad += 1
+    if not bad:
+        print("  ok     no file is named after a work or a publisher")
+    return bad
+
+
 def check_multi_idiom() -> int:
     """A request with several right answers, and the one that must still fail.
 
@@ -1160,6 +1199,9 @@ def main() -> int:
 
     print("\ncitations can be caught:")
     bad += check_provenance()
+
+    print("\nnothing is named after a source:")
+    bad += check_filenames()
 
     print("\na request with more than one right answer:")
     bad += check_multi_idiom()
