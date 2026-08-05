@@ -24,6 +24,8 @@ import json
 import os
 import sys
 
+from typing import NamedTuple
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 IDIOM_DIR = os.path.join(HERE, "patch_idioms")
 
@@ -58,7 +60,7 @@ def load_idioms() -> dict:
     return out
 
 
-def resolve(prompt: str, idioms: dict | None = None) -> str | None:
+def resolve_exact(prompt: str, idioms: dict | None = None) -> str | None:
     """Which idiom a prompt is asking for, decided here and not by the model.
 
     The model naming its own idiom and then being graded against that claim is
@@ -87,6 +89,185 @@ def resolve(prompt: str, idioms: dict | None = None) -> str | None:
                 if best is None or score > best[0]:
                     best = (score, slug)
     return best[1] if best else None
+
+
+# Endings that change a word's part of speech without changing what it names.
+# "melodic"/"melody", "evolving"/"evolve", "rhythmic"/"rhythm" are the same
+# request spelled for different grammar, and an exact substring match sees
+# three different words.
+_ENDINGS = ("ically", "ingly", "ing", "ical", "ies", "ied", "ic", "al",
+            "ed", "es", "s", "y")
+
+# Words that appear in almost every prompt and in almost every idiom phrase,
+# so a shared one is evidence of nothing.
+_EMPTY = {"a", "an", "the", "and", "or", "of", "with", "for", "in", "on",
+          "to", "that", "this", "it", "its", "some", "something", "make",
+          "makes", "made", "me", "my", "please", "patch", "sound", "sounds",
+          "simple", "basic", "nice", "good", "using", "only", "just", "very",
+          "really", "highly", "bit", "little", "more", "less",
+          # Words about the request rather than the music. "modules" stemmed
+          # to "modul" and was reported as a word the library did not know,
+          # which is true and useless -- every prompt says it.
+          "module", "modules", "modul", "rack", "build", "create", "want",
+          "need", "like", "use", "few", "get",
+          # Counts. "four bars of blorp" matched kick-drum on "four", which
+          # says nothing about what kind of patch was asked for.
+          "one", "two", "three", "four", "five", "six", "seven", "eight",
+          "nine", "ten", "sixteen", "bar", "bars", "beat", "beats"}
+
+
+def _stem(word: str) -> str:
+    """A crude stem: enough to see "melodic" and "melody" as one word.
+
+    Deliberately not a real stemmer. A real one is a dependency and a source
+    of surprises, and the job here is only to stop grammar from hiding a match
+    that a reader would call obvious. It is allowed to be wrong; nothing it
+    decides can reject a patch (see `resolve_intent`).
+    """
+    w = word.lower()
+    for end in _ENDINGS:
+        if len(w) > len(end) + 3 and w.endswith(end):
+            return w[: -len(end)]
+    return w
+
+
+def _words(text: str) -> set[str]:
+    keep = "".join(c if c.isalnum() or c.isspace() else " " for c in text)
+    return {_stem(w) for w in keep.lower().split()
+            if w not in _EMPTY and len(w) > 2}
+
+
+def reading(prompt: str, idioms: dict | None = None) -> dict:
+    """What the library recognises in a request, and what it does not.
+
+    Deliberately not a classifier and deliberately not a gate. `resolve_intent`
+    already picks one idiom, which is a single answer to a request that is
+    usually several things at once -- "a shimmering ambient pad" is a texture,
+    a mood and a voice, and forcing it into one slug throws two of them away.
+
+    This throws nothing away and decides nothing. It splits the request into
+    the words that carry meaning and says, for each, which idioms use that
+    word -- and, more usefully, which words NOTHING uses.
+
+    The unknown list is the point. A word the library has never seen is the
+    part of a request we are provably not checking, and it is invisible in
+    every other output: a patch that satisfies "pad" and ignores "shimmering"
+    passes everything, because nothing ever said "shimmering" was a word we
+    do not know. Saying so costs nothing and is the difference between a
+    reading somebody can correct and an answer they have to take on trust.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    asked = _words(prompt)
+    known: dict[str, list[str]] = {}
+    for slug, idiom in idioms.items():
+        words = _words(" ".join(list(idiom.get("names", [])) +
+                                list(idiom.get("implies", []))) +
+                       " " + slug.replace("-", " "))
+        for w in asked & words:
+            known.setdefault(w, []).append(slug)
+    return {"known": {w: sorted(s) for w, s in sorted(known.items())},
+            "unknown": sorted(asked - set(known))}
+
+
+class Intent(NamedTuple):
+    """What a prompt was taken to be asking for, and how sure we are.
+
+    `gating` is the load-bearing field and the reason this is not just a slug.
+    An idiom reached by NAME is a direct request and may reject a patch that
+    fails it. An idiom reached by resemblance is a guess about what somebody
+    meant, and a guess must never reject: rejecting on a resemblance teaches
+    the model to satisfy our guess instead of the request, and leaves the
+    person no way to see that the check was hollow. Same rule the affordance
+    tiers follow -- a `guessed` label informs and never disqualifies.
+    """
+    slug: str | None
+    how: str        # "named" | "implied" | "nearest" | "none"
+    gating: bool
+    why: str
+
+
+def resolve_intent(prompt: str, idioms: dict | None = None) -> Intent:
+    """Always answer. Never silently check nothing.
+
+    `resolve_exact` returns None whenever a request is worded in a way no
+    idiom happens to spell, and the pipeline then falls through to wiring and
+    audibility -- the two checks almost every patch passes. That is how a
+    request for a melody was graded only on whether it made a noise.
+
+    Being loud about the gap was the first fix and it was not enough: a
+    transcript line tells a person that nothing was checked, it does not check
+    anything. So resolution is total. When no idiom is named or implied we
+    look for the nearest one by word stem, and when even that finds nothing we
+    say so explicitly rather than returning a hole for a caller to interpret.
+
+    What the tiers may do differs, and that is the point:
+
+      named/implied  the request said it; may reject a patch
+      nearest        a resemblance; informs the model, never rejects
+      none           nothing resembled it; informs, never rejects
+
+    A caller that only wants the strong answer reads `.gating`. A caller that
+    wants to tell the model what is expected reads `.slug` whatever the tier.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+
+    exact = resolve_exact(prompt, idioms)
+    if exact is not None:
+        named = any(f" {n.lower()} " in
+                    " " + " ".join(prompt.lower().replace("-", " ").split()) + " "
+                    for n in idioms.get(exact, {}).get("names", []))
+        how = "named" if named else "implied"
+        return Intent(exact, how, True,
+                      f"the request {'names' if named else 'describes'} "
+                      f"{exact}")
+
+    asked = _words(prompt)
+    if asked:
+        # Rarity, not count. Counting shared words picked `wandering-drone`
+        # for "a shimmering ambient pad" -- two common words, "ambient" and
+        # "pad" -- over the idiom actually called `shimmer`, which shared the
+        # one word that meant something. A word appearing in one idiom's
+        # phrasing is evidence; a word appearing in twenty is furniture.
+        # A word from the idiom's NAME outranks any number of words from its
+        # description -- the same precedence `resolve_exact` already applies,
+        # for the same reason. "a shimmering ambient pad" shares two
+        # description words with `wandering-drone` and one NAME with the idiom
+        # called `shimmer`, and `shimmer` is plainly the better answer.
+        named_words = {slug: _words(" ".join(idiom.get("names", [])) + " " +
+                                    slug.replace("-", " "))
+                       for slug, idiom in idioms.items()}
+        vocab = {slug: named_words[slug] |
+                       _words(" ".join(idiom.get("implies", [])))
+                 for slug, idiom in idioms.items()}
+        seen: dict[str, int] = {}
+        for words in vocab.values():
+            for w in words:
+                seen[w] = seen.get(w, 0) + 1
+
+        best: tuple[float, str] | None = None
+        for slug, words in vocab.items():
+            shared = asked & words
+            if not shared:
+                continue
+            score = sum((8.0 if w in named_words[slug] else 1.0) / seen[w]
+                        for w in shared)
+            if best is None or score > best[0]:
+                best = (score, slug)
+
+        # One furniture word is not a resemblance. A guide picked on a word
+        # like "pad" is worse than saying nothing, because it points the model
+        # somewhere and reads as though we understood the request.
+        if best is not None and best[0] >= 0.25:
+            shared = sorted(asked & vocab[best[1]],
+                            key=lambda w: seen[w])
+            return Intent(best[1], "nearest", False,
+                          f"no idiom matched; {best[1]} is the nearest by "
+                          f"wording ({', '.join(shared)}), so it is offered as "
+                          f"a guide and cannot reject this patch")
+
+    return Intent(None, "none", False,
+                  "no idiom matched this request and none resembled it; only "
+                  "the wiring and audibility of the patch will be checked")
 
 
 # --------------------------------------------------------------------------
@@ -869,7 +1050,7 @@ def main(argv: list[str]) -> int:
     inv = patch_mod.inventory()
     idioms = load_idioms()
 
-    slug = argv[2] if len(argv) > 2 else resolve(
+    slug = argv[2] if len(argv) > 2 else resolve_exact(
         os.path.basename(argv[1]).replace("-", " "), idioms)
     if not slug:
         print("no idiom claimed and none implied by the name — nothing to check")

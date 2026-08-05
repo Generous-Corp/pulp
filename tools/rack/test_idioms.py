@@ -430,7 +430,7 @@ def main() -> int:
     idioms = idiom_check.load_idioms()
     named = implied = 0
     for prompt, want in RESOLUTIONS:
-        got = idiom_check.resolve(prompt, idioms)
+        got = idiom_check.resolve_exact(prompt, idioms)
         if got == want:
             print(f"  ok     {want or '(none)':<18} <- {prompt[:48]}")
             if want:

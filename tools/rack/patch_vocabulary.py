@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import sys
 
-from idiom_check import load_idioms, resolve
+from idiom_check import load_idioms, resolve_intent
 
 MARKER = "<!--PATCH_VOCABULARY-->"
 
@@ -108,12 +108,20 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     is then graded against it learns to pick easy targets.
     """
     idioms = idioms if idioms is not None else load_idioms()
-    slug = resolve(prompt, idioms)
+    intent = resolve_intent(prompt, idioms)
+    slug = intent.slug
     if not slug:
         return ""
     idiom = idioms[slug]
+    # How firmly this is put depends on how it was reached. Telling the model
+    # "this IS a krell patch" when we only matched a word pushes it to satisfy
+    # our guess rather than the request -- and nothing downstream will fail it
+    # for missing a target nobody asked for, because a non-gating intent
+    # cannot reject. Say which one it is.
     lines = [
-        f"This request is a **{slug}** patch.",
+        f"This request is a **{slug}** patch." if intent.gating else
+        f"No idiom matched this request. The nearest is **{slug}**; treat it "
+        f"as a guide, not a target -- the request comes first.",
         "",
         idiom.get("is", ""),
         "",
