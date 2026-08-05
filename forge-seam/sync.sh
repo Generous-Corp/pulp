@@ -104,6 +104,21 @@ if [ -f "$SRC/test/test_chrome_no_leak.cpp" ]; then
     report "test_chrome_no_leak.cpp" "$SRC/test/test_chrome_no_leak.cpp" \
            "$SEAM/test/test_chrome_no_leak.cpp"
 fi
+
+# The baselines, which are written INTO the checkout.
+#
+# populate.sh copies them out; nothing copied them back. A baseline refreshed
+# with FORGE_NO_LEAK_UPDATE=1 therefore landed in /tmp only, and /tmp is
+# cleared -- so a deliberate re-record was silently undone, and the guard came
+# back red against the image it was supposed to have replaced. Anything the
+# checkout writes has to come home the same way anything it edits does.
+for baseline in "$SRC"/test/baselines/chrome-home/*; do
+    [ -f "$baseline" ] || continue
+    name="$(basename "$baseline")"
+    mkdir -p "$SEAM/test/baselines/chrome-home"
+    report "baselines/chrome-home/$name" "$baseline" \
+           "$SEAM/test/baselines/chrome-home/$name"
+done
 if [ "$CHECK_ONLY" -eq 0 ]; then
     # settings_surface carries the shell-contributed settings rows (the
     # ForgeShell::settings_choices hook), and test_chrome.cpp carries the

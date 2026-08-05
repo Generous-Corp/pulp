@@ -154,6 +154,56 @@ struct RackLayout {
     const PanelBox* panel(const std::string& id) const;
 };
 
+/// How the rack is being LOOKED at, as distinct from how it is laid out.
+///
+/// The fit is the fit: a 39-module patch fits, at a scale where no silkscreen
+/// is legible and one panel is eleven points wide. The answer to that is a
+/// person moving closer, not the layout pretending the rack is smaller than it
+/// is -- so zoom and pan sit on top of the fit and change nothing about the
+/// rack itself.
+struct RackView {
+    /// Multiplies the fitted scale. 1 is "the whole rack, as it fits".
+    float zoom = 1.0f;
+    /// Where the rack has been dragged to, in view points, after the zoom.
+    float pan_x = 0.0f, pan_y = 0.0f;
+
+    bool operator==(const RackView& o) const {
+        return zoom == o.zoom && pan_x == o.pan_x && pan_y == o.pan_y;
+    }
+    bool operator!=(const RackView& o) const { return !(*this == o); }
+};
+
+/// Zoom is held between the fit and a panel drawn a little over life size.
+///
+/// The floor is the fit rather than something smaller: below it the window is
+/// already showing the whole rack with room to spare, so zooming out further
+/// only shrinks what is legible. The ceiling is what it takes to read a 39
+/// module patch -- that rack fits at about a fifth of life size, so a fifth of
+/// the ceiling has to reach 1.0 with headroom.
+inline constexpr float kMinZoom = 1.0f;
+inline constexpr float kMaxZoom = 8.0f;
+/// One press of the zoom key. A quarter each way is coarse enough to cross the
+/// range in a handful of presses and fine enough to stop where you meant to.
+inline constexpr float kZoomStep = 1.25f;
+/// How much empty window a panned rack may leave against an edge. Small, so
+/// the rack always stays against the side it was dragged to rather than
+/// drifting off it.
+inline constexpr float kPanGutter = 24.0f;
+
+/// The zoom and pan this view can actually have, given what is on screen.
+///
+/// A rack that already fits has nothing to pan and is pinned centred; a rack
+/// larger than its window stops when its edge reaches the window's. Without
+/// this, one flick of a trackpad loses the rack off the side and there is no
+/// affordance that says where it went.
+///
+/// Takes the rack's SCALED size rather than its modules, so the clamp is one
+/// piece of arithmetic over four numbers -- assertable on its own, and the
+/// same code whether it is called before a layout or inside one.
+RackView clamp_rack_view(float content_width, float content_height,
+                         float viewport_width, float viewport_height,
+                         RackView view);
+
 /// One Eurorack HP, in unscaled points. A 12 HP panel is 12 of these wide.
 inline constexpr float kHorizontalPitch = 15.0f;
 /// A 3U panel's height, unscaled.
@@ -204,8 +254,12 @@ std::vector<ScrewPoint> screw_points(const PanelBox& panel, float scale);
 /// Widths are fixed, so the strip scales as one and nothing is nudged to fit --
 /// a preview that fudges a panel's width to make a row look tidy is lying about
 /// the rack the user will get.
+///
+/// `view` moves the camera, never the rack. It is clamped here as well as by
+/// the caller, so a painted frame is sane whatever state a caller holds.
 RackLayout layout_rack(const std::vector<RackModule>& modules,
-                       float viewport_width, float viewport_height);
+                       float viewport_width, float viewport_height,
+                       RackView view = {});
 
 /// Where a cable ends.
 ///

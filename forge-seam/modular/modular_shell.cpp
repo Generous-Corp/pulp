@@ -2060,6 +2060,12 @@ void ForgeModularShell::on_poll() {
 }
 
 bool ForgeModularShell::handle_prompt_key(const pulp::view::KeyEvent& event) {
+    // Zoom first. The preview has no focus of its own -- it is a painted
+    // surface, not a field -- so its bindings have to come off the root hook,
+    // and they are modifier combinations no text field claims.
+    if (rack_preview_ != nullptr && rack_preview_->on_key_event(event))
+        return true;
+
     // Backspace removes a whole mention, not one letter of it.
     //
     // A picked module is "@VCO" -- a single thing the user chose, not five

@@ -808,7 +808,98 @@ void RackPreview::set_progress(float t) {
 }
 
 RackLayout RackPreview::layout_for(float width, float height) const {
-    return layout_rack(modules_, width, height);
+    return layout_rack(modules_, width, height, view_);
+}
+
+RackView RackPreview::clamped(RackView v) const {
+    const auto b = bounds();
+    // Clamped against the rack at the CANDIDATE zoom, not the current one: a
+    // zoom out shrinks the rack, and a pan that was legal at the old size has
+    // to come back in rather than being left where it no longer reaches.
+    RackView at_zoom;
+    at_zoom.zoom = v.zoom;
+    const auto L = layout_rack(modules_, b.width, b.height, at_zoom);
+    const float content_w = L.total_width * L.scale;
+    const float content_h = static_cast<float>(L.rows) * kPanelHeight * L.scale;
+    return clamp_rack_view(content_w, content_h, b.width, b.height, v);
+}
+
+void RackPreview::set_view(RackView v) {
+    const auto next = clamped(v);
+    if (next == view_) return;
+    view_ = next;
+    request_repaint();
+}
+
+bool RackPreview::zoom_in() {
+    const auto before = view_;
+    RackView next = view_;
+    next.zoom *= kZoomStep;
+    set_view(next);
+    return view_ != before;
+}
+
+bool RackPreview::zoom_out() {
+    const auto before = view_;
+    RackView next = view_;
+    next.zoom /= kZoomStep;
+    set_view(next);
+    return view_ != before;
+}
+
+bool RackPreview::reset_view() {
+    const auto before = view_;
+    set_view(RackView{});
+    return view_ != before;
+}
+
+bool RackPreview::pan_by(float dx, float dy) {
+    const auto before = view_;
+    RackView next = view_;
+    next.pan_x += dx;
+    next.pan_y += dy;
+    set_view(next);
+    return view_ != before;
+}
+
+bool RackPreview::on_key_event(const pulp::view::KeyEvent& event) {
+    if (!event.is_down || !event.isMainModifier()) return false;
+    if (event.key == pulp::view::KeyCode::num0) { reset_view(); return true; }
+    // KeyCode is ASCII-valued for everything printable -- `semicolon = ';'` is
+    // the convention -- and the zoom keys are punctuation the enum does not
+    // name, so they are matched on their character.
+    //
+    // Both faces of each key. "+" is Shift-= and "_" is Shift-- on every
+    // layout this ships to, and a binding that answers only the shifted form
+    // does nothing for somebody who did not also hold Shift.
+    const auto c = static_cast<int>(event.key);
+    if (c == '=' || c == '+') { zoom_in(); return true; }
+    if (c == '-' || c == '_') { zoom_out(); return true; }
+    return false;
+}
+
+void RackPreview::on_gesture_event(const pulp::view::GestureEvent& event) {
+    // `delta_scale` is the increment since the last event -- a pinch arrives as
+    // a stream of small ones -- so it multiplies the zoom rather than setting
+    // it. Setting it from `scale`, which is only ever 1 + delta here, would
+    // snap back to the fit on every tick of the gesture.
+    if (event.delta_scale == 0.0f) {
+        pulp::view::View::on_gesture_event(event);
+        return;
+    }
+    RackView next = view_;
+    next.zoom *= (1.0f + event.delta_scale);
+    set_view(next);
+}
+
+void RackPreview::on_mouse_event(const pulp::view::MouseEvent& event) {
+    if (!event.is_wheel) {
+        pulp::view::View::on_mouse_event(event);
+        return;
+    }
+    // The rack follows the fingers: two fingers down the trackpad reads as a
+    // positive delta and walks DOWN the rack, which moves the panels up.
+    pan_by(-event.scroll_delta_x, -event.scroll_delta_y);
 }
 
 float RackPreview::cable_alpha(std::size_t index) const {
@@ -823,7 +914,11 @@ float RackPreview::cable_alpha(std::size_t index) const {
 
 std::optional<std::size_t> RackPreview::cable_at(float x, float y) const {
     const auto b = bounds();
-    const auto L = layout_rack(modules_, b.width, b.height);
+    // The camera, not the fit. Paint and the hit test have to be the same
+    // layout or a zoomed rack lights the cable that USED to be under the
+    // pointer -- the same class of mistake as flattening a cable two different
+    // ways for drawing and for hitting.
+    const auto L = layout_rack(modules_, b.width, b.height, view_);
     std::optional<std::size_t> best;
     float best_d = kCableGrabPoints;
     for (std::size_t i = 0; i < connections_.size(); ++i) {
@@ -861,7 +956,7 @@ void RackPreview::on_mouse_leave() {
 
 void RackPreview::paint(Canvas& canvas) {
     const auto b = bounds();
-    const auto L = layout_rack(modules_, b.width, b.height);
+    const auto L = layout_rack(modules_, b.width, b.height, view_);
 
     /// Panels drawn without artwork of their own, so nothing on them says where
     /// a jack is. Collected here and used by the cable pass below.
