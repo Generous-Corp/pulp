@@ -331,10 +331,13 @@ def load_behaviours() -> dict:
 # its transport: the values a person would program a melody into. Matched
 # against the names CARTOG measured, so a vendor's own spelling decides.
 #
-# A STOPGAP, and scoped like one. Matching names was measured at 73% over the
-# 419 real params on this machine, and it fails hardest on the modules with
-# the most character -- which is why `affordances.py` reads each module once
-# instead. This survives for the single case where a name really does settle
+# A STOPGAP, and scoped like one. Matching names cannot work in general
+# because one name means different things on different modules -- "frequency"
+# is pitch on an oscillator, time on an LFO, timbre on a filter's cutoff, all
+# three confidently labelled on this machine -- which is why
+# `affordances.py` reads each module once instead, and why this list may
+# answer `structure` and nothing else. It survives for the case where a name
+# really does settle
 # it (a param called "Step 3" on a module the library tags as a Sequencer),
 # and only until that module has been classified: a classification supersedes
 # it entirely, per module, as the background pass reaches them. Deleting it
@@ -482,6 +485,8 @@ def check_behaviour(patch: dict, inv: dict, idiom: dict,
         spec = behaviours.get(flag)
         if spec is None:
             continue                    # a flag nobody has given meaning yet
+        raised = False
+        why = None
         for req in spec.get("requires", []):
             words = req.get("any_of") or []
             must = req.get("must")
@@ -500,18 +505,37 @@ def check_behaviour(patch: dict, inv: dict, idiom: dict,
                     words = [word]
                     break
             if not hits:
-                deferrals.append(Deferral(
-                    flag, words,
-                    f"nothing in this patch has measured params that "
-                    f"{'vary' if must == 'vary' else 'carry'} "
-                    f"{' or '.join(words)}, so reading the patch cannot "
-                    f"settle it — the gate that listens has to"))
+                why = (f"nothing in this patch has measured params that "
+                       f"{'vary' if must == 'vary' else 'carry'} "
+                       f"{' or '.join(words)}, so reading cannot settle it "
+                       f"— the gate that listens has to")
                 continue
-            findings.extend(_judge(flag, words, req, must, hits))
+            broke = _judge(flag, words, req, must, hits)
+            if broke:
+                findings.extend(broke)
+                raised = True
+            else:
+                why = why or ("reading found nothing wrong, which is not the "
+                              "same as finding it right")
 
-        if not spec.get("requires"):
+        # READING CAN ONLY EVER REJECT. A requirement that was not violated
+        # has not been SATISFIED -- it has failed to be disproved, and those
+        # are different facts. A krell whose modulation amounts happen to be
+        # non-zero has proved nothing about whether its timing wanders: what
+        # makes it wander is a sample-and-hold feeding an envelope, which is
+        # topology, and no param value can stand in for it.
+        #
+        # This was live for one commit and a machine that had classified its
+        # modules found it: the same patch that correctly deferred on an
+        # unclassified machine came back silently settled once its modules
+        # were read, because a value that was merely not-zero looked like an
+        # answer. Silence bought with a precondition is exactly the defect
+        # this whole layer exists to end.
+        if not raised and "listening" in (spec.get("settled_by") or
+                                          ["listening"]):
             deferrals.append(Deferral(
-                flag, [], "settled by listening, not by reading"))
+                flag, [],
+                why or "settled by listening, not by reading"))
     return findings, deferrals
 
 

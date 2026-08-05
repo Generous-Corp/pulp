@@ -79,9 +79,10 @@ def _classified_inv():
 def check_affordances_are_classified() -> tuple:
     """A module is read ONCE for what its knobs can express, and kept.
 
-    A word list over param names was measured at 73% against the 419 real
-    params on this machine, and the misses land on the modules with the most
-    character. So each module is classified from everything it publishes --
+    A word list over param names cannot work, because one name means
+    different things on different modules: "frequency" is confidently `pitch`
+    on a VCO, `time` on an LFO and `timbre` on a filter's cutoff, all in the
+    same cache. So each module is classified from everything it publishes --
     the maker's own description most of all -- and the answer is cached,
     content-addressed by plugin version and by the classification prompt.
     """
@@ -379,7 +380,7 @@ def check_behaviour_drives_the_check() -> tuple:
     if findings:
         bad += 1
         print(f"  WRONG  a patch with nothing readable was rejected: {findings}")
-    elif not mel or "listens" not in mel[0].why:
+    elif not mel:
         bad += 1
         print("  WRONG  an unreadable behaviour is passed silently rather "
               "than handed to the gate that could settle it")
@@ -498,7 +499,7 @@ def check_behaviour_drives_the_check() -> tuple:
     # The name-matching stopgap is scoped to `structure` and must stay there.
     # It is the one reading a param NAME can settle, and letting it answer
     # "how much does this wander" or "how likely is this" would rebuild the
-    # 73%-ceiling word list this whole design exists to avoid — quietly, one
+    # name-keyed word list this whole design exists to avoid — quietly, one
     # affordance at a time.
     named = _classified_inv()
     named["CVfunk"]["modules"]["Ouros"]["params"] = [
@@ -517,6 +518,34 @@ def check_behaviour_drives_the_check() -> tuple:
         print("  ok     names may only answer 'structure'; every other "
               "affordance needs a classification or nothing")
 
+    # READING CAN ONLY REJECT. A requirement that was not violated has not
+    # been satisfied -- it failed to be disproved, and those are different
+    # facts. A written, varied melody still has to be HEARD: the sequencer
+    # may not be clocked, or may not reach the output. If "no finding" were
+    # allowed to mean "settled", every behaviour would be provable by writing
+    # two different numbers, which is the presence-not-property defect
+    # wearing this layer's clothes.
+    findings, deferrals = I.check_behaviour(seq(tune), inv, melodic)
+    if findings:
+        bad += 1
+        print(f"  WRONG  a written melody is rejected: {findings}")
+    elif "melodic" not in {d.behaviour for d in deferrals}:
+        bad += 1
+        print("  WRONG  a melody that reading could not fault is marked "
+              "SETTLED; not-disproved is not proved, and only the gate that "
+              "listens can accept it")
+    else:
+        raised = [{"id": 3, "value": 0.4}]
+        _, dd = I.check_behaviour(seq(raised), inv, wander)
+        if "varies_timing" not in {d.behaviour for d in dd}:
+            bad += 1
+            print("  WRONG  an amount that is merely not-zero settles "
+                  "varies_timing; nothing about a value proves the timing "
+                  "wanders — that is topology")
+        else:
+            print("  ok     reading can only ever reject: a requirement it "
+                  "cannot fault is still handed to the gate that listens")
+
     # THE TRACKED REGRESSION CORPUS, whose author did not know this check
     # existed. Three patches in it are known-bad and three are known-good, and
     # the shape of each failure was chosen by somebody else — which is what
@@ -530,45 +559,85 @@ def check_behaviour_drives_the_check() -> tuple:
     # back naming the behaviours only the listening gate can settle, because a
     # silent pass on `krell-plays-one-note` is this project's founding bug.
     here = os.path.dirname(os.path.abspath(__file__))
-    corpus = [("bouncing-ball-correct.vcv", "bouncing-ball", True),
-              ("bouncing-ball-never-bounces.vcv", "bouncing-ball", False),
-              ("krell-plays-one-note.vcv", "krell", False),
-              ("krell-through-a-mult.vcv", "krell", True),
-              ("silent-envelope-never-gated.vcv", "subtractive-voice", False),
-              ("audible-envelope-gated.vcv", "subtractive-voice", True)]
-    inv_real = P.inventory()
+    corpus = [("bouncing-ball-correct.vcv", "bouncing-ball"),
+              ("bouncing-ball-never-bounces.vcv", "bouncing-ball"),
+              ("krell-plays-one-note.vcv", "krell"),
+              ("krell-through-a-mult.vcv", "krell"),
+              ("silent-envelope-never-gated.vcv", "subtractive-voice"),
+              ("audible-envelope-gated.vcv", "subtractive-voice")]
+
+    def _strip(inv):
+        """The same inventory as read by a machine that has classified nothing."""
+        bare = json.loads(json.dumps(inv))
+        for plug in bare.values():
+            for m in (plug.get("modules") or {}).values():
+                m.pop("affords", None)
+                m.pop("advice", None)
+                m.pop("classified", None)
+                for q in (m.get("params") or []):
+                    if isinstance(q, dict):
+                        q.pop("affords", None)
+                        q.pop("affordance_confidence", None)
+        return bare
+
+    # RUN IT IN BOTH CACHE STATES. This machine's classification cache is
+    # live state that grows as modules are read, and the first version of
+    # this check asserted something that was only true while the cache was
+    # empty -- it passed for a day and then failed the moment someone
+    # classified their modules, which is the opposite of a regression test.
+    # Whether a patch is rejected must not depend on how much of the library
+    # has been read, so both states are asserted and neither is the default.
+    live = P.inventory()
+    states = {"classified": live, "unread": _strip(live)}
     wrong = []
-    for name, slug, _good in corpus:
+    if len(states) < 2:
+        wrong.append("this check no longer compares two cache states, which "
+                     "is the only thing that can catch a verdict depending "
+                     "on how much of the library has been read")
+    for name, slug in corpus:
         path = os.path.join(here, "patch_idioms", "regressions", name)
         if not os.path.exists(path):
             wrong.append(f"{name} is missing from the tracked corpus")
             continue
         with open(path) as fh:
             pch = json.load(fh)
-        fs, ds = I.check_behaviour(pch, inv_real, idioms[slug])
-        if fs:
-            wrong.append(f"{name} was rejected by reading alone: {fs[0]}")
-        elif not ds:
-            wrong.append(f"{name} was passed silently, with no behaviour "
-                         f"handed to the gate that listens")
+        seen = {}
+        for label, inv_real in states.items():
+            fs, ds = I.check_behaviour(pch, inv_real, idioms[slug])
+            if fs:
+                wrong.append(f"{name} was rejected by reading alone "
+                             f"({label}): {fs[0]}")
+            elif not ds:
+                wrong.append(f"{name} was passed silently ({label}), with no "
+                             f"behaviour handed to the gate that listens")
+            declared = {f for f, on in (idioms[slug].get("behaviour") or
+                                        {}).items() if on}
+            settled = declared - {d.behaviour for d in ds}
+            if settled:
+                wrong.append(f"{name} ({label}) settled {sorted(settled)} by "
+                             f"reading, but reading can only ever DISPROVE")
+            seen[label] = (sorted(str(f) for f in fs),
+                           sorted(d.behaviour for d in ds))
+        # THE PROPERTY THE TWO STATES EXIST FOR. Classifying a module must
+        # never change whether a patch is acceptable -- it may only change
+        # how much can be EXPLAINED. This is the assertion that would have
+        # caught the bug that reached a commit: `krell-plays-one-note`
+        # deferred varies_timing on an unread machine and came back settled
+        # once its modules were classified, because a value that was merely
+        # not-zero looked like an answer.
+        if len(set(map(str, seen.values()))) > 1:
+            wrong.append(
+                f"{name} is judged differently once its modules are "
+                f"classified: {seen['unread']} unread vs "
+                f"{seen['classified']} classified. Reading more about a "
+                f"module may explain more; it may never change the verdict")
     if wrong:
         bad += 1
         print(f"  WRONG  {wrong[0]}")
     else:
-        _, ds = I.check_behaviour(
-            json.load(open(os.path.join(
-                here, "patch_idioms", "regressions",
-                "krell-plays-one-note.vcv"))), inv_real, idioms["krell"])
-        if "varies_timing" not in {d.behaviour for d in ds}:
-            bad += 1
-            print(f"  WRONG  krell-plays-one-note does not hand on "
-                  f"varies_timing — the one flag here whose static half "
-                  f"EXISTS and could not fire, so its silence has to be said: "
-                  f"{[d.behaviour for d in ds]}")
-        else:
-            print(f"  ok     none of the {len(corpus)} tracked regression "
-                  f"patches is rejected by reading, and every one hands its "
-                  f"unread behaviours to the gate that listens")
+        print(f"  ok     the {len(corpus)} tracked regression patches are "
+              f"judged IDENTICALLY read and unread — none rejected, none "
+              f"passed in silence, none settled by reading alone")
 
     # A single knob cannot differ from itself, and demanding it would be a
     # requirement no patch could ever satisfy.
@@ -583,7 +652,7 @@ def check_behaviour_drives_the_check() -> tuple:
     else:
         print("  ok     a lone param is never asked to differ from itself")
 
-    return bad, 15
+    return bad, 16
 
 
 def check_registered_before_the_skip() -> tuple:

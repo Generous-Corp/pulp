@@ -10,14 +10,25 @@ write music. "Row 1 push" is unreadable on its own and obvious on a module
 described as a five step sequencer, so the reading has to happen where the
 description is -- once per module, not once per patch.
 
-WHY NOT A WORD LIST. It was measured: matching param names against
-step/pitch/rate/cutoff/gain words scored 73% over the 419 real parameters on
-this machine, and the misses were not spread evenly. They landed on `Ouros`,
-`Slant`, `Node`, `Pressed Duck` -- modules whose makers named things for
-character rather than function, which is the same set a person buys a module
-FOR. A rule that fails on the distinctive modules fails on the ones people
-care about, and every vendor with a personality adds another entry somebody
-has to keep feeding.
+WHY NOT A WORD LIST. Because the same word means different things on
+different modules, and a word list assigns one answer per name by
+construction. Reproducible from the cache this file writes, on any machine
+that has run `classify`: among labels the classifier was CONFIDENT about,
+"frequency" is `pitch` on a VCO, `time` on an LFO, and `timbre` on a filter's
+cutoff; "amount" is `level` on an attenuator, `motion` on a tremolo, `space`
+on a reverb send, and `timbre` on a feedback control. Four such words on this
+machine's 59 classified modules, two of them with four distinct readings
+apiece. A list keyed on the name has to be wrong about most of each group,
+and no amount of growing it fixes that -- the information needed is not in
+the name.
+
+Count it yourself rather than trusting this paragraph: read
+`affordances.json`, group `known` labels by the parameter's name, and look
+for names carrying more than one affordance. (An earlier version of this
+docstring cited a 73%-accuracy figure from the design note. It is not
+reproducible -- no labels file, no scoring script, and no instrument in this
+repo that could produce a 9-way accuracy number -- so it is gone. The
+argument never needed it.)
 
 So each module is read once, from everything it already publishes: its name,
 the maker's own description (4,518 of 4,735 modules in the library index carry
