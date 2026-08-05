@@ -125,7 +125,7 @@ modules:
     docs: reference/modules.md#audio
 
   - name: music
-    summary: Dependency-light 12-TET theory and chord values with stable compatibility identities plus fixed-capacity deterministic generative pattern kernels
+    summary: Dependency-light 12-TET pitch-class and scale values, fixed-capacity chord construction, spelling, voicing, minimum-motion voice leading, diatonic harmony, ambiguity-preserving recognition, stable Pulp and Forge compatibility identities, and deterministic generative pattern kernels
     status: experimental
     dependencies: []
     docs: reference/modules.md#music
