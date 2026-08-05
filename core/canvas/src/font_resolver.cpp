@@ -595,4 +595,46 @@ bool ResolvedFont::color_font_active() const noexcept {
 #endif
 }
 
+std::string resolved_face_identity(const std::string& css_font_family,
+                                   float weight) {
+#ifdef PULP_HAS_SKIA
+    FontOptions options;
+    options.weight = weight;
+    // Same comma walk the shaper uses: strip whitespace and one matching pair
+    // of quotes per entry.
+    size_t pos = 0;
+    while (pos < css_font_family.size()) {
+        const size_t comma = css_font_family.find(',', pos);
+        std::string entry = css_font_family.substr(
+            pos, (comma == std::string::npos ? css_font_family.size() : comma) - pos);
+        pos = (comma == std::string::npos) ? css_font_family.size() : comma + 1;
+        const size_t lo = entry.find_first_not_of(" \t");
+        const size_t hi = entry.find_last_not_of(" \t");
+        if (lo == std::string::npos) continue;
+        entry = entry.substr(lo, hi - lo + 1);
+        if (entry.size() >= 2 &&
+            (entry.front() == '"' || entry.front() == '\'') &&
+            entry.front() == entry.back()) {
+            entry = entry.substr(1, entry.size() - 2);
+        }
+        if (!entry.empty()) options.family_stack.push_back(std::move(entry));
+    }
+    const auto resolved = FontResolver::instance().resolve_family_list(options);
+    if (!resolved.typeface) return {};
+    SkString name;
+    resolved.typeface->getPostScriptName(&name);
+    if (name.isEmpty()) {
+        // Not every face carries one; fall back to the family so the answer is
+        // still an identity rather than silently empty (which would read as
+        // "unknown" and disable a cache that is in fact valid).
+        return resolved.actual_family;
+    }
+    return std::string(name.c_str(), name.size());
+#else
+    (void)css_font_family;
+    (void)weight;
+    return {};
+#endif
+}
+
 } // namespace pulp::canvas

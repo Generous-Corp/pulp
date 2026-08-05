@@ -8,6 +8,8 @@
 # Runs JUST the sub-second gates that `.githooks/pre-push` runs in
 # `--mode=report`:
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
+#   - skill-path-map lint (the map's own rules match real files, validate
+#     against its schema, and don't quietly widen a subsystem claim)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
 #   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
 #   - config-doc (mapped config surfaces require their guide doc or a skip trailer)
@@ -65,6 +67,7 @@ BASE="${1:-${PULP_GATES_BASE:-origin/main}}"
 
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
+SPML="$ROOT/tools/scripts/skill_path_map_lint.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
 CDC="$ROOT/tools/scripts/config_doc_check.py"
 CDC_MAP="$ROOT/tools/scripts/config_doc_map.json"
@@ -87,6 +90,7 @@ DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
+UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -158,6 +162,21 @@ echo "" >&2
 echo "▸ skill-sync check" >&2
 if ! "$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report; then
     fail=1
+fi
+
+# ── 1b. skill-path-map lint ────────────────────────────────────────────────
+# skill-sync above is only as good as the map it reads. A pattern that matches
+# no tracked file reports nothing, which is indistinguishable from a clean run —
+# three sat on main unnoticed, including one pointing inside the `planning`
+# submodule, whose paths never appear in a superproject diff at all. Whole-tree
+# for the rules that catch rot the tree drifted into, diff-scoped for the one
+# that catches a claim being widened. Sub-second, pure stdlib.
+if [ -f "$SPML" ]; then
+    echo "" >&2
+    echo "▸ skill-path-map lint (patterns match real files; map matches its schema)" >&2
+    if ! "$PYTHON" "$SPML" --base "$BASE" --mode=report; then
+        fail=1
+    fi
 fi
 
 # ── 2. version-bump ────────────────────────────────────────────────────────
@@ -449,7 +468,21 @@ if [ -f "$THREAD_ASSERT_GUARD" ]; then
     fi
 fi
 
-# ── 14. framework-neutrality guard ─────────────────────────────────────────
+# ── 14. unbounded-wait lint (diff-scoped) ──────────────────────────────────
+# A test wait that cannot time out — `while (!flag.load())`, a bare
+# `future.wait()`, `cv.wait(lock, pred)` — turns a real regression into a CI job
+# timeout with no output, which is worse than the flake such waits are usually
+# added to fix. Diff-scoped on purpose: it stops the population growing without
+# blocking on the pre-existing backlog, which needs a reproduction per site.
+if [ -f "$UNBOUNDED_WAIT_LINT" ]; then
+    echo "" >&2
+    echo "▸ unbounded-wait lint (a test wait must be able to time out)" >&2
+    if ! "$PYTHON" "$UNBOUNDED_WAIT_LINT" --base "$BASE"; then
+        fail=1
+    fi
+fi
+
+# ── 15. framework-neutrality guard ─────────────────────────────────────────
 # Global invariant (not diff-scoped): Pulp's own source names no other
 # framework, and adopts none of their class names into its API. A comment that
 # says "mirrors the X class of the same name" is a written admission of

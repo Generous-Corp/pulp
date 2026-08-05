@@ -279,8 +279,17 @@ ComboBox* ComboBox::active_popup_in(View& scope) {
     return s ? s->active_popup : nullptr;
 }
 
-void ComboBox::close_active_popup_in(View& scope) {
-    if (ComboBox* popup = active_popup_in(scope)) popup->close_dropdown();
+void ComboBox::close_active_popup(View& root) {
+    if (ComboBox* popup = active_popup_in(root)) popup->close_dropdown();
+}
+
+void ComboBox::abandon_active_popup(View& root) noexcept {
+    if (auto* interaction = root.existing_interaction();
+        interaction && interaction->active_popup) {
+        if (active_popup_ == interaction->active_popup)
+            active_popup_ = nullptr;
+        interaction->active_popup = nullptr;
+    }
 }
 
 void ComboBox::notify_global_click(View* target) {
@@ -1050,7 +1059,7 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
     // native menu behavior (scrolling the backdrop closes the menu).
     // Scoped to THIS view's tree: scrolling in one hosted editor must not
     // dismiss a dropdown a DIFFERENT editor has open in the same process.
-    if (dx != 0.0f || dy != 0.0f) ComboBox::close_active_popup_in(*this);
+    if (dx != 0.0f || dy != 0.0f) ComboBox::close_active_popup(*this);
     target_scroll_x_ += dx;
     target_scroll_y_ += dy;
     clamp_scroll_targets();

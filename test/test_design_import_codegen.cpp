@@ -1732,6 +1732,59 @@ TEST_CASE("generate_pulp_js escapes text containing newlines / quotes / backslas
     }
 }
 
+TEST_CASE("bridge_native_js derives widget keys from the design's palette",
+          "[view][import]") {
+    // A design states `css/accent`; a Knob resolves `knob.arc`. The native
+    // materializer bridges the two, so the emitted artifact has to as well —
+    // otherwise the panel keeps the design's palette everywhere the DESIGN
+    // paints and every CONTROL falls back to Pulp's built-in default, which
+    // reads as a design bug and still scores a pass on similarity.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.tokens.colors["css/accent"] = "#C4622A";
+    ir.tokens.colors["css/line-strong"] = "#DCD0B6";
+    ir.tokens.colors["css/text-strong"] = "#2A2418";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    // The colour a Knob, a Slider and a Meter each actually resolve.
+    CHECK(js.find("setColorToken('knob.arc', '#c4622a')") != std::string::npos);
+    CHECK(js.find("setColorToken('slider.fill', '#c4622a')") !=
+          std::string::npos);
+    CHECK(js.find("setColorToken('knob.arc.bg', '#dcd0b6')") !=
+          std::string::npos);
+    CHECK(js.find("setColorToken('knob.thumb', '#2a2418')") !=
+          std::string::npos);
+    // The design's own names survive alongside the derived ones.
+    CHECK(js.find("setColorToken('css/accent', '#C4622A')") !=
+          std::string::npos);
+}
+
+TEST_CASE("bridge_native_js keeps a widget key the design states itself",
+          "[view][import]") {
+    // The specific instruction must not lose to the general one: a design that
+    // names knob.arc has already answered, and re-deriving it from `accent`
+    // would overwrite a deliberate choice with a guess.
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.root.type = "frame";
+    ir.tokens.colors["css/accent"] = "#C4622A";
+    ir.tokens.colors["knob.arc"] = "#00FF00";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setColorToken('knob.arc', '#00FF00')") != std::string::npos);
+    CHECK(js.find("setColorToken('knob.arc', '#c4622a')") == std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
@@ -3891,4 +3944,92 @@ TEST_CASE("an overlay control keeps the capture visible beneath it",
     }());
     INFO(js);
     REQUIRE(js.find(".style.backgroundColor") == std::string::npos);
+}
+
+// A tiled background is a gradient PLUS a size, and the JS emitter wrote only
+// the gradient — so the tile collapsed to one stretched copy.
+//
+// That is not a texture nicety. A design-system grid or scanline overlay IS
+// nothing but a gradient and a size, so losing the size loses the whole
+// element: a spectrum display whose only children were `.grid-x` / `.grid-y`
+// rendered as an empty panel and was reported as a layout bug on three
+// different panels before the missing size was found here.
+//
+// Order is load-bearing. The `background` shorthand RESETS `background-size`,
+// so the size has to be written after it; emitted first, it is silently
+// discarded and this test would pass against markup that still renders wrong.
+TEST_CASE("the JS emitter carries background-size, after the shorthand",
+          "[view][import][codegen][background-size]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    IRNode grid;
+    grid.type = "frame";
+    grid.name = "grid-x";
+    grid.style.background_gradient =
+        "linear-gradient(90deg, rgb(36, 38, 84) 1px, rgba(0, 0, 0, 0) 1px)";
+    grid.style.background_size = "12.5% 100%";
+    ir.root.children.push_back(std::move(grid));
+
+    // web_compat, not bridge_native_js: this is the document.createElement +
+    // el.style lane, which is what a generated panel's ui.js actually uses.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    const auto gradient_at = js.find(".style.background = ");
+    const auto size_at = js.find(".style.backgroundSize = ");
+    REQUIRE(gradient_at != std::string::npos);
+    REQUIRE(size_at != std::string::npos);
+    CHECK(js.find("12.5% 100%") != std::string::npos);
+    // The shorthand resets the size, so anything else here ships a tile that
+    // never tiles.
+    CHECK(gradient_at < size_at);
+}
+
+// The colour the DESIGN drew a control in. Without it the widget falls back to
+// the host theme's accent, so a panel whose author chose lilac renders its knobs
+// in whatever the surrounding app uses — the palette reaches the panel and stops
+// at its controls. Observed as the same ui.js rendering periwinkle in one host
+// and mint in another.
+//
+// The IR carries this per control and the native lane already consumed it; only
+// the web-compat lane was silent.
+TEST_CASE("the web-compat lane emits the design's accent for a control",
+          "[view][import][codegen][design-accent]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "CUTOFF";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.attributes["binding"] = "param_1";
+    knob.attributes["design_accent"] = "#d6b8ff";
+    ir.root.children.push_back(std::move(knob));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setAccentColor(") != std::string::npos);
+    CHECK(js.find("#d6b8ff") != std::string::npos);
+}
+
+// A control with no design accent must NOT be forced to one: the host theme is
+// the correct fallback, and emitting an empty colour would blank the widget.
+TEST_CASE("a control with no design accent is left to the theme",
+          "[view][import][codegen][design-accent]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode knob;
+    knob.type = "frame";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.attributes["binding"] = "param_1";
+    ir.root.children.push_back(std::move(knob));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setAccentColor(") == std::string::npos);
 }

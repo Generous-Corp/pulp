@@ -2,6 +2,7 @@
 
 #include <pulp/view/view_pool.hpp>
 #include <pulp/view/virtual_list.hpp>
+#include "../core/view/platform/win/accessibility_win_fragment_topology.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -83,6 +84,162 @@ TEST_CASE("ViewPool acquire/release round-trip preserves identity", "[view-pool]
     REQUIRE_FALSE(factory_called);
     REQUIRE(pool.total_size() == 0);
     REQUIRE(RowA::live == 1);
+}
+
+TEST_CASE("ViewCapture rejects a pooled allocation reused for a new row",
+          "[view-pool][lifetime]") {
+    RowA::reset_counters();
+    View root;
+    ViewPool pool;
+
+    auto first = pool.acquire<RowA>([] { return make<RowA>(); });
+    auto* allocation = first.get();
+    root.add_child(std::move(first));
+    ViewCapture old_row;
+    old_row.set(allocation);
+
+    auto detached = root.remove_child(allocation);
+    pool.release(std::move(detached));
+    auto second = pool.acquire<RowA>([] { return make<RowA>(); });
+    REQUIRE(second.get() == allocation);
+    root.add_child(std::move(second));
+
+    CHECK(old_row.live_in(root) == nullptr);
+}
+
+TEST_CASE("ViewCapture rejects a descendant of a reused pooled subtree",
+          "[view-pool][lifetime]") {
+    RowA::reset_counters();
+    View root;
+    ViewPool pool;
+
+    auto row = pool.acquire<RowA>([] { return make<RowA>(); });
+    row->add_child(std::make_unique<View>());
+    auto* allocation = row.get();
+    auto* nested_allocation = row->child_at(0);
+    root.add_child(std::move(row));
+    ViewCapture old_nested;
+    old_nested.set(nested_allocation);
+
+    auto detached = root.remove_child(allocation);
+    pool.release(std::move(detached));
+    auto reused = pool.acquire<RowA>([] { return make<RowA>(); });
+    REQUIRE(reused.get() == allocation);
+    REQUIRE(reused->child_at(0) == nested_allocation);
+    root.add_child(std::move(reused));
+
+    CHECK(old_nested.live_in(root) == nullptr);
+}
+
+TEST_CASE("ViewCapture invalidation generations are isolated per root",
+          "[view-pool][lifetime]") {
+    View root_a;
+    View root_b;
+    auto child_a = std::make_unique<View>();
+    auto* child_a_ptr = child_a.get();
+    root_a.add_child(std::move(child_a));
+    root_b.add_child(std::make_unique<View>());
+
+    ViewCapture capture_a;
+    capture_a.set(child_a_ptr);
+    const auto generation_a = root_a.root_structure_generation();
+    const auto generation_b = root_b.root_structure_generation();
+    const auto global_generation = View::structure_generation();
+
+    auto detached_b = root_b.remove_child(root_b.child_at(0));
+    REQUIRE(detached_b != nullptr);
+    CHECK(root_a.root_structure_generation() == generation_a);
+    CHECK(root_b.root_structure_generation() != generation_b);
+    CHECK(View::structure_generation() != global_generation);
+    CHECK(capture_a.live_in(root_a) == child_a_ptr);
+}
+
+TEST_CASE("ViewCapture invalidates before detach-time frame-clock callbacks",
+          "[view-pool][lifetime][reentrancy]") {
+    struct DetachProbe final : View {
+        View* root = nullptr;
+        ViewCapture* capture = nullptr;
+        bool capture_was_live_in_on_detached = false;
+        bool capture_was_live_after_detach = false;
+
+        void on_detached() override {
+            if (root && capture)
+                capture_was_live_in_on_detached =
+                    capture->live_in(*root) != nullptr;
+        }
+        void on_frame_clock_changed() override {
+            if (root && capture && parent() == nullptr)
+                capture_was_live_after_detach =
+                    capture->live_in(*root) != nullptr;
+        }
+    };
+
+    View root;
+    auto child = std::make_unique<DetachProbe>();
+    auto* probe = child.get();
+    root.add_child(std::move(child));
+
+    ViewCapture capture;
+    capture.set(probe);
+    probe->root = &root;
+    probe->capture = &capture;
+
+    auto detached = root.remove_child(probe);
+    REQUIRE(detached.get() == probe);
+    CHECK_FALSE(probe->capture_was_live_in_on_detached);
+    CHECK_FALSE(probe->capture_was_live_after_detach);
+    CHECK(capture.live_in(root) == nullptr);
+}
+
+TEST_CASE("throwing detach hook restores attached capture identity",
+          "[view-pool][lifetime][exception-safety]") {
+    struct ThrowingDetach final : View {
+        void on_detached() override {
+            throw std::runtime_error("detach failed");
+        }
+    };
+
+    View root;
+    auto child = std::make_unique<ThrowingDetach>();
+    auto* probe = child.get();
+    root.add_child(std::move(child));
+    ViewCapture capture;
+    capture.set(probe);
+
+    CHECK_THROWS_AS(root.remove_child(probe), std::runtime_error);
+    REQUIRE(root.child_count() == 1);
+    CHECK(root.child_at(0) == probe);
+    CHECK(probe->parent() == &root);
+    CHECK(capture.live_in(root) == probe);
+}
+
+TEST_CASE("UIA fragment topology flattens structural wrappers",
+          "[view-pool][accessibility][uia-topology]") {
+    View root;
+    auto first = std::make_unique<View>();
+    first->set_access_role(View::AccessRole::button);
+    first->set_access_label("First");
+    auto wrapper = std::make_unique<View>();
+    auto nested = std::make_unique<View>();
+    nested->set_access_role(View::AccessRole::slider);
+    nested->set_access_label("Nested");
+    first->add_child(std::move(wrapper));
+    first->child_at(0)->add_child(std::move(nested));
+    root.add_child(std::move(first));
+    auto second = std::make_unique<View>();
+    second->set_access_role(View::AccessRole::button);
+    second->set_access_label("Second");
+    root.add_child(std::move(second));
+
+    const auto topology = build_uia_fragment_topology(root);
+    REQUIRE(topology.nodes.size() == 3);
+    CHECK(topology.first_child == 0);
+    CHECK(topology.last_child == 2);
+    CHECK(topology.nodes[0].first_child == 1);
+    CHECK(topology.nodes[0].last_child == 1);
+    CHECK(topology.nodes[0].next_sibling == 2);
+    CHECK(topology.nodes[1].parent_index == 0);
+    CHECK(topology.nodes[2].prev_sibling == 0);
 }
 
 TEST_CASE("ViewPool per-class cap evicts (destroys) over-cap releases", "[view-pool]") {

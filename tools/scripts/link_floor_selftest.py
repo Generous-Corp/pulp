@@ -156,6 +156,68 @@ CASES: list[tuple[str, str, bool, str]] = [
         "debt entry 'alpha' is already inside tier",
     ),
     (
+        # The configuration axis. A guarded entry is APPENDED under the same
+        # condition that creates its edge, so where the condition holds it is an
+        # ordinary debt entry — rot-checked like any other. This case is that
+        # half: condition true, module reached, entry present.
+        "guarded_debt_present_when_condition_holds",
+        case(tier("beta", "gamma")
+             + "set(FIXTURE_CONDITION ON)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_probe)\n"
+             + "if(FIXTURE_CONDITION)\n"
+             + "  list(APPEND PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # The other half, and the one the iOS and GPU=OFF configures hit:
+        # condition false, so the module is not built and not reached, and the
+        # entry is not declared either. Neither bound is violated.
+        "guarded_debt_absent_when_condition_fails",
+        case(tier("alpha", "beta", "gamma")
+             + "set(FIXTURE_CONDITION OFF)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_probe)\n"
+             + "if(FIXTURE_CONDITION)\n"
+             + "  list(APPEND PULP_LINK_FLOOR_DEBT_probe zeta)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # Refutable from the rot side: the guard holds, so the entry is declared
+        # and IS checked. A genuinely cut edge still fails, which is the property
+        # a blanket exemption would have surrendered.
+        "guarded_debt_is_still_rot_checked_where_it_applies",
+        case(tier("alpha", "beta", "gamma")
+             + "set(FIXTURE_CONDITION ON)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_probe)\n"
+             + "if(FIXTURE_CONDITION)\n"
+             + "  list(APPEND PULP_LINK_FLOOR_DEBT_probe zeta)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "debt entry 'zeta' is no longer linked",
+    ),
+    (
+        # Refutable from the other side: the guard is false but the module is
+        # reached anyway — the edge escaped its condition. Undeclared, so the
+        # upper bound catches it. Without this the guard could be wrong in one
+        # direction and never say so.
+        "guarded_debt_escaping_its_condition_is_caught",
+        case(tier("beta", "gamma")
+             + "set(FIXTURE_CONDITION OFF)\n"
+             + "set(PULP_LINK_FLOOR_DEBT_probe)\n"
+             + "if(FIXTURE_CONDITION)\n"
+             + "  list(APPEND PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "pulp/alpha is outside tier 'fixture'",
+    ),
+    (
         # core/host links pulp::format while format reaches back through view,
         # so a walk that does not close over what it has seen hangs on the real
         # repo. Reproduced here in two targets; the case is bounded by the

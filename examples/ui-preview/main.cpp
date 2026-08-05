@@ -1269,11 +1269,21 @@ int main(int argc, char* argv[]) {
 
     if (screenshot_only) {
         if (!emit_view_tree(render_w, render_h)) return 1;
+        // Skia, not the platform default. On macOS the default backend is
+        // CoreGraphics, which supports neither filter chains nor blend layers,
+        // so a panel built on blurred `screen` blooms renders its FALLBACK
+        // here and looks identical whether or not those paths are correct.
+        // That makes this screenshot useless as a check on exactly the effects
+        // designed panels lean on hardest -- a render bug and its fix both
+        // produce the same picture. Skia is also what the app itself draws
+        // with, so this now shows what the user would see.
         bool ok = render_to_file(
             root,
             static_cast<uint32_t>(render_w),
             static_cast<uint32_t>(render_h),
-            screenshot_path.c_str());
+            screenshot_path.c_str(),
+            /*scale=*/2.0f,
+            ScreenshotBackend::skia);
         std::cout << (ok ? "Screenshot saved to " + screenshot_path + "\n" : "Screenshot failed\n");
         pulp::inspect::uninstall_inspector_hooks();
         return ok ? 0 : 1;

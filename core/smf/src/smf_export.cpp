@@ -319,6 +319,17 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
                     " has per-note playback modifiers, which have no standard MIDI file "
                     "representation")));
+        // A lane's points are authored independently of the notes, so writing
+        // the notes alone produces a file that opens successfully with every
+        // controller movement gone. The raw entry point fails closed like the
+        // modifier check above; only the interchange adapter clears this, and
+        // only once `clip.midi-expression-lane` has been accepted by exact id.
+        if (!notes->lanes().empty() && !loss_policy_.drop_midi_expression_lanes)
+            return TrackResult(Err(smf_error(
+                SmfErrorCode::UnsupportedFeature,
+                "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
+                    " has controller and expression lanes, which this Standard MIDI file "
+                    "writer does not emit")));
 
         for (const auto& note : notes->notes()) {
             auto velocity = scale_velocity_16_to_7(note.velocity);

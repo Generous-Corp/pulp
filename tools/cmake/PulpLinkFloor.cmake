@@ -91,6 +91,16 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # pulp_assert_link_floor() rejects a debt entry that is no longer reached and a
 # debt entry that duplicates its tier, so the list cannot outlive its subject.
 #
+# That "no longer reached" check measures one configure, and a project does not
+# have one closure. A module whose subdirectory is behind an option is absent by
+# construction wherever the option is off, and an edge behind a platform guard
+# takes everything it alone reached with it. Read as rot, that absence fails the
+# gate in its healthy direction — it asks for an entry to be DELETED because a
+# narrower configure could not reach it, and deleting it then breaks the wider
+# configure where the link genuinely exists. An upper bound is not violated by
+# reaching less, so an entry a documented guard can remove is APPENDED under
+# that same guard below, which keeps it rot-checked wherever the guard holds.
+#
 # StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
 # write and cannot cut from its own CMakeLists account for all of it.
 #
@@ -102,9 +112,11 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 #         -> pulp-host -> pulp-playback -> pulp-timeline
 #     which is the only reason this plugin reaches pulp-timeline at all: the
 #     sequencer's own code carries no pulp/timeline include and no timeline
-#     link. view, host, playback, timeline, render and canvas all arrive this
-#     way, so cutting the one unconditional link would delete six entries at
-#     once.
+#     link. view, host, playback, timeline and canvas all arrive this way, so
+#     cutting the one unconditional link would delete five entries at once.
+#     `render` is NOT among them: pulp_add_plugin links it directly per format
+#     under PULP_HAS_SKIA (tools/cmake/PulpUtils.cmake), which is the edge the
+#     closure report names, so cutting the view link alone leaves it reached.
 #
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
@@ -115,12 +127,69 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas events graph host native-components playback render
-    sample_bank_manifest signal state timeline view)
+    canvas events graph native-components sample_bank_manifest signal state view)
 
+# The loadable editor proof plugin reaches the same modules by the same routes,
+# being packaged by the same format machinery over the same view stack. It has
+# no `timeline` entry because it REQUIREs timeline and timeline_editor outright
+# and links them directly, so they are a lower bound here rather than debt —
+# which is why the conditional appends below must never name them.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    canvas events graph host native-components playback render
-    sample_bank_manifest signal state view)
+    canvas events graph native-components sample_bank_manifest signal state view)
+
+# Entries whose edge only exists in some configurations, appended under the
+# condition that creates them. Appending rather than exempting is deliberate:
+# where the condition HOLDS the entry is back in the ordinary debt list and is
+# rot-checked exactly like any other, so a link genuinely cut on desktop still
+# fails the gate. Only the configure that cannot have the edge stops asking.
+#
+# The condition to guard an entry with is the one that decides whether the
+# module is BUILT, never a restatement of the edge itself. That keeps the entry
+# refutable from both sides:
+#
+#   condition true, module not reached  -> "no longer linked" (the edge was cut)
+#   condition false, module reached     -> "outside tier"     (the edge escaped)
+#
+# so a guard that is wrong in either direction fails in one of the two
+# configurations instead of quietly permitting whatever it finds.
+#
+#   render — core/render is added only under PULP_ENABLE_GPU (CMakeLists.txt),
+#     so a GPU=OFF build defines no such target for any consumer to reach. A
+#     worktree whose external/skia-build is headers-only forces exactly that,
+#     which is an ordinary fresh-checkout state rather than an exotic one. Note
+#     the condition is the module's EXISTENCE and not any one edge: two
+#     independent links carry it — pulp_add_plugin's per-format
+#     `target_link_libraries(... pulp::render)` under PULP_HAS_SKIA
+#     (tools/cmake/PulpUtils.cmake), which is the edge the closure report names,
+#     and core/view's `if(TARGET pulp-render)` block. Guarding on either edge
+#     would make the entry unfalsifiable from one side.
+#
+#   host, playback, timeline — core/host is skipped on iOS (App Store policy
+#     disallows dlopen of third-party plugins), so the pulp-view-core ->
+#     pulp-host hop does not exist there. `playback` and `timeline` are guarded
+#     on the same condition for a DIFFERENT reason, and the difference matters:
+#     core/playback and core/timeline are added unconditionally and ARE built on
+#     iOS. They are guarded because this target's only route to them runs
+#     THROUGH host — reachability, not existence. The iOS configure is what
+#     established that, by naming all three as unreached; the closure report
+#     could not have, since it records one shortest chain per module and a
+#     second, longer edge would be invisible in it.
+#
+#     That claim stays refutable: add a direct pulp::playback link on iOS and
+#     the module is reached while the condition is false, which the walk reports
+#     as "outside tier". What it does NOT catch is the carrying hop being
+#     rerouted rather than removed. The way to close that is to DERIVE the set
+#     from the graph — re-run the closure with pulp-host excluded and take the
+#     difference — so the exemption is recomputed per configure instead of
+#     asserted here. Recorded as the follow-up; this list is the interim.
+if(PULP_ENABLE_GPU)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
+    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
+endif()
+if(NOT IOS)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP host playback timeline)
+    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP host playback)
+endif()
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 

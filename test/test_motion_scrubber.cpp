@@ -422,9 +422,10 @@ TEST_CASE("DomainHandler routes Motion.loadFixture + scrubTo to MotionScrubber",
     REQUIRE(load_body["header"]["version"].getInt64() ==
             pulp::view::motion::kFixtureSchemaVersion);
 
-    // Motion.scrubTo frame 2
+    // Draft 2020-12 integer semantics include integral JSON numbers written
+    // with an explicit positive exponent.
     auto scrub_resp = dh.handle(make_request(2, "Motion.scrubTo",
-                                             "{\"frame\":2}"));
+                                             "{\"frame\":2e+0}"));
     REQUIRE_FALSE(scrub_resp.is_error);
     auto scrub_body = choc::json::parse(scrub_resp.params_json);
     REQUIRE(scrub_body["playhead_frame"].getInt64() == 2);

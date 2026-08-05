@@ -113,8 +113,13 @@ public:
     /// when the menu is closed.
     bool dropdown_window_rect(float& x, float& y, float& w, float& h) const;
 
-    /// Close any currently open ComboBox (call before opening a new one).
+    /// Close the process-global active ComboBox shim.
     static void close_active_popup();
+    /// Close only the active ComboBox owned by `root`.
+    static void close_active_popup(View& root);
+    /// Clear popup routing without invoking dismissal/change callbacks. Used
+    /// when a whole realm is retired behind an inspector response deadline.
+    static void abandon_active_popup(View& root) noexcept;
 
     /// The open dropdown that belongs to `scope`'s own tree, or nullptr.
     ///
@@ -132,10 +137,6 @@ public:
     /// be passed — a ScrollView asking "is a dropdown open in my editor?" gets
     /// the same answer as the root.
     static ComboBox* active_popup_in(View& scope);
-
-    /// Close the open dropdown owned by `scope`'s tree, leaving any other
-    /// editor's popup alone. Root-scoped counterpart to close_active_popup().
-    static void close_active_popup_in(View& scope);
 
     /// Called by the root view on any mouse click — closes popup if click is outside.
     static void notify_global_click(View* target);

@@ -12,9 +12,13 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+
+#include "support/thread_progress.hpp"
 #if defined(__unix__) || defined(__APPLE__)
 #include "native_components/rt_test_scope.hpp"
 #endif
+
+#include "support/thread_progress.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -940,6 +944,14 @@ TEST_CASE("SignalGraph control-thread snapshot readers pin against retirement",
     while (std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
     }
+    // The hammer window is a contention budget, not an ordering guarantee: nothing
+    // puts either worker's first iteration inside it, so a loaded host can spend
+    // the whole window before they are scheduled and leave both iteration counts
+    // at zero — a scheduling artifact that reads as a snapshot-lifetime regression.
+    // Wait for each thread to prove it ran. The progress deadline turns a thread
+    // that genuinely never advances into a failed REQUIRE rather than a hang.
+    (void)pulp::test::wait_for_progress(reader_iterations);
+    (void)pulp::test::wait_for_progress(retire_iterations);
     stop.store(true, std::memory_order_release);
     reader_thread.join();
     retirer_thread.join();
@@ -1042,6 +1054,15 @@ TEST_CASE("SignalGraph control-thread node-field edits serialize against prepare
     while (std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
     }
+    // The hammer window is a contention budget, not an ordering guarantee: nothing
+    // puts either worker's first iteration inside it, so a loaded host can spend
+    // the whole window before they are scheduled and leave both iteration counts
+    // at zero — a scheduling artifact that reads as a control-thread-edit
+    // regression. Wait for each thread to prove it ran. The progress deadline
+    // turns a thread that genuinely never advances into a failed REQUIRE
+    // rather than a hang.
+    (void)pulp::test::wait_for_progress(mutate_iterations);
+    (void)pulp::test::wait_for_progress(prepare_iterations);
     stop.store(true, std::memory_order_release);
     mutate_thread.join();
     prepare_thread.join();
@@ -3135,9 +3156,11 @@ TEST_CASE("SignalGraph audio-thread MIDI ingress is Race-free during swaps",
         }
     });
 
-    while (processed_blocks.load(std::memory_order_relaxed) < 8) {
-        std::this_thread::yield();
-    }
+    // Bound the wait for the audio thread's first blocks. An unbounded spin here
+    // trades this suite's flake for a hang: a graph that genuinely never renders
+    // would never leave the loop and the assertion below would never report.
+    (void)pulp::test::wait_for_condition(
+        [&] { return processed_blocks.load(std::memory_order_relaxed) >= 8; });
 
     bool all_swaps_succeeded = true;
     for (int iteration = 0; iteration < 32; ++iteration) {
@@ -3295,8 +3318,14 @@ TEST_CASE("SignalGraph live controls and MIDI handoff are TSan-clean together",
         }
     });
 
-    started.wait();
-    first_block.wait();
+    // Bounded: `future::wait()` has no timeout, so if a genuine regression means
+    // the audio thread never reaches graph.process(), this barrier hangs the
+    // suite instead of failing it — on a runner that is a job timeout with no
+    // useful output, strictly worse than the flake the barrier was added to fix.
+    // A CHECK here reports the barrier itself, and the assertions after the join
+    // then report the zero counters as the failure they are.
+    CHECK(started.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+    CHECK(first_block.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
 
     bool all_gain_updates_succeeded = true;
     bool all_injects_succeeded = true;

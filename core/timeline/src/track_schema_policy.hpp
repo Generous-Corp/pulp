@@ -15,6 +15,7 @@ struct TrackSchemaVersionPolicy {
     std::uint32_t active_take_lane_introduced_version;
     std::uint32_t freeze_introduced_version;
     std::uint32_t mixer_introduced_version;
+    std::uint32_t tuning_introduced_version;
 
     [[nodiscard]] constexpr bool requires_device_chain(std::uint32_t version) const noexcept {
         return version >= device_chain_introduced_version;
@@ -40,10 +41,15 @@ struct TrackSchemaVersionPolicy {
     [[nodiscard]] constexpr bool supports_mixer(std::uint32_t version) const noexcept {
         return version >= mixer_introduced_version;
     }
+
+    // The tuning this track overrides the project's with, when it states one.
+    [[nodiscard]] constexpr bool supports_tuning(std::uint32_t version) const noexcept {
+        return version >= tuning_introduced_version;
+    }
 };
 
 inline constexpr TrackSchemaVersionPolicy track_schema_policy{
-    "pulp.timeline.track", 1, 7, 2, 3, 4, 5, 6, 7,
+    "pulp.timeline.track", 1, 8, 2, 3, 4, 5, 6, 7, 8,
 };
 static_assert(
     track_schema_policy.oldest_readable_version > 0 &&
@@ -77,6 +83,10 @@ static_assert(
     track_schema_policy.mixer_introduced_version > 0 &&
     track_schema_policy.mixer_introduced_version <= track_schema_policy.current_version &&
     !track_schema_policy.supports_mixer(track_schema_policy.mixer_introduced_version - 1) &&
-    track_schema_policy.supports_mixer(track_schema_policy.mixer_introduced_version));
+    track_schema_policy.supports_mixer(track_schema_policy.mixer_introduced_version) &&
+    track_schema_policy.tuning_introduced_version > track_schema_policy.mixer_introduced_version &&
+    track_schema_policy.tuning_introduced_version <= track_schema_policy.current_version &&
+    !track_schema_policy.supports_tuning(track_schema_policy.tuning_introduced_version - 1) &&
+    track_schema_policy.supports_tuning(track_schema_policy.tuning_introduced_version));
 
 } // namespace pulp::timeline::detail

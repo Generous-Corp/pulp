@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
@@ -9,6 +10,7 @@
 #include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
+#include <functional>
 #include <optional>
 #include <vector>
 #include <memory>
@@ -19,6 +21,7 @@ namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
+class WidgetBridge;
 class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
 class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 class GestureArbiter; class GestureRecognizer;
@@ -31,6 +34,28 @@ struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
 class ComboBox;          // pulp/view/ui_components.hpp — held (as View*) in RootInteractionState
+class View;
+
+/// Identity-safe reference to a View captured across native event boundaries.
+/// Capturing records the root and current structure generation while the View
+/// is known-live. `live_in()` is therefore O(1) until a detach invalidates that
+/// generation; only the invalidation path walks the tree. The instance id
+/// closes allocator-address reuse (ABA) after an old realm is destroyed and a
+/// replacement view lands at the same address.
+class ViewCapture {
+public:
+    void set(View* view) noexcept;
+    void reset() noexcept;
+    bool has_value() const noexcept { return view_ != nullptr; }
+    View* live_in(View& root) const noexcept;
+
+private:
+    View* view_ = nullptr;
+    std::uint64_t instance_id_ = 0;
+    mutable View* validated_root_ = nullptr;
+    mutable std::uint64_t validated_root_instance_id_ = 0;
+    mutable std::uint64_t validated_generation_ = 0;
+};
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -79,15 +104,14 @@ public:
     void add_child(std::unique_ptr<View> child);
     std::unique_ptr<View> remove_child(View* child);
 
-    /// Process-wide monotonic counter bumped by every structural mutation that
-    /// can DETACH a node (remove_child). Never resets; starts at 1 so 0 is a
-    /// reserved "never validated" sentinel for external cache holders. add_child
-    /// does NOT bump it — adding a node cannot detach an already-reachable node,
-    /// so a pointer confirmed under some root at generation G is still under that
-    /// root at any later generation with no intervening remove_child. WidgetBridge
-    /// uses this to make its per-id widget-liveness cache O(1) on repeat lookups,
-    /// skipping the O(tree) subtree walk while the generation is unchanged.
+    /// Process-wide compatibility generation retained for existing SDK users.
+    /// New internal caches should prefer root_structure_generation() so an
+    /// unrelated editor's mutation does not invalidate their fast path.
     static std::uint64_t structure_generation() noexcept;
+    /// Generation of the top-level tree containing this view. Safe to call on
+    /// a nested subtree root; mutations anywhere under the same top-level root
+    /// invalidate identity/liveness caches that use it.
+    std::uint64_t root_structure_generation() const noexcept;
 
     size_t child_count() const { return children_.size(); }
     View* child_at(size_t index) { return children_[index].get(); }
@@ -234,7 +258,14 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; invalidate_subtree_caches_up(); }
+    void set_visible(bool v) {
+        if (visibility_quarantine_count_ > 0) {
+            visible_after_quarantine_ = v;
+            return;
+        }
+        visible_ = v;
+        invalidate_subtree_caches_up();
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
 
@@ -294,7 +325,8 @@ public:
 
     /// Mouse down with full event context.
     virtual void on_mouse_event(const MouseEvent& event) {
-        if (on_pointer_event) on_pointer_event(event);
+        auto callback = on_pointer_event;
+        if (callback) callback(event);
     }
     /// True if this widget adjusts its VALUE on a scroll-wheel over it (knobs,
     /// faders, sliders, steppers, pan). The host routes the wheel to such a
@@ -899,18 +931,18 @@ public:
     /// `borderTopWidth: 0` must yield a 0-px top border, not the 10-px
     /// shorthand. Without a per-edge `set` bit, the stored 0 is
     /// indistinguishable from "unset" in `apply_border_widths`.
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; border_top_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; border_right_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; border_left_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Color-only setters. Setting `borderTopColor` alone must not mark the
     /// top edge's width as explicitly set; that would let a stale 0 override
     /// the uniform `borderWidth` shorthand. Mirrors CSS, where
     /// `border-top-color` and `border-top-width` are independent longhands.
-    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top_color(Color c)    { border_top_.color = c;    border_top_color_set_ = true;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right_color(Color c)  { border_right_.color = c;  border_right_color_set_ = true;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left_color(Color c)   { border_left_.color = c;   border_left_color_set_ = true;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Width-only setters. Setting `borderTopWidth` alone preserves the
     /// existing per-edge color and explicitly marks the width as set, including
     /// a width of 0, which then overrides any uniform shorthand on that edge.
@@ -937,6 +969,15 @@ public:
     bool has_border_right_set() const { return border_right_set_; }
     bool has_border_bottom_set() const { return border_bottom_set_; }
     bool has_border_left_set() const { return border_left_set_; }
+    /// Per-edge colour "explicitly set" probes. A `BorderSide` default-
+    /// constructs to opaque black, so a stored colour is indistinguishable
+    /// from "never set" — and paint has to tell those apart, or a box that
+    /// only ever received per-side WIDTHS gets four black edges instead of
+    /// the uniform `border_color()` the shorthand asked for.
+    bool has_border_top_color_set() const { return border_top_color_set_; }
+    bool has_border_right_color_set() const { return border_right_color_set_; }
+    bool has_border_bottom_color_set() const { return border_bottom_color_set_; }
+    bool has_border_left_color_set() const { return border_left_color_set_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.). When
     /// transitioning from uniform `corner_radius_` to per-corner mode, seed
@@ -1509,12 +1550,63 @@ public:
     void set_backdrop_blur(float radius) { style_extras().backdrop_blur = radius; }
     float backdrop_blur() const { return style_extras_ ? style_extras_->backdrop_blur : 0.0f; }
 
+    /// CSS backdrop-filter with its full function list — `saturate()`,
+    /// `brightness()`, `invert()`, and compositions of them. Takes precedence
+    /// over `set_backdrop_blur` when non-empty; a blur-only value can be
+    /// expressed either way and means the same thing.
+    ///
+    /// Callers that pass a list containing a blur SHOULD also call
+    /// `set_backdrop_blur` with that radius: the repaint-damage pass reads the
+    /// scalar to decide how far beyond the view's bounds a change reaches.
+    void set_backdrop_filter_chain(std::vector<FilterOp> chain) {
+        style_extras().backdrop_filter_chain = std::move(chain);
+    }
+    const std::vector<FilterOp>& backdrop_filter_chain() const {
+        static const std::vector<FilterOp> kEmpty;
+        return style_extras_ ? style_extras_->backdrop_filter_chain : kEmpty;
+    }
+
     /// CSS `clip-path: path("...")`. Stores an SVG-path-d string; paint_all()
     /// installs it as a canvas clip via
     /// `Canvas::clip_path_svg` before painting children. Empty string
     /// clears the slot. URL refs (`url(#id)`) and named shape forms
     /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
     /// `path("...")` form is honored today.
+    /// The clip an IMPORTER resolved for this view, in the view's own
+    /// coordinate space — the rectangle CSS's clip chain leaves of it.
+    ///
+    /// Unlike `overflow`, this clips ONLY this view's own painting, never its
+    /// children: each child carries the rectangle its own chain resolves to.
+    /// That is deliberate and is the whole reason the slot exists. CSS clips
+    /// along the containing-block chain while a view tree clips by parentage,
+    /// so a child can legitimately need a WIDER clip than its parent — an
+    /// absolutely positioned node whose containing block sits above the
+    /// `overflow: hidden` box it is nested in escapes that clip in a browser.
+    /// An inherited clip is an intersection and cannot widen, so no assignment
+    /// of inherited rectangles can express that; a per-view rectangle can.
+    ///
+    /// Native and authored trees never set it and pay nothing.
+    void set_ancestor_clip_rect(Rect r) { style_extras().ancestor_clip = r; }
+    const std::optional<Rect>& ancestor_clip_rect() const {
+        static const std::optional<Rect> kNone;
+        return style_extras_ ? style_extras_->ancestor_clip : kNone;
+    }
+
+    /// Corner radii for the ancestor clip, clockwise from top-left.
+    ///
+    /// CSS clips overflow to the clipper's ROUNDED padding box, so a child with
+    /// square corners inside a rounded card is cut to the card's curve. Clipping
+    /// to the bare rectangle instead paints that child square into the corner
+    /// and the card reads as unrounded even though its own border curves.
+    /// Zero on every corner is the common case and clips to the plain rectangle.
+    void set_ancestor_clip_radii(float tl, float tr, float br, float bl) {
+        style_extras().ancestor_clip_radii = {tl, tr, br, bl};
+    }
+    const std::array<float, 4>& ancestor_clip_radii() const {
+        static const std::array<float, 4> kNone{0.0f, 0.0f, 0.0f, 0.0f};
+        return style_extras_ ? style_extras_->ancestor_clip_radii : kNone;
+    }
+
     void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
     const std::string& clip_path() const {
         static const std::string kEmpty;
@@ -1610,11 +1702,20 @@ public:
         return style_extras_ ? style_extras_->background_origin : kEmpty;
     }
 
-    /// CSS background-position / background-size. Both are storage-only slots
-    /// today: Pulp's solid-bg paint path doesn't honor position or size offsets
-    /// (these only matter for url()/image-set() raster backgrounds). Storing
-    /// the keyword keeps the round-trip honest so the image pipeline can honor
-    /// the existing value without a JS-side change.
+    /// CSS background-position / background-size.
+    ///
+    /// `background-size` IS read at paint wherever the layer repeats — it sizes
+    /// the gradient tile. `background-position` is still storage-only, as is
+    /// `background-size` on a non-repeating layer, because the remaining cases
+    /// only matter for url()/image-set() raster backgrounds and there is no
+    /// image paint pass yet.
+    ///
+    /// Storing a keyword nothing reads is a deliberate strategy here, but it
+    /// carries a cost worth naming: the compat entry for `background-origin`
+    /// justified a `supported` claim on "pulp doesn't paint repeating gradient
+    /// tiles", and when tile paint arrived that claim went false with no edit
+    /// to the entry. If you make one of these slots load-bearing, re-read what
+    /// the matrix says about its neighbours.
     void set_background_position(std::string kw)   { style_extras().background_position = std::move(kw); }
     const std::string& background_position() const {
         static const std::string kEmpty;
@@ -1776,7 +1877,90 @@ public:
         float sweep_turns = 1.0f;   // conic: turns the stop list spans
         std::vector<Color> colors;
         std::vector<float> positions;
+
+        // ── Geometry only a laid-out box can resolve ────────────────────
+        //
+        // CSS gradient geometry is a function of the box: an angle's endpoints
+        // depend on the aspect ratio, and a radial's radii are percentages of
+        // the width and height. Style is applied BEFORE the box is sized —
+        // the design importer runs the whole style pass ahead of Yoga — so
+        // anything resolved when the CSS is parsed is resolved against a
+        // degenerate 1x1 box, which silently turns every angled gradient the
+        // wrong way and gives every radial the wrong radius. These slots carry
+        // the CSS intent forward instead, and the painter resolves them
+        // against the real bounds.
+
+        /// Where a linear gradient's endpoints come from. `endpoints` means
+        /// x0..y1 are already box fractions and need no box (the four
+        /// `to <side>` keywords, and every caller of the explicit setter).
+        enum class LinearFrom { endpoints, angle, corner };
+        LinearFrom linear_from = LinearFrom::endpoints;
+        /// CSS angle in radians, clockwise from "to top". Valid for
+        /// LinearFrom::angle.
+        float linear_angle = 0.0f;
+        /// Signs of the named corner for LinearFrom::corner: x is +1 for
+        /// `right`, -1 for `left`; y is +1 for `bottom`, -1 for `top`.
+        float corner_x = 1.0f, corner_y = 1.0f;
+
+        /// The band a `repeating-linear-gradient` tiles; 0 when the gradient
+        /// does not repeat. `positions` are rescaled ONTO this band — 0..1
+        /// across one tile — exactly as a repeating conic's are onto its
+        /// sweep, so the painter only has to place the band and let the shader
+        /// tile it.
+        float linear_repeat = 0.0f;
+        /// What `linear_repeat` is measured in. CSS lets the band be a length
+        /// (`... 1px, 7px` — 7 CSS px per tile whatever the box) or a fraction
+        /// of the gradient line (`... 0%, 10%`), and the line's length is a
+        /// function of the laid-out box, so the choice cannot be collapsed
+        /// before paint.
+        enum class RepeatUnit { px, line_fraction };
+        RepeatUnit linear_repeat_unit = RepeatUnit::px;
+
+        /// True when `positions` still hold raw `px` LENGTHS rather than 0..1
+        /// parameters, because every stop named one. The divisor is the
+        /// gradient LINE, whose length is a function of the laid-out box — and
+        /// of the `background-size` TILE when the layer is tiled — so the
+        /// division belongs at paint, beside `linear_repeat_unit`, which
+        /// carries its band's unit forward for the same reason.
+        ///
+        /// `linear-gradient(<colour> 1px, transparent 1px)` under
+        /// `background-size: 100% 32px` is a scanline every 32px. Read as
+        /// parameters instead, both stops land at 1.0 — the far end of the
+        /// ramp — and the layer paints its first colour over the WHOLE box.
+        /// That is a monotone wash, and it reads as a missing tile rather than
+        /// as a misread stop, which is why the two halves have to land
+        /// together.
+        bool positions_in_px = false;
+
+        /// How a radial gradient's radii are sized, per css-images-3.
+        /// `max_side` is not a CSS keyword — it is the pre-existing
+        /// `radius x max(w,h)` circle the explicit setter has always meant,
+        /// kept so those callers are unaffected.
+        enum class RadialSize {
+            max_side, farthest_corner, farthest_side, closest_corner,
+            closest_side, explicit_radii,
+        };
+        RadialSize radial_size = RadialSize::max_side;
+        /// A circle has one radius resolved against the box's diagonal-ish
+        /// metric; an ellipse gets a separate radius per axis. CSS defaults to
+        /// ellipse unless `circle` is named or a single length is given.
+        bool radial_circle = false;
+        /// RadialSize::explicit_radii: radii as fractions of width and height,
+        /// plus an absolute term. A `%` radius fills the fraction slot and a
+        /// `px` radius the absolute one, so both spellings — and a calc() that
+        /// mixes them — resolve through one expression.
+        float radial_rx = 0.0f, radial_ry = 0.0f;
+        float radial_rx_px = 0.0f, radial_ry_px = 0.0f;
     };
+
+    /// A radial gradient's centre and radii in pixels, resolved against a box.
+    struct ResolvedRadial { float cx, cy, rx, ry; };
+
+    /// Resolve a radial layer's CSS sizing against a box of `w` x `h`.
+    /// Free of any View state so the painter, the parser and tests all get the
+    /// same answer from the same code.
+    static ResolvedRadial resolve_radial(const BackgroundGradient& g,
+                                         float w, float h);
 
     /// Replace the background-image stack, first layer on top.
     void set_background_gradient_layers(std::vector<BackgroundGradient> layers) {
@@ -1846,7 +2030,11 @@ public:
     int background_gradient_type() const {
         return bg_gradients_.empty() ? 0 : bg_gradients_.front().type;
     }
-    /// Radial radius as a fraction of max(w,h). Exposed for tests/inspection.
+    /// The legacy single-radius slot, as a fraction of max(w,h). Reports what
+    /// set_background_gradient_radial() was given and nothing else — a radial
+    /// parsed from CSS has per-axis radii that this cannot express, and leaves
+    /// this at its default. Use resolve_radial() for a gradient's real
+    /// geometry.
     float background_gradient_radius() const {
         return bg_gradients_.empty() ? 0.7071f : bg_gradients_.front().radius;
     }
@@ -1954,6 +2142,43 @@ public:
     UserSelect user_select() const { return user_select_; }
 
 private:
+    friend class WidgetBridge;
+    friend class ViewCapture;
+
+    void begin_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_++ == 0)
+            visible_after_quarantine_ = visible_;
+        set_visible_from_quarantine(false);
+    }
+    void refresh_visibility_quarantine() noexcept {
+        set_visible_from_quarantine(false);
+    }
+    void end_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_ == 0)
+            return;
+        --visibility_quarantine_count_;
+        if (visibility_quarantine_count_ == 0)
+            set_visible(visible_after_quarantine_);
+    }
+    void set_visible_from_quarantine(bool visible) noexcept {
+        visible_ = visible;
+        invalidate_subtree_caches_up();
+    }
+    static void set_subtree_detaching(View& view, bool detaching) noexcept;
+    void publish_structure_change() noexcept;
+    std::vector<GestureRecognizer*> collect_realm_reset_gestures() const;
+    void prepare_children_for_realm_reset(
+        const std::vector<GestureRecognizer*>& removed_recognizers) noexcept;
+    void disconnect_frame_clock_for_realm_reset() noexcept;
+    void finish_realm_reset_detach() noexcept;
+    void retire_interaction_state_for_realm_reset(
+        std::unique_ptr<ActiveDrag>& retired_drag,
+        std::unique_ptr<RootInteractionState>& retired_interaction) noexcept;
+    std::unique_ptr<View> extract_child_for_realm_reset(View* child) noexcept;
+    void adopt_child_for_realm_reset(std::unique_ptr<View> child) noexcept;
+    void retire_children_for_realm_reset(
+        std::vector<std::unique_ptr<View>>& retired) noexcept;
+
     /// Recursively fire `on_frame_clock_changed()` on this view and every
     /// descendant. Used by `set_frame_clock()` so a clock installed on a root
     /// after the subtree was built reaches self-subscribing descendants.
@@ -2021,6 +2246,18 @@ private:
     void paint_outset_shadows(canvas::Canvas& canvas);
     void apply_overflow_and_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
+    /// Builds the per-corner outline for a box of the given size and four
+    /// corner radii, dispatching between circular corners and the `continuous`
+    /// squircle. Owned by paint_background_and_border and handed to the border
+    /// pass so both draw the same shape.
+    using CornerPathBuilder =
+        std::function<void(float w, float h, float tl, float tr,
+                           float bl, float br)>;
+    void paint_border(canvas::Canvas& canvas,
+                      bool use_per_corner,
+                      const CornerPathBuilder& build_corner_path,
+                      float eff_r, float eff_tl, float eff_tr,
+                      float eff_bl, float eff_br);
     void paint_children_in_order(canvas::Canvas& canvas);
     void paint_post_decorations(canvas::Canvas& canvas, const EffectLayerState& layers);
 
@@ -2039,6 +2276,13 @@ private:
     /// copy is populated; `interaction()` walks up to it. Detached widgets use a
     /// process-global fallback instead (see view.cpp), never this member.
     std::unique_ptr<RootInteractionState> interaction_state_;
+    // Only the root's value is observed and bumped. Atomic prevents a native
+    // provider's incidental read from racing the owner-thread detach publish.
+    std::atomic<std::uint64_t> structure_generation_{1};
+    // Set across an entire subtree before the first virtual detach callback.
+    // ViewCapture treats this as already absent even while on_detached() still
+    // needs the old parent link to release parent-owned resources.
+    std::atomic<bool> detaching_{false};
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
@@ -2064,6 +2308,8 @@ private:
     std::string access_disabled_;
     std::string access_hidden_;
     bool visible_ = true;
+    std::size_t visibility_quarantine_count_ = 0;
+    bool visible_after_quarantine_ = true;
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;
@@ -2127,6 +2373,13 @@ private:
     bool border_right_set_ = false;
     bool border_bottom_set_ = false;
     bool border_left_set_ = false;
+    // Parallel flags for the per-edge COLOR longhands. Separate from the width
+    // flags because CSS treats them as independent: `border-top-color` alone
+    // must not make the top edge's width explicit.
+    bool border_top_color_set_ = false;
+    bool border_right_color_set_ = false;
+    bool border_bottom_color_set_ = false;
+    bool border_left_color_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     // % support paired with corner_radii_. >0 means use pct
@@ -2187,6 +2440,14 @@ private:
     struct ViewStyleExtras {
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
+        /// The whole `backdrop-filter` list when it is more than a blur.
+        std::vector<FilterOp> backdrop_filter_chain;
+        // Import-resolved clip on this view's OWN ink; see
+        // set_ancestor_clip_rect for why it does not descend.
+        std::optional<Rect> ancestor_clip;
+        // Corner radii of that clip, clockwise from top-left; see
+        // set_ancestor_clip_radii.
+        std::array<float, 4> ancestor_clip_radii{0.0f, 0.0f, 0.0f, 0.0f};
         std::string clip_path;
         std::string mask_image;
         std::string mask;

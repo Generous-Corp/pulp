@@ -141,6 +141,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_clip_sequence_ref",
         "pulp.timeline.command.set_groove",
         "pulp.timeline.command.set_meter_map",
+        "pulp.timeline.command.set_note_events",
         "pulp.timeline.command.set_note_velocity",
         "pulp.timeline.command.set_record_arm",
         "pulp.timeline.command.set_take_comp",

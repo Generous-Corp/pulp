@@ -337,6 +337,63 @@ TEST_CASE("native resolver keeps asset diagnostics deterministic across JSON ord
     REQUIRE(background_pos < src_pos);
 }
 
+TEST_CASE("CSS clip-path polygon becomes SVG path data",
+          "[view][import][native-resolver][clip-path]") {
+    // View::set_clip_path takes SVG path data; CSS gives a shape function.
+    // Nobody had written the translation, so the raw "polygon(...)" text
+    // reached the path parser, failed, and the clip silently did nothing: an
+    // element meant to be clipped to an ADSR curve painted as a full rectangle
+    // over its own labels. Silent because a clip that does not clip still
+    // renders something.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    IRNode clipped;
+    clipped.type = "frame";
+    clipped.name = "Envelope";
+    clipped.style.width = 200.0f;
+    clipped.style.height = 100.0f;
+    clipped.style.clip_path = "polygon(0% 100%, 50% 0%, 100% 100%)";
+    ir.root.children.push_back(clipped);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    const auto& d = root->child_at(0)->clip_path();
+
+    INFO("clip path emitted: " << d);
+    // Percentages resolve against the element's own box, so this is geometry
+    // rather than a string swap: 50% of 200 is 100, 100% of 100 is 100.
+    REQUIRE_FALSE(d.empty());
+    CHECK(d.find("polygon") == std::string::npos);
+    CHECK(d.rfind("M ", 0) == 0);
+    CHECK(d.find("100 0") != std::string::npos);   // apex: 50% x, 0% y
+    CHECK(d.find("200 100") != std::string::npos); // bottom-right corner
+    CHECK(d.back() == 'Z');
+}
+
+TEST_CASE("an unparseable clip-path shape is dropped rather than passed through",
+          "[view][import][native-resolver][clip-path]") {
+    // Handing a shape function the path parser cannot read is what produced
+    // the original bug. If a polygon cannot be converted, emitting nothing is
+    // honest; emitting the CSS text only looks like it did something.
+    DesignIR ir;
+    ir.root.type = "frame";
+
+    IRNode bad;
+    bad.type = "frame";
+    bad.style.width = 200.0f;
+    bad.style.height = 100.0f;
+    bad.style.clip_path = "polygon(nonsense)";
+    ir.root.children.push_back(bad);
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    CHECK(root->child_at(0)->clip_path().empty());
+}
+
 TEST_CASE("clear_baked_knob_antenna removes the antenna without notching the disc",
           "[view][import][knob][antenna]") {
     // Synthetic 40x50 RGBA8: a thin vertical "antenna" (x 18..21) standing above

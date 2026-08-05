@@ -17,6 +17,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <cstddef>
+#include <memory>
 #include <thread>
 #include <chrono>
 #include <pulp/view/value_channel_set.hpp>
@@ -1406,6 +1408,28 @@ MeterFrame mono_frame(float rms) {
     return f;
 }
 
+class SameAddressValueChannelSet {
+public:
+    SameAddressValueChannelSet() { reconstruct(); }
+    ~SameAddressValueChannelSet() { std::destroy_at(current_); }
+
+    ValueChannelSet* get() const noexcept { return current_; }
+    ValueChannelSet* replace() {
+        std::destroy_at(current_);
+        return reconstruct();
+    }
+
+private:
+    ValueChannelSet* reconstruct() {
+        current_ = std::construct_at(
+            reinterpret_cast<ValueChannelSet*>(storage_));
+        return current_;
+    }
+
+    alignas(ValueChannelSet) std::byte storage_[sizeof(ValueChannelSet)]{};
+    ValueChannelSet* current_ = nullptr;
+};
+
 } // namespace
 
 TEST_CASE("a meter binds to a published value channel, not a parameter",
@@ -1438,6 +1462,180 @@ TEST_CASE("a meter binds to a published value channel, not a parameter",
     gr->publish(mono_frame(0.75f));
     bridge.service_param_bindings();
     REQUIRE_THAT(meter->display_rms(), WithinAbs(0.75f, 1e-5f));
+}
+
+TEST_CASE("value bindings lease and re-resolve the replacement channel set",
+          "[view][bridge][state-binding][value-channel][hot-swap][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    auto retired = std::make_unique<ValueChannelSet>();
+    auto* retired_meter = retired->declare_meter("level");
+    auto* retired_events = retired->declare_events("ticks");
+    REQUIRE(retired_meter != nullptr);
+    REQUIRE(retired_events != nullptr);
+
+    auto replacement = std::make_unique<ValueChannelSet>();
+    auto* replacement_meter = replacement->declare_meter("level");
+    auto* replacement_events = replacement->declare_events("ticks");
+    REQUIRE(replacement_meter != nullptr);
+    REQUIRE(replacement_events != nullptr);
+    const ValueEvent retired_event{.frame_index = 1, .value = 0.25f};
+    retired_events->publish(&retired_event, 1);
+
+    ValueChannelSet* active = retired.get();
+    int lease_depth = 0;
+    int access_calls = 0;
+    bool nested_lease = false;
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channel_access(
+        [&](const ValueChannelVisitor& visitor) {
+            ++access_calls;
+            nested_lease = nested_lease || lease_depth != 0;
+            ++lease_depth;
+            visitor(active);
+            --lease_depth;
+        });
+    bridge.load_script(R"(
+        createMeter('live');
+        createMeter('live2');
+        bindMeter('live', 'value:level');
+        bindMeter('live2', 'value:level');
+        globalThis.eventCalls = 0;
+        bindEvents('value:ticks', function() {
+            ++eventCalls;
+            // This performs another leased channel visit. It must run after the
+            // event frame's source lease has been released.
+            listValueChannels();
+        });
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("live"));
+    auto* meter2 = dynamic_cast<Meter*>(bridge.widget("live2"));
+    REQUIRE(meter != nullptr);
+    REQUIRE(meter2 != nullptr);
+
+    retired_meter->publish(mono_frame(0.2f));
+    access_calls = 0;
+    bridge.service_param_bindings();
+    CHECK(access_calls == 1);
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.2f, 1e-5f));
+    REQUIRE_THAT(meter2->display_rms(), WithinAbs(0.2f, 1e-5f));
+
+    // Mutation proof: leave the retired generation alive and publish a
+    // different value to it. A cached source pointer reads 0.3; a name resolved
+    // under the current lease reads the replacement's 0.8.
+    active = replacement.get();
+    retired_meter->publish(mono_frame(0.3f));
+    replacement_meter->publish(mono_frame(0.8f));
+    // Both generations now report publication 1. Generation identity, not just
+    // the per-source counter, must make the replacement event observable.
+    const ValueEvent replacement_event{.frame_index = 7, .value = 1.0f};
+    replacement_events->publish(&replacement_event, 1);
+    bridge.service_frame_callbacks();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.8f, 1e-5f));
+    CHECK(eval_json(engine, "eventCalls") == "1");
+    CHECK_FALSE(nested_lease);
+
+    // Destruction proof: the old set and all its sources are now gone while
+    // the original bridge and bindings remain. Servicing must touch only the
+    // replacement generation.
+    retired.reset();
+    replacement_meter->publish(mono_frame(0.6f));
+    bridge.service_frame_callbacks();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
+}
+
+TEST_CASE("a temporarily unavailable value-channel lease preserves its neutral",
+          "[view][bridge][state-binding][value-channel][hot-swap][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* level = channels.declare_meter("level", {}, 0.35f);
+    REQUIRE(level != nullptr);
+    ValueChannelSet* active = &channels;
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channel_access(
+        [&](const ValueChannelVisitor& visitor) { visitor(active); });
+    bridge.load_script(R"(
+        createMeter('live');
+        bindMeter('live', 'value:level');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("live"));
+    REQUIRE(meter != nullptr);
+
+    level->publish(mono_frame(0.25f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.25f, 1e-5f));
+
+    active = nullptr;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.35f, 1e-5f));
+}
+
+TEST_CASE("value generation identity survives same-address replacement ABA",
+          "[view][bridge][state-binding][value-channel][hot-swap][aba]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    SameAddressValueChannelSet storage;
+    ValueChannelSet* active = storage.get();
+    auto* first_meter = active->declare_meter("level");
+    auto* first_events = active->declare_events("ticks");
+    REQUIRE(first_meter != nullptr);
+    REQUIRE(first_events != nullptr);
+    first_meter->publish(mono_frame(0.2f));       // publish sequence 1
+    const ValueEvent first_event{.frame_index = 1, .value = 0.25f};
+    first_events->publish(&first_event, 1);       // publication 1
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channel_access(
+        [&](const ValueChannelVisitor& visitor) { visitor(active); });
+    bridge.load_script(R"(
+        createMeter('live');
+        bindMeter('live', 'value:level');
+        globalThis.abaEventCalls = 0;
+        bindEvents('value:ticks', function() { ++abaEventCalls; });
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("live"));
+    REQUIRE(meter != nullptr);
+    bridge.service_frame_callbacks();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.2f, 1e-5f));
+    CHECK(eval_json(engine, "abaEventCalls") == "0");
+
+    const auto first_identity = active->generation_identity();
+    const auto* first_address = active;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    active = storage.replace();
+    REQUIRE(active == first_address);
+    REQUIRE(active->generation_identity() != first_identity);
+    auto* second_meter = active->declare_meter("level");
+    auto* second_events = active->declare_events("ticks");
+    REQUIRE(second_meter != nullptr);
+    REQUIRE(second_events != nullptr);
+    second_meter->publish(mono_frame(0.8f));      // publish sequence 1 again
+    const ValueEvent second_event{.frame_index = 7, .value = 1.0f};
+    second_events->publish(&second_event, 1);     // publication 1 again
+
+    bridge.service_frame_callbacks();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.8f, 1e-5f));
+    CHECK(eval_json(engine, "abaEventCalls") == "1");
 }
 
 TEST_CASE("an undeclared value channel fails loudly rather than silently",

@@ -467,7 +467,10 @@ inline std::string browser_capture_runtime_install_name() {
     return "browser_capture-v1";
 }
 
-inline constexpr std::array<std::string_view, 13>
+// Sized from the list, not by hand: a literal count and a literal list drift
+// apart silently, and the failure lands at capture time as a module that
+// cannot resolve rather than at install time as a short manifest.
+inline constexpr std::array<std::string_view, 14>
     browser_capture_runtime_files{
         "browser_process.mjs",
         "capture.mjs",
@@ -477,6 +480,11 @@ inline constexpr std::array<std::string_view, 13>
         "interaction_plan_protocol.json",
         "lifecycle.mjs",
         "network_dependencies.mjs",
+        // The capture imports this for the per-node platform-font answer; an
+        // upgraded install missing it fails module resolution at capture time,
+        // not at install time, so the break surfaces as a broken import rather
+        // than a broken upgrade.
+        "platform_fonts.mjs",
         "renderers.mjs",
         "security.mjs",
         "semantics.mjs",

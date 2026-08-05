@@ -31,19 +31,18 @@ namespace {
 // tree: the first view owning a native overlay (non-const, so we can call its
 // capture_native_overlay_png hook) and whether any node requires a GPU host. One
 // pass instead of two so a large tree is walked once, not once per predicate.
-struct TreeScan {
-    View* overlay = nullptr;   ///< First native-overlay-owning view, or null.
-    bool needs_gpu = false;    ///< Any requires_gpu_host() in the subtree.
-};
-
-void scan_tree(View& v, TreeScan& s) {
-    if (!s.overlay && v.contains_native_overlay()) s.overlay = &v;
-    if (!s.needs_gpu && v.requires_gpu_host()) s.needs_gpu = true;
-    if (s.overlay && s.needs_gpu) return;  // both answered — stop early.
+void scan_tree(View& v, CaptureRequirements& requirements) {
+    if (!requirements.native_overlay && v.contains_native_overlay())
+        requirements.native_overlay = &v;
+    if (!requirements.requires_gpu && v.requires_gpu_host())
+        requirements.requires_gpu = true;
+    if (requirements.native_overlay && requirements.requires_gpu)
+        return;
     for (std::size_t i = 0; i < v.child_count(); ++i) {
         if (View* c = v.child_at(i)) {
-            scan_tree(*c, s);
-            if (s.overlay && s.needs_gpu) return;
+            scan_tree(*c, requirements);
+            if (requirements.native_overlay && requirements.requires_gpu)
+                return;
         }
     }
 }
@@ -70,7 +69,7 @@ constexpr ScreenshotBackend raster_fallback() {
 // min_opaque_coverage) — all four MUST be passed explicitly, otherwise the strict
 // defaults (5% non-background, 95% opaque) silently apply and reject sparse UIs.
 bool passes_capture_floor(const ScreenshotContentStats& st) {
-    return st.passes_content_floor(/*min_unique_colors=*/3,
+    return st.passes_content_floor(/*min_unique_colors=*/2,
                                    /*min_luminance_stddev=*/0.0,
                                    /*min_non_background_coverage=*/0.001,
                                    /*min_opaque_coverage=*/0.0);
@@ -95,12 +94,44 @@ void paint_root(canvas::Canvas& c, View& root, uint32_t w, uint32_t h) {
 
 }  // namespace
 
+CaptureRequirements inspect_capture_requirements(View& root) {
+    CaptureRequirements requirements;
+    scan_tree(root, requirements);
+    return requirements;
+}
+
 bool has_gpu_capture() {
 #ifdef PULP_VIEW_HAS_GPU_CAPTURE
     return true;
 #else
     return false;
 #endif
+}
+
+bool has_screenshot_backend() {
+#ifdef PULP_VIEW_HAS_BUILTIN_SCREENSHOT
+    return true;
+#else
+    if (has_gpu_capture())
+        return true;
+#ifdef PULP_VIEW_HAS_SCREENSHOT_DECODER
+    return has_screenshot_provider();
+#else
+    return false;
+#endif
+#endif
+}
+
+bool has_screenshot_decoder() {
+#ifdef PULP_VIEW_HAS_SCREENSHOT_DECODER
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool passes_capture_content_floor(const std::vector<uint8_t>& png) {
+    return passes_capture_floor(analyze_screenshot_content(png));
 }
 
 std::vector<uint8_t> render_to_png_gpu(View& root, uint32_t width, uint32_t height,
@@ -130,20 +161,18 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
     CaptureResult r;
 
     // Walk the tree once: find any native overlay AND whether GPU is required.
-    TreeScan scan;
-    scan_tree(root, scan);
+    const auto requirements = inspect_capture_requirements(root);
 
     // 1. Native overlay (WebView / native NSView). It isn't painted into the Pulp
     //    canvas, so ask the owning view for an in-process snapshot (e.g. WKWebView
     //    takeSnapshot). If one comes back non-blank we're done; only if there's no
     //    in-process snapshot do we refuse (rather than return a silent blank).
-    if (View* overlay = scan.overlay) {
+    if (View* overlay = requirements.native_overlay) {
         std::vector<uint8_t> png = overlay->capture_native_overlay_png(width, height);
         if (!png.empty()) {
-            const ScreenshotContentStats st = analyze_screenshot_content(png);
             r.png = std::move(png);
             r.used = ScreenshotBackend::default_backend;  // native-overlay snapshot
-            if (passes_capture_floor(st)) {
+            if (passes_capture_content_floor(r.png)) {
                 r.ok = true;
             } else {
                 r.reason = "native-overlay (WebView) snapshot came back essentially blank";
@@ -160,7 +189,7 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
     // 2. Resolve the backend.
     ScreenshotBackend chosen = backend;
     if (chosen == ScreenshotBackend::auto_select) {
-        chosen = scan.needs_gpu ? ScreenshotBackend::gpu : raster_fallback();
+        chosen = requirements.requires_gpu ? ScreenshotBackend::gpu : raster_fallback();
     }
     if (chosen == ScreenshotBackend::gpu && !has_gpu_capture()) {
         runtime::log_warn(
@@ -171,9 +200,14 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
     r.used = chosen;
 
     // 3. Render.
+    // Platform renderers lay the supplied tree out at the capture dimensions.
+    // Keep that implementation detail from mutating a live inspector tree.
+    const auto original_bounds = root.bounds();
     r.png = (chosen == ScreenshotBackend::gpu)
                 ? render_to_png_gpu(root, width, height, scale)
                 : render_to_png(root, width, height, scale, chosen);
+    root.set_bounds(original_bounds);
+    root.layout_children();
     if (r.png.empty()) {
         r.reason =
             "capture produced no bytes (no screenshot backend available for this "
@@ -186,8 +220,7 @@ CaptureResult capture_view(View& root, uint32_t width, uint32_t height, float sc
     //    still pass (the strict default floor is for golden-image work, not the
     //    "did anything paint" guard). A native-overlay blank is already refused in
     //    step 1, so here we only reject "nothing but the background fill".
-    const ScreenshotContentStats stats = analyze_screenshot_content(r.png);
-    if (!passes_capture_floor(stats)) {
+    if (!passes_capture_content_floor(r.png)) {
         r.reason =
             "captured frame is essentially blank (only the background fill — no widgets "
             "painted); the UI almost certainly did not render";

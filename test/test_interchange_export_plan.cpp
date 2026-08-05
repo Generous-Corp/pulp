@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -339,4 +340,58 @@ TEST_CASE("a loss manifest names its loss classes durably", "[interchange]") {
     const LossEntry* entry = plan.losses().find(Concept::ClipAbsolute);
     REQUIRE(entry != nullptr);
     REQUIRE(loss_class_id(entry->loss_class) == "dropped");
+}
+
+TEST_CASE("a controller stream reaches the loss manifest an export actually writes",
+          "[interchange]") {
+    // The census recording this concept is only half the path. What a user
+    // receives is `pulp-loss-manifest.json`, so the assertion that matters is
+    // over the artifact bytes rather than over the walker.
+    MidiExpressionLane mod_wheel;
+    mod_wheel.id = {30};
+    mod_wheel.address = {0, 0, 0x0B, 0, 1};
+    mod_wheel.points = {{{40}, TickPosition{0}, 0u}, {{41}, TickPosition{24}, 0x8000'0000u}};
+
+    MidiExpressionLane brightness;
+    brightness.id = {31};
+    brightness.address = {0, 1, 0x0B, 0, 74};
+    brightness.points = {{{42}, TickPosition{48}, 0xFFFF'FFFFu}};
+
+    auto content = take_value(MidiContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 0,
+                                                  {brightness, mod_wheel}));
+    auto clip = take_value(Clip::create({5}, {0}, {100}, std::move(content)));
+    auto track = take_value(Track::create({6}, "musical", {clip}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
+    const Project project =
+        take_value(Project::create(ProjectInput{{1}, "expressive", 100, {3}, {}, {sequence}}));
+
+    const ExportPlan plan = plan_export(project, Format::Smf);
+    REQUIRE_FALSE(plan.is_lossless());
+
+    const LossEntry* entry = plan.losses().find(Concept::ClipMidiExpressionLane);
+    REQUIRE(entry != nullptr);
+    REQUIRE(entry->level == ExportLevel::Drop);
+    REQUIRE(entry->loss_class == LossClass::Dropped);
+    REQUIRE_FALSE(entry->degraded_to.has_value());
+    REQUIRE(entry->count == 2);
+    REQUIRE(entry->owners.size() == 2);
+    REQUIRE(entry->owners[0] == ItemId{30});
+    REQUIRE(entry->owners[1] == ItemId{31});
+
+    // An empty detail is the failure mode a row-less concept would produce, and
+    // it reads as a filled-in manifest. Assert the sentence, not its presence.
+    REQUIRE(entry->detail.find("controller stream") != std::string_view::npos);
+
+    // The exported artifact itself, because that is what the receiving
+    // application's user has to go on.
+    const std::string manifest = loss_manifest_json(plan);
+    REQUIRE(manifest.find("\"clip.midi-expression-lane\"") != std::string::npos);
+    REQUIRE(manifest.find("\"lossless\":false") != std::string::npos);
+    REQUIRE(manifest.find("\"count\":\"2\"") != std::string::npos);
+
+    // Consent is per concept, so the new loss must be nameable in the accept
+    // list -- otherwise an export could never be authorized at all.
+    const std::vector<Concept> consent = plan.required_consent();
+    REQUIRE(std::find(consent.begin(), consent.end(), Concept::ClipMidiExpressionLane) !=
+            consent.end());
 }

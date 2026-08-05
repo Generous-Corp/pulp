@@ -135,11 +135,9 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
     // native measure-vs-paint divergence is a real bug, but fixing it means
     // regenerating the committed golden digests and belongs in its own change,
     // not smuggled in behind a browser port.
-    if (!platform_font_db_usable()) {
-        for (const auto& b : bundled_typefaces_snapshot()) {
-            if (!b.typeface || b.family.empty()) continue;
-            provider->registerTypeface(b.typeface, SkString(b.family.c_str()));
-        }
+    for (const auto& b : bundled_typefaces_snapshot()) {
+        if (!b.typeface || b.family.empty()) continue;
+        provider->registerTypeface(b.typeface, SkString(b.family.c_str()));
     }
 
     // Bridge user-registered fonts into the SkParagraph font collection.

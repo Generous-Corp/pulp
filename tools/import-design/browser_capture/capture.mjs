@@ -33,6 +33,7 @@ import {
   freezeAndMeasureDocumentExtent,
   installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
+  measureClippedControls,
   measureDocumentExtent,
   resumeDynamicTime,
   validateCaptureDimensions,
@@ -64,6 +65,7 @@ import {
   createCaptureProgress,
 } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
+import { evaluatePlatformFonts } from "./platform_fonts.mjs";
 
 function parseArguments(argv) {
   const command = argv[0] ?? "";
@@ -665,11 +667,41 @@ async function runCapture(options) {
       });
       finalExtent = await measureDocumentExtent(cdp);
       if (finalExtent.top < 0) {
-        const error = new Error(
-          `content still begins at y=${finalExtent.top}px after one bounded ` +
-          "viewport correction; pass an explicit --height");
-        error.code = "capture-negative-overflow";
-        throw error;
+        // The correction above re-centres CENTRED content by growing the
+        // viewport, which is why it is expressed as -2 * top. Content placed
+        // ABSOLUTELY above the origin does not move when the viewport grows, so
+        // it survives that correction unchanged — and `--height` is the same
+        // lever, so refusing with "pass an explicit --height" sent the caller
+        // round a loop that could not terminate.
+        //
+        // Agents write `top: -5px` constantly (a badge nudged over an edge, a
+        // ring inset), and refusing the whole design over a few pixels loses
+        // the entire panel. Translate instead: push the document down by the
+        // overhang so nothing sits above y=0. Relative geometry is untouched —
+        // every box moves by the same amount, so the DOM snapshot and the
+        // bitmap stay in the same coordinate space as each other.
+        const shift = Math.ceil(-finalExtent.top);
+        await cdp.call("Runtime.evaluate", {
+          expression:
+            `(() => { const s = document.createElement('style');` +
+            ` s.setAttribute('data-pulp-origin-shift', '${shift}');` +
+            ` s.textContent = 'body{margin-top:${shift}px !important}';` +
+            ` document.head.appendChild(s); return true; })()`,
+          returnByValue: true,
+        });
+        heightSettle = await waitForStable(cdp, {
+          networkIdle: () => pendingNetwork.size === 0,
+        });
+        finalExtent = await measureDocumentExtent(cdp);
+        if (finalExtent.top < 0) {
+          const error = new Error(
+            `content still begins at y=${finalExtent.top}px after a ` +
+            `${shift}px origin shift. Something re-anchors to the viewport ` +
+            "(position: fixed, or a negative margin on <html>), which a " +
+            "document-level shift cannot move.");
+          error.code = "capture-negative-overflow";
+          throw error;
+        }
       }
     }
     if (finalExtent.left < 0 || finalExtent.top < 0) {
@@ -701,8 +733,75 @@ async function runCapture(options) {
       error.code = "capture-negative-overflow";
       throw error;
     }
+    // Symmetric with the rule above. Content past the top or left is refused;
+    // content past a clipping edge was silently dropped, so a panel could ship
+    // with parameters bound to controls nobody can see.
+    const clippedControls = await measureClippedControls(cdp);
+    if (clippedControls.length > 0) {
+      const detail = clippedControls
+        .map(c => `${c.binding || "(unbound)"} cut by ${c.lost}px inside .${c.by}`)
+        .join("; ");
+      const error = new Error(
+        `${clippedControls.length} bound control(s) are clipped out of view: ` +
+        `${detail}. The panel declares a frame smaller than its own content; ` +
+        "give the root the height its content needs, or remove what does not fit.");
+      error.code = "capture-control-clipped";
+      throw error;
+    }
     const captureWidth = finalExtent.width;
     const captureHeight = finalExtent.height;
+
+    // Where the authored frame sits INSIDE the captured image. Measured HERE,
+    // while the page is still live — the envelope is assembled after teardown,
+    // and evaluating there returns null.
+    //
+    // The capture is deliberately larger than the design: the root carries its
+    // own padding, and the width growth above extends past a centered canvas so
+    // captureBeyondViewport does not clip it. Both are correct; shrinking the
+    // image would clip the drop shadows the growth exists to preserve. What was
+    // missing is the OFFSET. Without it a consumer must guess where the design
+    // starts, and a centered guess is wrong because the growth is asymmetric —
+    // it scored a visually-close panel as 73% different, and two phantom
+    // "renderer bugs" (a 9x-too-tall caret, advances 1/8 px short) were both
+    // this offset misread as pixel error.
+    //
+    // Best effort: a capture that cannot resolve the frame still succeeds with
+    // a null, because a missing offset must degrade to "cannot align" rather
+    // than fail an otherwise good capture.
+    let authoredFrame = null;
+    try {
+      const frameEval = await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          if (!document.body) return null;
+          // NOT firstElementChild: the harness injects a <style> into the body
+          // for the scroll-shift correction, and a style tag measures 0x0.
+          // Take the first child that actually occupies space.
+          let el = null;
+          for (const c of document.body.children) {
+            const b = c.getBoundingClientRect();
+            if (b.width > 0 && b.height > 0) { el = c; break; }
+          }
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left + window.scrollX, y: r.top + window.scrollY,
+                   width: r.width, height: r.height };
+        })()`,
+        returnByValue: true,
+      });
+      const box = frameEval.result?.value;
+      if (box && box.width > 0 && box.height > 0) {
+        // Relative to the capture origin — the document extent's top-left,
+        // which is negative for content starting left of the viewport.
+        authoredFrame = {
+          x: box.x - finalExtent.left,
+          y: box.y - finalExtent.top,
+          width: box.width,
+          height: box.height,
+        };
+      }
+    } catch {
+      authoredFrame = null;
+    }
     validateCaptureDimensions(
       captureWidth, captureHeight, dpr, "final capture extent");
     const screenshotOptions = {
@@ -731,6 +830,10 @@ async function runCapture(options) {
         device_scale_factor: dpr,
       });
     const tokenReport = await evaluateDesignTokens(cdp);
+    // Read before time resumes, like every other DOM-derived sidecar: the
+    // faces reported have to be the ones the frozen frame was shaped with.
+    const platformFontReport = await evaluatePlatformFonts(
+      cdp, snapshot, COMPUTED_STYLES);
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
     await networkGuard.awaitProvenance();
@@ -784,6 +887,8 @@ async function runCapture(options) {
       }),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
+      writeJson(
+        path.join(outputDir, "platform-fonts.json"), platformFontReport),
       ...(interactionReport
         ? [writeFile(
             path.join(outputDir, "interaction-report.json"),
@@ -897,6 +1002,18 @@ async function runCapture(options) {
         dimension_count: Object.keys(tokenReport.dimensions).length,
         string_count: Object.keys(tokenReport.strings).length,
       },
+      // Which typefaces the reference pixels were actually shaped with, as
+      // opposed to which the style rows asked for. A consumer comparing its own
+      // text against this capture has to know whether the reference used the
+      // authored family or a substitute, because measuring against a substitute
+      // and "fixing" the difference makes the renderer wrong on purpose.
+      platform_fonts: {
+        schema: platformFontReport.schema,
+        report: "platform-fonts.json",
+        text_run_count: platformFontReport.summary.text_runs,
+        resolved_run_count: platformFontReport.summary.resolved,
+        face_count: platformFontReport.faces_by_glyph_count.length,
+      },
       states: [{
         name: "default",
         reference_asset_id: "reference:browser",
@@ -907,6 +1024,10 @@ async function runCapture(options) {
         logical_width: captureWidth,
         logical_height: captureHeight,
         device_scale_factor: dpr,
+        // Null when the frame could not be resolved, and null is meaningful:
+        // it says "this capture cannot be registered", which a consumer must
+        // treat as "refuse to score" rather than as zero offset.
+        authored_frame: authoredFrame,
       },
     };
     await writeJson(

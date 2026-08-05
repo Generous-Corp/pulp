@@ -40,7 +40,7 @@ void close_active_combo_popup_in_subtree(View& root) {
     // same process a recycling list could miss its own open popup entirely.
     auto* active = ComboBox::active_popup_in(root);
     if (active != nullptr && is_descendant_of(root, active))
-        ComboBox::close_active_popup_in(root);
+        ComboBox::close_active_popup(root);
 }
 } // namespace
 

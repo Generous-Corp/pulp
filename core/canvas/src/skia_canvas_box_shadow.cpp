@@ -42,6 +42,29 @@
 
 namespace pulp::canvas {
 
+namespace {
+
+// The corner radius of an OUTSET shadow's silhouette.
+//
+// CSS Backgrounds 3 §7.1.1: the shadow shape is the border box outset by the
+// spread with each corner radius increased by the SPREAD — the whole spread,
+// not half of it. Both callers below already outset the occluder by the full
+// spread, so the radius is the only part that can fall out of step.
+//
+// Getting this wrong is invisible along the axes and only shows on the
+// diagonals, because the half-extent stays correct while the corner arc is
+// short: a circular silhouette becomes a squircle that reads as a ring one to
+// two pixels too large. Chrome is the oracle here and draws radius + spread at
+// every spread value.
+//
+// Inset shadows are NOT the mirror of this and are handled separately below;
+// they shrink the radius and are governed by their own smoothing rule.
+inline float outset_corner_radius(float corner_radius, float spread) {
+    return corner_radius + spread;
+}
+
+}  // namespace
+
 // ── Box shadow ──────────────────────────────────────────────────────────────
 
 void SkiaCanvas::draw_box_shadow(float x, float y, float w, float h,
@@ -119,7 +142,7 @@ void SkiaCanvas::draw_box_shadow(float x, float y, float w, float h,
                         sp.setImageFilter(SkImageFilters::DropShadowOnly(
                             dx, dy, sigma, sigma, white, nullptr, nullptr));
                         if (corner_radius > 0.0f) {
-                            float r = corner_radius + spread * 0.5f;
+                            const float r = outset_corner_radius(corner_radius, spread);
                             c->drawRRect(SkRRect::MakeRectXY(occluder_local, r, r), sp);
                         } else {
                             c->drawRect(occluder_local, sp);
@@ -168,7 +191,7 @@ void SkiaCanvas::draw_box_shadow(float x, float y, float w, float h,
                                             nullptr));
 
         if (corner_radius > 0.0f) {
-            float r = corner_radius + spread * 0.5f;
+            const float r = outset_corner_radius(corner_radius, spread);
             canvas_->drawRRect(SkRRect::MakeRectXY(occluder, r, r),
                                 shadow_paint);
         } else {

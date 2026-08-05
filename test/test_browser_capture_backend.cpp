@@ -405,6 +405,42 @@ TEST_CASE("browser version metadata redacts successful subprocess output",
     CHECK(result.product.find("/opt/acme") == std::string::npos);
     CHECK(result.product.find("<local-path>") != std::string::npos);
 }
+
+TEST_CASE("redaction keeps a leading-slash token that is not a path",
+          "[import-design][browser-capture][security]") {
+    // "/16" is a note division, not a filename, and panels are full of them.
+    // The capture runtime's mirror of this rule replaced such text with
+    // "<local-path>", so a delay panel shipped with its labels destroyed —
+    // invisible to every validator, because the string was still a string.
+    //
+    // Both halves matter: the label survives AND a genuine path on the same
+    // line is still redacted. Asserting only the first would pass a sanitizer
+    // that had simply stopped working.
+    TempTree tree("slash-token-redaction");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo \"Google Chrome /16 sync path:/opt/acme secret/browser "
+        "123.0.0.0\" >&2\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    REQUIRE(result.compatible);
+    INFO("redacted product: " << result.product);
+    CHECK(result.product.find("/16") != std::string::npos);
+    CHECK(result.product.find("/opt/acme") == std::string::npos);
+    CHECK(result.product.find("<local-path>") != std::string::npos);
+}
 #endif
 
 #ifndef _WIN32
