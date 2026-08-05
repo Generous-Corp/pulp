@@ -61,6 +61,16 @@ if(WIN32)
     target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
 endif()
 
+add_library(pulp-inspect-control
+    src/control_grants.cpp
+    src/control_identity.cpp)
+add_library(pulp::inspect-control ALIAS pulp-inspect-control)
+target_include_directories(pulp-inspect-control
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-control PUBLIC pulp::inspect-protocol)
+
 add_library(pulp-inspect-client src/client.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
@@ -168,6 +178,7 @@ foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-discovery-support
         pulp-inspect-discovery
         pulp-inspect-publication
+        pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime
         pulp-inspect-telemetry

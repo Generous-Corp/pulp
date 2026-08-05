@@ -77,6 +77,18 @@ target_link_libraries(pulp-test-control-manifest PRIVATE
 catch_discover_tests(pulp-test-control-manifest
     PROPERTIES LABELS "inspect;control;manifest")
 
+add_executable(pulp-test-control-identity test_control_identity.cpp)
+target_link_libraries(pulp-test-control-identity PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-identity
+    PROPERTIES LABELS "inspect;control;identity")
+
+add_executable(pulp-test-control-grants test_control_grants.cpp)
+target_link_libraries(pulp-test-control-grants PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-grants
+    PROPERTIES LABELS "inspect;control;grants")
+
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)
