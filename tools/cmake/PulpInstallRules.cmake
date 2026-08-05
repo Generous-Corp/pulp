@@ -103,6 +103,9 @@ endif()
 if(TARGET pulp-inspect-publication)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
 endif()
+if(TARGET pulp-inspect-control)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-control)
+endif()
 if(TARGET pulp-inspect-client)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-client)
 endif()
@@ -311,7 +314,11 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_broker.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_grants.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_identity.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_manifest.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_peer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_registry_digest.inc"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"

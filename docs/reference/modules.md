@@ -229,7 +229,10 @@ and macOS audit-token PID generation with the live process's validated code
 signature, identifier, Team ID or per-artifact ad-hoc CDHash. The broker must
 still exact-match that observation against launcher- or policy-owned expected
 identity before minting a verified peer. Named-pipe and TCP peers cannot be
-passed to that verifier.
+passed to that verifier. The installed `pulp::inspect-control` component owns
+the resulting identity, registration, and grant state in a dormant
+`ControlBroker`; constructing it never opens an endpoint or activates a runtime
+bridge.
 
 ### Child Process Pool — Crash-isolated workers
 
