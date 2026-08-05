@@ -899,3 +899,39 @@ TEST_CASE("pulp inspect validates missing values before connecting", "[cli][shel
     REQUIRE(unpaired_publication.stderr_output.find(
                 "--publication requires --session and --instance") != std::string::npos);
 }
+
+TEST_CASE("pulp inspect audit is read only and fails closed before activation",
+          "[cli][shellout][inspect][audit]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const auto help = run_pulp({"inspect", "audit", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    CHECK(help.stdout_output.find("audit ARTIFACT [--json]") !=
+          std::string::npos);
+
+    const auto missing_argument = run_pulp({"inspect", "audit"}, 10000);
+    REQUIRE_FALSE(missing_argument.timed_out);
+    REQUIRE(missing_argument.exit_code == 2);
+    CHECK(missing_argument.stderr_output.find("requires ARTIFACT") !=
+          std::string::npos);
+
+    const auto temp = unique_temp_dir("pulp-cli-inspect-audit");
+    const auto absent = temp / "not-an-artifact";
+    const auto blocked = run_pulp(
+        {"inspect", "audit", absent.string(), "--json"}, 10000);
+    REQUIRE_FALSE(blocked.timed_out);
+    REQUIRE(blocked.exit_code == 1);
+    const auto result = choc::json::parse(blocked.stdout_output);
+    CHECK(result["schema"].getString() == "pulp.control.audit.v1");
+    CHECK_FALSE(result["ok"].getBool());
+    CHECK(result["verdict"].getString() == "block");
+    CHECK_FALSE(fs::exists(absent));
+    fs::remove_all(temp);
+}

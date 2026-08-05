@@ -10,10 +10,12 @@ import re
 
 
 CAPABILITY_RE = re.compile(
-    r'PULP_INSPECT_CAPABILITY\(\w+,\s*"([^"]+)",\s*\w+,\s*([01]),\s*([01]),'
+    r'PULP_INSPECT_CAPABILITY\(\w+,\s*"([^"]+)",\s*"([^"]+)",'
+    r'\s*\w+,\s*\w+,\s*\w+,\s*\w+,\s*([01]),\s*([01]),'
 )
 CAPABILITY_ROW_RE = re.compile(
-    r"^\|\s*`([^`]+)`\s*\|\s*(yes|no)\s*\|\s*(yes|no)\s*\|",
+    r"^\|\s*(?:`[^`]+`\s+\()?`([^`]+)`\)?\s*\|\s*"
+    r"(yes|no)\s*\|\s*(yes|no)\s*\|",
     re.MULTILINE,
 )
 MCP_TOOL_RE = re.compile(
@@ -185,13 +187,14 @@ REQUIRED_CLAIMS = {
 
 REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
-        "if(PULP_ENABLE_INSPECTOR)\n    add_subdirectory(inspect)\nendif()",
+        "add_subdirectory(inspect)",
         "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)",
         "target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)",
         "target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)",
         "pulp-standalone-inspector-runtime-eval PRIVATE\n        pulp::inspect pulp::inspect-runtime-eval",
     ),
     "inspect/CMakeLists.txt": (
+        "if(NOT PULP_ENABLE_INSPECTOR)\n    return()\nendif()",
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
         "src/discovery_common.cpp",
         "src/discovery_paths.cpp",
@@ -209,9 +212,23 @@ REQUIRED_BUILD_CONTRACTS = {
         "inspect/include/pulp/inspect/publication_binding.hpp",
         "inspect/include/pulp/inspect/trace_inspector.hpp",
     ),
+    "tools/cmake/PulpInspectorShipping.cmake": (
+        "function(_pulp_cache_control_declarations target profile capabilities eval_ack)",
+        'set(PULP_${target}_CONTROL_PROFILE "${profile}" CACHE INTERNAL "" FORCE)',
+        'set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "" FORCE)',
+        '"${eval_ack}" CACHE INTERNAL "" FORCE)',
+    ),
+    "tools/cmake/PulpUtils.cmake": (
+        "_pulp_cache_control_declarations(${target}",
+    ),
     "tools/cli/CMakeLists.txt": (
         "cmd_inspect_unavailable.cpp",
         "cmd_tweaks_unavailable.cpp",
+        "target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)",
+    ),
+    "tools/mcp/CMakeLists.txt": (
+        "if(TARGET pulp::inspect-client)",
+        "PULP_MCP_ENABLE_INSPECTOR_CLIENT=0",
     ),
     "test/cmake/view_widget_bridge_tests.cmake": (
         "pulp-test-inspector-stripped-artifact",
@@ -358,13 +375,15 @@ def check_root(
         capability_id: (observe == "yes", develop == "yes")
         for capability_id, observe, develop in parsed_rows
     }
-    definition_ids = {capability_id for capability_id, _, _ in capability_definitions}
+    definition_ids = {
+        capability_id for capability_id, _, _, _ in capability_definitions
+    }
     extra_rows = sorted(set(capability_rows) - definition_ids)
     for capability_id in extra_rows:
         errors.append(
             f"development inspector docs contain unknown capability `{capability_id}`"
         )
-    for capability_id, observe, develop in capability_definitions:
+    for capability_id, _, observe, develop in capability_definitions:
         if f"`{capability_id}`" not in capability_doc:
             errors.append(
                 f"development inspector docs omit capability `{capability_id}`"
@@ -379,6 +398,51 @@ def check_root(
             errors.append(
                 "development inspector docs have stale profile membership for "
                 f"`{capability_id}`; expected {expected_text}"
+            )
+
+    shipping_cmake_path = root / "tools/cmake/PulpInspectorShipping.cmake"
+    if shipping_cmake_path.exists():
+        shipping_cmake = shipping_cmake_path.read_text(encoding="utf-8")
+
+        def cmake_list(name: str) -> list[str]:
+            match = re.search(
+                rf"set\({re.escape(name)}\s+(.*?)\)",
+                shipping_cmake,
+                re.DOTALL,
+            )
+            return match.group(1).split() if match else []
+
+        legacy = cmake_list("_PULP_INSPECTOR_SHIPPING_CAPABILITIES")
+        contracts = cmake_list("_PULP_CONTROL_CAPABILITIES")
+        registry_pairs = {
+            capability_id: contract_id
+            for capability_id, contract_id, _, _ in capability_definitions
+        }
+        projected_pairs = list(zip(legacy, contracts))
+        if (
+            len(legacy) != len(contracts)
+            or len(set(legacy)) != len(legacy)
+            or len(set(contracts)) != len(contracts)
+            or any(registry_pairs.get(old) != contract for old, contract in projected_pairs)
+        ):
+            errors.append(
+                "control shipping capability projection differs from the canonical registry"
+            )
+        digest_include = (
+            root / "inspect/include/pulp/inspect/control_registry_digest.inc"
+        ).read_text(encoding="utf-8")
+        header_digest = re.search(r'"([0-9a-f]{64})"', digest_include)
+        cmake_digest = re.search(
+            r'set\(_PULP_CONTROL_REGISTRY_DIGEST_V1\s+"([0-9a-f]{64})"\)',
+            shipping_cmake,
+        )
+        if (
+            not header_digest
+            or not cmake_digest
+            or header_digest.group(1) != cmake_digest.group(1)
+        ):
+            errors.append(
+                "installed shipping helper registry digest differs from the canonical header"
             )
 
     for relative_path, claims in FORBIDDEN_CLAIMS.items():

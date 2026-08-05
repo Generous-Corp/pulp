@@ -761,10 +761,15 @@ loopback) as a `ViewRole::Remote` secondary. The session speaks the
 protocol in `docs/reference/remote-view-protocol.md`:
 
 - `view.hello` + `view.metadata` handshake
-- `view.param_set` / `view.param_changed` wire through `StateStore`
+- `view.param_changed` publishes trusted host-side `StateStore` updates
 - `view.param_get` request/response
-- `view.input` (notification)
+- `view.input` (reserved notification; logged and ignored by the host)
 - `view.close` (either side)
+
+Remote View is observation-only. It deliberately has no inbound
+`view.param_set` handler, and `view.input` is not dispatched into the primary
+view. Do not restore either as an authority shortcut: future parameter or input
+mutation must pass through Pulp's capability/grant controller and audit path.
 
 Tests: `test/test_remote_view.cpp` covers handshake, metadata escaping,
 parameter sync, input forwarding, close handling, null-channel rejection, and
@@ -773,16 +778,18 @@ stale-session detach behavior via MemoryMessageChannel loopback.
 ### Attaching from an MCP server
 
 An MCP server that runs alongside a Pulp plugin host can open a
-`RemoteViewSession` to drive the plugin's view from Claude Code:
+`RemoteViewSession` to inspect the plugin's view from Claude Code:
 
-1. MCP server can declare a tool (e.g. `view_attach`, `view_param_set`,
+1. MCP server can declare read-only tools (for example `view_attach` and
    `view_param_get`) backed by `pulp::runtime::WebSocketChannel::connect(...)`.
 2. Tool handler calls `bridge->attach_remote_channel(std::move(ws), "mcp")`
    where `bridge` is the host's ViewBridge (same process) — or opens
    the socket *to* a separate Pulp host process that listens via
    `WebSocketChannel::accept`.
-3. Subsequent MCP tool calls drive `RemoteViewSession::set_parameter`
-   / `get_parameter` / `send_input`.
+3. Subsequent MCP tool calls may read through
+   `RemoteViewSession::get_parameter` and detach the session. Do not expose
+   `set_parameter` or `send_input` as remote mutation tools; the former is a
+   trusted host-side publish helper, and the latter has no host dispatch path.
 
 This is the pattern. A concrete MCP-tool wrapper bundled with Pulp is
 a small follow-up on top of `tools/mcp/pulp_mcp.cpp`.

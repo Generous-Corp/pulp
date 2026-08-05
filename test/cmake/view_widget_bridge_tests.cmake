@@ -71,6 +71,12 @@ target_link_libraries(pulp-test-inspector-test-input PRIVATE
     pulp::inspect-protocol Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-test-input)
 
+add_executable(pulp-test-control-manifest test_control_manifest.cpp)
+target_link_libraries(pulp-test-control-manifest PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-manifest
+    PROPERTIES LABELS "inspect;control;manifest")
+
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)

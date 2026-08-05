@@ -88,3 +88,41 @@ function(pulp_patch_choc_v8 choc_source_dir)
         message(STATUS "Pulp: applied CHOC V8 compatibility patch")
     endif()
 endfunction()
+
+function(pulp_patch_choc_json_number_exponent choc_source_dir)
+    set(_pulp_choc_json_header
+        "${choc_source_dir}/choc/text/choc_JSON.h")
+    if(NOT EXISTS "${_pulp_choc_json_header}")
+        message(FATAL_ERROR
+            "Pulp: CHOC JSON header not found for standards patch: ${_pulp_choc_json_header}")
+    endif()
+
+    file(READ "${_pulp_choc_json_header}" _pulp_choc_json)
+    set(_pulp_choc_json_original
+"                    hadExponent = true;
+                    popIf ('-');
+                    continue;")
+    set(_pulp_choc_json_patched
+"                    hadExponent = true;
+                    if (! popIf ('-'))
+                        popIf ('+');
+                    continue;")
+
+    string(FIND "${_pulp_choc_json}" "${_pulp_choc_json_patched}"
+        _pulp_choc_json_patched_position)
+    if(NOT _pulp_choc_json_patched_position EQUAL -1)
+        return()
+    endif()
+
+    string(FIND "${_pulp_choc_json}" "${_pulp_choc_json_original}"
+        _pulp_choc_json_original_position)
+    if(_pulp_choc_json_original_position EQUAL -1)
+        message(FATAL_ERROR
+            "Pulp: CHOC JSON exponent parser no longer matches the reviewed source; update or retire Pulp's standards patch")
+    endif()
+
+    string(REPLACE "${_pulp_choc_json_original}" "${_pulp_choc_json_patched}"
+        _pulp_choc_json "${_pulp_choc_json}")
+    file(WRITE "${_pulp_choc_json_header}" "${_pulp_choc_json}")
+    message(STATUS "Pulp: applied CHOC JSON positive-exponent patch")
+endfunction()

@@ -1,6 +1,7 @@
 add_library(pulp-inspect-protocol
     src/authentication.cpp
     src/capabilities.cpp
+    src/control_manifest.cpp
     src/protocol.cpp
     src/session.cpp
     src/test_input.cpp)
@@ -12,6 +13,10 @@ target_include_directories(pulp-inspect-protocol
         $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
+
+if(NOT PULP_ENABLE_INSPECTOR)
+    return()
+endif()
 
 add_library(pulp-inspect-discovery-support
     src/discovery_common.cpp

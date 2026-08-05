@@ -428,10 +428,13 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     auto bad_node_params = handler.handle(make_request(7, methods::kDOMGetNodeById, "not json"));
     REQUIRE(bad_node_params.is_error);
 
-    auto highlight = handler.handle(make_request(8, methods::kDOMHighlightNode));
+    auto highlight = handler.handle(make_request(
+        8, methods::kDOMHighlightNode, R"({"id":"child"})"));
     REQUIRE_FALSE(highlight.is_error);
+    REQUIRE(overlay.selected_view() == root.child_at(0));
     auto clear = handler.handle(make_request(9, methods::kDOMClearHighlight));
     REQUIRE_FALSE(clear.is_error);
+    REQUIRE(overlay.selected_view() == nullptr);
 
     auto search = handler.handle(make_request(10, methods::kDOMSearch, R"({"query":"child"})"));
     REQUIRE_FALSE(search.is_error);

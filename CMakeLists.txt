@@ -403,12 +403,10 @@ endfunction()
 _pulp_configure_standalone_target(pulp-standalone)
 target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 
-# The inspector protocol/session/client foundation is CPU-only and installable
-# when the optional SDK component is requested. inspect/CMakeLists.txt adds the
-# GPU/view overlay target only where that stack exists.
-if(PULP_ENABLE_INSPECTOR)
-    add_subdirectory(inspect)
-endif()
+# The control manifest and protocol registry are CPU-only audit data and remain
+# available even when live Inspector support is disabled. inspect/CMakeLists.txt
+# returns after that foundation in production-stripped configurations.
+add_subdirectory(inspect)
 
 # Inspector-capable standalone archives are optional SDK components. The
 # ordinary `pulp::standalone` target above is deliberately inspector-free;

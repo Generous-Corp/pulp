@@ -1,6 +1,7 @@
 // cmd_inspect.cpp — authenticated client for explicitly enabled inspector sessions
 
 #include "cmd_inspect_screenshot.hpp"
+#include "inspector_shipping_report.hpp"
 
 #include <pulp/inspect/client.hpp>
 #include <pulp/inspect/discovery.hpp>
@@ -12,6 +13,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -162,10 +164,18 @@ std::string risk_id(InspectorCapabilityRisk risk) {
     switch (risk) {
     case InspectorCapabilityRisk::Observe:
         return "observe";
+    case InspectorCapabilityRisk::Sensitive:
+        return "sensitive";
+    case InspectorCapabilityRisk::StreamingSensitive:
+        return "streaming-sensitive";
+    case InspectorCapabilityRisk::ResourceConsuming:
+        return "resource-consuming";
     case InspectorCapabilityRisk::Control:
         return "control";
     case InspectorCapabilityRisk::HighRisk:
         return "high-risk";
+    case InspectorCapabilityRisk::Critical:
+        return "critical";
     case InspectorCapabilityRisk::Unavailable:
         return "unavailable";
     }
@@ -265,11 +275,45 @@ int cmd_inspect(const std::vector<std::string>& args) {
         verb = args.front();
         first_option = 1;
         if (verb != "profiles" && verb != "list" && verb != "capabilities" && verb != "doctor" &&
+            verb != "audit" &&
             verb != "screenshot" &&
             verb != "set-parameter" && verb != "inject-midi" && verb != "set-transport") {
             std::cerr << "Error: unknown inspect command: " << verb << "\n";
             return 2;
         }
+    }
+
+    if (verb == "audit") {
+        std::filesystem::path artifact;
+        for (std::size_t index = first_option; index < args.size(); ++index) {
+            if (args[index] == "--json") {
+                json_output = true;
+            } else if (args[index] == "--help" || args[index] == "-h") {
+                std::cout << "Usage: pulp inspect audit ARTIFACT [--json]\n"
+                             "Verify the manifest, profile, digest, and linked "
+                             "control surfaces without activating the artifact.\n";
+                return 0;
+            } else if (args[index].starts_with("-")) {
+                std::cerr << "Error: unknown inspect audit argument: "
+                          << args[index] << "\n";
+                return 2;
+            } else if (!artifact.empty()) {
+                std::cerr << "Error: inspect audit accepts exactly one artifact\n";
+                return 2;
+            } else {
+                artifact = args[index];
+            }
+        }
+        if (artifact.empty()) {
+            std::cerr << "Error: inspect audit requires ARTIFACT\n";
+            return 2;
+        }
+        const auto report =
+            pulp::cli::inspector_shipping::audit_artifact(artifact);
+        std::cout << (json_output
+            ? pulp::cli::inspector_shipping::audit_json(report) + "\n"
+            : pulp::cli::inspector_shipping::audit_human(report));
+        return report.complete ? 0 : 1;
     }
 
     for (std::size_t index = first_option; index < args.size(); ++index) {
@@ -278,6 +322,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout
                 << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
                 << "Usage: pulp inspect <profiles|list|capabilities|doctor> [options]\n"
+                << "       pulp inspect audit ARTIFACT [--json]\n"
                 << "       pulp inspect screenshot --out FILE [session options] [--json]\n"
                 << "       pulp inspect set-parameter --id ID --value VALUE --session ID "
                    "--instance ID --publication ID\n"
