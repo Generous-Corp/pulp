@@ -182,17 +182,47 @@ def resolve_intent(prompt: str, idioms: dict | None = None) -> Intent:
 
     asked = _words(prompt)
     if asked:
-        best: tuple[int, str] | None = None
-        for slug, idiom in idioms.items():
-            phrases = list(idiom.get("names", [])) + list(idiom.get("implies", []))
-            shared = asked & _words(" ".join(phrases) + " " + slug.replace("-", " "))
-            if shared and (best is None or len(shared) > best[0]):
-                best = (len(shared), slug)
-        if best is not None:
+        # Rarity, not count. Counting shared words picked `wandering-drone`
+        # for "a shimmering ambient pad" -- two common words, "ambient" and
+        # "pad" -- over the idiom actually called `shimmer`, which shared the
+        # one word that meant something. A word appearing in one idiom's
+        # phrasing is evidence; a word appearing in twenty is furniture.
+        # A word from the idiom's NAME outranks any number of words from its
+        # description -- the same precedence `resolve_exact` already applies,
+        # for the same reason. "a shimmering ambient pad" shares two
+        # description words with `wandering-drone` and one NAME with the idiom
+        # called `shimmer`, and `shimmer` is plainly the better answer.
+        named_words = {slug: _words(" ".join(idiom.get("names", [])) + " " +
+                                    slug.replace("-", " "))
+                       for slug, idiom in idioms.items()}
+        vocab = {slug: named_words[slug] |
+                       _words(" ".join(idiom.get("implies", [])))
+                 for slug, idiom in idioms.items()}
+        seen: dict[str, int] = {}
+        for words in vocab.values():
+            for w in words:
+                seen[w] = seen.get(w, 0) + 1
+
+        best: tuple[float, str] | None = None
+        for slug, words in vocab.items():
+            shared = asked & words
+            if not shared:
+                continue
+            score = sum((8.0 if w in named_words[slug] else 1.0) / seen[w]
+                        for w in shared)
+            if best is None or score > best[0]:
+                best = (score, slug)
+
+        # One furniture word is not a resemblance. A guide picked on a word
+        # like "pad" is worse than saying nothing, because it points the model
+        # somewhere and reads as though we understood the request.
+        if best is not None and best[0] >= 0.25:
+            shared = sorted(asked & vocab[best[1]],
+                            key=lambda w: seen[w])
             return Intent(best[1], "nearest", False,
                           f"no idiom matched; {best[1]} is the nearest by "
-                          f"wording, so it is offered as a guide and cannot "
-                          f"reject this patch")
+                          f"wording ({', '.join(shared)}), so it is offered as "
+                          f"a guide and cannot reject this patch")
 
     return Intent(None, "none", False,
                   "no idiom matched this request and none resembled it; only "
