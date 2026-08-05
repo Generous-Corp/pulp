@@ -136,6 +136,32 @@ find "$DEST_DIR" -maxdepth 1 -name "$SLUG-*.vcvplugin" 2>/dev/null \
         rm -f "$old"
     done
 
+# THE UNPACKED DIRECTORY IS WHAT RACK LOADS, AND IT WINS OVER THE ARCHIVE.
+#
+# Rack unpacks a .vcvplugin into `<slug>/` and then loads that directory. So
+# placing a new archive beside a stale unpacked copy changes nothing at all:
+# this script printed "placed", exited 0, and Rack went on running the old
+# code. Verified -- an install over an existing unpacked plugin left the
+# previous binary live while every signal said it had succeeded, which is the
+# worst shape a packaging step can have.
+#
+# Moved aside rather than deleted. A user who built their own pack from inside
+# the app has it in exactly this form, and silently destroying it would be the
+# other failure. They get it back under a dated name and are told where.
+if [ -d "$DEST_DIR/$SLUG" ]; then
+    ASIDE="$DEST_DIR/.$SLUG.replaced-$(date +%Y%m%d-%H%M%S)"
+    if mv "$DEST_DIR/$SLUG" "$ASIDE" 2>/dev/null; then
+        echo "install_pack: moved the previously unpacked $SLUG aside to $ASIDE"
+        echo "              (Rack loads the unpacked directory, so leaving it"
+        echo "               would have kept the old plugin live)"
+        [ -n "$OWNER" ] && chown -R "$OWNER" "$ASIDE" 2>/dev/null
+    else
+        echo "install_pack: could not move aside $DEST_DIR/$SLUG -- Rack will" >&2
+        echo "              keep loading it and this install will NOT take" >&2
+        exit 1
+    fi
+fi
+
 # Copy to a temporary name and rename, so a Rack starting up mid-copy never
 # sees a half-written archive under a name it will try to unpack.
 TMP="$DEST_DIR/.$BASE.part"
