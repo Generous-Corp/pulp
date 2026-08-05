@@ -40,7 +40,9 @@ endif()
 add_executable(pulp-test-browser-capture-import
     test_browser_capture_backdrop_filter.cpp
     test_browser_capture_ir.cpp
+    test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
+    test_browser_capture_svg_render.cpp
     test_browser_import_cli.cpp
     test_html_intake.cpp
     test_html_project_stager.cpp
@@ -50,6 +52,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_styles.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_tree.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/svg_shape_lowering.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/claude_html_dependencies.cpp

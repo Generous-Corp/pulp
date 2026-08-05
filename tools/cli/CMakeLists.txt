@@ -21,7 +21,7 @@ configure_file(
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(TARGET pulp::inspect-client)
-    set(_pulp_inspect_command_source cmd_inspect.cpp)
+    set(_pulp_inspect_command_source cmd_inspect.cpp cmd_inspect_screenshot.cpp)
 else()
     set(_pulp_inspect_command_source cmd_inspect_unavailable.cpp)
 endif()
@@ -81,6 +81,8 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_run_parse.cpp
     cmd_ship.cpp
+    inspector_container_report.cpp
+    inspector_shipping_report.cpp
     cmd_bake.cpp
     notary_env.cpp
     cmd_upgrade.cpp
@@ -145,6 +147,7 @@ add_executable(pulp-cli
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-cli PRIVATE cmd_seq.cpp)
 endif()
+target_include_directories(pulp-cli PRIVATE ${CMAKE_SOURCE_DIR}/inspect/include)
 # The C++ CLI was historically the user-facing `pulp` binary. The Rust
 # binary now takes the `pulp` slot and this target emits `pulp-cpp`.
 # Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
@@ -156,6 +159,7 @@ target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host)
+target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
 endif()
@@ -203,6 +207,15 @@ if(TARGET pulp-test-cli-designmd-subcommands)
     add_dependencies(pulp-test-cli-designmd-subcommands pulp-cli)
     target_compile_definitions(pulp-test-cli-designmd-subcommands PRIVATE
         PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+
+# The real-process inspector test is declared before this top-level-only CLI.
+# Attach the shell-out binary only after pulp-cli exists so vendored Pulp test
+# configurations never reference a target they cannot create.
+if(TARGET pulp-test-standalone-inspector-process)
+    add_dependencies(pulp-test-standalone-inspector-process pulp-cli)
+    target_compile_definitions(pulp-test-standalone-inspector-process PRIVATE
+        "PULP_INSPECT_CLI_BINARY=\"$<TARGET_FILE:pulp-cli>\"")
 endif()
 
 # RPATH so the installed binary can find shared libraries (e.g.,

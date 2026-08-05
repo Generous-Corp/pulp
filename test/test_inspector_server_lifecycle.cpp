@@ -6,6 +6,9 @@
 using pulp::inspect::InspectorPublicationBinding;
 using pulp::inspect::InspectorPublicationLease;
 using pulp::inspect::InspectorServerShutdownFence;
+using pulp::inspect::InspectorTargetedEventResult;
+using pulp::inspect::make_event;
+using pulp::inspect::make_request;
 
 namespace {
 
@@ -154,6 +157,123 @@ public:
 };
 
 } // namespace
+
+TEST_CASE("authenticated server targets telemetry to its requesting client only",
+          "[inspect][server][telemetry][targeted]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::TelemetryStream,
+    };
+    std::mutex identities_mutex;
+    std::vector<std::string> identities;
+    InspectorSession session(
+        {"session-targeted", "instance", "plugin", "1"}, policy,
+        [&](const pulp::inspect::InspectorRequestContext& context,
+            const InspectorMessage& request) {
+            {
+                std::lock_guard lock(identities_mutex);
+                identities.emplace_back(context.client_id);
+            }
+            return make_response(request.id, R"({"sample":null})");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{&session, &publisher, record, *token};
+    config.max_message_bytes = 1024;
+    REQUIRE(start_test_inspector_server(server, std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient first;
+    InspectorClient second;
+    REQUIRE(first.connect(records.front(), reader));
+    REQUIRE(second.connect(records.front(), reader));
+    std::mutex events_mutex;
+    std::condition_variable events_cv;
+    int first_events = 0;
+    int second_events = 0;
+    first.set_event_handler([&](const InspectorMessage& event) {
+        if (event.method != "Telemetry.sample")
+            return;
+        {
+            std::lock_guard lock(events_mutex);
+            ++first_events;
+        }
+        events_cv.notify_all();
+    });
+    second.set_event_handler([&](const InspectorMessage& event) {
+        if (event.method != "Telemetry.sample")
+            return;
+        {
+            std::lock_guard lock(events_mutex);
+            ++second_events;
+        }
+        events_cv.notify_all();
+    });
+    REQUIRE_FALSE(first.request("Telemetry.getSnapshot").is_error);
+    REQUIRE_FALSE(second.request("Telemetry.getSnapshot").is_error);
+
+    std::vector<std::string> captured;
+    {
+        std::lock_guard lock(identities_mutex);
+        captured = identities;
+    }
+    REQUIRE(captured.size() == 2);
+    REQUIRE(captured[0] != captured[1]);
+    CHECK(server.send_to_client(
+              "missing-client", make_event("Telemetry.sample")) ==
+          InspectorTargetedEventResult::ClientNotFound);
+    CHECK(server.send_to_client(
+              captured[0], make_request(99, "Telemetry.sample")) ==
+          InspectorTargetedEventResult::EventUnavailable);
+    CHECK(server.send_to_client(
+              captured[0], make_event("State.parameterChanged")) ==
+          InspectorTargetedEventResult::EventUnavailable);
+    CHECK(server.send_to_client(
+              captured[0],
+              make_event("Telemetry.sample", std::string(2048, 'x'))) ==
+          InspectorTargetedEventResult::MessageTooLarge);
+    REQUIRE(server.send_to_client(
+                captured[0],
+                make_event("Telemetry.sample", R"({"sequence":1})")) ==
+            InspectorTargetedEventResult::Queued);
+    {
+        std::unique_lock lock(events_mutex);
+        REQUIRE(events_cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return first_events == 1;
+        }));
+        CHECK_FALSE(events_cv.wait_for(
+            lock, std::chrono::milliseconds(100), [&] {
+                return second_events != 0;
+            }));
+        CHECK(second_events == 0);
+    }
+
+    std::atomic<int> cleanup_calls{0};
+    std::atomic<bool> cleanup_reentered{false};
+    session.set_client_disconnect_handler([&](std::string_view) {
+        cleanup_reentered.store(
+            server.send_to_client(captured[0], make_event("Telemetry.sample")) ==
+                InspectorTargetedEventResult::EventUnavailable,
+            std::memory_order_release);
+        const auto call = ++cleanup_calls;
+        if (call == 1)
+            throw std::runtime_error("cleanup failure must be contained");
+    });
+    server.stop();
+    CHECK(cleanup_calls.load() == 2);
+    CHECK(cleanup_reentered.load(std::memory_order_acquire));
+}
 
 TEST_CASE("authenticated inspector server is reachable only on loopback",
           "[inspect][server][security][authentication]") {
@@ -949,24 +1069,48 @@ TEST_CASE("serialized callback stop and concurrent request do not deadlock",
         InspectorCapability::SessionDescribe,
         InspectorCapability::StateRead,
     };
-    InspectorServer server;
+    InspectorServer* server_ptr = nullptr;
     std::atomic<int> entered{0};
     InspectorSession session(
         {"session-concurrent-stop", "instance", "plugin", "1"},
         config,
         [&](const auto& request) {
             entered.fetch_add(1, std::memory_order_relaxed);
-            server.stop();
+            server_ptr->stop();
             return make_response(request.id, "{}");
         });
+    auto server = std::make_unique<InspectorServer>();
+    server_ptr = server.get();
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryRecord record;
     record.session_id = session.info().session_id;
     record.instance_id = session.info().instance_id;
     record.plugin_id = session.info().plugin_id;
-    REQUIRE(start_test_inspector_server(
-        server, InspectorServerConfig{&session, &publisher, record, *token}));
+    std::mutex post_mutex;
+    std::condition_variable post_cv;
+    int posted_requests = 0;
+    auto contended_rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{},
+        [&](auto task) {
+            {
+                std::unique_lock lock(post_mutex);
+                ++posted_requests;
+                post_cv.notify_all();
+                if (!post_cv.wait_for(lock, std::chrono::seconds(1),
+                                      [&] { return posted_requests == 2; })) {
+                    return false;
+                }
+            }
+            task();
+            return true;
+        },
+        [] { return false; });
+    InspectorServerConfig server_config{
+        &session, &publisher, record, *token};
+    server_config.main_thread_rpc = std::move(contended_rpc);
+    REQUIRE(start_test_inspector_server(*server, std::move(server_config)));
+    const auto shutdown = server->shutdown_fence();
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     InspectorClient first;
@@ -989,6 +1133,8 @@ TEST_CASE("serialized callback stop and concurrent request do not deadlock",
     }
     CHECK(entered.load(std::memory_order_relaxed) >= 1);
     CHECK(reader.list().empty());
+    server.reset();
+    REQUIRE(shutdown.wait_for(std::chrono::seconds(1)));
 }
 
 TEST_CASE("callback stop cancels a concurrent authenticated restart",
@@ -1354,6 +1500,7 @@ TEST_CASE("cleanup-worker publication loss can destroy the server owner",
     CHECK(shutdown_fence.ready());
 #endif
 }
+
 
 TEST_CASE("external server destruction joins its cleanup worker",
           "[inspect][publication][cleanup][external-join]") {

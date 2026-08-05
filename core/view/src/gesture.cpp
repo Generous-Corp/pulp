@@ -150,7 +150,8 @@ void GestureRecognizer::fail() {
     pending_callbacks_.clear();
 }
 
-void GestureRecognizer::remove_relationships_to(const GestureRecognizer& other) {
+void GestureRecognizer::remove_relationships_to(
+    const GestureRecognizer& other) noexcept {
     auto remove = [&other](std::vector<GestureRecognizer*>& recognizers) {
         recognizers.erase(
             std::remove(recognizers.begin(), recognizers.end(), &other),
@@ -921,6 +922,10 @@ void GestureArbiter::reset() {
                 candidate.owner->release_pointer_capture(session.pointer_id);
         }
     }
+    sessions_.clear();
+}
+
+void GestureArbiter::abandon() noexcept {
     sessions_.clear();
 }
 

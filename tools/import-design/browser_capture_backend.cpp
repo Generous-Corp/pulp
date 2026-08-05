@@ -113,8 +113,19 @@ std::string sanitize_subprocess_output(std::string value) {
         R"(file:///+[^\r\n;,)]*)", std::regex::icase};
     static const std::regex kQuotedPosixPath{
         R"((["'])(/[^"'\r\n]+)\1)"};
+    // A path worth hiding has a parent, so a second segment is required. The
+    // capture runtime's mirror of this rule (browser_capture/security.mjs)
+    // redacted "/16" — panel copy on any arpeggiator or delay — as a filename;
+    // the two implementations are kept in step so that class of bug cannot
+    // reappear on one side alone.
+    // The second segment must arrive before the first space, but everything
+    // after it may contain spaces: "/Users/Jane Doe/Private" is one path, while
+    // "/16 sync" is a label followed by a word. Allowing a space before the
+    // second slash would let a later unrelated path drag a leading "/16" into
+    // the match; forbidding spaces outright would strand "Doe/Private" in the
+    // clear.
     static const std::regex kUnquotedPosixPath{
-        R"((^|[\s=(:,])/(?!/)[^\r\n;,)]*)"};
+        R"((^|[\s=(:,])/(?!/)[^\s"'<>;,)]*/[^\r\n;,)]*)"};
     static const std::regex kWindowsPath{
         R"(\b[A-Za-z]:\\[^\r\n;,)]*)"};
     value = std::regex_replace(value, kExternalUrl, "<external-url>");

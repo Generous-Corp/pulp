@@ -12,6 +12,7 @@ The output directory matches the on-disk shape expected by
 to four digits, contiguous indices starting at 0.
 
 Sources:
+    inspector   — uses ``pulp inspect screenshot`` against a running standalone.
     macos       — uses ``screencapture -R X,Y,W,H`` (bounds required).
     simulator   — uses ``xcrun simctl io booted screenshot``.
 
@@ -21,6 +22,7 @@ Exit codes:
     3  Required external tool not installed / simulator not booted.
        Treated as ctest SKIP_RETURN_CODE for the smoke test so CI
        hosts without screencapture / Xcode don't false-fail.
+    4  Capture started but aborted before all requested frames were saved.
 """
 
 from __future__ import annotations
@@ -86,7 +88,54 @@ def _capture_simulator(dest: Path) -> bool:
     return proc.returncode == 0 and dest.exists() and dest.stat().st_size > 0
 
 
-def _source_available(source: str, bounds: Optional[str]) -> bool:
+def _capture_inspector(
+    dest: Path,
+    pulp_bin: str,
+    *,
+    session: Optional[str] = None,
+    instance: Optional[str] = None,
+    publication: Optional[str] = None,
+) -> int:
+    """Request a validated in-app PNG; preserve the inspector CLI exit status."""
+    command = [pulp_bin, "inspect", "screenshot", "--out", str(dest)]
+    if session:
+        command.extend(["--session", session])
+    if instance:
+        command.extend(["--instance", instance])
+    if publication:
+        command.extend(["--publication", publication])
+    try:
+        proc = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"capture_sim_frames: inspector capture failed: {exc}", file=sys.stderr)
+        return 1
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode(errors="replace") if isinstance(proc.stderr, bytes) else (proc.stderr or "")
+        detail = stderr.strip() or "no diagnostic output"
+        print(
+            f"capture_sim_frames: inspector capture failed "
+            f"(exit {proc.returncode}): {detail}",
+            file=sys.stderr,
+        )
+        return proc.returncode
+    if not dest.exists() or dest.stat().st_size == 0:
+        print(
+            "capture_sim_frames: inspector capture reported success without a PNG",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def _source_available(source: str, bounds: Optional[str], pulp_bin: Optional[str] = None) -> bool:
+    if source == "inspector":
+        return bool(pulp_bin or _which_or_none("pulp"))
     if source == "macos":
         return _which_or_none("screencapture") is not None and bool(bounds)
     if source == "simulator":
@@ -127,15 +176,25 @@ def capture(
     gate_consecutive: int = 1,
     idle_timeout_s: float = 10.0,
     bounds: Optional[str] = None,
+    pulp_bin: Optional[str] = None,
+    session: Optional[str] = None,
+    instance: Optional[str] = None,
+    publication: Optional[str] = None,
 ) -> int:
     deps = _load_deps()
     if deps is None:
         return 3
     np_mod, Image = deps
-    if not _source_available(source, bounds):
+    resolved_pulp = _which_or_none(pulp_bin or "pulp") if source == "inspector" else None
+    source_available = (
+        resolved_pulp is not None
+        if source == "inspector"
+        else _source_available(source, bounds)
+    )
+    if not source_available:
         print(
             f"capture_sim_frames: source `{source}` unavailable "
-            "(missing tool, unbooted simulator, or no --bounds)",
+            "(missing capture tool or required source configuration)",
             file=sys.stderr,
         )
         return 3
@@ -160,12 +219,19 @@ def capture(
         while saved < frame_count:
             grab_path = scratch_path / f"grab_{grab_idx:06d}.png"
             grab_idx += 1
-            ok = (
-                _capture_macos(grab_path, bounds or "")
-                if source == "macos"
-                else _capture_simulator(grab_path)
-            )
-            if not ok:
+            if source == "inspector":
+                grab_status = _capture_inspector(
+                    grab_path,
+                    resolved_pulp or "pulp",
+                    session=session,
+                    instance=instance,
+                    publication=publication,
+                )
+            elif source == "macos":
+                grab_status = 0 if _capture_macos(grab_path, bounds or "") else 3
+            else:
+                grab_status = 0 if _capture_simulator(grab_path) else 3
+            if grab_status != 0:
                 # Exit code semantics (#2168, #2152):
                 #   0 — full requested capture completed
                 #   3 — nothing was saved (e.g. source misconfigured at start)
@@ -178,7 +244,7 @@ def capture(
                         f"before any frames captured",
                         file=sys.stderr,
                     )
-                    return 3
+                    return grab_status
                 print(
                     f"capture_sim_frames: grab failed for source `{source}` "
                     f"mid-run — captured {saved}/{frame_count} frames",
@@ -246,7 +312,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--source", required=True,
-                        choices=("macos", "simulator"))
+                        choices=("inspector", "macos", "simulator"))
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--frame-count", type=int, default=60)
@@ -259,11 +325,27 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Seconds without saved motion → stop")
     parser.add_argument("--bounds", default=None,
                         help="macOS region as X,Y,W,H (required for --source macos)")
+    parser.add_argument("--pulp", default=None,
+                        help="pulp CLI path for --source inspector (default: PATH)")
+    parser.add_argument("--session", default=None,
+                        help="Exact inspector session for --source inspector")
+    parser.add_argument("--instance", default=None,
+                        help="Exact inspector instance for --source inspector")
+    parser.add_argument("--publication", default=None,
+                        help="Exact inspector publication for --source inspector")
     args = parser.parse_args(argv)
 
     if args.source == "macos" and not args.bounds:
         print("capture_sim_frames: --bounds X,Y,W,H is required with --source macos",
               file=sys.stderr)
+        return 2
+    identity = (args.session, args.instance, args.publication)
+    if args.source == "inspector" and any(identity) and not all(identity):
+        print(
+            "capture_sim_frames: --session, --instance, and --publication "
+            "must be provided together",
+            file=sys.stderr,
+        )
         return 2
     return capture(
         source=args.source,
@@ -274,6 +356,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         gate_consecutive=args.gate_consecutive,
         idle_timeout_s=args.idle_timeout_s,
         bounds=args.bounds,
+        pulp_bin=args.pulp,
+        session=args.session,
+        instance=args.instance,
+        publication=args.publication,
     )
 
 

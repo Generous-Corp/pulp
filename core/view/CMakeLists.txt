@@ -104,6 +104,11 @@ else()
     set(PULP_TEXT_ACCESSIBILITY_SOURCE src/text_accessibility.cpp)
 endif()
 
+# The pure UIA tree topology builder is compiled everywhere for normal
+# macOS/Linux unit-test coverage. Provider ownership remains Windows-private.
+target_sources(pulp-view-core PRIVATE
+    platform/win/accessibility_win_fragment_topology.cpp)
+
 # Source ownership is declarative and intentionally separate from platform/link
 # policy below. Keep this include at directory scope so engine and accessibility
 # source selections flow into the target manifests.
@@ -292,6 +297,7 @@ if(APPLE)
             platform/mac/plugin_view_host_mac_text_input.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
+            platform/mac/accessibility_mac_host_lifetime.mm
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
@@ -329,6 +335,8 @@ elseif(WIN32)
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
         platform/win/accessibility_win.cpp
+        platform/win/accessibility_win_events.cpp
+        platform/win/accessibility_win_fragment_lifecycle.cpp
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
         # Standalone outbound file-drag backend (free begin_file_drag via OLE).
@@ -404,6 +412,23 @@ elseif(UNIX)
     # Linux AT-SPI needs no link deps: accessibility_linux.cpp
     # speaks the AT-SPI2 wire protocol directly over pulp::platform::DBus
     # (libdbus-1 dlopen'd). No atk-bridge-2.0 / libatspi at build time.
+endif()
+
+# Capability probe used by remote inspector capture. Desktop macOS has the
+# CoreGraphics implementation above; Skia-enabled Windows/Linux builds use the
+# portable raster implementation. Other targets remain provider/GPU-dependent
+# and therefore report unsupported until they install a real producer.
+if((APPLE AND NOT PULP_IOS) OR (WIN32 AND PULP_HAS_SKIA)
+   OR (UNIX AND NOT APPLE AND NOT ANDROID AND PULP_HAS_SKIA))
+    target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_BUILTIN_SCREENSHOT=1)
+endif()
+
+# capture_view() only accepts provider output after its blank/content floor can
+# decode the PNG. Apple uses ImageIO; Skia builds use SkPngDecoder. A provider
+# without either remains available to direct render_to_png() callers, but is
+# not advertised as an always-honest smart-capture backend.
+if(APPLE OR PULP_HAS_SKIA)
+    target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_SCREENSHOT_DECODER=1)
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).

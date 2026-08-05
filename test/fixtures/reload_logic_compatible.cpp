@@ -8,6 +8,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/value_channel_set.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,6 +18,8 @@ using namespace pulp;
 namespace {
 class CompatibleGain final : public format::Processor {
 public:
+    CompatibleGain() { channels_.declare_scalar("compatible_signal"); }
+
     format::PluginDescriptor descriptor() const override {
         return {.name = "ReloadGain", .manufacturer = "Pulp Examples",
                 .bundle_id = "com.pulp.reload.gain", .version = "0.2.0",
@@ -40,6 +43,11 @@ public:
             for (std::size_t n = 0; n < out.num_samples(); ++n) o[n] = i[n] * g;
         }
     }
+
+    view::ValueChannelSet* value_channels() override { return &channels_; }
+
+private:
+    view::ValueChannelSet channels_;
 };
 }  // namespace
 

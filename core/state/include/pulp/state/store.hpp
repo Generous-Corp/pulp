@@ -247,6 +247,10 @@ public:
     /// **Main-thread only** — see @c begin_gesture().
     void acquire_gesture(ParamID id);
     void release_gesture(ParamID id);
+    /// Release a lease without synchronously entering host code. The matching
+    /// host end callback is queued for flush_deferred_gesture_releases().
+    void defer_gesture_release(ParamID id);
+    void flush_deferred_gesture_releases() noexcept;
 
     /// Close every gesture still open and report each end to the host.
     ///
@@ -486,6 +490,11 @@ private:
     // union that is actually open toward the host.
     std::unordered_set<ParamID> direct_gestures_;
     std::unordered_map<ParamID, std::size_t> gesture_leases_;
+    std::vector<ParamID> deferred_gesture_releases_;
+
+    // Close a retired owner's pending host bracket before a replacement owner
+    // is allowed to begin the same parameter again.
+    void flush_deferred_gesture_release(ParamID id) noexcept;
 
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
@@ -510,6 +519,7 @@ public:
         open_gestures_.clear();
         direct_gestures_.clear();
         gesture_leases_.clear();
+        deferred_gesture_releases_.clear();
     }
 };
 

@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -148,6 +149,27 @@ TEST_CASE("capture_view passes a non-blank widget tree (raster)", "[view][screen
     REQUIRE_FALSE(r.png.empty());
     REQUIRE(r.png.size() > 8);
     REQUIRE(r.png[1] == 'P');  // PNG magic "\x89PNG"
+}
+
+TEST_CASE("capture_view accepts a two-color UI", "[view][screenshot][gpu]") {
+    View root;
+    root.set_background_color(pulp::canvas::Color::rgba8(28, 31, 46));
+    auto panel = std::make_unique<View>();
+    panel->flex().preferred_width = 160.0f;
+    panel->flex().preferred_height = 80.0f;
+    panel->set_background_color(pulp::canvas::Color::rgba8(96, 150, 240));
+    root.add_child(std::move(panel));
+
+    const CaptureResult r = capture_view_resilient(root, 320, 200, 1.0f);
+    if (r.png.empty()) {
+        SUCCEED("no raster backend in this build");
+        return;
+    }
+    const auto stats = analyze_screenshot_content(r.png);
+    INFO("two-color capture reason: " << r.reason);
+    INFO("unique colors: " << stats.unique_colors);
+    REQUIRE(stats.unique_colors >= 2);
+    REQUIRE(r.ok);
 }
 
 TEST_CASE("capture_view returns a non-blank native-overlay snapshot instead of refusing",

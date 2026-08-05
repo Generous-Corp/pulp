@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -46,6 +49,15 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn("id: relevance", workflow)
         self.assertIn("pulls/${PR_NUMBER}/files", workflow)
         self.assertIn(".previous_filename // empty", workflow)
+        self.assertIn("github.event.merge_group.base_sha", workflow)
+        self.assertIn('merge_group)', workflow)
+        self.assertIn(
+            'git fetch --no-tags --depth=1 origin "$BASE_SHA"', workflow
+        )
+        self.assertIn(
+            'git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA"',
+            workflow,
+        )
         self.assertIn("contents/tools/scripts/webclap_relevance.py?ref=${BASE_SHA}", workflow)
         self.assertIn('CHANGED_FILE_COUNT: ${{ github.event.pull_request.changed_files }}', workflow)
         self.assertIn('"${CHANGED_FILE_COUNT:-0}" -ge 3000', workflow)
@@ -57,6 +69,78 @@ class WebclapRelevanceTests(unittest.TestCase):
             21,
             "every expensive step after relevance classification must be guarded",
         )
+
+    def test_merge_group_diff_keeps_both_sides_of_a_rename(self) -> None:
+        git_env = os.environ.copy()
+        local_git_env = subprocess.check_output(
+            ["git", "rev-parse", "--local-env-vars"], text=True, env=git_env
+        ).splitlines()
+        for name in local_git_env:
+            git_env.pop(name, None)
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q", repo], check=True, env=git_env)
+            subprocess.run(
+                ["git", "-C", repo, "config", "user.name", "test"],
+                check=True,
+                env=git_env,
+            )
+            subprocess.run(
+                ["git", "-C", repo, "config", "user.email", "test@example.com"],
+                check=True,
+                env=git_env,
+            )
+            old_path = repo / "core" / "view" / "old.cpp"
+            old_path.parent.mkdir(parents=True)
+            old_path.write_text("content\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", repo, "add", "."], check=True, env=git_env
+            )
+            subprocess.run(
+                ["git", "-C", repo, "commit", "-qm", "base"],
+                check=True,
+                env=git_env,
+            )
+            base = subprocess.check_output(
+                ["git", "-C", repo, "rev-parse", "HEAD"],
+                text=True,
+                env=git_env,
+            ).strip()
+            new_path = repo / "docs" / "old.cpp"
+            new_path.parent.mkdir(parents=True)
+            old_path.rename(new_path)
+            subprocess.run(
+                ["git", "-C", repo, "add", "-A"], check=True, env=git_env
+            )
+            subprocess.run(
+                ["git", "-C", repo, "commit", "-qm", "rename"],
+                check=True,
+                env=git_env,
+            )
+            head = subprocess.check_output(
+                ["git", "-C", repo, "rev-parse", "HEAD"],
+                text=True,
+                env=git_env,
+            ).strip()
+
+            changed = subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    repo,
+                    "diff",
+                    "--name-only",
+                    "--no-renames",
+                    base,
+                    head,
+                ],
+                text=True,
+                env=git_env,
+            ).splitlines()
+
+            self.assertEqual(changed, ["core/view/old.cpp", "docs/old.cpp"])
+            self.assertTrue(any(webclap_relevance.is_relevant(path) for path in changed))
 
 
 if __name__ == "__main__":

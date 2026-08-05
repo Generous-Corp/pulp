@@ -13,6 +13,7 @@ PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", Sess
 PULP_INSPECT_METHOD(kInspectorEnable, "Inspector.enable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorDisable, "Inspector.disable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorGetInfo, "Inspector.getInfo", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kInspectorGetAgentContext, "Inspector.getAgentContext", SessionDescribe, Request)
 PULP_INSPECT_METHOD(kInspectorApplyTweak, "Inspector.applyTweak", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorListTweaks, "Inspector.listTweaks", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorClearTweaks, "Inspector.clearTweaks", AuthoringTweaks, Request)
@@ -50,6 +51,14 @@ PULP_INSPECT_METHOD(kStateGetParameters, "State.getParameters", StateRead, Reque
 PULP_INSPECT_METHOD(kStateSetParameter, "State.setParameter", StateWrite, Request)
 PULP_INSPECT_METHOD(kStateGetValueChannels, "State.getValueChannels", UiRead, Request)
 PULP_INSPECT_METHOD(kStateParameterChanged, "State.parameterChanged", StateRead, Event)
+
+PULP_INSPECT_METHOD(kTelemetryGetSnapshot, "Telemetry.getSnapshot", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetrySubscribe, "Telemetry.subscribe", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetryUnsubscribe, "Telemetry.unsubscribe", TelemetryStream, Request)
+PULP_INSPECT_METHOD(kTelemetrySample, "Telemetry.sample", TelemetryStream, Event)
+
+PULP_INSPECT_METHOD(kTestInjectMidi, "Test.injectMidi", TestInput, Request)
+PULP_INSPECT_METHOD(kTestSetTransport, "Test.setTransport", TestInput, Request)
 
 PULP_INSPECT_METHOD(kConsoleEnable, "Console.enable", LogsRead, Request)
 PULP_INSPECT_METHOD(kConsoleGetMessages, "Console.getMessages", LogsRead, Request)

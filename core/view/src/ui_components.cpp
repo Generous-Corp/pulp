@@ -269,6 +269,22 @@ void ComboBox::close_active_popup() {
     }
 }
 
+void ComboBox::close_active_popup(View& root) {
+    if (auto* interaction = root.existing_interaction();
+        interaction && interaction->active_popup) {
+        interaction->active_popup->close_dropdown();
+    }
+}
+
+void ComboBox::abandon_active_popup(View& root) noexcept {
+    if (auto* interaction = root.existing_interaction();
+        interaction && interaction->active_popup) {
+        if (active_popup_ == interaction->active_popup)
+            active_popup_ = nullptr;
+        interaction->active_popup = nullptr;
+    }
+}
+
 void ComboBox::notify_global_click(View* target) {
     // Forwarding shim (S11): resolve the popup owned by the CLICK's OWN root, so
     // an outside-click in one hosted editor never dismisses another editor's

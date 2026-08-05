@@ -9,6 +9,14 @@ add_test(NAME build-check COMMAND pulp-test-build-check)
 if(Python3_Interpreter_FOUND)
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    add_test(NAME inspector-protocol-registry-complete
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --root ${PROJECT_SOURCE_DIR})
+    add_test(NAME inspector-protocol-registry-check-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --self-test)
     add_test(NAME auval-helper-worker-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_run_auval_component.py")
     if(UNIX)
@@ -48,6 +56,13 @@ if(Python3_Interpreter_FOUND)
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
+
+    # Unbounded-wait lint: a test wait that cannot time out turns a real
+    # regression into a CI job timeout with no output. The selftest is the
+    # load-bearing part — it scans the SAME wait unbounded and bounded, so the
+    # gate is proven to distinguish them rather than proven to be quiet.
+    add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
 
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
@@ -274,6 +289,28 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
+    # Presence checks over a rendered panel: every one of the five is proved in
+    # both directions on a synthetic capture — green on the reference as its
+    # own render, red on the same render with one defect painted in. A check
+    # nobody has watched fail is not known to be able to fail, which is how
+    # several instruments in this area read as clean while measuring nothing.
+    # 77 is SKIPPED, not passed: without numpy and Pillow not one of the seeded
+    # defects can be painted, and a green tick over a suite that ran nothing is
+    # the exact failure this suite exists to rule out.
+    add_test(NAME check-panel-presence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_panel_presence.py")
+    set_tests_properties(check-panel-presence-selftest PROPERTIES
+        TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+    # The agent-panel gate's own failure classifier. The negative fixture
+    # passes by being REFUSED, so which of three verdicts this returns is the
+    # only thing between "the clipping gate still fires" and "nobody noticed it
+    # stopped". Pure Python, no fixtures, no browser -- so unlike the gate it
+    # guards, this one always runs.
+    add_test(NAME agent-panel-gate-classifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_agent_panel_invariants.py")
+    set_tests_properties(agent-panel-gate-classifier-selftest PROPERTIES
+        TIMEOUT 120)
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

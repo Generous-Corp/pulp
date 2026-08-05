@@ -347,3 +347,67 @@ export async function freezeAndMeasureDocumentExtent(
   await freezeDynamicTime(cdp);
   return measureDocumentExtent(cdp, maximumLogicalSize);
 }
+
+// Bound controls whose box escapes a clipping ancestor.
+//
+// The document-extent checks cannot see this. `overflow: hidden` means the
+// content never grows the document, so a design that declares a 540px root and
+// fills it with 900px measures as a clean 540px document and captures without
+// complaint -- while a third of it, including controls bound to real
+// parameters, is cut away. Content past the TOP or LEFT is refused outright as
+// capture-negative-overflow; content past the BOTTOM was simply lost, and
+// every stage downstream reported success.
+//
+// Deliberately scoped to BOUND CONTROLS rather than all content. Clipped text
+// is ordinary and usually intentional -- `text-overflow: ellipsis` needs
+// `overflow: hidden`, and design systems use it throughout -- so failing on it
+// would reject correct panels. A control the user cannot reach is never
+// intentional: it drives a parameter that can now only be automated.
+const CLIPPED_CONTROLS_EXPRESSION = `(() => {
+  const TOLERANCE_PX = 1;
+  const clips = value =>
+    value === 'hidden' || value === 'clip' ||
+    value === 'scroll' || value === 'auto';
+  const describe = element => {
+    const name = String(element.className || '').trim().split(/\\s+/)[0];
+    return name || element.tagName.toLowerCase();
+  };
+  const clipped = [];
+  const controls =
+    document.querySelectorAll('[data-pulp-param],[data-pulp-meter]');
+  for (const control of controls) {
+    const rect = control.getBoundingClientRect();
+    if (rect.width <= 0.25 || rect.height <= 0.25) continue;
+    for (let node = control.parentElement; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const clipsX = clips(style.overflowX);
+      const clipsY = clips(style.overflowY);
+      if (!clipsX && !clipsY) continue;
+      const box = node.getBoundingClientRect();
+      const lost = Math.max(
+        clipsX ? box.left - rect.left : 0,
+        clipsX ? rect.right - box.right : 0,
+        clipsY ? box.top - rect.top : 0,
+        clipsY ? rect.bottom - box.bottom : 0);
+      if (lost > TOLERANCE_PX) {
+        clipped.push({
+          binding: control.getAttribute('data-pulp-param') ||
+                   control.getAttribute('data-pulp-meter') || '',
+          lost: Math.round(lost),
+          by: describe(node)
+        });
+        break;
+      }
+    }
+  }
+  return clipped;
+})()`;
+
+export async function measureClippedControls(cdp) {
+  const evaluated = await cdp.call("Runtime.evaluate", {
+    expression: CLIPPED_CONTROLS_EXPRESSION,
+    returnByValue: true,
+  });
+  const clipped = evaluated.result?.value;
+  return Array.isArray(clipped) ? clipped : [];
+}

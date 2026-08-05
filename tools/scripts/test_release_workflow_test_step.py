@@ -43,9 +43,11 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +66,7 @@ WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
 VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
 POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
+SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
 
 class SignAndReleaseNoTestGate(unittest.TestCase):
@@ -380,7 +383,7 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
-    """release-path-pr-gate.yml must route darwin via the release macOS var."""
+    """release-path-pr-gate.yml must have a release-priority-safe selector."""
 
     def setUp(self) -> None:
         self.assertTrue(
@@ -391,7 +394,13 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
 
     def test_darwin_leg_uses_release_macos_runner_resolver(self) -> None:
         self.assertIn("resolve-macos-runner:", self.text)
+        self.assertIn("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON", self.text)
         self.assertIn("PULP_RELEASE_MACOS_RUNS_ON_JSON", self.text)
+        self.assertLess(
+            self.text.index("PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON"),
+            self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON"),
+            "the PR-gate-specific selector must win before the legacy shared fallback",
+        )
         self.assertIn("needs: resolve-macos-runner", self.text)
         self.assertIn(
             "matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os",
@@ -1114,6 +1123,63 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
         self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
 
+    def test_darwin_x64_prefers_the_dedicated_release_tart_pool(self) -> None:
+        steps = self.workflow["jobs"]["resolve-macos-runner"]["steps"]
+        resolver = next(step for step in steps if step.get("id") == "resolve")
+        selector = resolver["env"]["DARWIN_X64"]
+        per_leg = selector.index("PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON")
+        release_pool = selector.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        legacy_intel = selector.index("PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON")
+        self.assertLess(per_leg, release_pool)
+        self.assertLess(release_pool, legacy_intel)
+
+    def test_darwin_x64_remains_an_arm_cross_compile_not_native_intel(self) -> None:
+        for job in ("build-cli", "smoke-cli"):
+            rows = self.workflow["jobs"][job]["strategy"]["matrix"]["include"]
+            darwin_x64 = next(
+                row for row in rows if row["platform"] == "darwin-x64"
+            )
+            self.assertEqual(darwin_x64["os"], "macos-15-xcompile")
+            self.assertNotEqual(darwin_x64["os"], "macos-15-intel")
+
+
+class TrustedReleaseControlPlaneRouting(unittest.TestCase):
+    """Only trusted release resolver jobs may reuse persistent Linux capacity."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.release_text = RELEASE_CLI.read_text(encoding="utf-8")
+        cls.sign_text = SIGN_AND_RELEASE.read_text(encoding="utf-8")
+        cls.release = yaml.safe_load(cls.release_text)
+        cls.sign = yaml.safe_load(cls.sign_text)
+
+    def test_resolvers_prefer_dedicated_then_existing_linux_selector(self) -> None:
+        for workflow in (self.release, self.sign):
+            with self.subTest(workflow=workflow["name"]):
+                runs_on = workflow["jobs"]["resolve-macos-runner"]["runs-on"]
+                dedicated = runs_on.index("PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON")
+                existing = runs_on.index("PULP_LOCAL_LINUX_RUNS_ON_JSON")
+                fallback = runs_on.index('"ubuntu-latest"')
+                self.assertLess(dedicated, existing)
+                self.assertLess(existing, fallback)
+
+    def test_release_control_workflows_never_accept_untrusted_pr_events(self) -> None:
+        for text in (self.release_text, self.sign_text):
+            with self.subTest(workflow=text.splitlines()[0]):
+                trigger_block = text.split("\n# Never cancel", 1)[0]
+                self.assertNotIn("pull_request:", trigger_block)
+                self.assertNotIn("merge_group:", trigger_block)
+
+    def test_release_resolver_checks_out_trusted_main_control_code(self) -> None:
+        steps = self.release["jobs"]["resolve-macos-runner"]["steps"]
+        checkouts = [step for step in steps if "uses" in step]
+        self.assertGreaterEqual(len(checkouts), 1)
+        for checkout in checkouts:
+            self.assertEqual(
+                checkout["with"]["ref"],
+                "${{ github.event.repository.default_branch }}",
+            )
+
 
 class SignAndReleaseCannotTouchTheRelease(unittest.TestCase):
     """sign-and-release.yml must be structurally incapable of gating a release.
@@ -1266,14 +1332,68 @@ class ReleaseBotSshSigning(unittest.TestCase):
         cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
         cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
         cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
+        cls.shipyard_config = SHIPYARD_CONFIG.read_text(encoding="utf-8")
 
     def test_signing_helper_requires_release_bot_private_key_secret(self) -> None:
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY:?RELEASE_BOT_SSH_SIGNING_KEY", self.helper)
-        self.assertIn("git config --global gpg.format ssh", self.helper)
-        self.assertIn("git config --global user.signingkey", self.helper)
-        self.assertIn("git config --global commit.gpgsign true", self.helper)
-        self.assertIn("git config --global tag.gpgSign true", self.helper)
+        self.assertIn("git config --local gpg.format ssh", self.helper)
+        self.assertIn('git config --local gpg.ssh.program "${ssh_program}"', self.helper)
+        self.assertIn("git config --local user.signingkey", self.helper)
+        self.assertIn("git config --local commit.gpgsign true", self.helper)
+        self.assertIn("git config --local tag.gpgSign true", self.helper)
+        self.assertNotIn("git config --global", self.helper)
         self.assertIn(self.BOT_EMAIL, self.helper)
+
+    def test_signing_helper_overrides_inherited_program_without_global_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            key = root / "source-key"
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+                check=True,
+            )
+            global_config = root / "global.gitconfig"
+            subprocess.run(
+                ["git", "config", "--file", str(global_config), "gpg.ssh.program", "/bin/false"],
+                check=True,
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GIT_CONFIG_GLOBAL": str(global_config),
+                    "RELEASE_BOT_SSH_SIGNING_KEY": key.read_text(encoding="utf-8"),
+                    "RUNNER_TEMP": str(root / "runner-temp"),
+                }
+            )
+
+            subprocess.run(["bash", str(RELEASE_SIGNING_HELPER)], cwd=repo, env=env, check=True)
+
+            effective = subprocess.run(
+                ["git", "config", "--get", "gpg.ssh.program"],
+                cwd=repo,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(effective, subprocess.run(
+                ["sh", "-c", "command -v ssh-keygen"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "config", "--file", str(global_config), "gpg.ssh.program"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+                "/bin/false",
+            )
 
     def test_auto_release_signs_version_tags(self) -> None:
         self.assertIn("name: Configure release bot SSH signing", self.auto_release)
@@ -1288,9 +1408,13 @@ class ReleaseBotSshSigning(unittest.TestCase):
         )
 
     def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
+        self.assertIn(
+            'ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"',
+            self.shipyard_config,
+        )
         self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)
         self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.post_tag_sync)
-        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
+        self.assertIn("bash -- tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
 
 
 class StrandedReleaseTrackerWorkflow(unittest.TestCase):

@@ -55,10 +55,42 @@ Frame shoot(View& root, uint32_t w, uint32_t h) {
 
 bool near(int a, int b, int tol) { return std::abs(a - b) <= tol; }
 
+/// Whether this build can actually put pixels in a buffer.
+///
+/// Every case in this file samples rendered pixels, so without a working
+/// rasteriser they all fail — and they fail as "the colour is wrong" rather
+/// than "there was no colour", which sends a reader looking for a paint bug
+/// that is not there. The sanitizer lane does exactly this: it never enables
+/// Skia, so this whole file went red on a build that was never able to run it.
+///
+/// A runtime probe rather than a build flag, because the same emptiness comes
+/// from a missing Skia AND from a Skia that has no device to draw on. Cached:
+/// the answer cannot change within a run.
+bool paint_available() {
+    static const bool ok = [] {
+        TestEnvironment env(8, 8);
+        env.run("setBackground('', '#ff0000');");
+        return shoot(env.root, 8, 8).ok();
+    }();
+    return ok;
+}
+
+/// A skip that names its missing dependency. Silence would read as coverage.
+#define REQUIRE_PAINT()                                                       \
+    do {                                                                      \
+        if (!paint_available()) {                                             \
+            WARN("SKIPPED: this build cannot rasterise (no Skia surface) — "  \
+                 "the computed-style paint cases are NOT covered by this run"); \
+            return;                                                           \
+        }                                                                     \
+    } while (0)
+
+
 }  // namespace
 
 TEST_CASE("pixel probe control: a plain fill actually reaches the buffer",
           "[web-compat][computed-paint]") {
+    REQUIRE_PAINT();
     // Without this, every assertion below could be passing against an empty
     // frame — the failure mode that makes a blank render look like a green run.
     TestEnvironment env(40, 40);
@@ -74,6 +106,7 @@ TEST_CASE("pixel probe control: a plain fill actually reaches the buffer",
 
 TEST_CASE("the setBackground bridge helper does NOT accept oklab",
           "[web-compat][computed-paint][oklab]") {
+    REQUIRE_PAINT();
     // Documented gap, not an aspiration. `setBackground(id, css)` runs a
     // different colour parser from the web-compat style-decl path, and it does
     // not understand modern CSS colour functions — it falls back to white
@@ -94,6 +127,7 @@ TEST_CASE("the setBackground bridge helper does NOT accept oklab",
 
 TEST_CASE("every declared box-shadow layer paints, not just the first",
           "[web-compat][computed-paint][box-shadow]") {
+    REQUIRE_PAINT();
     // 13 of 13 shadowed elements in the design carry up to three layers. A
     // paint path that drew only the first would flatten the whole sense of
     // depth while still looking plausible.
@@ -123,6 +157,7 @@ TEST_CASE("every declared box-shadow layer paints, not just the first",
 
 TEST_CASE("an inset shadow paints inside the box, not outside it",
           "[web-compat][computed-paint][box-shadow]") {
+    REQUIRE_PAINT();
     // Every multi-layer shadow in the design includes an inset layer. Painting
     // it outside would put a halo where the design wanted an inner well.
     TestEnvironment env(120, 120);
@@ -148,6 +183,7 @@ TEST_CASE("an inset shadow paints inside the box, not outside it",
 
 TEST_CASE("mix-blend-mode screen composites, it does not just overwrite",
           "[web-compat][computed-paint][blend]") {
+    REQUIRE_PAINT();
     // One element in the design uses it — the LED. screen(a,b) lightens; the
     // failure mode is the child simply replacing what is underneath, which
     // looks fine in isolation and wrong on the panel.
@@ -176,6 +212,7 @@ TEST_CASE("mix-blend-mode screen composites, it does not just overwrite",
 // is the one whose answer decides the question.
 TEST_CASE("oklab through the style-decl path",
           "[web-compat][computed-paint][oklab][surface]") {
+    REQUIRE_PAINT();
     TestEnvironment env(40, 40);
     env.run(R"JS(
         var d = document.createElement('div');
@@ -191,6 +228,7 @@ TEST_CASE("oklab through the style-decl path",
 
 TEST_CASE("oklab alpha through the style-decl path, differential",
           "[web-compat][computed-paint][oklab][surface]") {
+    REQUIRE_PAINT();
     // A differential, not an absolute: render the same colour with and without
     // `/ 0.05` over the same white ground. Identical pixels mean the alpha was
     // dropped; different pixels mean it survived. This cannot be fooled by a
@@ -229,6 +267,7 @@ TEST_CASE("oklab alpha through the style-decl path, differential",
 #include <pulp/view/design_sources.hpp>
 TEST_CASE("legacy HTML lane: how many nodes carry appearance",
           "[web-compat][ir-lane]") {
+    REQUIRE_PAINT();
     const char* dir_env = std::getenv("PULP_CSS_PROBE_DIR");
     if (dir_env == nullptr) { WARN("SKIPPED"); return; }
     std::ifstream in(std::filesystem::path("/tmp/forge-designs/1785533071370-001-ok/index.html"),
@@ -255,6 +294,7 @@ TEST_CASE("legacy HTML lane: how many nodes carry appearance",
 
 TEST_CASE("legacy HTML lane control: does it emit styles at all",
           "[web-compat][ir-lane]") {
+    REQUIRE_PAINT();
     // 0 styled nodes on the real design could mean the parser never emits
     // appearance, or that this design puts all of it in CSS classes. Inline
     // styles separate the two.

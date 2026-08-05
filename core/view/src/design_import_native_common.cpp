@@ -44,6 +44,71 @@ bool ends_with(std::string_view value, std::string_view suffix) {
            value.substr(value.size() - suffix.size()) == suffix;
 }
 
+/// Convert a CSS `clip-path` shape function to SVG path data in view-local
+/// coordinates, or nullopt when the value is not a shape this understands.
+///
+/// `View::set_clip_path` takes SVG path data, and CSS gives a shape function,
+/// so the two need a translation that nobody had written. Without it the raw
+/// `polygon(...)` text reached the path parser, failed to parse, and the clip
+/// silently did nothing — an element that should have been clipped to an ADSR
+/// curve painted as a full rectangle instead.
+///
+/// Percentages resolve against the element's own box, which is why the box
+/// size has to be passed in rather than read later at paint time.
+std::optional<std::string> css_clip_path_to_svg(const std::string& value,
+                                                float box_w, float box_h) {
+    const auto open = value.find('(');
+    if (open == std::string::npos || !ends_with(value, ")")) return std::nullopt;
+    std::string fn = value.substr(0, open);
+    // Trim, and drop a leading fill-rule if present (`polygon(evenodd, …)`).
+    while (!fn.empty() && std::isspace(static_cast<unsigned char>(fn.front())))
+        fn.erase(fn.begin());
+    while (!fn.empty() && std::isspace(static_cast<unsigned char>(fn.back())))
+        fn.pop_back();
+    if (fn != "polygon") return std::nullopt;
+    if (!(box_w > 0.0f) || !(box_h > 0.0f)) return std::nullopt;
+
+    std::string args = value.substr(open + 1, value.size() - open - 2);
+    if (const auto rule = args.find(','); rule != std::string::npos) {
+        const auto head = args.substr(0, rule);
+        if (head.find("evenodd") != std::string::npos ||
+            head.find("nonzero") != std::string::npos)
+            args = args.substr(rule + 1);
+    }
+
+    // One `x y` pair per comma-separated vertex.
+    auto to_px = [](const std::string& token, float basis) -> std::optional<float> {
+        if (token.empty()) return std::nullopt;
+        try {
+            const auto number = std::stof(token);
+            if (token.find('%') != std::string::npos) return number * 0.01f * basis;
+            return number;  // px, or a bare number treated as px
+        } catch (const std::exception&) { return std::nullopt; }
+    };
+
+    std::ostringstream out;
+    std::size_t start = 0;
+    bool first = true;
+    while (start <= args.size()) {
+        auto comma = args.find(',', start);
+        if (comma == std::string::npos) comma = args.size();
+        std::istringstream pair(args.substr(start, comma - start));
+        std::string xs, ys, extra;
+        pair >> xs >> ys;
+        if (pair >> extra) return std::nullopt;  // more than two components
+        const auto x = to_px(xs, box_w);
+        const auto y = to_px(ys, box_h);
+        if (!x || !y) return std::nullopt;
+        out << (first ? "M " : " L ") << *x << " " << *y;
+        first = false;
+        if (comma == args.size()) break;
+        start = comma + 1;
+    }
+    if (first) return std::nullopt;  // no vertices parsed
+    out << " Z";
+    return out.str();
+}
+
 std::string node_id(const IRNode& node, std::string_view path) {
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
         return *node.stable_anchor_id;
@@ -555,11 +620,18 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     };
 
     add("backgroundGradient", node.style.background_gradient);
-    if (!node.style.box_shadow.empty())
-        add("boxShadow", box_shadow_to_css(node.style.box_shadow));
+    // boxShadow is applied now (see apply_visual_style), so warning about it
+    // would train a reader to ignore this list — the cost of a diagnostic that
+    // outlives its gap is that the real ones stop being read.
     add("filter", node.style.filter);
     add("backdropFilter", node.style.backdrop_filter);
-    add("transform", node.style.transform);
+    // A lone `rotate()` IS represented now (see apply_visual_style), so only
+    // the transforms still dropped are worth a warning — a list, a translate,
+    // a scale, a raw matrix. Warning about the honored one would train a
+    // reader to skip this list, which costs the real entries their audience.
+    if (!node.style.transform ||
+        !css_transform_rotation(*node.style.transform).has_value())
+        add("transform", node.style.transform);
 
     if (node.style.position &&
         (*node.style.position == "fixed" || *node.style.position == "sticky")) {
@@ -1246,7 +1318,8 @@ static std::optional<Color> parse_any_css_color(const std::string& value) {
 }
 
 void apply_visual_style(View& view, const IRStyle& style,
-                        bool skip_border = false) {
+                        bool skip_border = false,
+                        bool skip_box_shadow = false) {
     if (style.background_color) {
         if (auto color = parse_any_css_color(*style.background_color))
             view.set_background_color(*color);
@@ -1257,6 +1330,45 @@ void apply_visual_style(View& view, const IRStyle& style,
     // gap — see core/view/src/css_gradient.cpp for the shared parser.
     if (style.background_gradient && !style.background_gradient->empty())
         apply_css_background_gradient(view, *style.background_gradient);
+
+    // Box-shadows, in CSS author order.
+    //
+    // Not painting these was the single largest fidelity gap in an imported
+    // panel, and it did not present as a shadow bug. A knob whose softness IS
+    // its shadow stack — an inset bottom sheen plus two spread rings — renders
+    // as a flat, hard-edged disc, so the face reads as an over-contrasty
+    // gradient and the search goes to the gradient code, which was correct all
+    // along. Measured on one generated panel: the conic samples matched Chrome
+    // within 4/255 while the same node failed on the annulus its rings should
+    // have drawn.
+    //
+    // The first layer paints ON TOP (View::add_box_shadow appends and the
+    // painter iterates in reverse), which is the order the IR already holds, so
+    // set-then-append reproduces the cascade without reversing anything here.
+    //
+    // `skip_box_shadow` is for a node whose body is painted by the layer
+    // BENEATH it — see body_is_painted_beneath(). Installing the stack there
+    // draws every layer a second time over the copy that layer already drew,
+    // and two composites of one translucent layer are not one composite.
+    if (!skip_box_shadow && !style.box_shadow.empty()) {
+        bool first = true;
+        for (const auto& layer : style.box_shadow) {
+            // A layer whose colour will not parse is DROPPED rather than
+            // defaulted to black: a shadow nobody asked for is more visible
+            // than a shadow that is missing, and the census below still counts
+            // the node as carrying shadows.
+            const auto color = parse_any_css_color(layer.color);
+            if (!color) continue;
+            if (first) {
+                view.set_box_shadow(layer.offset_x, layer.offset_y, layer.blur,
+                                    layer.spread, *color, layer.inset);
+                first = false;
+            } else {
+                view.add_box_shadow(layer.offset_x, layer.offset_y, layer.blur,
+                                    layer.spread, *color, layer.inset);
+            }
+        }
+    }
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
     if (style.background_size)
@@ -1332,8 +1444,36 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (const auto mode = css_blend_mode(*style.mix_blend_mode))
             view.set_mix_blend_mode(*mode);
     }
-    if (style.clip_path)
-        view.set_clip_path(*style.clip_path);
+    // A rotation, about the view's centre — the same reading and the same
+    // pivot the JS lane's setRotation uses, so a design that rotates renders
+    // the same through both. An importer only sets this once it has put the
+    // node's box in the PRE-rotation frame; a box that still includes the
+    // rotation would be transformed twice, which is why the shared parser
+    // refuses everything but a lone `rotate()`.
+    //
+    // Without it a 3px bar rotated into a diagonal — the shape every ADSR
+    // envelope and every knob pointer is made of — drew as a flat horizontal
+    // stub.
+    if (style.transform) {
+        if (const auto degrees = css_transform_rotation(*style.transform))
+            view.set_rotation(*degrees);
+    }
+    if (style.clip_path) {
+        // `set_clip_path` takes SVG path data, but CSS gives a shape function.
+        // Handing `polygon(4% 87%, …)` straight through produced a string the
+        // path parser could not read, so the clip silently did nothing and the
+        // element painted as a full rectangle: an ADSR envelope drawn as a
+        // clipped gradient came out as solid blocks covering its own labels.
+        const auto box_w = style.width.value_or(0.0f);
+        const auto box_h = style.height.value_or(0.0f);
+        auto path = css_clip_path_to_svg(*style.clip_path, box_w, box_h);
+        if (path) view.set_clip_path(*path);
+        else if (style.clip_path->find("polygon") == std::string::npos)
+            // Anything not a shape function is already path data (or a url()
+            // reference we cannot resolve); pass it through unchanged rather
+            // than dropping a clip that used to work.
+            view.set_clip_path(*style.clip_path);
+    }
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
     // the source stroke as border_color/border_width, but the stroke is already
     // baked into the raster. Drawing it again paints a spurious box outline —
@@ -1399,6 +1539,9 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_ancestor_clip_rect(Rect{style.clip_rect->x, style.clip_rect->y,
                                          style.clip_rect->width,
                                          style.clip_rect->height});
+        view.set_ancestor_clip_radii(
+            style.clip_rect->radius_tl, style.clip_rect->radius_tr,
+            style.clip_rect->radius_br, style.clip_rect->radius_bl);
     }
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) {
@@ -1412,6 +1555,17 @@ void apply_visual_style(View& view, const IRStyle& style,
                 view.set_clip_marker_tolerance(true);
         }
     }
+    // `pointer-events` is a design's only way to say "this layer is decoration,
+    // do not let it eat presses". A panel stacks glows, gradient washes and
+    // vignette bands over its controls; without this the topmost band wins every
+    // hit-test and the panel renders correctly while responding to nothing.
+    //
+    // Only `none` is honoured. The other CSS values (`visiblePainted`, `stroke`,
+    // `fill`, ...) are SVG-specific hit-test modes that this tree has no
+    // equivalent for, and treating them as `auto` matches what a browser does
+    // for a non-SVG box.
+    if (style.pointer_events && *style.pointer_events == "none")
+        view.set_pointer_events(View::PointerEvents::none);
     if (style.position) {
         if (auto position = parse_position(*style.position)) view.set_position(*position);
     }
@@ -1535,6 +1689,19 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
         line.set_stroke_width(*stroke_width);
 }
 
+// True when this node's BODY is drawn by the layer beneath it — the capture
+// bitmap (`capture`) or the lowered native node it was hoisted out of
+// (`underlay`). The lowering records Chrome's computed appearance on the
+// control regardless, so its geometry survives a round-trip; painting that
+// appearance again composites every box-shadow layer TWICE. Doubling a
+// 0.5-alpha offset layer takes its halo to 0.75 and stretches the visible
+// tail, which reads as a dark crescent under a dial that the browser draws
+// with a clean gap.
+bool body_is_painted_beneath(const IRNode& node) {
+    const auto body = attr(node, "designed_body").value_or("");
+    return body == "underlay" || body == "capture";
+}
+
 // Skin a knob with its captured body disc when hoist_captured_art_knobs +
 // enrich have stamped an absolute asset_path (+ png_natural + opaque-core rect).
 // A single-frame sprite renders the design's disc and core-fits it to the box;
@@ -1574,6 +1741,77 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
         skin.track = parse_css_color(*hex);
     if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
         skin.indicator = parse_css_color(*hex);
+
+    // Where the value ring rides.
+    //
+    // The control's box IS the design's body box — it comes from the author's
+    // `[data-pulp-paint]` rect, which is the dial element itself. So ANY scale
+    // at or below 0.5 necessarily paints on top of the body, and the old fixed
+    // 0.46 put the arc at 92% of the body radius: straight across the brushed
+    // cap the design had just drawn. No constant can satisfy "the design owns
+    // the body", because the constant is a fraction of the body.
+    //
+    // Derive it from the body EDGE instead: half the box, plus half the ring's
+    // own stroke, plus a hairline. The arc then sits in the gap the design left
+    // around its dial — where a decorative bezel or tick ring already lives —
+    // rather than over the art. Nothing new has to be measured or emitted.
+    const float box = std::min(node.style.width.value_or(0.0f),
+                               node.style.height.value_or(0.0f));
+    if (box > 0.0f)
+        skin.ring_radius_scale = 0.5f + (skin.ring_width * 0.5f + 1.0f) / box;
+
+    // A design that drew its own decorative ring can say exactly where the
+    // value belongs, as a fraction of the control box, and that wins over the
+    // derivation above. Absent — which is the common case — the derivation is
+    // what runs, so this channel refines the result rather than gating it.
+    if (const auto declared = attr_float(node, "design_ring_radius");
+        declared && *declared > 0.0f)
+        skin.ring_radius_scale = *declared;
+
+    // Where the POINTER rides — the same question the ring was just given a
+    // design-derived answer to, and the same wrong answer until now.
+    //
+    // `paint_mod_ring_knob` draws the pointer from the box CENTRE, which is
+    // right for a stock knob that owns its whole box and is a spoke straight
+    // across the artwork for a knob whose body the design drew. Moving the ring
+    // out and leaving the pointer where it was made that worse, not better:
+    // before, the spoke ended on the cap; now it crosses the cap AND the gap.
+    //
+    // Both ends come from edges that exist rather than from a length that reads
+    // well: it starts a hairline outside the body (the same hairline the ring
+    // clears it by) and ends on the ring's OUTER edge, so the value's own layer
+    // is exactly what the pointer spans. On kelvin's CUTOFF that is a tick from
+    // 81 to 85 on a 160px box whose dial ends at 80.
+    //
+    // A design that wants a longer pointer says so by declaring a ring radius —
+    // the tick follows the ring out, because it is defined against it.
+    if (box > 0.0f) {
+        skin.indicator_inner_scale = 0.5f + 1.0f / box;
+        skin.indicator_outer_scale =
+            skin.ring_radius_scale + (skin.ring_width * 0.5f) / box;
+    }
+
+    // A design that DREW its own pointer says exactly where it belongs, and
+    // that wins over the derivation above — the derivation is what runs when
+    // the design is silent, not a preference.
+    //
+    // The attributes are the ones the Figma lane already writes
+    // (`hoist_captured_art_knobs`) and the browser-capture lane now writes too,
+    // so both importers speak one vocabulary. They are fractions of the disc's
+    // HALF-extent, while the skin's scales are fractions of the whole shorter
+    // side, hence the halving — getting that wrong doubles the pointer and
+    // looks like a geometry bug rather than a units one.
+    if (const auto r_out = attr_float(node, "knob_ind_r_out");
+        r_out && *r_out > 0.0f) {
+        const float r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
+        skin.indicator_outer_scale = *r_out * 0.5f;
+        skin.indicator_inner_scale = r_in * 0.5f;
+        if (const auto w = attr_float(node, "knob_ind_w"); w && *w > 0.0f && box > 0.0f)
+            skin.indicator_width = std::max(1.0f, *w * 0.5f * box);
+        if (const auto hex = attr(node, "knob_ind_color"); hex && !hex->empty())
+            if (auto parsed = parse_any_css_color(*hex)) skin.indicator = *parsed;
+    }
+
     apply_designed_control_skin(control, skin);
     return true;
 }
@@ -1620,6 +1858,33 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
+            // Adopt the browser's own line breaking when the capture carried
+            // it. Label validates the basis before using it, so a stale cache
+            // costs a reflow rather than a wrong layout.
+            if (!node.text_line_boxes.empty() && node.text_layout_basis) {
+                std::vector<Label::CachedLineBox> boxes;
+                boxes.reserve(node.text_line_boxes.size());
+                for (const auto& b : node.text_line_boxes) {
+                    boxes.push_back({b.left, b.top, b.width, b.height,
+                                     b.start, b.length});
+                }
+                const bool browser_wrapped = boxes.size() > 1;
+                label->set_cached_line_boxes(
+                    std::move(boxes), node.text_layout_basis->width,
+                    node.text_layout_basis->resolved_face);
+                // THE CAPTURE DECIDES WHETHER THIS RUN WRAPS, not our own
+                // measurement of it. If the browser put the text on one line
+                // then one line is the right answer, and re-deriving that from
+                // advances we compute ourselves can only lose: a label sized to
+                // fit its own text has no slack, so any positive epsilon breaks
+                // the last word onto a second line. Roughly fifteen labels on
+                // one panel wrapped that way — "Select model", "My projects",
+                // "Browse marketplace" — every one of them a run the browser
+                // kept whole.
+                //
+                // `white-space` still applies where the capture says nothing.
+                label->set_multi_line(browser_wrapped);
+            }
             return label;
         }
         case NativeWidgetKind::text_button:
@@ -1733,6 +1998,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (semantics.fader_thumb_corner_radius)
                 fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
+            // Same contract the knob case takes above: a design that painted its
+            // own track owns the body, and the widget contributes only the value
+            // layer. Without it a designed fader drew a stock track, fill and
+            // thumb over the authored track the box pipeline had already painted.
+            apply_designed_body_skin(*fader, node);
             return fader;
         }
         case NativeWidgetKind::meter: {
@@ -1862,7 +2132,8 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_identity(*view, node, resolved);
     apply_layout(*view, node, parent_direction);
     apply_visual_style(*view, node.style,
-                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
+                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
+                       /*skip_box_shadow=*/body_is_painted_beneath(node));
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 

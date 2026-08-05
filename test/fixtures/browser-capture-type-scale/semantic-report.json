@@ -1,0 +1,21 @@
+{
+  "schema": "pulp-browser-semantics-v1",
+  "version": 1,
+  "viewport": {
+    "width": 1280,
+    "height": 800,
+    "device_scale_factor": 2
+  },
+  "summary": {
+    "candidates": 0,
+    "resolved": 0,
+    "unresolved": 0,
+    "bound": 0,
+    "conflicted": 0,
+    "paint_ordered": 0
+  },
+  "limitations": [
+    "Canvas and WebGL internal hit regions are not recoverable from the DOM; their host surface is reported as one unresolved candidate when clickable."
+  ],
+  "candidates": []
+}

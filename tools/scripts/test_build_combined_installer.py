@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -24,6 +25,8 @@ class CombinedInstallerTest(unittest.TestCase):
         self,
         plugins: list[tuple[str, str]],
         apps: list[tuple[str, str]] | None = None,
+        grouped_apps: list[tuple[str, str, str]] | None = None,
+        product_titles: list[tuple[str, str]] | None = None,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -112,6 +115,13 @@ class CombinedInstallerTest(unittest.TestCase):
                 bundle = tmp / f"{app_name}.app"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--app", title, str(bundle)))
+            # Apps nested under a product group, which are also forced on.
+            for group, title, app_name in grouped_apps or []:
+                bundle = tmp / f"{app_name}.app"
+                (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                args.extend(("--app-for", group, title, str(bundle)))
+            for bundle_name, title in product_titles or []:
+                args.extend(("--product-title", bundle_name, title))
 
             env = {
                 "PATH": f"{fake_bin}:/usr/bin:/bin",
@@ -178,6 +188,32 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIn('choice id="plugin-1-au"', xml)
         self.assertIn('title="Foo-Bar"', xml)
         self.assertIn('title="Foo Bar"', xml)
+
+    def test_a_products_standalone_nests_in_its_group_and_cannot_be_deselected(
+            self) -> None:
+        # A user thinks in products — "Kelvin, and which formats of it" — not in
+        # a flat list where the same plugin appears once as a format group and
+        # again as an app under a different name. The standalone also carries
+        # the uninstaller, so a user who deselects it installs plugins they
+        # cannot later remove; the row is shown but its checkbox is refused.
+        xml, _ = self._run_installer(
+            [("Kelvin", "au"), ("Kelvin", "vst3"), ("Lattice", "au")],
+            grouped_apps=[("Kelvin", "Standalone app", "Kelvin")],
+            product_titles=[("Kelvin", "Kelvin \u2014 instrument")],
+        )
+        # The display title replaces the bundle name on the group.
+        self.assertIn('title="Kelvin \u2014 instrument"', xml)
+        # The app choice is nested inside the group, not at the top level.
+        group = re.search(
+            r'<line choice="plugin-0">(.*?)</line>', xml, re.S)
+        self.assertIsNotNone(group)
+        self.assertIn("standalone-app", group.group(1))
+        # And it is forced on.
+        choice = re.search(
+            r'<choice id="standalone-app"[^>]*>', xml)
+        self.assertIsNotNone(choice)
+        self.assertIn('enabled="false"', choice.group(0))
+        self.assertIn('selected="true"', choice.group(0))
 
     def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
         xml, relocation = self._run_installer(

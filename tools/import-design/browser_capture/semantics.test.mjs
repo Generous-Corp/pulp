@@ -37,6 +37,19 @@ test("the capture collects the properties a whole panel needs to be drawn",
       "word-spacing",
       // ::before / ::after inject text that exists in no DOM text node.
       "content",
+      // An inline <svg> icon's colour is set three different ways — a
+      // presentation attribute, a stylesheet rule, or `currentColor` inherited
+      // from the box around it — and only the browser knows which one won.
+      // Without these, the geometry arrives with no colour to draw it in.
+      "fill",
+      "fill-opacity",
+      "fill-rule",
+      "stroke",
+      "stroke-opacity",
+      "stroke-width",
+      // Read but not drawn: a dashed stroke rendered solid is a wrong picture,
+      // so its presence sends the subtree to the element fallback instead.
+      "stroke-dasharray",
     ]) {
       assert.ok(COMPUTED_STYLES.includes(property),
         `${property} must be collected; a property the capture skips is one ` +

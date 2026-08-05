@@ -95,11 +95,15 @@ else()
         PULP_MCP_ENABLE_TIMELINE_TOOLS=0)
 endif()
 
-if(TARGET pulp::inspect-protocol)
+if(TARGET pulp::inspect-client)
     target_link_libraries(pulp-mcp-core PRIVATE pulp::inspect-protocol)
+    target_link_libraries(pulp-mcp-core PRIVATE pulp::inspect-client)
+    target_compile_definitions(pulp-mcp-core PUBLIC
+        PULP_MCP_ENABLE_INSPECTOR_CLIENT=1)
 else()
-    target_sources(pulp-mcp-core PRIVATE
-        "${PROJECT_SOURCE_DIR}/inspect/src/capabilities.cpp")
+    target_link_libraries(pulp-mcp-core PRIVATE pulp::inspect-protocol)
+    target_compile_definitions(pulp-mcp-core PUBLIC
+        PULP_MCP_ENABLE_INSPECTOR_CLIENT=0)
 endif()
 
 add_executable(pulp-mcp pulp_mcp_main.cpp)

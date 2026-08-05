@@ -186,6 +186,18 @@ missing comparison backend, not proof that the rendered PNG was empty.
   `--script` expects its own entry-module shape — a raw generated `ui.js` from
   `import-design` does not load that way (throws). Prefer `--validate` with the
   Skia backend for an imported `ui.js`.
+- **`pulp inspect screenshot --out FILE`** — asks an explicitly enabled,
+  running standalone to capture its own selected window surface and writes
+  validated PNG bytes. It prefers host back-buffer readback and falls back to
+  the shared `capture_view()` Skia/GPU/provider path when host readback is
+  missing, malformed, or blank. An active design viewport requires the live
+  back buffer; the fallback never re-lays out a live design tree at window size
+  and calls that transformed frame. This is the live-window choice from SSH:
+  capture runs inside
+  the app, so the remote shell does not need macOS Screen Recording permission.
+  Exit 3 is an explicit unsupported host/capability skip and creates no output.
+  This does not capture a plugin editor composited inside Logic, REAPER, or
+  another external host.
 - **`pulp::view::render_to_file`** in tests — headless view-tree PNGs in CI.
 - **`pulp::view::render_to_rgba`** (`screenshot.hpp`) — raw-pixel sibling of
   `render_to_png`. Returns the decoded **RGBA8** buffer (R,G,B,A byte order,

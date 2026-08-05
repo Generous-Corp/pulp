@@ -1,0 +1,117 @@
+{
+  "schema": "pulp-browser-capture-v1",
+  "version": 1,
+  "provenance": {
+    "capture_method": "chromium-cdp",
+    "browser": {
+      "product": "Google Chrome",
+      "version": "150.0.7871.187",
+      "protocol_version": "1.3",
+      "build_hash": "@30f6543ae91e6a860e73b76e3216b663b050f4e5",
+      "origin": "system"
+    },
+    "source": {
+      "entry": "refusals.html",
+      "sha256": "7e66b70aa2a40813754e7e29b0060cb7ceef047f6cd51fb2b64e7724187075c1"
+    },
+    "viewport": {
+      "initial": {
+        "width": 1280,
+        "height": 800
+      },
+      "resolved": {
+        "width": 1280,
+        "height": 800
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "primary_surface": {
+          "left": 0,
+          "top": 0,
+          "width": 420,
+          "height": 80
+        }
+      },
+      "device_scale_factor": 2
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "light",
+    "reduced_motion": false,
+    "settle": {
+      "rounds": 15,
+      "stable_rounds": 13,
+      "elapsed_ms": 1392
+    },
+    "network": {
+      "external_allowed": false,
+      "allowed_origins": [],
+      "external_resources": [],
+      "blocked_requests": []
+    },
+    "health": {
+      "status": "healthy",
+      "layout_count": 26,
+      "visible_elements": 22,
+      "visible_text_characters": 2,
+      "painted_surfaces": 12,
+      "runtime_exceptions": [],
+      "log_errors": [],
+      "failed_responses": []
+    },
+    "readiness": {
+      "contract": "",
+      "awaited": false
+    },
+    "renderer_hooks": []
+  },
+  "documents": [
+    {
+      "id": "document:0",
+      "url": "pulp-capture:///refusals.html",
+      "node_count": 77,
+      "layout_count": 26,
+      "paint_order": true,
+      "snapshot_asset": "dom-snapshot.json"
+    }
+  ],
+  "assets": [
+    {
+      "id": "reference:browser",
+      "kind": "screenshot",
+      "mime_type": "image/png",
+      "path": "browser.png",
+      "sha256": "18e9f75f47667327449bdc0918e797a4fb0dab335d5af520b4de06efc24c503d",
+      "width_px": 2560,
+      "height_px": 1600
+    }
+  ],
+  "semantics": {
+    "schema": "pulp-browser-semantics-v1",
+    "report": "semantic-report.json",
+    "candidate_count": 0,
+    "resolved_count": 0,
+    "unresolved_count": 0
+  },
+  "tokens": {
+    "schema": "pulp-browser-tokens-v1",
+    "report": "tokens.json",
+    "color_count": 0,
+    "dimension_count": 0,
+    "string_count": 0
+  },
+  "states": [
+    {
+      "name": "default",
+      "reference_asset_id": "reference:browser"
+    }
+  ],
+  "reference": {
+    "asset_id": "reference:browser",
+    "path": "browser.png",
+    "logical_width": 1280,
+    "logical_height": 800,
+    "device_scale_factor": 2
+  }
+}

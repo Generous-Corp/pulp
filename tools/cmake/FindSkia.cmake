@@ -444,6 +444,16 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     else()
         set(_skia_backend_defs "SK_GRAPHITE;SK_DAWN")
     endif()
+    # Every skia-builder archive Pulp consumes comes from its Release
+    # directory. Skia derives SK_DEBUG from the consumer's missing NDEBUG,
+    # and that changes inline SkRefCnt disposal behavior. A Debug Pulp TU
+    # compiled without SK_RELEASE can therefore derive from SkRefCnt while
+    # the Release archive performs the final unref: the archive leaves the
+    # count at zero, then the consumer's debug-only base destructor traps
+    # because it expects the debug disposer to have restored it to one.
+    # Keep all consumers ABI-compatible with the prebuilt archive even when
+    # Pulp itself is a Debug build.
+    list(APPEND _skia_backend_defs SK_RELEASE)
 
     # Create imported interface target that links everything
     if(NOT TARGET skia::skia)

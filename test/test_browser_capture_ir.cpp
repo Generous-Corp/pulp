@@ -3,8 +3,10 @@
 
 #include "tools/import-design/browser_capture_ir.hpp"
 #include "tools/import-design/browser_capture_styles.hpp"
+#include "tools/import-design/browser_capture_validation.hpp"
 
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -165,6 +167,32 @@ std::string with_interaction_provenance(
     return capture;
 }
 
+/// Splice a value onto the envelope's `reference` block. Written as a splice
+/// rather than a parameter on envelope() so the shared helper keeps producing
+/// the capture every other case in this file was written against.
+std::string with_reference_member(std::string capture,
+                                  std::string_view member) {
+    const std::string anchor = R"JSON("device_scale_factor":2)JSON";
+    const auto position = capture.find(anchor);
+    REQUIRE(position != std::string::npos);
+    capture.replace(position, anchor.size(),
+                    anchor + "," + std::string(member));
+    return capture;
+}
+
+std::string with_primary_surface(std::string capture,
+                                 std::string_view surface) {
+    const std::string settle =
+        R"JSON("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120})JSON";
+    const auto position = capture.find(settle);
+    REQUIRE(position != std::string::npos);
+    capture.replace(position, settle.size(),
+                    settle + R"JSON(,"viewport":{"document":{)JSON" +
+                        R"JSON("width":956,"height":636,"primary_surface":)JSON" +
+                        std::string(surface) + "}}");
+    return capture;
+}
+
 void write_valid_reports(const TempCapture& temp) {
     temp.write("semantic-report.json", R"JSON({
       "schema":"pulp-browser-semantics-v1",
@@ -180,6 +208,27 @@ void write_valid_reports(const TempCapture& temp) {
       "strings":{"css/width":"100%","css/space":"calc(1rem + 2px)"},
       "source_identity":{}
     })JSON");
+}
+
+/// Lower a synthetic capture whose envelope `decorate` has adjusted, and hand
+/// back the root's attributes. The reference PNG is written first so the
+/// envelope carries its real hash: the lowering verifies it.
+std::map<std::string, std::string> lowered_root_attributes(
+    const TempCapture& temp,
+    const std::function<std::string(std::string)>& decorate) {
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    temp.write("capture.json",
+               decorate(envelope("browser.png",
+                                 pulp::runtime::sha256_hex(png))));
+    auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json",
+        {.source = pulp::view::DesignSource::claude,
+         .source_file = "/source/editor.html"});
+    REQUIRE(result);
+    return {result.design_ir->root.attributes.begin(),
+            result.design_ir->root.attributes.end()};
 }
 
 }  // namespace
@@ -681,14 +730,32 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     REQUIRE(result);
 
     std::vector<const pulp::view::IRNode*> controls;
+    std::vector<const pulp::view::IRNode*> drivers;
+    std::vector<const pulp::view::IRNode*> displays;
     std::function<void(const pulp::view::IRNode&)> walk =
         [&](const pulp::view::IRNode& node) {
-            if (node.attributes.count("pulpParamKey") != 0) controls.push_back(&node);
+            const bool drives = node.attributes.count("pulpParamKey") != 0;
+            const bool shows = node.attributes.count("pulpMeterValueKey") != 0;
+            if (drives) drivers.push_back(&node);
+            if (shows) displays.push_back(&node);
+            if (drives || shows) controls.push_back(&node);
             for (const auto& child : node.children) walk(child);
         };
     walk(result.design_ir->root);
 
     REQUIRE(controls.size() == 2);
+    // The knob DRIVES the macro and the meter only DISPLAYS it. Both under
+    // pulpParamKey reads downstream as two controls competing for one
+    // parameter, which a host that requires each macro to be driven exactly
+    // once rejects -- on a panel whose author did the ordinary thing.
+    REQUIRE(drivers.size() == 1);
+    REQUIRE(displays.size() == 1);
+    REQUIRE(drivers.front()->attributes.at("pulpParamKey") == "shared");
+    REQUIRE(displays.front()->attributes.at("pulpMeterValueKey") == "shared");
+    REQUIRE(displays.front()->attributes.count("pulpParamKey") == 0);
+    // The shared "binding" key stays on both: the JS emitter reads one key and
+    // branches on the widget type (bindMeter vs bindWidgetToParam).
+    REQUIRE(displays.front()->attributes.at("binding") == "shared");
     std::set<std::string> anchors;
     for (const auto* control : controls) {
         const auto route = control->attributes.find("pulpRouteId");
@@ -757,6 +824,19 @@ TEST_CASE("a lowered control carries the appearance Chrome solved",
         // side) — the same box the paint bounds report — not the content box.
         REQUIRE(style.border_radius.has_value());
         CHECK(*style.border_radius == Catch::Approx(49.0f).margin(0.5));
+
+        // A uniform radius populates all four corners as well as the single
+        // slot. Asserting the corners here — not only that a circle renders —
+        // is the point: the four fields existed and had a consumer long before
+        // anything wrote to them, so a render test passed while the IR carried
+        // nothing. Absence and agreement are different states.
+        REQUIRE(style.border_top_left_radius.has_value());
+        REQUIRE(style.border_top_right_radius.has_value());
+        REQUIRE(style.border_bottom_right_radius.has_value());
+        REQUIRE(style.border_bottom_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(49.0f).margin(0.5));
+        CHECK(*style.border_bottom_right_radius ==
+              Catch::Approx(49.0f).margin(0.5));
 
         // Three layered shadows, two of them inset. Collapsing the declaration
         // to one string would drop every layer past the first.
@@ -829,6 +909,59 @@ TEST_CASE("computed style mapping folds CSS onto the IR",
         CHECK(layers[1].spread == Catch::Approx(2.0f));
     }
 
+    SECTION("a per-corner radius keeps all four corners") {
+        // The card idiom: a media area rounded at the top and square where it
+        // meets its caption. Taking only the first corner of the shorthand
+        // renders a plain rectangle inside a rounded border — the corners are
+        // where the two disagree, so a uniform-radius fixture cannot catch it.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-radius", "12px 12px 0px 0px"}}, box,
+                              style);
+        REQUIRE(style.border_top_left_radius.has_value());
+        REQUIRE(style.border_top_right_radius.has_value());
+        REQUIRE(style.border_bottom_right_radius.has_value());
+        REQUIRE(style.border_bottom_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(12.0f));
+        CHECK(*style.border_top_right_radius == Catch::Approx(12.0f));
+        CHECK(*style.border_bottom_right_radius == Catch::Approx(0.0f));
+        CHECK(*style.border_bottom_left_radius == Catch::Approx(0.0f));
+        // The single slot must stay empty when the corners disagree: a
+        // consumer reading it alone would otherwise round all four.
+        CHECK_FALSE(style.border_radius.has_value());
+    }
+
+    SECTION("two- and three-value radius shorthands expand per CSS") {
+        // 2 values: TL/BR then TR/BL. 3 values: TL, TR/BL, BR. Both are
+        // diagonal pairings that a left-to-right reading gets wrong.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle two;
+        apply_computed_styles({{"border-radius", "4px 16px"}}, box, two);
+        CHECK(*two.border_top_left_radius == Catch::Approx(4.0f));
+        CHECK(*two.border_bottom_right_radius == Catch::Approx(4.0f));
+        CHECK(*two.border_top_right_radius == Catch::Approx(16.0f));
+        CHECK(*two.border_bottom_left_radius == Catch::Approx(16.0f));
+
+        pulp::view::IRStyle three;
+        apply_computed_styles({{"border-radius", "2px 6px 10px"}}, box, three);
+        CHECK(*three.border_top_left_radius == Catch::Approx(2.0f));
+        CHECK(*three.border_top_right_radius == Catch::Approx(6.0f));
+        CHECK(*three.border_bottom_left_radius == Catch::Approx(6.0f));
+        CHECK(*three.border_bottom_right_radius == Catch::Approx(10.0f));
+    }
+
+    SECTION("an elliptical radius keeps its horizontal axis") {
+        // Nothing downstream carries two radii per corner. Keeping the
+        // horizontal axis is wrong-but-round; dropping the declaration would
+        // paint a square corner, which is further from the design.
+        CapturedBox box{0.0, 0.0, 240.0, 160.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-radius", "10px 10px 10px 10px / 20px"}},
+                              box, style);
+        REQUIRE(style.border_top_left_radius.has_value());
+        CHECK(*style.border_top_left_radius == Catch::Approx(10.0f));
+    }
+
     SECTION("a zero-width border contributes no colour") {
         // Chrome reports border-*-color on every element whether or not a
         // border is drawn, so an ungated mapping invents a border here.
@@ -869,6 +1002,60 @@ TEST_CASE("computed style mapping folds CSS onto the IR",
         CHECK(*style.border == "2px solid rgb(1, 2, 3)");
     }
 
+    SECTION("a style on an edge other than the top is not dropped") {
+        // Chrome computes a style per edge, and the capture records all four.
+        // Reading only `border-top-style` lost the style of any border that is
+        // not on the top edge: this box has a dashed LEFT border and a top
+        // edge of zero width, so the only style it has was never read and it
+        // painted solid.
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "0px"},
+                               {"border-right-width", "0px"},
+                               {"border-bottom-width", "0px"},
+                               {"border-left-width", "3px"},
+                               {"border-left-color", "rgb(1, 2, 3)"},
+                               {"border-top-style", "none"},
+                               {"border-right-style", "none"},
+                               {"border-bottom-style", "none"},
+                               {"border-left-style", "dashed"}},
+                              box, style);
+        REQUIRE(style.border_style.has_value());
+        CHECK(*style.border_style == "dashed");
+        // The edge that has no width contributes no style either: `none` on
+        // the other three is Chrome's report for "there is no border here",
+        // and taking it would turn the one real edge off.
+        REQUIRE(style.border_left_width.has_value());
+        CHECK(*style.border_left_width == Catch::Approx(3.0f));
+    }
+
+    SECTION("edges that disagree about style emit no shorthand") {
+        // The shorthand is a single `<width> <style> <color>` string, so a box
+        // whose edges carry different styles cannot be described by one. Left
+        // ungated, it took the first style it found and asserted it of all
+        // four — a solid frame reported as dashed, or the reverse.
+        CapturedBox box{0.0, 0.0, 40.0, 20.0};
+        pulp::view::IRStyle style;
+        apply_computed_styles({{"border-top-width", "2px"},
+                               {"border-right-width", "2px"},
+                               {"border-bottom-width", "2px"},
+                               {"border-left-width", "2px"},
+                               {"border-top-color", "rgb(1, 2, 3)"},
+                               {"border-right-color", "rgb(1, 2, 3)"},
+                               {"border-bottom-color", "rgb(1, 2, 3)"},
+                               {"border-left-color", "rgb(1, 2, 3)"},
+                               {"border-top-style", "solid"},
+                               {"border-right-style", "solid"},
+                               {"border-bottom-style", "dashed"},
+                               {"border-left-style", "solid"}},
+                              box, style);
+        CHECK_FALSE(style.border.has_value());
+        // The uniform width and colour still hold; only the one-string
+        // shorthand is refused.
+        REQUIRE(style.border_width.has_value());
+        CHECK(*style.border_width == Catch::Approx(2.0f));
+    }
+
     SECTION("transparent and absent values are not recorded as appearance") {
         CapturedBox box{0.0, 0.0, 40.0, 20.0};
         pulp::view::IRStyle style;
@@ -898,4 +1085,230 @@ TEST_CASE("computed style mapping folds CSS onto the IR",
         REQUIRE(style.border_radius.has_value());
         CHECK(*style.border_radius == Catch::Approx(20.0f));
     }
+}
+
+// The capture is deliberately LARGER than the design: the panel's root carries
+// its own padding and the harness grows the extent so drop shadows and
+// absolutely positioned decoration are not clipped. Both are correct, so the
+// image can never be shrunk to the design -- what it has to carry instead is
+// WHERE the design sits inside it. Without that a consumer guesses, and a
+// centred guess is wrong because the growth is asymmetric.
+TEST_CASE("a browser capture records where the authored frame sits inside it",
+          "[import-design][browser-capture][registration]") {
+    SECTION("the recorded frame reaches the IR root") {
+        TempCapture temp;
+        const auto attributes = lowered_root_attributes(
+            temp, [](std::string capture) {
+                return with_reference_member(
+                    std::move(capture),
+                    R"JSON("authored_frame":{"x":120,"y":120,)JSON"
+                    R"JSON("width":760,"height":886.0625})JSON");
+            });
+        REQUIRE(attributes.count("browser_authored_frame_x") == 1);
+        CHECK(std::stod(attributes.at("browser_authored_frame_x")) ==
+              Catch::Approx(120.0));
+        CHECK(std::stod(attributes.at("browser_authored_frame_y")) ==
+              Catch::Approx(120.0));
+        CHECK(std::stod(attributes.at("browser_authored_frame_width")) ==
+              Catch::Approx(760.0));
+        CHECK(std::stod(attributes.at("browser_authored_frame_height")) ==
+              Catch::Approx(886.0625));
+    }
+
+    // A capture that could not resolve the frame emits null, and null says
+    // "this cannot be registered". Recording it as an origin of (0,0) would
+    // turn a capture that knows it cannot be aligned into one that claims it
+    // is -- the exact substitution of a plausible number for a missing one
+    // that the refusal exists to prevent.
+    SECTION("a null frame is absent, not an origin of zero") {
+        TempCapture temp;
+        const auto attributes = lowered_root_attributes(
+            temp, [](std::string capture) {
+                return with_reference_member(std::move(capture),
+                                             R"JSON("authored_frame":null)JSON");
+            });
+        CHECK(attributes.count("browser_authored_frame_x") == 0);
+        CHECK(attributes.count("browser_authored_frame_width") == 0);
+    }
+
+    // Captures taken before the field existed still register: the primary
+    // surface is the same rect measured a different way, and it is what the
+    // root's own geometry was derived from.
+    SECTION("a capture predating the field registers by its primary surface") {
+        TempCapture temp;
+        const auto attributes = lowered_root_attributes(
+            temp, [](std::string capture) {
+                return with_primary_surface(
+                    std::move(capture),
+                    R"JSON({"left":40,"top":40,"width":576,"height":179})JSON");
+            });
+        REQUIRE(attributes.count("browser_authored_frame_x") == 1);
+        CHECK(std::stod(attributes.at("browser_authored_frame_x")) ==
+              Catch::Approx(40.0));
+        CHECK(std::stod(attributes.at("browser_authored_frame_width")) ==
+              Catch::Approx(576.0));
+    }
+}
+
+// Registration is what makes a similarity number mean anything. Unregistered,
+// the comparison reads the same pixel box out of two pictures that hold
+// different content there and returns a plausible figure for it: kelvin, which
+// differs from its oracle by 5.6% of its pixels, was reported at 31% similar.
+TEST_CASE("the importer's comparison registers the reference before scoring",
+          "[import-design][browser-capture][registration]") {
+    // kelvin's own numbers: a 1760x2014 capture holding a 1520x1772 panel at
+    // device (240,240), recorded as a 760x886.0625 CSS frame at (120,120).
+    pulp::view::DesignIR ir;
+    ir.root.attributes["browser_device_scale_factor"] = "2.000000";
+    ir.root.attributes["browser_authored_frame_x"] = "120.000000";
+    ir.root.attributes["browser_authored_frame_y"] = "120.000000";
+    ir.root.attributes["browser_authored_frame_width"] = "760.000000";
+    ir.root.attributes["browser_authored_frame_height"] = "886.062500";
+
+    SECTION("the recorded frame is scaled by the capture's own device scale") {
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                ir, {}, 1760, 2014, 1520, 1772);
+        REQUIRE(registration.registered);
+        CHECK(registration.x == 240);
+        CHECK(registration.y == 240);
+        CHECK(registration.width == 1520);
+        CHECK(registration.height == 1772);
+    }
+
+    // The probe that made the reporting defect legible: a 200x120 page on a
+    // 1280x800 viewport. Chrome returns the whole viewport at 2560x1600 while
+    // the render is 400x240, so the comparison scored the top-left 400x240 --
+    // 114 of 96000 pixels differing, 99.88% identical -- and then multiplied
+    // that by an area ratio of 0.0234, printing
+    //
+    //     Similarity: 2% (114/96000 pixels differ, mean error: 0.127656)
+    //
+    // The percentage contradicted its own count because the count is measured
+    // over the overlap and the percentage is scaled afterwards by how much of
+    // the images that overlap covers. Registration is what closes it: a scored
+    // comparison has IDENTICAL extents, so the ratio is 1 and the printed
+    // percentage is exactly 1 - differing/total. That invariant is what is
+    // asserted here -- the wart is in the raw comparator and is not this lane's
+    // to keep alive.
+    SECTION("a full-viewport capture registers to the render's own extent") {
+        pulp::view::DesignIR probe;
+        probe.root.attributes["browser_device_scale_factor"] = "2.000000";
+        probe.root.attributes["browser_authored_frame_x"] = "0.000000";
+        probe.root.attributes["browser_authored_frame_y"] = "0.000000";
+        probe.root.attributes["browser_authored_frame_width"] = "200.000000";
+        probe.root.attributes["browser_authored_frame_height"] = "120.000000";
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                probe, {}, 2560, 1600, 400, 240);
+        REQUIRE(registration.registered);
+        CHECK(registration.x == 0);
+        CHECK(registration.y == 0);
+        CHECK(registration.width == 400);
+        CHECK(registration.height == 240);
+    }
+
+    // A fractional CSS height rounds independently on the two sides, so the
+    // frame and the render can land a pixel apart on a panel that is perfectly
+    // registered. Refusing that would reject a good capture over arithmetic.
+    SECTION("a pixel of rounding snaps to the render rather than refusing") {
+        ir.root.attributes["browser_authored_frame_height"] = "886.500000";
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                ir, {}, 1760, 2014, 1520, 1774);
+        REQUIRE(registration.registered);
+        CHECK(registration.height == 1774);
+    }
+
+    // Refuse rather than score. verify_rendered_panel.py already refuses a size
+    // mismatch for the same reason -- "never scored: a size mismatch is
+    // compared over the wrong pixels" -- and this lane is the one that did not.
+    SECTION("an unregisterable capture is refused, not scored") {
+        for (const char* key : {"browser_authored_frame_x",
+                                "browser_authored_frame_y",
+                                "browser_authored_frame_width",
+                                "browser_authored_frame_height"}) {
+            ir.root.attributes.erase(key);
+        }
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                ir, {}, 1760, 2014, 1520, 1772);
+        CHECK_FALSE(registration.registered);
+        CHECK(registration.reason.find("never scored") != std::string::npos);
+    }
+
+    // The refusal is scoped to a genuine mismatch. A capture whose reference is
+    // already the render -- every uncropped one -- keeps scoring, so this does
+    // not turn into a blanket new failure for every panel taken before the
+    // field existed.
+    SECTION("a reference that is already the render still scores") {
+        for (const char* key : {"browser_authored_frame_x",
+                                "browser_authored_frame_y",
+                                "browser_authored_frame_width",
+                                "browser_authored_frame_height"}) {
+            ir.root.attributes.erase(key);
+        }
+        const auto registration =
+            pulp::import_design::resolve_reference_registration(
+                ir, {}, 1520, 1772, 1520, 1772);
+        REQUIRE(registration.registered);
+        CHECK(registration.x == 0);
+        CHECK(registration.y == 0);
+        CHECK(registration.width == 1520);
+        CHECK(registration.height == 1772);
+    }
+}
+
+// WHY registration is required, stated as arithmetic anyone can check.
+//
+// compare_screenshots scores the OVERLAP of two images and then scales the
+// result by how much of them that overlap covers, so two images whose shared
+// region is BYTE-IDENTICAL score 12.5% when one is 1280x600 and the other is
+// the 400x240 corner of it: 96000 / 768000. The differing-pixel count printed
+// beside such a number says 0.
+//
+// That is the whole C2 defect in one line, and it is why cropping to the
+// authored frame is not a cosmetic improvement to a roughly-right number: it is
+// what makes the number mean anything at all. Left unpinned, someone reads the
+// scaling as the bug and "fixes" it in the comparator, and every consumer that
+// legitimately compares unequal images silently changes meaning.
+TEST_CASE("an unregistered comparison scores identical pixels as a near-miss",
+          "[import-design][browser-capture][registration]") {
+    const fs::path source_path =
+        fs::path(PULP_BROWSER_CAPTURE_STYLE_FIXTURE_DIR) / "browser.png";
+    std::ifstream input(source_path, std::ios::binary);
+    REQUIRE(input);
+    // assign() rather than an iterator-pair constructor: the latter is a most
+    // vexing parse here and declares a function.
+    std::vector<std::uint8_t> source;
+    source.assign(std::istreambuf_iterator<char>(input),
+                  std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(source.empty());
+
+    // Both sides are produced by the same decode/encode round trip, so their
+    // shared region is identical byte for byte.
+    const auto whole = pulp::view::crop_png(source, 0, 0, 1280, 600);
+    const auto corner = pulp::view::crop_png(source, 0, 0, 400, 240);
+    if (whole.empty() || corner.empty()) {
+        // This build carries no PNG pixel decoder. Reporting that as a pass is
+        // wrong, but so is reporting it as a defect in the code under test.
+        SUCCEED("PNG decoding is unavailable in this build");
+        return;
+    }
+
+    const auto unregistered = pulp::view::compare_screenshots(whole, corner);
+    REQUIRE(unregistered.valid);
+    CHECK(unregistered.diff_pixels == 0);
+    CHECK(unregistered.total_pixels == 400u * 240u);
+    // 96000 / (1280*600) = 0.125. Zero pixels differ and it scores 12%.
+    CHECK(unregistered.similarity == Catch::Approx(0.125).margin(0.001));
+    CHECK_FALSE(unregistered.passes());
+
+    // Registered -- the same region on both sides -- the score is what the
+    // count says it is.
+    const auto registered = pulp::view::compare_screenshots(corner, corner);
+    REQUIRE(registered.valid);
+    CHECK(registered.diff_pixels == 0);
+    CHECK(registered.similarity == Catch::Approx(1.0));
+    CHECK(registered.passes());
 }

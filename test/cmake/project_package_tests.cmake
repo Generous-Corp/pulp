@@ -108,3 +108,38 @@ add_test(NAME project-package-compile-out
 set_tests_properties(project-package-compile-out PROPERTIES
     LABELS "timeline;cmake;sdk;slow"
     TIMEOUT 1200)
+
+# VST3 bundle layout: moduleinfo.json must live in Contents/Resources/.
+#
+# Putting it directly under Contents/ makes codesign treat it as an unsigned
+# nested code object, so the bundle cannot be signed and therefore cannot be
+# notarized or shipped — and Pulp's own scanner reads it from Contents/
+# Resources/, so it was invisible there too. Both failures are silent until
+# packaging, which is exactly why this is a test.
+add_test(NAME vst3-bundle-layout
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/check_vst3_bundle_layout.py"
+        "${CMAKE_BINARY_DIR}")
+set_tests_properties(vst3-bundle-layout PROPERTIES
+    LABELS "format;vst3;packaging"
+    TIMEOUT 60)
+
+# Uninstaller contract. An uninstaller has two ways to be wrong and only one is
+# loud: removing too little leaves a plugin the host keeps loading, removing too
+# much deletes somebody else's work. Both are covered.
+add_test(NAME pulp-uninstaller-contract
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pulp_uninstall.py")
+set_tests_properties(pulp-uninstaller-contract PROPERTIES
+    LABELS "packaging;ship"
+    TIMEOUT 120)
+
+# The desktop and web builds embed fonts from two separate lists, and
+# bundled_fonts.cpp names every blob symbol directly. A face in one list and not
+# the other is a COMPILE error in the web lane, which nobody runs locally.
+add_test(NAME bundled-font-lists-agree
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_bundled_font_lists.py")
+set_tests_properties(bundled-font-lists-agree PROPERTIES
+    LABELS "canvas;fonts;web"
+    TIMEOUT 60)

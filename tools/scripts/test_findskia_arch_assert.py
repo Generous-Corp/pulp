@@ -9,7 +9,9 @@ clang/ar/lipo), and asserts:
 
   * -DCMAKE_OSX_ARCHITECTURES=arm64  → configure FAILS with "architecture
     mismatch" (the lib is x86_64-only), and
-  * -DCMAKE_OSX_ARCHITECTURES=x86_64 → configure SUCCEEDS (arch satisfied).
+  * -DCMAKE_OSX_ARCHITECTURES=x86_64 → configure SUCCEEDS (arch satisfied),
+    and the imported target exports SK_RELEASE so Debug consumers use the same
+    inline Skia ABI as the bundled Release archive.
 
 Skips cleanly when not on macOS or the toolchain (clang/ar/lipo/cmake) is
 absent, so non-Apple CI does not fail on it.
@@ -67,7 +69,11 @@ class FindSkiaArchAssert(unittest.TestCase):
             "cmake_minimum_required(VERSION 3.20)\n"
             "project(findskia_arch_assert NONE)\n"
             f'set(SKIA_DIR "{self.skia.as_posix()}")\n'
-            f'include("{FINDSKIA.as_posix()}")\n')
+            f'include("{FINDSKIA.as_posix()}")\n'
+            "get_target_property(_skia_defs skia::skia INTERFACE_COMPILE_DEFINITIONS)\n"
+            "if(NOT \"SK_RELEASE\" IN_LIST _skia_defs)\n"
+            "  message(FATAL_ERROR \"skia::skia must export SK_RELEASE: ${_skia_defs}\")\n"
+            "endif()\n")
 
     def _configure(self, arch):
         build = self.proj / f"build-{arch}"

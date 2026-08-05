@@ -98,16 +98,28 @@ endif()
 
 # ── Bundled fonts ─────────────────────────────────────────────────────────────
 # The Skia prebuilt does not export SkFontMgr_New_Custom_Data, so core/canvas
-# materialises Inter / JetBrains Mono from embedded blobs through the platform
-# font manager (bundled_fonts.cpp). There is no platform font manager in a
-# browser, so these blobs ARE the font stack — without them every Label shapes
-# to zero width.
+# materialises its fonts from embedded blobs through the platform font manager
+# (bundled_fonts.cpp). There is no platform font manager in a browser, so these
+# blobs ARE the font stack — without them every Label shapes to zero width.
+#
+# This list must match the one in core/canvas/CMakeLists.txt, because
+# bundled_fonts.cpp names every symbol directly and is compiled into this build
+# too. A face present there and missing here is not a missing font at runtime,
+# it is a COMPILE error in a lane nobody runs locally:
+#
+#   error: no member named 'Jost_Regular_ttf' in namespace 'pulp_bundled_fonts'
+#
+# which is how adding Jost to the desktop list broke the web build.
 include("${_PULP_WEBUI_ROOT}/tools/cmake/PulpEmbedData.cmake")
 if(NOT TARGET pulp-bundled-fonts)
     pulp_add_binary_data(pulp-bundled-fonts
         SOURCES
             ${_PULP_WEBUI_ROOT}/external/fonts/Inter-Regular.ttf
             ${_PULP_WEBUI_ROOT}/external/fonts/JetBrainsMono-Regular.ttf
+            ${_PULP_WEBUI_ROOT}/external/fonts/Jost-Regular.ttf
+            ${_PULP_WEBUI_ROOT}/external/fonts/Jost-Medium.ttf
+            ${_PULP_WEBUI_ROOT}/external/fonts/Jost-SemiBold.ttf
+            ${_PULP_WEBUI_ROOT}/external/fonts/Jost-Bold.ttf
         NAMESPACE pulp_bundled_fonts
     )
 endif()

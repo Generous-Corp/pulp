@@ -609,6 +609,15 @@ commands:
       - name: --watch
         kind: flag
         description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot.
+      - name: --inspect
+        kind: option
+        description: Enable the authenticated Development Inspector with an optional off/observe/develop/custom profile. Requires a GPU-enabled desktop build; bare --inspect selects develop.
+      - name: --inspect-capability
+        kind: option
+        description: Add one capability id to --inspect=custom; repeatable. Mutating capabilities require session.control.
+      - name: --inspect-runtime-eval
+        kind: flag
+        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control, plus a live ScriptedUiSession with no effectful ReloadCapability grants; the stock all-capabilities editor path is refused. No profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
       - name: --audio-inspector
         kind: flag
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
@@ -1094,7 +1103,7 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Experimental client for a custom host/test fixture that explicitly starts an inspector server; normal Pulp launches do not.
+    summary: Installed authenticated client for an explicitly activated Development Inspector. The Rust pulp binary delegates to its sibling pulp-cpp; normal Pulp launches publish no endpoint.
     args:
       - name: --session
         kind: option
@@ -1127,7 +1136,87 @@ commands:
       - name: --output
         kind: option
         required: false
-        description: File path for the one-shot command response
+        description: File path for a legacy one-shot command response
+      - name: --out
+        kind: option
+        required: false
+        description: Screenshot subcommand output path for decoded PNG bytes
+      - name: --id
+        kind: option
+        required: false
+        description: Numeric parameter ID for set-parameter
+      - name: --value
+        kind: option
+        required: false
+        description: Finite parameter value for set-parameter
+      - name: --normalized
+        kind: flag
+        required: false
+        description: Interpret set-parameter value in normalized 0 through 1 space
+      - name: --kind
+        kind: option
+        required: false
+        description: MIDI kind note_on or note_off for inject-midi
+      - name: --channel
+        kind: option
+        required: false
+        description: Public MIDI channel 1 through 16 for inject-midi
+      - name: --note
+        kind: option
+        required: false
+        description: MIDI note 0 through 127 for inject-midi
+      - name: --velocity
+        kind: option
+        required: false
+        description: MIDI velocity 0 through 127 for inject-midi
+      - name: --duration-ms
+        kind: option
+        required: false
+        description: Required bounded note_on hold from 1 through 2000 milliseconds for inject-midi
+      - name: --playing
+        kind: option
+        required: false
+        description: Boolean standalone play state for set-transport
+      - name: --position-samples
+        kind: option
+        required: false
+        description: Nonnegative standalone sample position for set-transport
+      - name: --tempo-bpm
+        kind: option
+        required: false
+        description: Finite standalone tempo from 20 through 400 BPM for set-transport
+      - name: --json
+        kind: flag
+        required: false
+        description: Emit stable JSON for named commands, including screenshot capture or unsupported status
+    subcommands:
+      - name: audit
+        summary: Read-only artifact preflight for the canonical control manifest, profile and digest markers, declared capabilities, and known external surfaces; never loads or activates the artifact.
+        args:
+          - name: artifact
+            kind: positional
+            required: true
+            description: Standalone executable or bundle to audit
+          - name: --json
+            kind: flag
+            required: false
+            description: Emit the pulp.control.audit.v1 result
+      - name: profiles
+        summary: List the declared off, observe, and develop profiles and capabilities
+      - name: list
+        summary: Discover live publications and return exact session, instance, and non-reusable publication identities
+      - name: capabilities
+        summary: Authenticate and report available/effective capabilities for one exact publication
+      - name: doctor
+        summary: Report discovery runtime-directory readiness and live-session count
+      - name: screenshot
+        summary: Save the selected standalone's deterministic in-process back buffer as validated PNG bytes; unsupported hosts exit 3 without creating an output
+      - name: set-parameter
+        summary: Apply one typed numeric parameter mutation under state.write and a controller lease
+      - name: inject-midi
+        summary: Inject one bounded standalone note; note_on is paired with note_off on the same controller lease
+      - name: set-transport
+        summary: Apply one coherent partial standalone play, position, or tempo update under test.input and a controller lease
     docs: reference/cli.md#inspect
 
   - name: motion
