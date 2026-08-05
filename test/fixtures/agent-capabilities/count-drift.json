@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.agent-capabilities.v1",
+  "capabilities": [{
+    "key": "timebase.tick", "domain": "timebase", "include": "pulp/timebase/tick.hpp",
+    "symbol": "pulp::timebase::TickPosition", "summary": "fixture", "rt_class": "any",
+    "lifecycle": {"construction": "any", "prepare": "none", "process": "any", "reset": "value-initialization", "release": "none"},
+    "state_model": "fixture", "seed_model": "none", "input_domain": "ticks",
+    "output_domain": "ticks", "units": ["ticks"], "latency": "zero", "tail": "none", "scheduling": "pure"
+  }],
+  "counts": {"total": 99, "by_domain": {}},
+  "compatibility": null
+}

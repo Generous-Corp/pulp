@@ -19,6 +19,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-manifest-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
+    add_test(NAME agent-capability-installed-sdk
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
+            --build-dir "${CMAKE_BINARY_DIR}" --cmake "${CMAKE_COMMAND}")
+    set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 180)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")

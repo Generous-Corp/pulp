@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import importlib.util
 import json
 import pathlib
 import re
@@ -25,6 +26,10 @@ REQUIRED = {
     "key", "domain", "include", "symbol", "summary", "rt_class", "lifecycle",
     "state_model", "seed_model", "input_domain", "output_domain", "units",
     "latency", "tail", "scheduling",
+}
+STRING_FIELDS = {
+    "key", "domain", "include", "symbol", "summary", "rt_class", "state_model",
+    "seed_model", "input_domain", "output_domain", "latency", "tail", "scheduling",
 }
 FORBIDDEN_NUMERIC_CONTRACT_FIELDS = {"min", "max", "default", "range", "choices"}
 
@@ -83,9 +88,9 @@ EXPORTS = [
     capability(
         key="timebase.swing", domain="timebase", include="pulp/timebase/quantize.hpp",
         symbol="pulp::timebase::SwingRatio",
-        summary="Exact rational swing projection and inverse over integer document ticks.", rt_class="any",
+        summary="Exact rational swing projection with bounded-rounding recovery over integer document ticks.", rt_class="any",
         lifecycle={"construction": "any", "prepare": "none", "process": "any", "reset": "value-initialization", "release": "none"},
-        state_model="Pure value and free-function transform; invalid inputs leave positions unchanged.", seed_model="none",
+        state_model="Pure value and free-function transforms; unswing recovers within the documented rounding bound, and invalid inputs leave positions unchanged.", seed_model="none",
         input_domain="document ticks and rational swing", output_domain="document ticks", units=["ticks", "rational ratio"],
         latency="zero", tail="none", scheduling="pure",
         _compile="pulp::timebase::SwingRatio value{}; (void)pulp::timebase::swing_position({}, {1}, value);",
@@ -115,7 +120,18 @@ def public_rows() -> list[dict[str, Any]]:
     return [{k: copy.deepcopy(v) for k, v in row.items() if not k.startswith("_")} for row in EXPORTS]
 
 
-def document() -> dict[str, Any]:
+def legacy_signal_projection(root: pathlib.Path) -> dict[str, Any]:
+    path = root / "tools/dsp_vocabulary.py"
+    spec = importlib.util.spec_from_file_location("pulp_dsp_vocabulary_source", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.scan_headers()
+
+
+def document(root: pathlib.Path | None = None) -> dict[str, Any]:
+    root = root or repo_root()
     rows = sorted(public_rows(), key=lambda row: row["key"])
     counts = {domain: sum(row["domain"] == domain for row in rows) for domain in sorted(DOMAINS)}
     return {
@@ -123,7 +139,11 @@ def document() -> dict[str, Any]:
         "capabilities": rows,
         "counts": {"total": len(rows), "by_domain": counts},
         "compatibility": {
-            "signal_vocabulary": "tools/dsp_vocabulary.py remains the legacy signal-only projection during migration"
+            "signal_vocabulary": {
+                "schema": "pulp.signal-vocabulary.compat.v1",
+                "source": "curated manifest regeneration scan of public signal headers",
+                "entries": legacy_signal_projection(root),
+            }
         },
     }
 
@@ -147,6 +167,9 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     problems: list[str] = []
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         return [f"schema must be exactly {SCHEMA}"]
+    expected_top = {"schema", "capabilities", "counts", "compatibility"}
+    if set(doc) != expected_top:
+        problems.append(f"top-level fields must be exactly {', '.join(sorted(expected_top))}")
     rows = doc.get("capabilities")
     if not isinstance(rows, list) or not rows:
         return ["capabilities must be a non-empty array"]
@@ -164,6 +187,10 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
         missing = sorted(REQUIRED - row.keys())
         if missing:
             problems.append(f"{where} missing required fields: {', '.join(missing)}")
+        for field in sorted(STRING_FIELDS):
+            value = row.get(field)
+            if not isinstance(value, str) or not value.strip():
+                problems.append(f"{where}.{field} must be a non-empty string")
         key = row.get("key")
         if not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*", key):
             problems.append(f"{where} has invalid stable key {key!r}")
@@ -187,23 +214,73 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
         if forbidden:
             problems.append(f"{where} duplicates Forge numeric contract fields: {', '.join(forbidden)}")
         units = row.get("units")
-        if not isinstance(units, list) or not all(isinstance(unit, str) and unit for unit in units):
+        if (not isinstance(units, list) or not units
+                or not all(isinstance(unit, str) and unit.strip() for unit in units)):
             problems.append(f"{where} units must be an array of non-empty strings")
         lifecycle = row.get("lifecycle")
         lifecycle_fields = {"construction", "prepare", "process", "reset", "release"}
         if not isinstance(lifecycle, dict) or set(lifecycle) != lifecycle_fields:
             problems.append(f"{where} lifecycle must contain exactly {', '.join(sorted(lifecycle_fields))}")
+        elif not all(isinstance(value, str) and value.strip() for value in lifecycle.values()):
+            problems.append(f"{where} lifecycle values must be non-empty strings")
         descriptor = row.get("forge_descriptor")
         if descriptor is not None:
-            if not isinstance(descriptor, dict) or descriptor.get("catalog") != "forge-catalog.json":
+            if (not isinstance(descriptor, dict) or set(descriptor) != {"catalog", "node_key"}
+                    or descriptor.get("catalog") != "forge-catalog.json"
+                    or not isinstance(descriptor.get("node_key"), str)
+                    or not descriptor.get("node_key").strip()):
                 problems.append(f"{where} has invalid forge_descriptor reference")
             elif descriptor.get("node_key") not in forge_keys:
                 problems.append(f"{where} references missing Forge descriptor {descriptor.get('node_key')!r}")
+
+    actual_by_domain = {
+        domain: sum(isinstance(row, dict) and row.get("domain") == domain for row in rows)
+        for domain in sorted(DOMAINS)
+    }
+    counts = doc.get("counts")
+    if (not isinstance(counts, dict) or set(counts) != {"total", "by_domain"}
+            or isinstance(counts.get("total"), bool) or not isinstance(counts.get("total"), int)
+            or counts.get("total") != len(rows)
+            or not isinstance(counts.get("by_domain"), dict)
+            or set(counts.get("by_domain", {})) != DOMAINS
+            or any(isinstance(value, bool) or not isinstance(value, int)
+                   for value in counts.get("by_domain", {}).values())
+            or counts.get("by_domain") != actual_by_domain):
+        problems.append("counts must exactly match capabilities by domain")
+
+    compatibility = doc.get("compatibility")
+    projection = compatibility.get("signal_vocabulary") if isinstance(compatibility, dict) else None
+    if (not isinstance(compatibility, dict) or set(compatibility) != {"signal_vocabulary"}
+            or not isinstance(projection, dict)
+            or set(projection) != {"schema", "source", "entries"}
+            or projection.get("schema") != "pulp.signal-vocabulary.compat.v1"
+            or not isinstance(projection.get("source"), str)
+            or not projection.get("source", "").strip()
+            or not isinstance(projection.get("entries"), dict)):
+        problems.append("compatibility.signal_vocabulary has an invalid shape")
+    else:
+        entries = projection["entries"]
+        for header, classes in entries.items():
+            if not isinstance(header, str) or not header or not isinstance(classes, list) or not classes:
+                problems.append("compatibility signal vocabulary entries must map headers to non-empty arrays")
+                break
+            valid_classes = all(
+                isinstance(item, dict) and set(item) == {"class", "methods"}
+                and isinstance(item["class"], str) and item["class"].strip()
+                and isinstance(item["methods"], list)
+                and all(isinstance(method, str) and method.strip() for method in item["methods"])
+                for item in classes
+            )
+            if not valid_classes:
+                problems.append(f"compatibility signal vocabulary entry {header!r} is invalid")
+                break
+        if entries != legacy_signal_projection(root):
+            problems.append("compatibility signal vocabulary is stale against public signal headers")
     return problems
 
 
-def rendered() -> str:
-    return json.dumps(document(), indent=2, ensure_ascii=False) + "\n"
+def rendered(root: pathlib.Path | None = None) -> str:
+    return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
 
 
 def main() -> int:
@@ -221,13 +298,13 @@ def main() -> int:
         for problem in problems:
             print(f"agent-capabilities: INVALID: {problem}", file=sys.stderr)
         return 1 if problems else 0
-    doc = document()
+    doc = document(root)
     problems = validate(doc, root)
     if problems:
         for problem in problems:
             print(f"agent-capabilities: INVALID: {problem}", file=sys.stderr)
         return 1
-    output = rendered()
+    output = rendered(root)
     snapshot = args.snapshot or root / SNAPSHOT
     fixture = root / COMPILE_FIXTURE
     if args.json:
