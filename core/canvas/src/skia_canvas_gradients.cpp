@@ -70,6 +70,25 @@ void SkiaCanvas::set_fill_gradient_linear(float x0, float y0, float x1, float y1
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// The band spans pts[0]..pts[1] and Skia tiles it the rest of the way: a
+// one-band span plus a repeating tile mode IS the repetition, so nothing here
+// expands the stop list or touches the paint path. Same shape as
+// set_fill_gradient_conic_repeating below, one axis instead of one turn.
+void SkiaCanvas::set_fill_gradient_linear_repeating(float x0, float y0,
+                                                     float x1, float y1,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+    std::vector<SkColor4f> sk_colors;
+    std::vector<float> sk_pos;
+    colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
+    SkPoint pts[2] = {{x0, y0}, {x1, y1}};
+    gradient_shader_ = skia_gradient::make_linear(pts, sk_colors.data(),
+                                                  sk_pos.data(), count,
+                                                  SkTileMode::kRepeat);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
                                            const Color* colors, const float* positions, int count) {
     std::vector<SkColor4f> sk_colors;

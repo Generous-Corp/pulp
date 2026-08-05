@@ -10,6 +10,7 @@
 #include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
+#include <functional>
 #include <optional>
 #include <vector>
 #include <memory>
@@ -930,18 +931,18 @@ public:
     /// `borderTopWidth: 0` must yield a 0-px top border, not the 10-px
     /// shorthand. Without a per-edge `set` bit, the stored 0 is
     /// indistinguishable from "unset" in `apply_border_widths`.
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; border_top_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; border_right_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; border_left_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Color-only setters. Setting `borderTopColor` alone must not mark the
     /// top edge's width as explicitly set; that would let a stale 0 override
     /// the uniform `borderWidth` shorthand. Mirrors CSS, where
     /// `border-top-color` and `border-top-width` are independent longhands.
-    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; invalidate_subtree_caches_up(); }
-    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_top_color(Color c)    { border_top_.color = c;    border_top_color_set_ = true;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right_color(Color c)  { border_right_.color = c;  border_right_color_set_ = true;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; border_bottom_color_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left_color(Color c)   { border_left_.color = c;   border_left_color_set_ = true;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Width-only setters. Setting `borderTopWidth` alone preserves the
     /// existing per-edge color and explicitly marks the width as set, including
     /// a width of 0, which then overrides any uniform shorthand on that edge.
@@ -968,6 +969,15 @@ public:
     bool has_border_right_set() const { return border_right_set_; }
     bool has_border_bottom_set() const { return border_bottom_set_; }
     bool has_border_left_set() const { return border_left_set_; }
+    /// Per-edge colour "explicitly set" probes. A `BorderSide` default-
+    /// constructs to opaque black, so a stored colour is indistinguishable
+    /// from "never set" — and paint has to tell those apart, or a box that
+    /// only ever received per-side WIDTHS gets four black edges instead of
+    /// the uniform `border_color()` the shorthand asked for.
+    bool has_border_top_color_set() const { return border_top_color_set_; }
+    bool has_border_right_color_set() const { return border_right_color_set_; }
+    bool has_border_bottom_color_set() const { return border_bottom_color_set_; }
+    bool has_border_left_color_set() const { return border_left_color_set_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.). When
     /// transitioning from uniform `corner_radius_` to per-corner mode, seed
@@ -1540,6 +1550,22 @@ public:
     void set_backdrop_blur(float radius) { style_extras().backdrop_blur = radius; }
     float backdrop_blur() const { return style_extras_ ? style_extras_->backdrop_blur : 0.0f; }
 
+    /// CSS backdrop-filter with its full function list — `saturate()`,
+    /// `brightness()`, `invert()`, and compositions of them. Takes precedence
+    /// over `set_backdrop_blur` when non-empty; a blur-only value can be
+    /// expressed either way and means the same thing.
+    ///
+    /// Callers that pass a list containing a blur SHOULD also call
+    /// `set_backdrop_blur` with that radius: the repaint-damage pass reads the
+    /// scalar to decide how far beyond the view's bounds a change reaches.
+    void set_backdrop_filter_chain(std::vector<FilterOp> chain) {
+        style_extras().backdrop_filter_chain = std::move(chain);
+    }
+    const std::vector<FilterOp>& backdrop_filter_chain() const {
+        static const std::vector<FilterOp> kEmpty;
+        return style_extras_ ? style_extras_->backdrop_filter_chain : kEmpty;
+    }
+
     /// CSS `clip-path: path("...")`. Stores an SVG-path-d string; paint_all()
     /// installs it as a canvas clip via
     /// `Canvas::clip_path_svg` before painting children. Empty string
@@ -1676,11 +1702,20 @@ public:
         return style_extras_ ? style_extras_->background_origin : kEmpty;
     }
 
-    /// CSS background-position / background-size. Both are storage-only slots
-    /// today: Pulp's solid-bg paint path doesn't honor position or size offsets
-    /// (these only matter for url()/image-set() raster backgrounds). Storing
-    /// the keyword keeps the round-trip honest so the image pipeline can honor
-    /// the existing value without a JS-side change.
+    /// CSS background-position / background-size.
+    ///
+    /// `background-size` IS read at paint wherever the layer repeats — it sizes
+    /// the gradient tile. `background-position` is still storage-only, as is
+    /// `background-size` on a non-repeating layer, because the remaining cases
+    /// only matter for url()/image-set() raster backgrounds and there is no
+    /// image paint pass yet.
+    ///
+    /// Storing a keyword nothing reads is a deliberate strategy here, but it
+    /// carries a cost worth naming: the compat entry for `background-origin`
+    /// justified a `supported` claim on "pulp doesn't paint repeating gradient
+    /// tiles", and when tile paint arrived that claim went false with no edit
+    /// to the entry. If you make one of these slots load-bearing, re-read what
+    /// the matrix says about its neighbours.
     void set_background_position(std::string kw)   { style_extras().background_position = std::move(kw); }
     const std::string& background_position() const {
         static const std::string kEmpty;
@@ -1866,6 +1901,36 @@ public:
         /// Signs of the named corner for LinearFrom::corner: x is +1 for
         /// `right`, -1 for `left`; y is +1 for `bottom`, -1 for `top`.
         float corner_x = 1.0f, corner_y = 1.0f;
+
+        /// The band a `repeating-linear-gradient` tiles; 0 when the gradient
+        /// does not repeat. `positions` are rescaled ONTO this band — 0..1
+        /// across one tile — exactly as a repeating conic's are onto its
+        /// sweep, so the painter only has to place the band and let the shader
+        /// tile it.
+        float linear_repeat = 0.0f;
+        /// What `linear_repeat` is measured in. CSS lets the band be a length
+        /// (`... 1px, 7px` — 7 CSS px per tile whatever the box) or a fraction
+        /// of the gradient line (`... 0%, 10%`), and the line's length is a
+        /// function of the laid-out box, so the choice cannot be collapsed
+        /// before paint.
+        enum class RepeatUnit { px, line_fraction };
+        RepeatUnit linear_repeat_unit = RepeatUnit::px;
+
+        /// True when `positions` still hold raw `px` LENGTHS rather than 0..1
+        /// parameters, because every stop named one. The divisor is the
+        /// gradient LINE, whose length is a function of the laid-out box — and
+        /// of the `background-size` TILE when the layer is tiled — so the
+        /// division belongs at paint, beside `linear_repeat_unit`, which
+        /// carries its band's unit forward for the same reason.
+        ///
+        /// `linear-gradient(<colour> 1px, transparent 1px)` under
+        /// `background-size: 100% 32px` is a scanline every 32px. Read as
+        /// parameters instead, both stops land at 1.0 — the far end of the
+        /// ramp — and the layer paints its first colour over the WHOLE box.
+        /// That is a monotone wash, and it reads as a missing tile rather than
+        /// as a misread stop, which is why the two halves have to land
+        /// together.
+        bool positions_in_px = false;
 
         /// How a radial gradient's radii are sized, per css-images-3.
         /// `max_side` is not a CSS keyword — it is the pre-existing
@@ -2181,6 +2246,18 @@ private:
     void paint_outset_shadows(canvas::Canvas& canvas);
     void apply_overflow_and_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
+    /// Builds the per-corner outline for a box of the given size and four
+    /// corner radii, dispatching between circular corners and the `continuous`
+    /// squircle. Owned by paint_background_and_border and handed to the border
+    /// pass so both draw the same shape.
+    using CornerPathBuilder =
+        std::function<void(float w, float h, float tl, float tr,
+                           float bl, float br)>;
+    void paint_border(canvas::Canvas& canvas,
+                      bool use_per_corner,
+                      const CornerPathBuilder& build_corner_path,
+                      float eff_r, float eff_tl, float eff_tr,
+                      float eff_bl, float eff_br);
     void paint_children_in_order(canvas::Canvas& canvas);
     void paint_post_decorations(canvas::Canvas& canvas, const EffectLayerState& layers);
 
@@ -2296,6 +2373,13 @@ private:
     bool border_right_set_ = false;
     bool border_bottom_set_ = false;
     bool border_left_set_ = false;
+    // Parallel flags for the per-edge COLOR longhands. Separate from the width
+    // flags because CSS treats them as independent: `border-top-color` alone
+    // must not make the top edge's width explicit.
+    bool border_top_color_set_ = false;
+    bool border_right_color_set_ = false;
+    bool border_bottom_color_set_ = false;
+    bool border_left_color_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     // % support paired with corner_radii_. >0 means use pct
@@ -2356,6 +2440,8 @@ private:
     struct ViewStyleExtras {
         StagedAnimation staged_animation{};
         float backdrop_blur = 0.0f;
+        /// The whole `backdrop-filter` list when it is more than a blur.
+        std::vector<FilterOp> backdrop_filter_chain;
         // Import-resolved clip on this view's OWN ink; see
         // set_ancestor_clip_rect for why it does not descend.
         std::optional<Rect> ancestor_clip;

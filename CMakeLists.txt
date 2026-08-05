@@ -718,3 +718,11 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()
 endif()
+
+# Optional design pack for the agent-panel invariant test. The fixture links a
+# stylesheet that lives with the design system rather than in Pulp, so the test
+# skips without it instead of importing an unstyled page and reporting green.
+set(PULP_DESIGN_PANEL_PACK_CSS "" CACHE FILEPATH
+    "Design-pack stylesheet for test/fixtures/agent-panels")
+set(PULP_DESIGN_PANEL_PACK_FONTS "" CACHE PATH
+    "Directory of the design pack's @font-face files")

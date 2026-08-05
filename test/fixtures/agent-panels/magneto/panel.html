@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+</head><body style="margin:0">
+  <div class="pulp-root" data-theme="dark" style="padding:32px;width:760px">
+
+    <div class="pulp-panel" style="position:relative;overflow:hidden;border-color:var(--line-strong);box-shadow:var(--shadow-md), inset 0 1px 0 var(--highlight-top)">
+
+      <!-- ── HEAD : cream faceplate, warm bloom behind the wordmark ── -->
+      <div class="head" style="position:relative;overflow:hidden;padding:var(--space-4) var(--space-6);background:linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-panel) 100%)">
+        <div style="position:absolute;inset:0;background:radial-gradient(58% 150% at 16% 120%, color-mix(in oklab, var(--accent) 42%, transparent) 0%, transparent 70%);filter:blur(26px);mix-blend-mode:multiply;pointer-events:none"></div>
+        <div style="position:relative;display:flex;flex-direction:column;gap:var(--space-1)">
+          <div class="pulp-eyebrow">Magnetic Delay Line &middot; 3-head transport</div>
+          <div class="pulp-display" style="font-size:var(--text-2xl);letter-spacing:0.02em">MAGNETO</div>
+        </div>
+        <div style="position:relative;display:flex;align-items:center;gap:var(--space-3)">
+          <span class="pulp-badge" style="background:var(--surface-sunken);color:var(--text-muted);border:1px solid var(--line)">15 IPS</span>
+          <span class="pulp-badge" style="background:var(--surface-sunken);color:var(--text-muted);border:1px solid var(--line)">Ferric</span>
+          <span class="pulp-dot on" style="box-shadow:0 0 10px var(--accent), 0 0 20px color-mix(in oklab, var(--accent) 50%, transparent)"></span>
+        </div>
+      </div>
+
+      <div class="body" style="padding:var(--space-6);background:linear-gradient(180deg, var(--surface-panel) 0%, var(--surface-raised) 62%, var(--surface-panel) 100%)">
+
+        <!-- ── TRANSPORT WINDOW : a dark cut-out into the chassis, lit from within ── -->
+        <div class="pulp-scope" style="position:relative;overflow:hidden;height:136px;background-color:var(--surface-app);background-image:linear-gradient(color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px);background-size:100% 34px;border:1px solid var(--line-strong);box-shadow:inset 0 3px 14px color-mix(in oklab, var(--surface-app) 88%, transparent), inset 0 0 0 1px color-mix(in oklab, var(--accent) 12%, transparent), 0 2px 0 var(--highlight-top)">
+
+          <!-- bloom BEHIND the transport -->
+          <div style="position:absolute;inset:0;background:radial-gradient(46% 120% at 12% 50%, color-mix(in oklab, var(--accent) 70%, transparent) 0%, transparent 68%);filter:blur(24px);mix-blend-mode:screen;pointer-events:none"></div>
+
+          <!-- tape path -->
+          <div style="position:absolute;left:72px;top:67px;width:520px;height:2px;border-radius:var(--radius-pill);background:linear-gradient(90deg, color-mix(in oklab, var(--accent) 70%, transparent) 0%, color-mix(in oklab, var(--accent) 34%, transparent) 46%, color-mix(in oklab, var(--accent) 10%, transparent) 100%);mix-blend-mode:screen"></div>
+          <div style="position:absolute;left:72px;top:60px;width:180px;height:16px;background:repeating-linear-gradient(66deg, color-mix(in oklab, var(--accent) 22%, transparent) 0 2px, transparent 2px 9px);filter:blur(0.4px);mix-blend-mode:screen"></div>
+
+          <!-- supply reel -->
+          <div style="position:absolute;left:26px;top:22px;width:92px;height:92px;border-radius:50%;background:
+              radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--accent) 82%, var(--surface-app)) 0 8%, transparent 8.5%),
+              radial-gradient(circle at 50% 50%, transparent 0 28%, color-mix(in oklab, var(--surface-panel) 9%, transparent) 28% 73%, transparent 73.5%),
+              repeating-conic-gradient(from 0deg, transparent 0 15deg, color-mix(in oklab, var(--accent) 22%, transparent) 15deg 45deg, transparent 45deg 60deg),
+              radial-gradient(circle at 36% 28%, color-mix(in oklab, var(--surface-raised) 18%, transparent) 0%, transparent 62%),
+              color-mix(in oklab, var(--surface-app) 82%, var(--surface-panel));
+            box-shadow:inset 0 0 0 2px color-mix(in oklab, var(--accent) 48%, transparent), inset 0 10px 22px color-mix(in oklab, var(--surface-app) 80%, transparent), 0 0 26px color-mix(in oklab, var(--accent) 26%, transparent)"></div>
+
+          <!-- take-up reel -->
+          <div style="position:absolute;left:150px;top:38px;width:60px;height:60px;border-radius:50%;background:
+              radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--accent) 70%, var(--surface-app)) 0 10%, transparent 10.5%),
+              repeating-conic-gradient(from 18deg, transparent 0 18deg, color-mix(in oklab, var(--accent) 17%, transparent) 18deg 42deg, transparent 42deg 60deg),
+              radial-gradient(circle at 34% 26%, color-mix(in oklab, var(--surface-raised) 14%, transparent) 0%, transparent 60%),
+              color-mix(in oklab, var(--surface-app) 86%, var(--surface-panel));
+            box-shadow:inset 0 0 0 2px color-mix(in oklab, var(--accent) 34%, transparent), inset 0 8px 16px color-mix(in oklab, var(--surface-app) 80%, transparent), 0 0 16px color-mix(in oklab, var(--accent) 18%, transparent)"></div>
+
+          <!-- the echo train: repeats decaying along the tape -->
+          <div style="position:absolute;left:300px;top:69px;display:flex;align-items:flex-start;gap:16px;mix-blend-mode:plus-lighter">
+            <div style="width:3px;height:44px;border-radius:var(--radius-pill);background:var(--accent);box-shadow:0 0 14px color-mix(in oklab, var(--accent) 80%, transparent)"></div>
+            <div style="width:3px;height:34px;border-radius:var(--radius-pill);background:var(--accent);opacity:.82;box-shadow:0 0 12px color-mix(in oklab, var(--accent) 65%, transparent)"></div>
+            <div style="width:3px;height:26px;border-radius:var(--radius-pill);background:var(--accent);opacity:.64;box-shadow:0 0 10px color-mix(in oklab, var(--accent) 50%, transparent)"></div>
+            <div style="width:3px;height:20px;border-radius:var(--radius-pill);background:var(--accent);opacity:.48;box-shadow:0 0 8px color-mix(in oklab, var(--accent) 40%, transparent)"></div>
+            <div style="width:3px;height:15px;border-radius:var(--radius-pill);background:var(--accent);opacity:.34"></div>
+            <div style="width:3px;height:11px;border-radius:var(--radius-pill);background:var(--accent);opacity:.24"></div>
+            <div style="width:3px;height:8px;border-radius:var(--radius-pill);background:var(--accent);opacity:.16"></div>
+            <div style="width:3px;height:5px;border-radius:var(--radius-pill);background:var(--accent);opacity:.10"></div>
+          </div>
+
+          <!-- glass readout floating over the lit deck -->
+          <div style="position:absolute;right:18px;top:16px;display:flex;flex-direction:column;gap:2px;padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);background:color-mix(in oklab, var(--surface-panel) 12%, transparent);backdrop-filter:blur(9px) saturate(1.3);-webkit-backdrop-filter:blur(9px) saturate(1.3);border:1px solid color-mix(in oklab, var(--accent) 40%, transparent);box-shadow:0 6px 18px color-mix(in oklab, var(--surface-app) 70%, transparent)">
+            <div class="pulp-mono" style="font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:color-mix(in oklab, var(--accent) 74%, var(--surface-app))">Head Spacing</div>
+            <div class="pulp-mono" style="font-size:var(--text-lg);color:var(--accent);text-shadow:0 0 12px color-mix(in oklab, var(--accent) 60%, transparent)">380 <span style="font-size:var(--text-xs)">ms</span></div>
+          </div>
+        </div>
+
+        <!-- ── CONTROL DECK ── -->
+        <div style="display:grid;grid-template-columns:300px 1fr;gap:var(--space-6);margin-top:var(--space-6);align-items:stretch">
+
+          <!-- HERO : TIME -->
+          <div class="pulp-card" style="position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:var(--space-5) var(--space-4) var(--space-5);background:linear-gradient(168deg, var(--surface-raised) 0%, var(--surface-panel) 100%)">
+            <div style="position:absolute;inset:0;background:radial-gradient(52% 40% at 50% 46%, color-mix(in oklab, var(--accent) 46%, transparent) 0%, transparent 72%);filter:blur(30px);mix-blend-mode:multiply;pointer-events:none"></div>
+
+            <div class="pulp-eyebrow" style="position:relative;align-self:flex-start">Delay Time</div>
+
+            <div class="pulp-knob" data-pulp-param="time" data-pulp-value="0.62" style="position:relative;margin:var(--space-4) 0 var(--space-3);gap:var(--space-4)">
+              <div class="dial" data-pulp-paint style="width:164px;height:164px;border:1px solid var(--control-line);background:
+                  radial-gradient(circle at 50% 16%, color-mix(in oklab, var(--knob-hi) 82%, var(--highlight-top)) 0%, transparent 56%),
+                  conic-gradient(from 208deg,
+                    color-mix(in oklab, var(--knob-lo) 74%, var(--surface-app)) 0deg,
+                    var(--knob-base) 44deg,
+                    color-mix(in oklab, var(--knob-hi) 90%, var(--highlight-top)) 92deg,
+                    var(--knob-base) 148deg,
+                    color-mix(in oklab, var(--knob-lo) 80%, var(--surface-app)) 196deg,
+                    var(--knob-base) 252deg,
+                    color-mix(in oklab, var(--knob-hi) 92%, var(--highlight-top)) 306deg,
+                    color-mix(in oklab, var(--knob-lo) 74%, var(--surface-app)) 360deg),
+                  var(--knob-base);
+                box-shadow:
+                  inset 0 2px 0 var(--highlight-top),
+                  inset 0 -14px 28px color-mix(in oklab, var(--knob-lo) 72%, transparent),
+                  0 18px 34px var(--shadow-color),
+                  0 3px 8px var(--shadow-color-2),
+                  0 0 0 9px color-mix(in oklab, var(--surface-sunken) 62%, transparent),
+                  0 0 0 10px color-mix(in oklab, var(--accent) 30%, transparent)"></div>
+              <div class="knob-label" style="font-size:var(--text-xs);letter-spacing:0.28em;color:var(--text-strong)">TIME</div>
+            </div>
+
+            <div style="position:relative;display:flex;align-items:center;gap:var(--space-2)">
+              <span class="pulp-numfield" style="background:var(--surface-sunken)">380<span class="unit">ms</span></span>
+              <span class="pulp-numfield" style="background:var(--surface-sunken)">1/8<span class="unit">D</span></span>
+            </div>
+          </div>
+
+          <!-- SATELLITES -->
+          <div style="display:flex;flex-direction:column;gap:var(--space-5)">
+
+            <div class="pulp-groupbox" style="--gb-bg:var(--surface-raised);box-shadow:var(--shadow-sm), inset 0 1px 0 var(--highlight-top)">
+              <div class="gb-title">Regeneration</div>
+              <div class="gb-body" style="flex-direction:row;justify-content:space-around;align-items:flex-start;gap:var(--space-4)">
+
+                <div class="pulp-knob" data-pulp-param="feedback" data-pulp-value="0.48">
+                  <div class="dial" data-pulp-paint style="background:
+                      radial-gradient(circle at 50% 18%, color-mix(in oklab, var(--knob-hi) 84%, var(--highlight-top)) 0%, transparent 58%),
+                      conic-gradient(from 208deg,
+                        color-mix(in oklab, var(--knob-lo) 78%, var(--surface-app)) 0deg,
+                        var(--knob-base) 60deg,
+                        color-mix(in oklab, var(--knob-hi) 92%, var(--highlight-top)) 110deg,
+                        var(--knob-base) 190deg,
+                        color-mix(in oklab, var(--knob-lo) 82%, var(--surface-app)) 260deg,
+                        var(--knob-base) 320deg,
+                        color-mix(in oklab, var(--knob-lo) 78%, var(--surface-app)) 360deg),
+                      var(--knob-base);
+                    box-shadow:inset 0 1px 0 var(--highlight-top), inset 0 -8px 16px color-mix(in oklab, var(--knob-lo) 66%, transparent), 0 8px 16px var(--shadow-color-2), 0 0 0 5px color-mix(in oklab, var(--surface-sunken) 55%, transparent)"></div>
+                  <div class="knob-label">FEEDBACK</div>
+                </div>
+
+                <div class="pulp-knob" data-pulp-param="tone" data-pulp-value="0.55">
+                  <div class="dial" data-pulp-paint style="background:
+                      radial-gradient(circle at 50% 18%, color-mix(in oklab, var(--knob-hi) 84%, var(--highlight-top)) 0%, transparent 58%),
+                      conic-gradient(from 208deg,
+                        color-mix(in oklab, var(--knob-lo) 78%, var(--surface-app)) 0deg,
+                        var(--knob-base) 60deg,
+                        color-mix(in oklab, var(--knob-hi) 92%, var(--highlight-top)) 110deg,
+                        var(--knob-base) 190deg,
+                        color-mix(in oklab, var(--knob-lo) 82%, var(--surface-app)) 260deg,
+                        var(--knob-base) 320deg,
+                        color-mix(in oklab, var(--knob-lo) 78%, var(--surface-app)) 360deg),
+                      var(--knob-base);
+                    box-shadow:inset 0 1px 0 var(--highlight-top), inset 0 -8px 16px color-mix(in oklab, var(--knob-lo) 66%, transparent), 0 8px 16px var(--shadow-color-2), 0 0 0 5px color-mix(in oklab, var(--surface-sunken) 55%, transparent)"></div>
+                  <div class="knob-label">TONE</div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="pulp-groupbox" style="--gb-bg:var(--surface-raised);flex:1;box-shadow:var(--shadow-sm), inset 0 1px 0 var(--highlight-top)">
+              <div class="gb-title">Blend &amp; Output</div>
+              <div class="gb-body" style="flex-direction:row;align-items:flex-end;justify-content:space-around;gap:var(--space-5)">
+
+                <div style="display:flex;flex-direction:column;align-items:center;gap:var(--space-3)">
+                  <div style="display:flex;align-items:flex-end;gap:var(--space-2)">
+                    <div style="display:flex;flex-direction:column;justify-content:space-between;height:140px;padding:2px 0">
+                      <div style="width:9px;height:1px;background:var(--line-strong)"></div>
+                      <div style="width:6px;height:1px;background:var(--line)"></div>
+                      <div style="width:9px;height:1px;background:var(--line-strong)"></div>
+                      <div style="width:6px;height:1px;background:var(--line)"></div>
+                      <div style="width:9px;height:1px;background:var(--line-strong)"></div>
+                    </div>
+                    <div class="pulp-fader" data-pulp-param="mix" data-pulp-value="0.38">
+                      <div class="track" data-pulp-paint style="width:10px;background:linear-gradient(180deg, var(--surface-sunken) 0%, var(--surface-inset) 100%);box-shadow:inset 0 2px 5px color-mix(in oklab, var(--surface-app) 34%, transparent), inset 0 0 0 1px var(--line)"></div>
+                    </div>
+                  </div>
+                  <div class="pulp-eyebrow" style="color:var(--text-muted)">MIX</div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;align-items:center;gap:var(--space-3)">
+                  <div class="pulp-meter" data-pulp-meter="out" style="width:12px;box-shadow:inset 0 2px 6px color-mix(in oklab, var(--surface-app) 38%, transparent), inset 0 0 0 1px var(--line)">
+                    <div class="level" style="height:62%"></div>
+                  </div>
+                  <div class="pulp-eyebrow" style="color:var(--text-muted)">OUT</div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <!-- The style pack ends with `body { padding: 120px }` to keep blurred light
+       off negative document coordinates. Its TRAILING 120px is empty air that
+       the document's scroll extent still counts, so the measured content runs
+       120px past the root box. The leading room stays (it is what protects the
+       top/left edges); only the unused trailing slack is dropped, so the root's
+       own box is the document's last painted edge. -->
+  <style>body { padding-bottom: 0; }</style>
+</body></html>

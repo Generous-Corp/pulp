@@ -160,6 +160,11 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"cursor",
          {{"cpp", "swift", "native"},
           "web-only affordance; native surfaces have no pointer-cursor styling"}},
+        {"pointer_events",
+         {{"cpp", "swift"},
+          "js+native lower it — the native View hit test needs decoration to "
+          "stop eating presses. The C++ and SwiftUI codegen surfaces emit no "
+          "hit-testing concept to attach it to"}},
         {"right",
          {{"swift"},
           "js+cpp+native lower right-anchored absolute offsets; SwiftUI "

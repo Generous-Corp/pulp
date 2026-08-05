@@ -289,6 +289,28 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
+    # Presence checks over a rendered panel: every one of the five is proved in
+    # both directions on a synthetic capture — green on the reference as its
+    # own render, red on the same render with one defect painted in. A check
+    # nobody has watched fail is not known to be able to fail, which is how
+    # several instruments in this area read as clean while measuring nothing.
+    # 77 is SKIPPED, not passed: without numpy and Pillow not one of the seeded
+    # defects can be painted, and a green tick over a suite that ran nothing is
+    # the exact failure this suite exists to rule out.
+    add_test(NAME check-panel-presence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_panel_presence.py")
+    set_tests_properties(check-panel-presence-selftest PROPERTIES
+        TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+    # The agent-panel gate's own failure classifier. The negative fixture
+    # passes by being REFUSED, so which of three verdicts this returns is the
+    # only thing between "the clipping gate still fires" and "nobody noticed it
+    # stopped". Pure Python, no fixtures, no browser -- so unlike the gate it
+    # guards, this one always runs.
+    add_test(NAME agent-panel-gate-classifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_agent_panel_invariants.py")
+    set_tests_properties(agent-panel-gate-classifier-selftest PROPERTIES
+        TIMEOUT 120)
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

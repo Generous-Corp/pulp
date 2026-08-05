@@ -2809,3 +2809,21 @@ Note `tools/cli/cli_fs_util.cpp` carries a third `path_is_within` used for
 archive-extraction containment. It is still lexical-only; its callers currently
 pass pre-canonicalized paths, but it is the same fail-open shape if that ever
 stops being true.
+
+## A new browser-capture module must be registered for `pulp upgrade`
+
+`tools/import-design/browser_capture/` is a module graph the capture imports at
+run time, and `pulp upgrade` copies it file-by-file from a hard-coded list —
+`browser_capture_runtime_files` in `tools/cli/upgrade_install.hpp`. Adding a
+`.mjs` there and not adding it to that list produces an installed runtime with
+a hole in it.
+
+The reason this is worth a note rather than being obvious: **the break does not
+surface where the mistake was made.** The source tree is complete, every test
+that runs the capture from source passes, and the install itself reports
+success. It fails later, on an upgraded machine, as a module-resolution error
+during a capture — which reads as a broken import rather than a short manifest.
+
+The array's size is a literal beside the literal list, so bump both. Two tests
+hold the line: one compares the C++ list against the on-disk manifest, the
+other resolves the installed graph.

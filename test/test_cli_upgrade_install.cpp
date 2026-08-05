@@ -161,7 +161,7 @@ TEST_CASE("upgrade runtime list matches the canonical browser manifest",
         ui::browser_capture_runtime_files.begin(),
         ui::browser_capture_runtime_files.end()};
 
-    REQUIRE(manifest.size() == 13);
+    REQUIRE(manifest.size() == 14);
     CHECK(cpp_runtime_files == manifest);
 }
 

@@ -477,6 +477,22 @@ text shared by both fonts.
 
 ---
 
+## Jost
+
+Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type/Jost)
+
+SIL Open Font License, Version 1.1
+
+Licensed under the SIL Open Font License, Version 1.1 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at: https://openfontlicense.org
+
+The Font Software may be bundled and redistributed with software under the
+terms of the SIL OFL 1.1; see the Inter entry above for the full license
+text shared by both fonts.
+
+---
+
 ## lcov_cobertura
 
 Copyright 2011-2022 Eric Wendelin

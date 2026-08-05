@@ -1763,6 +1763,58 @@ Gotchas learned wiring this:
   hardcoded pixel constants (repo rule: every visual importer fix must be a
   generalizable rule reading the design data).
 
+### A designed control: installing a painter is not the same as it being consulted
+
+`apply_designed_body_skin` (`core/view/src/design_import_native_common.cpp`) is
+what makes a control whose design already painted its own body stop drawing a
+stock body over it. It installs a `WidgetPainter` via
+`apply_designed_control_skin`, and the widget's `paint` is supposed to give that
+delegate first refusal.
+
+**Only the widget kinds whose `paint` actually calls `effective_painter()` honour
+it.** `Knob::paint` does. `Fader::paint` did not, and `WidgetPainter::paint_linear`
+had no caller anywhere in the repo — so installing the skin on a fader compiled,
+ran, returned `true`, and moved zero pixels. `Meter` still has no painter hook at
+all (`WidgetPainter` has `paint_rotary` / `paint_linear` / `paint_button_background`
+and nothing for a level), so a designed meter still paints its stock body.
+
+Checks worth doing before believing a designed-control skin works:
+
+- Grep the hook for a **call site**, not just an override. An overridden virtual
+  with no caller is indistinguishable from a working one at compile time.
+- Assert both halves in the test: `widget->painter() != nullptr` proves the
+  install, and a counting painter reaching the hook proves the consult. Use
+  `painter()` and not `effective_painter()` for the install assertion, because
+  the latter walks up to an ancestor and will pass on a widget that was never
+  skinned itself.
+- A designed control's **Chrome-relative pixel diff is not a success metric.**
+  The design authors a bare track or a bare disc and the widget supplies the
+  value layer, so the oracle has no fill, no thumb and no arc to match. Fixing a
+  designed fader makes that region score WORSE against Chrome while being more
+  correct. Judge it by what the widget stopped overpainting, not by the number.
+
+**The control's box IS the design's body box.** It comes from the author's
+`[data-pulp-paint]` rect (`browser_capture/semantics.mjs`, `paintBox`), which in
+practice is the dial element itself. `paint_mod_ring_knob` then takes
+`min(w, h) * radius_scale` on `local_bounds()`, so **every `radius_scale <= 0.5`
+paints on the body by construction** — a fixed 0.46 put the value arc at 92% of
+the body radius, straight across a brushed cap the design had just drawn. No
+constant can satisfy "the design owns the body", because the constant is a
+fraction of the body; `apply_designed_body_skin` therefore derives the scale from
+the body EDGE (`0.5 + (ring_width/2 + 1) / min(w,h)`) and treats a
+`design_ring_radius` attribute as an override rather than the mechanism.
+
+Two consequences when changing that radius:
+
+- A scale above 0.5 paints OUTSIDE the widget's own box. That is legal here —
+  `View` clips only on `overflow: hidden`/`scroll` — and the hit rect is
+  unchanged, so the drag target stays on the dial. It does mean neighbouring
+  controls can converge: measure the gap between the two ARCS, not between their
+  boxes, because both arcs move outward together.
+- Measure the arc radius in a band tight around the expected value. A wider band
+  silently averages in the design's own concentric decoration (kelvin's copper
+  hairline at r≈89 and tick ring at r≈98) and reports a radius a pixel high.
+
 ### Native codegen fidelity gaps
 
 The render uses `generate_native_node` in `core/view/src/design_codegen.cpp`
@@ -4656,6 +4708,45 @@ Reject importer output that targets earlier SDK versions for canvas-heavy design
 
 Always pixel-sample after rendering — visual inspection misses uniform-fallback bugs. A spectrum that renders "uniform light gray" instead of "rainbow gradient" looks roughly right at thumbnail scale but is structurally broken (every color stop resolved to white by the parseColor fallback). Sample horizontal cross-sections at the expected gradient axis and assert color variance > some threshold.
 
+**A similarity number is only `1 - differing/total` when the two images are the
+same size.** `compare_screenshots` scores the top-left OVERLAP
+(`min(w) x min(h)`) and then multiplies the result by how much of the images
+that overlap covers, so unequal extents produce a percentage that contradicts
+the differing-pixel count printed beside it. A 200x120 page captured on a
+1280x800 viewport printed `Similarity: 2% (114/96000 pixels differ)` — 99.88%
+identical, scaled by 0.0234. Never quote that percentage without checking that
+the two images have the same dimensions.
+
+**The browser capture is deliberately LARGER than the design, so it must be
+registered before it is scored.** The panel's root carries its own padding and
+`capture.mjs` grows the extent so drop shadows and absolutely positioned
+decoration are not clipped; shrinking the image would clip the very shadows the
+growth exists to preserve. `capture.json` records where the design sits inside
+the image as `reference.authored_frame` (CSS px; `provenance.viewport.document.
+primary_surface` is the same box), and the importer crops to it, scaled by
+`browser_device_scale_factor`, in `resolve_reference_registration`.
+
+Three things about that rect are easy to get wrong:
+
+- **The inset is not symmetric.** kelvin's is 120 CSS px on the left and top and
+  zero on the right and bottom. A centred guess scored a visually-close panel as
+  73% different, and two phantom "renderer defects" — a caret measured nine times
+  too tall, advances measured an eighth of a pixel short per glyph — were both
+  this offset misread as pixel error.
+- **`authored_frame` can be null, and null is not a zero offset.** It means the
+  capture could not resolve its frame, so the comparison must REFUSE rather than
+  register at the origin. `object_member` yields an empty view for a null, which
+  reads as absent and reaches the refusal path.
+- **A fractional CSS height rounds independently on the two sides.** lattice's
+  frame is `1006.703125` CSS px -> 2013 device px, while its render is 2014,
+  because the root's height rounds up before it is doubled. The registration
+  snaps a one-pixel disagreement to the render and refuses anything larger.
+
+`crop_png` **CLAMPS** a rect that overruns its image — it returns a smaller
+picture with no error — so always compare the registered reference's extent
+against the render's after cropping. A silently clamped crop is the same
+misregistration wearing a correct-looking rect.
+
 ### 8. Pointer events need explicit `registerPointer(id)` AND don't bubble
 
 **Spec:** `addEventListener('pointerdown', fn)` plus React synthetic-event bubbling: a click on a child reaches the parent's handler unless `stopPropagation` is called.
@@ -5016,6 +5107,123 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 
 **Claude Code surfacing**: when someone runs `/import-design` on a Figma file, ask if they want silver (default) or sprite. If they're unsure, default silver and add a note that they can re-import with `--knob-style=sprite` to compare. If they have one specific knob that "needs to look like the Figma", suggest the `@sprite` suffix on that node's name in the Figma file.
 
+## A generated panel can be captured perfectly and still not be the one that ships
+
+Four independent defects, all found in one session on a single panel, all of
+which reported success at every stage. They share a shape: the browser lane
+worked, and something AFTER it quietly substituted, discarded or invented.
+Check each by looking at the INSTALLED artifact, never at the capture's own
+proof images.
+
+- **`capture_method` tells you which panel actually won.** `chromium-cdp` means
+  the browser-solved document survived; `design-ir-first` (or any procedural
+  builder's stamp) means something rebuilt the panel from the parameter list
+  after the import. A host that imports HTML must have an explicit branch that
+  makes the imported IR the design — if its selection chain only handles
+  "emitted" and "retained", the imported document falls through to the template
+  and the serialization below overwrites it. Nothing reports a fallback,
+  because nothing considers it one: the install succeeds and the panel is
+  merely someone else's. Assert the capture method on the installed document.
+
+- **A meter and the control beside it legitimately name the same parameter.**
+  `data-pulp-param` DRIVES, `data-pulp-meter` DISPLAYS. Lowering both under
+  `pulpParamKey` makes one parameter read as driven twice, and a host that
+  requires each to be driven exactly once then rejects an ordinary panel. The
+  attribute that supplied the key is the declared role: meters lower to
+  `pulpMeterValueKey`. The shared `binding` attribute stays on both — the JS
+  emitter reads one key and branches on the widget type.
+
+- **Every node in a lowered tree needs an anchor, including the ones the
+  adapter authored.** The capture backdrop is not a document element, so it is
+  easy to leave unanchored; a consumer that enforces "every node carries an
+  anchor" then refuses the whole tree, and the panel it refuses is the one the
+  browser just solved correctly.
+
+- **The whole-tree lowering is opt-in and silence looks like success.** Without
+  `--native-panel-lowering` the capture emits ONE photograph plus control
+  overlays. It scores *better* against the oracle (the bitmap is the oracle),
+  so a fidelity gate cannot see the difference — but the colours are baked into
+  pixels, nothing downstream can retint or theme it, and the bitmap does not
+  survive being saved, because a project persists the DesignIR and the ui.js,
+  not the scratch directory the asset lived in. Count `faithful_capture` nodes
+  in the installed IR: on a natively lowered panel it is zero.
+
+## Colour: the agent chooses it, and it belongs on the root
+
+A style pack ships structure, components, spacing and type. It does **not** own
+the panel's palette. If every pack ships the same ground — which is easy to end
+up with, and was true of all three at one point — then a brief that tells the
+model "write no literal colour, every colour comes from a token" guarantees
+every generated plugin is the same shade, no matter what art direction the
+model committed to. The variety is structural only, and nobody notices because
+each panel looks deliberate on its own.
+
+The rule that gets both properties is **one place, not everywhere**:
+
+```html
+<div class="pulp-root" style="
+  --surface-app:<ground>; --surface-panel:<panel>; --text-strong:<type>;
+  --accent:<accent>; --line:<hairline>; ...">
+```
+
+Write the brief with placeholders, not with a worked palette. A concrete
+example gets copied, and then every generated plugin arrives in the example's
+colours — which is the same defect as inheriting the pack's ground, differing
+only in which hex everything collapses to. It is an easy one to introduce while
+fixing the original.
+
+then `var(--token)` for every colour below it. The model picks the hex; the
+panel stays addressable, so themes, retinting and pack restyling all keep
+working. Scattering literals through the markup is what actually breaks
+restyling — measured once at 106 literals and zero tokens, where a warm cream
+pack and a phosphor-green pack produced two near-identical pictures.
+
+Enforce it, do not merely ask: require an accent AND a surface override in the
+document, checked before the browser starts. A prose instruction in a brief
+does not hold. Require both, because either alone is the house style with one
+thing moved.
+
+## Clipping: the negative rule and the positive one are not symmetric
+
+Content past the TOP or LEFT reaches negative document coordinates and the
+capture refuses it outright (`capture-negative-overflow`). Content past a
+clipping edge — a root that declares `height:540px; overflow:hidden` and then
+holds 900px — is **silently dropped**, and every stage downstream reports
+success. `overflow:hidden` means the document never grows, so the extent checks
+measure a clean 540px document and capture without complaint while a third of
+the panel, including controls bound to real parameters, is cut away.
+
+Scope the check to **bound controls**, not to all content: clipped text is
+ordinary and usually intentional (`text-overflow: ellipsis` requires
+`overflow: hidden`, and design systems use it throughout), so failing on it
+rejects correct panels. A control the user cannot reach is never intentional —
+it drives a parameter that can now only be automated. `capture-control-clipped`
+names each binding and how many pixels were lost.
+
+## The value arc belongs to the WIDGET, and a blank knob in the capture is correct
+
+A captured knob that is a bare shaded disc — no arc, no pointer — looks like a
+design that forgot its indicator. It is not. The value arc has to MOVE with the
+parameter, and a captured one cannot: it is baked at whatever value the document
+declared. So the authoring brief tells the model not to draw one, and the widget
+supplies the arc and the indicator at runtime.
+
+Do not "fix" this by adding a ring to the design. That puts a static arc under a
+moving one, which is visibly worse than either — two rings at two different
+angles — and it is a documented regression with a test pinning the prompt
+against it. The blank disc in the browser oracle is the correct intermediate.
+
+The trap for a reader arriving at a screenshot: our render has indicators and
+the Chrome oracle does not, so the renderer looks like it is inventing control
+appearance in violation of "the design draws, the runtime animates". The value
+arc is the deliberate exception, for the reason above. Check the authoring brief
+and its tests before concluding the renderer overdraws.
+
+Note that a pack may still SHIP `.ring` / `.pointer` components while the brief
+tells generated panels not to use them — hand-authored panels and other lanes
+consume the same pack. A component existing in the stylesheet is not permission
+for the generated lane to use it.
+
 ## Native-import gotchas
 
 Non-obvious rules in the import + native-codegen path. Each cost a real
@@ -5048,6 +5256,42 @@ correctness bug before it was made explicit; treat them as invariants.
 
   The area metric is blind to this: forge moved 0.0522 → 0.0520 for a change
   that visibly corrected every card corner. Judge it on a magnified crop.
+
+- **A lowered control carries a COPY of the body beneath it, so anything it
+  repaints is composited twice.** `lower_semantic_controls` builds the control
+  node fresh and then calls `apply_computed_styles` to record Chrome's resolved
+  appearance on it — gradient, radius, and the whole box-shadow stack — while
+  `designed_body` (`underlay` or `capture`) states that the body is drawn by the
+  layer beneath. Both are deliberate: the copy keeps the control's geometry
+  through a round trip. What is NOT safe is painting that copy. Two composites
+  of one translucent layer are not one composite, and a 0.5-alpha offset shadow
+  reaches 0.75 with a stretched tail — a dark crescent under a dial where the
+  browser leaves a clean gap.
+
+  The tell is directional and everywhere at once: EVERY lowered control on the
+  panel is darker than Chrome just outside its box, worst under the biggest
+  dial, and the excess follows each layer's own coverage, so an offset layer
+  shows heavily on the offset side and faintly all the way round. That is one
+  defect, not two. Measure it as mean luma in the ring OUTSIDE the control's box
+  — a whole-panel percentage at tolerance 16 cannot see the 1-10 luma half of it
+  at all.
+
+  Watch for the same shape in any other property the control copies:
+  `apply_visual_style` still installs background, gradient and border on it. An
+  opaque background over an identical opaque background is invisible, which is
+  why only the shadow was caught.
+
+- **`box-shadow` and `filter: drop-shadow()` do NOT share a blur→sigma
+  conversion, and the plausible unification is wrong.** Measured off Chrome 151
+  at six radii (black shadow on white, DPR 1, Gaussian-CDF fit to the rendered
+  coverage, residual ~0.2/255): `box-shadow: 0 0 Npx` renders with sigma = N/2
+  exactly — which is what `skia_canvas_box_shadow.cpp` already does and what the
+  CSS spec says — while `drop-shadow(0 0 Npx)` on the same page fits sigma = N.
+  Because the two spellings visibly differ for the same N, "correcting"
+  box-shadow to Skia's `ConvertRadiusToSigma(blur/2)` (`0.2887*blur + 0.5`) is a
+  convincing change that is 1.7x too tight. `test_box_shadow_cache.cpp` pins the
+  measured law. If a shadow looks too heavy, suspect what is painting it twice
+  before suspecting the blur.
 
 - **A slow `pulp-import-design` run is usually the scratch sweep, not the
   import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
@@ -5508,64 +5752,187 @@ fixture you derived from the same matrices as the code agrees with it by
 construction. On an out-of-gamut `oklch` the hand-written expectation was simply
 wrong and Chrome settled it.
 
-**Gradient geometry cannot be resolved when the CSS is parsed.** The importer
-runs its whole style pass *before* Yoga sizes anything, so
-`apply_css_background_gradient` sees a degenerate 1x1 box. Every box-dependent
-number therefore has to travel as CSS *intent* on `View::BackgroundGradient` and
-be resolved in `View::paint_background_and_border` against real `bounds_`:
+**Still open, diagnosed not fixed:** `apply_css_background_gradient` reads
+`local_bounds()` *before* layout, so the box is 1:1 and **every angled gradient
+resolves in the wrong direction**. Confirmed arithmetically against Chrome. It
+needs paint-time resolution. Radial `farthest-corner` separately uses a constant
+`0.7071·max(w,h)` and ignores an off-centre `at`, running ~28% short.
 
-- a linear `<angle>`'s endpoints (the line's length is the box's projection onto
-  it, so the aspect ratio is in the answer);
-- a `to <corner>` keyword's angle, which is itself a function of the aspect;
-- a radial's radii, which are percentages of width and height *independently*.
+## Inline `<svg>` — the geometry is captured, the PAINT was not
 
-`View::resolve_radial` is the single place that turns a radial's CSS sizing into
-pixels, shared by the painter, the parser's calc()-stop resolution, and the
-tests, so the three cannot drift.
+An icon's shapes are in the DOM snapshot all along: `<path d="…">`, `viewBox`,
+`points`, `cx`/`r` are authored attributes and the snapshot carries every
+attribute of every node. What was missing is the other half — **`fill` and
+`stroke` were not in `COMPUTED_STYLES`** (`browser_capture/semantics.mjs`), so
+the capture held shapes with no colour for them.
 
-**Three things about radial gradients that are easy to get wrong:**
+Reading the paint back off the authored attributes does not substitute, and the
+failure is silent in the two most common idioms:
 
-- **The default shape is an ELLIPSE, not a circle**, and a two-value size
-  (`90% 70%`) can only be an ellipse. Skia has no elliptical gradient — put the
-  y-squash in a **local matrix on the shader** (`set_fill_gradient_radial_-
-  elliptical`), never on the canvas: a background gradient is routinely filled
-  through a rounded-rect or per-corner path, and a canvas scale would stretch
-  those corners with it.
-- **The corner keywords are not the corner distance.** For an ellipse the spec
-  takes the matching `-side` aspect and scales it until it passes through the
-  corner, which works out to exactly `sqrt(2)` per axis — noticeably larger.
-- **`to bottom right` is `atan2(HEIGHT, width)`, not `atan2(width, height)`.**
-  The gradient line is perpendicular to the *other* diagonal `(w, -h)`, whose
-  perpendicular is `(h, w)`. The transposed form is a plausible-looking
-  expression that is only correct on a square box; on 160x100 it misses Chrome's
-  boundary by 48px. Chrome settled this — the arithmetic had been "checked" twice.
+- `fill="currentColor"` resolves against the `color` of the box AROUND the
+  icon, which is nowhere in the SVG markup;
+- a stylesheet rule (`.icon path { fill: var(--accent) }`) leaves no attribute
+  on the element at all.
 
-**A geometry fixture MUST be non-square and off-centre.** The pre-existing test
-for radial sizing asserted `closest-side → 0.5` and `farthest-corner → 0.7071`
-on a **200x200 box with the gradient at 50% 50%** — and on a square, centred box
-those wrong constants give exactly the right answer. The test could not have
-failed for the defect it was named after. The same trap makes a 45° angle its
-own reflection and an ellipse a circle. Use a box like 160x100 with the centre
-at something like `20% 20%`, and the wrong model and the correct one stop
-agreeing. This generalises past gradients: **any test whose subject is
-arithmetic over a box needs a fixture where the plausible-but-wrong formula
-gives a different answer**, or it is only asserting that two expressions
-coincide on the one input you chose.
+Only the browser knows which one won, so the resolved value is the only usable
+input. The capture now collects `fill`, `fill-opacity`, `fill-rule`, `stroke`,
+`stroke-opacity`, `stroke-width` and `stroke-dasharray`. **A capture taken
+before that refuses with `capture_fallback_reason: svg-paint-unavailable`
+rather than defaulting** — see the next trap for why defaulting is worse than
+refusing.
 
-**Skia interpolates gradient stops UNPREMULTIPLIED by default; CSS is
-premultiplied.** `SkGradient::Interpolation::fInPremul` defaults to `kNo`, so a
-fade to `transparent` — which Chromium serializes as `rgba(0, 0, 0, 0)` — drags
-the colour toward **black** as the alpha falls instead of just fading. Opaque
-gradients are bit-identical either way, which is why every existing gradient test
-passed over it. It only shows on a stop with alpha < 1, and that is exactly the
-form real panels use for a soft screen-sized wash. `skia_gradient_compat.hpp`
-now routes all four makers through `css_interpolation()`.
+**`fill: none` must be STATED, never omitted.** SVG's own default fill is
+opaque black and `SvgPathWidget`'s default matches it, so a lowering that emits
+no `svg_fill` for a stroke-only icon does not leave it unfilled — it fills the
+outline solid black. A stroke-only waveform renders as a black blob with the
+right stroke around it, and every colour assertion still passes, because the
+stroke IS there. Both consumers already understand the literal string `none`
+(`apply_svg_paint` calls `clear_fill()`, the `setSvgFill` bridge treats it as
+clear), so emit it. Found by looking at the render; no IR-level assertion could
+have caught it.
 
-**Symptom to recognise:** a wash that is present, correctly positioned, and
-*too weak and too grey* — the tint reads roughly a third of Chrome's over most
-of its area while matching near the hot centre. Compute the expected delta both
-ways (`α·(C−B)` vs `α·(lerp(C,black,f)−B)`) at one off-centre pixel; the two
-predictions differ by ~3x and pick the answer immediately.
+**Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
+one user-coordinate space (the root `viewBox`), so every vector node is placed
+at the `<svg>` element's own box and carries the same viewBox. Giving each
+shape the box Chrome solved for IT rescales every path by a different factor
+and the icon comes apart. This is the one place whole-tree lowering
+deliberately does not use a node's own solved box.
+
+**What still refuses, and why the reason is per-node.** `capture_fallback_reason`
+carries `svg-<refusal>` and `capture_fallback_detail` names the element:
+`transform` (no per-node matrix in the lowering), `paint-reference` (a
+`url(#…)` fill/stroke, `clip-path`, `mask-image` or `filter`),
+`dashed-stroke`, `group-opacity`, `element` (a `<text>`, `<image>`, `<use>`,
+nested `<svg>`), `shape-geometry` (a percentage length, a malformed `points`).
+A refusal pools the WHOLE subtree, so a refused icon never half-draws over its
+own capture. Read `native_svg_lowered` / `native_svg_refused` /
+`native_svg_shapes` on the IR root beside those per-node strings: the residual
+is meant to be a list of constructs, not a total.
+
+Two refusals are easy to get wrong in the permissive direction, and both draw a
+plausible-looking WRONG picture rather than nothing: `<switch>` renders the
+FIRST child whose requirement attributes hold, so walking it as a plain group
+draws every alternative stacked; and a non-default `preserveAspectRatio`
+(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
+renderer's fixed `xMidYMid meet` will not.
+
+**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
+miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
+stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
+coverage by <1%, which is why it is accepted rather than sent to the fallback —
+refusing on it would capture most real icons. Revisit if a design shows it.
+
+## Inline `<svg>` — the geometry is captured, the PAINT was not
+
+An icon's shapes are in the DOM snapshot all along: `<path d="…">`, `viewBox`,
+`points`, `cx`/`r` are authored attributes and the snapshot carries every
+attribute of every node. What was missing is the other half — **`fill` and
+`stroke` were not in `COMPUTED_STYLES`** (`browser_capture/semantics.mjs`), so
+the capture held shapes with no colour for them.
+
+Reading the paint back off the authored attributes does not substitute, and the
+failure is silent in the two most common idioms:
+
+- `fill="currentColor"` resolves against the `color` of the box AROUND the
+  icon, which is nowhere in the SVG markup;
+- a stylesheet rule (`.icon path { fill: var(--accent) }`) leaves no attribute
+  on the element at all.
+
+Only the browser knows which one won, so the resolved value is the only usable
+input. The capture now collects `fill`, `fill-opacity`, `fill-rule`, `stroke`,
+`stroke-opacity`, `stroke-width` and `stroke-dasharray`. **A capture taken
+before that refuses with `capture_fallback_reason: svg-paint-unavailable`
+rather than defaulting** — see the next trap for why defaulting is worse than
+refusing.
+
+**A design that lowers ZERO vector nodes is almost always a stale CAPTURE, not
+a code failure.** Measured: forge's snapshot has 18 `<svg>` and 38 `<path>`, all
+of them with layout objects and clean paint (no transform, no `url()`, no
+dashes). Lowered from a capture taken WITH the paint properties it produces
+18/18 icons and 40 vector nodes; strip the seven paint columns from that exact
+same snapshot and it produces 0 vector nodes and 18
+`svg-paint-unavailable` refusals. The pre-extension protocol collected **61**
+properties and the current one collects **68** — `len(computedStyleNames)` in
+`dom-snapshot.json` is the fastest way to tell which one you are holding. The
+importer now prints a `Warning: capture predates the SVG paint protocol …` line
+naming the count and the action, `BrowserCaptureIrResult::warnings` carries it
+for any other caller, and `native_svg_stale_capture` is stamped on the IR root —
+because a harness that lowers in-process and dumps `native.ir.json` never sees a
+CLI print, which is exactly how this stayed invisible. **Re-capture before
+debugging the lowering.**
+
+**A re-capture regenerates the oracle too — check whether it actually moved.**
+`browser.png` comes out of the same run, so a score that shifts after a
+re-capture can be the reference changing (different Chrome build, font
+resolution, settle timing) rather than the render improving. Do not attribute
+it until you have hashed both. Measured on forge: two captures of the same
+source taken hours apart produced a **byte-identical** `browser.png`
+(sha256 `76bbd8f2…`) on the same Chrome build, so the whole confound
+evaporated and every point of movement was ours. That is the good case; assume
+it only after `shasum` says so.
+
+**The capture runtime is STAGED into the build directory** (`browser_capture-v1/`
+beside `pulp-import-design`, copied by a CMake custom target). A capture taken
+before that copy runs is old even though the source tree is current — so
+re-capture only counts if the importer was rebuilt first.
+
+Two things this rules out, both checked rather than assumed: an icon `<svg>`
+with no background of its own IS in the painted set (every one of forge's 18 has
+a layout object, so sourcing roots from `painted_nodes()` is sound), and the
+lowering is a **pixel-level no-op on a stale capture** — the composite is
+byte-identical to the pre-change one, so a visual difference on an old capture
+came from somewhere else.
+
+**`fill: none` must be STATED, never omitted.** SVG's own default fill is
+opaque black and `SvgPathWidget`'s default matches it, so a lowering that emits
+no `svg_fill` for a stroke-only icon does not leave it unfilled — it fills the
+outline solid black. A stroke-only waveform renders as a black blob with the
+right stroke around it, and every colour assertion still passes, because the
+stroke IS there. Both consumers already understand the literal string `none`
+(`apply_svg_paint` calls `clear_fill()`, the `setSvgFill` bridge treats it as
+clear), so emit it. Found by looking at the render; no IR-level assertion could
+have caught it.
+
+**One place decides a node is a captured element.** Two conditions reach the
+element-capture fallback — an element style cannot describe, and an `<svg>`
+whose shapes refused — and they are `capture_fallback()` in
+`lower_painted_tree`, not two branches each writing the node's attributes. This
+is not tidiness: when the fallback branch was duplicated, a parallel branch
+added `unpainted` + `unpainted_fallback_area` to one copy, and every refused
+`<svg>` then counted as a fallback while contributing zero fallback area. The
+tally and the area disagreed, and the metric under-reported every unpainted icon
+on every design. Anything true of *every* fallback goes in that one helper.
+
+**Shapes share ONE box, and it is the `<svg>`'s.** The shapes of one icon share
+one user-coordinate space (the root `viewBox`), so every vector node is placed
+at the `<svg>` element's own box and carries the same viewBox. Giving each
+shape the box Chrome solved for IT rescales every path by a different factor
+and the icon comes apart. This is the one place whole-tree lowering
+deliberately does not use a node's own solved box.
+
+**What still refuses, and why the reason is per-node.** `capture_fallback_reason`
+carries `svg-<refusal>` and `capture_fallback_detail` names the element:
+`transform` (no per-node matrix in the lowering), `paint-reference` (a
+`url(#…)` fill/stroke, `clip-path`, `mask-image` or `filter`),
+`dashed-stroke`, `group-opacity`, `element` (a `<text>`, `<image>`, `<use>`,
+nested `<svg>`), `shape-geometry` (a percentage length, a malformed `points`).
+A refusal pools the WHOLE subtree, so a refused icon never half-draws over its
+own capture. Read `native_svg_lowered` / `native_svg_refused` /
+`native_svg_shapes` on the IR root beside those per-node strings: the residual
+is meant to be a list of constructs, not a total.
+
+Two refusals are easy to get wrong in the permissive direction, and both draw a
+plausible-looking WRONG picture rather than nothing: `<switch>` renders the
+FIRST child whose requirement attributes hold, so walking it as a plain group
+draws every alternative stacked; and a non-default `preserveAspectRatio`
+(`none` stretches, `slice` overflows and crops) puts the geometry somewhere the
+renderer's fixed `xMidYMid meet` will not.
+
+**Not carried, and not refused:** `stroke-linecap`, `stroke-linejoin` and the
+miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
+stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
+coverage by <1%, which is why it is accepted rather than sent to the fallback —
+refusing on it would capture most real icons. Revisit if a design shows it.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
@@ -5582,49 +5949,6 @@ the code, and both were found by measuring rather than reasoning:
   ink-bearing nodes pass on every real design. Quote the area-weighted number and
   say the per-node gate is not live.
 
-**Its feature classifier lied about `background-blend-mode`, and the shape of
-that lie generalises.** `background-blend-mode` carries **one value per
-background layer**, so a node with two background layers and no blending at all
-computes to the string `"normal, normal"` — which is not `"normal"`. Comparing
-the whole computed value against the keyword classified every multi-layer
-background as a blend. That mislabelled *the single largest node on the panel* on
-three of four designs, and it read as "59-70% of failing area is
-`background-blend-mode`" when the corpus contains **zero** non-normal
-`background-blend-mode` anywhere; the node was two ordinary radial gradients.
-**Any CSS property that takes a comma-separated list per background layer or per
-transition needs its value split before a keyword comparison** — `background-*`,
-`transition-*`, `animation-*`, `mask-*` are all like this. A grep-shaped check
-over a computed style is not a check.
-
-**Always report a coverage statistic beside the failing fraction.** Take the
-reference's modal colour, call pixels beyond a threshold from it "ink", and
-report both `covered = |render ink ∩ ref ink| / |ref ink|` and
-`inkRatio = |render ink| / |ref ink|`. **Both, not one:** a solid-black render
-against SPECTR scores `covered = 1.00` (black is far from the modal colour
-everywhere) and is only caught by `inkRatio = 26`. This is what makes SPECTR's
-blank render legible as `cover=0.000` instead of a respectable-looking 0.1245.
-
-**Two ways a background-build waiter lies, and both look like a result.**
-Measurement work runs long builds, so agents wrap them in wait loops. Two
-failure modes have each burned a session here:
-
-- **`pgrep -f "cmake --build ..."` matches ANOTHER agent's build in another
-  worktree.** Several worktrees share this machine and every one of them runs a
-  byte-identical command line, so `until ! pgrep -f …` either blocks on someone
-  else's build or — if your pattern does not match your own invocation — exits
-  instantly and reports "finished" before yours started. Match on something
-  unique to your run (a marker file the command writes on exit, or the build
-  log's own last line), never on the shared command line. A wait loop can also
-  match ITSELF: the shell running `pgrep -f "ctest …"` has that string in its
-  own argv, so the loop never ends.
-- **A pipeline ending in `grep -c` reports failure on a zero count.** `grep`
-  exits 1 when it finds nothing, so `… ; grep -cE " error:" build.log` makes a
-  perfectly clean build's task exit 1 and read as "build failed". Put the grep
-  anywhere but last, or `|| true` it.
-
-In both cases the honest move is the same: **read the build log's own tail
-rather than trusting the wrapper's verdict.**
-
 **Prove the bitmap is absent by substitution, not by scanning.** A static scan
 shows no node *references* the capture; it cannot show no pixel *comes from* it.
 Replace `browser.png` with solid magenta at identical dimensions, re-lower,
@@ -5639,3 +5963,66 @@ fills, including 1px hairlines, give **0 failing pixels of 960,000 — Chrome an
 Skia agree exactly**, so `τ_node = 0.0` holds for flat fills. The effects family
 cannot be given a τ yet because its gradients are still measuring the defect
 above rather than noise.
+
+## Area weighting cannot see the defects people notice
+
+`score_native_panel.py` reports an area-weighted failing fraction, and the
+defects that make a panel look wrong are small. Measured, not argued: a gradient
+fix moved delay **0.1697 → 0.0919 (−46%)** with no visible change, while a
+person looking at the same renders found five defects the score ranked as noise
+— a button's triangle icon entirely absent, a square icon 2px off-centre in its
+ring, every knob's pointer line gone, every selected state's accent fill turned
+grey, a teal underline dropped from the active tab while boxes were invented
+around the tabs next to it, and a paragraph running past its card. A missing
+knob pointer is a few hundred px on a 16M px panel. **Never read a falling area
+score as a fidelity improvement, and never read a low one as a good panel.**
+
+`tools/import-validation/check_panel_presence.py` asks the questions area
+weighting cannot, over the same capture and render:
+
+```bash
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --json-out presence.json
+# no-regression use: fail only on findings that are NEW
+python3 tools/import-validation/check_panel_presence.py \
+  --capture <capture-dir> --render <native.png> --baseline presence.json
+```
+
+Five checks — ink present per node, ink absent per node, colour present, text
+contained, text runs — each a yes/no question whose answer does not shrink as
+the panel grows. On the four current designs it names every one of those six
+defects, at the node.
+
+Things that cost time here, all of them found by measuring:
+
+- **Run it against the reference as its own render first.** That control must
+  report zero on every design. It is the only thing that separates "this check
+  found a defect" from "this check fires on everything", and it caught two
+  contamination bugs during development.
+- **Ink is measured against each side's OWN modal colour**, which makes the ink
+  checks deliberately blind to colour. A filled chip going grey changes no marks
+  at all — both sides are a flat rectangle with a label on it — so the per-node
+  colour check is what catches selected states going dead, not the ink checks.
+- **A per-node colour check and a panel-wide one catch different things.** The
+  teal underline vanished panel-wide on forge (ratio 0.004); delay's accent
+  survived on sliders while every toggle lost it, so only the per-node question
+  sees that one.
+- **Containment must be asked against a container with room to spare**, never
+  against the run's own box or the reference's own extent. A text node's box is
+  a tight fit around Chrome's glyphs, so a substituted face makes every run on
+  the panel "overflow" — 154 findings on delay, one root cause, no signal. Asked
+  against the nearest ancestor with slack it drops to the runs that genuinely
+  stopped fitting.
+- **Restrict text measurements to pixels the run or its ancestors own.** A tab
+  strip 2px lower in our render read as a caption 80px below it overflowing its
+  card, because the measuring window caught the tab's own text in the same
+  colour.
+- **A blank render is flagged first, panel-wide, before any per-node verdict.**
+  SPECTR renders zero marks and every per-node check fires; saying that once
+  ("the panel is substantially blank") beats saying it 56 times.
+- **What it still cannot see**: a mark present but the wrong shape or a couple
+  of px out of place; a missing glyph inside a gradient tile, where the
+  gradient's own variation counts as ink (forge's logo mark is missed for
+  exactly this reason); and text clipped inside a box whose ink still ends short
+  of the clip edge. Nodes it cannot measure are counted under `unmeasurable` and
+  are never folded into the passing count.

@@ -38,6 +38,113 @@ mapping, evidence, and caveat text.
 
 ## Recently changed
 
+- **`background-origin` demoted to `partial` — a conditional claim whose
+  condition flipped** — the entry was marked `supported`, and its own
+  written justification was that all three values "paint identically
+  because pulp doesn't paint repeating gradient tiles (the only case
+  where this would matter)". Pulp now paints repeating gradient tiles
+  (see the next entry), so the one case the row named as mattering
+  became the normal case and the claim went false without anyone editing
+  it.
+
+  The property is still a storage-only slot the paint path never reads,
+  so the tile grid is anchored on the **border box** where CSS specifies
+  the **padding box**. On any node with a border or padding the stripe
+  train sits `borderWidth` early against a browser; `border-box` agrees
+  only by accident. A percentage `background-size` resolves against the
+  wrong box for the same reason.
+
+  Worth recording as a pattern rather than a one-off: the original entry
+  did the right thing by writing its assumption down in the row. What
+  failed was re-reading that assumption when the feature it depended on
+  landed. **When you make a stored-but-unread slot load-bearing, re-read
+  what the matrix claims about its neighbours.**
+
+- **A sized gradient layer TILES, and an all-`px` stop list resolves** —
+  two halves of one change, and they only work together. Previously
+  `background-size` reached `View` and stopped: it was a storage-only
+  slot that the paint path never read, so a gradient CSS had sized into
+  a tile painted **once** across the whole box. A
+  `linear-gradient(colour 1px, transparent 1px)` at
+  `background-size: 100% 32px` is only a scanline pattern if it repeats;
+  drawn once it is a single hairline.
+
+  The second half is the stop reader. A colour-stop list written
+  entirely in `px` now resolves against the gradient line at paint time —
+  which is the only place the line, and the `background-size` tile it may
+  belong to, is actually known.
+
+  **These do not work separately, and the failure is silent in both
+  directions.** Tiling alone moves zero pixels, because the untiled stop
+  list still resolves to a flat wash; the stop fix alone removes the wash
+  but produces no scanlines, because nothing repeats. Landing either half
+  by itself looks exactly like a broken implementation.
+
+  Still unsupported, and now stated precisely rather than lumped
+  together: `background-position` on a gradient layer, and
+  `background-size` on a **non-repeating** layer — both are stored and
+  ignored at paint. `cover` / `contain` / `auto` continue to mean the
+  element's box, because CSS gives a gradient no intrinsic size to fit. A
+  stop list that **mixes** `px` with percentages still reads the `px`
+  term as a raw 0..1 parameter.
+
+- **`backdropFilter` is a filter CHAIN at paint time, not blur-only** —
+  the catalog entry moves from `parses blur(Npx) → setBackdropFilter(id,
+  blur_px)` to `css_filter_chain → View::set_backdrop_filter_chain →
+  Canvas::save_backdrop_filter_chain`. The colour functions
+  (`brightness` / `contrast` / `grayscale` / `hue-rotate` / `invert` /
+  `opacity` / `saturate` / `sepia`) now apply on the Skia backend: the
+  list composes into one `SkImageFilter` installed as the layer's
+  backdrop, cropped to the element's own rect, applied in source order.
+  Blur alone additionally sets `View::set_backdrop_blur`, so the scalar
+  slot keeps working.
+
+  Two limits remain and they are **different in kind**, which is why
+  they are listed separately in `unsupportedValues`:
+  * `drop-shadow(...)` is dropped by the parser — its colour argument
+    needs the full colour parser, and a shadow in the wrong colour is
+    worse than an absent one. `url(#filter)` needs an SVG filter graph.
+  * The **JS/web-compat bridge slot is still scalar**
+    (`setBackdropFilter(id, blur_px)`), so a design that reaches paint
+    through the shim rather than through the native import lane still
+    gets blur only. The lane decides what you get — check which one a
+    panel uses before filing a bug against this row.
+
+  A backend that does not advertise
+  `CanvasCapability::backdrop_filter_chain` keeps the blur, drops the
+  colour half, and says so once through the capability-fallback warning.
+
+- **`content` — `wontfix` is now scoped to THIS lane, not to Pulp** —
+  the row stays `wontfix` and the reason is unchanged for Pulp's own CSS
+  shim: there is no pseudo-element model, so no `::before` / `::after`
+  box is ever created and `content` has nothing to fill.
+
+  The correction is that the row was reading as a blanket statement. A
+  design arriving through the **browser-capture importer is a different
+  lane and is not covered by this row**: Chrome creates the
+  pseudo-element and resolves `content` (including `counter()` and
+  `attr()`) into ordinary text runs before the snapshot, and lowering
+  reads those runs. So generated content *does* survive that path.
+  `url()` content still does not — it is an image, and the snapshot
+  carries no text for it.
+
+- **CSS Color 4 colours resolve on the JS side before crossing to
+  native** — no catalog status changed, but the paint shim
+  (`web-compat-style-decl-paint.js`) now rewrites `oklab()` / `oklch()` /
+  `lab()` / `lch()` / `color()` inside gradient strings to hex before the
+  string is handed over. The native stop parser does not know those
+  function names and falls back to **white**, so a translucent bloom
+  painted as an opaque white blob. Chrome serializes every
+  `color-mix(in oklab, …)` to `oklab(…)`, so this is the common path for
+  generated panels rather than an edge case.
+
+  `box-shadow` gained a colour-**first** branch in the same change: CSS
+  allows the colour on either side of the offsets and Chrome emits it
+  first, so a computed shadow previously did not match at all and fell
+  through, leaving a card ringed by a bright halo. Full rationale and the
+  two regex traps (anchor the offsets; a round-trip assertion cannot test
+  this) are in the `engine` skill.
+
 - **`resolveCSSLength` everywhere** —
   `core/view/js/web-compat-style-decl.js` swept: 58 `parseCSSLength(...)`
   call sites swapped to `resolveCSSLength(...)`. The new helper is a
