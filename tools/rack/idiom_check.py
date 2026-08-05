@@ -1181,11 +1181,23 @@ def library_problems(idioms: dict | None = None,
             bad.append(f"{slug} has provenance {tier!r}, which is not one of "
                        f"{PROVENANCE}")
         elif tier == "read":
-            anchor = idiom.get("anchor")
-            if not isinstance(anchor, dict) or not anchor.get("doc") \
-                    or not anchor.get("quote"):
+            # Two anchor shapes, because two kinds of book. A text is anchored
+            # by a phrase; a book of page images -- the ARP patch book is 103
+            # of them and no text at all -- is anchored by a page and the hash
+            # of that page. Exactly one, never both: a record carrying a quote
+            # AND a page has not decided what it read.
+            anchor = idiom.get("anchor") or {}
+            if not isinstance(anchor, dict) or not anchor.get("doc"):
                 bad.append(f"{slug} says it was read and carries no anchor, so "
                            f"nothing can ever check it")
+            elif (anchor.get("quote") is not None) == \
+                    (anchor.get("page") is not None):
+                bad.append(f"{slug}'s anchor is neither a quote nor a page "
+                           f"image, or is both")
+            elif anchor.get("page") is not None and not anchor.get("sha256"):
+                bad.append(f"{slug} cites a page number with no hash of that "
+                           f"page; a page number alone says only how long the "
+                           f"book is")
         elif idiom.get("anchor"):
             bad.append(f"{slug} is {tier} and still carries an anchor; an "
                        f"anchor is the evidence for a `read` claim and means "

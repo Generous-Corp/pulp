@@ -234,8 +234,13 @@ def _epub_text(path: str) -> tuple[str, str]:
     pages = sum(1 for n in names if n.lower().endswith((".png", ".jpg", ".jpeg")))
     if pages > 20 and pages > 8 * max(len(order), 1):
         return "", (f"is a page scan wrapped as an EPUB — {pages} images and "
-                    f"{len(order)} document(s). No OCR is installed and none "
-                    f"will be; this file cannot be cited")
+                    f"{len(order)} document(s). There is no text to extract "
+                    f"and OCR would be the wrong tool anyway: on a book of "
+                    f"patch diagrams it would capture the caption and discard "
+                    f"the routing and the settings, which are the content. "
+                    f"Extract the pages and LOOK at them; an idiom read this "
+                    f"way is anchored by page and page hash rather than by a "
+                    f"quote (see provenance_check._corpus_pages)")
 
     import html                              # noqa: PLC0415
     out = []

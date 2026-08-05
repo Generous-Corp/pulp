@@ -623,7 +623,7 @@ def check_fragments() -> int:
 # Every case runs against a throwaway copy of the library and a throwaway
 # corpus. Nothing on disk in the repo is touched.
 
-def _sandbox(idioms: list, docs: dict):
+def _sandbox(idioms: list, docs: dict, pages: dict | None = None):
     """(idiom_dir, corpus_dir) holding exactly what a case needs."""
     import json
     import tempfile
@@ -637,14 +637,20 @@ def _sandbox(idioms: list, docs: dict):
     for name, body in docs.items():
         with open(os.path.join(cdir, name), "w") as f:
             f.write(body)
+    for book, numbered in (pages or {}).items():
+        d = os.path.join(cdir, "pages", book)
+        os.makedirs(d)
+        for n, body in numbered.items():
+            with open(os.path.join(d, f"index-{n}_1.png"), "wb") as f:
+                f.write(body)
     return idir, cdir
 
 
-def _swept(idioms: list, docs: dict, write: bool = True):
+def _swept(idioms: list, docs: dict, write: bool = True, pages: dict | None = None):
     """Run the anchor check over a sandbox, and give back what it decided."""
     import json
     import provenance_check as pc
-    idir, cdir = _sandbox(idioms, docs)
+    idir, cdir = _sandbox(idioms, docs, pages)
     old = pc.IDIOM_DIR, pc.CORPUS
     pc.IDIOM_DIR, pc.CORPUS = idir, cdir
     try:
@@ -731,6 +737,69 @@ def check_provenance() -> int:
             bad += 1
         else:
             print(f"  ok     {name}")
+
+    # ── the other kind of book ───────────────────────────────────────────────
+    # A book of page images cannot be quoted, so it is anchored by page and by
+    # the hash of that page. Everything below is a way of pointing at a page
+    # without having opened the book, and each has to be caught -- otherwise
+    # `read` would mean "wrote down a number", and the image half of the
+    # library would be the easiest place in it to invent a citation.
+    import hashlib                                       # noqa: PLC0415
+    PAGES = {"picturebook": {20: b"page twenty's pixels",
+                             75: b"page seventy-five's pixels"}}
+    def _sha(n):
+        return hashlib.sha256(PAGES["picturebook"][n]).hexdigest()
+
+    def _img(slug, **over):
+        a = {"doc": "picturebook", "page": 20, "sha256": _sha(20),
+             "shows": "a panel diagram captioned with a musical intent"}
+        a.update(over.pop("anchor", {}))
+        return _entry(slug, anchor=a, **over)
+
+    IMAGE_CASES = [
+        ("a page the book does not have",
+         _img("overrun", anchor={"page": 999}), "no such page"),
+        ("a page that exists, hashed as a different page",
+         _img("wrong-page", anchor={"sha256": _sha(75)}), "not the one whose hash"),
+        ("a page number with no hash of the page",
+         _img("bare-locator", anchor={"sha256": None}), "no sha256"),
+        ("a page anchor that does not say what the page shows",
+         _img("mute", anchor={"shows": "a diagram"}), "without saying what the page shows"),
+        ("an image-sourced record claiming a quote",
+         _entry("miscast", anchor={"doc": "picturebook", "quote": REAL}),
+         "not in the corpus"),
+        ("a text-sourced record claiming a page",
+         _entry("misfiled", anchor={"doc": "part-99.md", "page": 20,
+                                    "sha256": _sha(20),
+                                    "shows": "a panel diagram of something"}),
+         "not in the corpus"),
+        ("an anchor that is both a quote and a page",
+         _entry("hedged", anchor={"doc": "picturebook", "page": 20,
+                                  "sha256": _sha(20), "quote": REAL,
+                                  "shows": "a panel diagram of something"}),
+         "neither a quote nor a page"),
+    ]
+    for name, entry, expect in IMAGE_CASES:
+        if entry["anchor"].get("sha256", "keep") is None:
+            del entry["anchor"]["sha256"]
+        counts, demoted, after = _swept([entry], DOCS, pages=PAGES)
+        if not demoted:
+            print(f"  WRONG  {name}: the check passed it")
+            bad += 1
+        elif not any(expect in d for d in demoted):
+            print(f"  WRONG  {name}: demoted, but not for {expect!r}: {demoted}")
+            bad += 1
+        else:
+            print(f"  ok     {name}")
+
+    # And an image citation that IS honest must survive, or the seven above
+    # would be satisfied by a check that rejects every page anchor there is.
+    counts, demoted, after = _swept([_img("looked-at-it")], DOCS, pages=PAGES)
+    if demoted or after["looked-at-it"]["provenance"] != "read":
+        print(f"  WRONG  an honest page citation was demoted: {demoted}")
+        bad += 1
+    else:
+        print("  ok     a page citation that is true survives")
 
     # The control. A citation that IS true must survive, or the check would
     # score perfectly by demoting everything.

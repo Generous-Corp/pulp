@@ -40,6 +40,7 @@ after checkout. No corpus means nothing was verified, and that is what it says.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -61,6 +62,51 @@ def _normalise(text: str) -> str:
     fails: a paraphrase, a wrong word, a remembered-not-read phrase.
     """
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _corpus_pages() -> dict:
+    """Every page image in the corpus: {book: {page number: sha256}}.
+
+    A BOOK OF PICTURES NEEDS A DIFFERENT ANCHOR, AND A PAGE NUMBER ALONE IS NOT
+    ONE. The ARP 2600 patch book conversion is 103 page images and no text: a
+    complete worked patch per page, with the routing drawn as coloured cables
+    and every slider marked. It is the most useful thing in the corpus and a
+    quote anchor cannot touch it.
+
+    A locator of the form "page 52" asserts only that the book has at least 52
+    pages, which anybody can write down from the page count without opening it.
+    That is not evidence, and `read` would stop meaning anything if it were
+    allowed to rest on one.
+
+    The hash is what makes it evidence. It requires possession of the book, it
+    pins the ONE page the record is about, and it fails when the record points
+    at the wrong one -- which is exactly the set of things a quote proves. What
+    neither proves is that anybody understood what they were looking at; a
+    quote can be grepped and a hash can be computed. The mechanism has never
+    certified comprehension, only that the source was in hand and the pointer
+    is right.
+
+    They are still different evidentiary acts, so `--ratio` counts them
+    separately rather than letting "derived from" quietly blur reading a
+    sentence with looking at a diagram.
+    """
+    out: dict[str, dict[int, str]] = {}
+    root = os.path.join(CORPUS, "pages")
+    if not os.path.isdir(root):
+        return out
+    for book in sorted(os.listdir(root)):
+        path = os.path.join(root, book)
+        if not os.path.isdir(path):
+            continue
+        pages: dict[int, str] = {}
+        for name in os.listdir(path):
+            m = re.search(r"(\d+)", name)
+            if not m:
+                continue
+            with open(os.path.join(path, name), "rb") as f:
+                pages[int(m.group(1))] = hashlib.sha256(f.read()).hexdigest()
+        out[book] = pages
+    return out
 
 
 def _corpus_docs() -> dict:
@@ -87,14 +133,49 @@ def _corpus_docs() -> dict:
     return out
 
 
-def verify(idiom: dict, docs: dict) -> str | None:
+def verify(idiom: dict, docs: dict, pages: dict | None = None) -> str | None:
     """Why this idiom's `read` claim does not hold, or None if it does."""
     if idiom.get("provenance") != "read":
         return None
+    pages = pages if pages is not None else {}
     anchor = idiom.get("anchor")
     if not isinstance(anchor, dict):
         return "claims to be read and carries no anchor"
-    doc, quote = anchor.get("doc"), anchor.get("quote")
+    doc = anchor.get("doc")
+
+    # An anchor is one shape or the other, never both and never neither. A
+    # record carrying a quote AND a page has not decided what it read, and the
+    # weaker half would end up carrying the claim.
+    has_page = anchor.get("page") is not None
+    has_quote = anchor.get("quote") is not None
+    if has_page == has_quote:
+        return ("has an anchor that is neither a quote nor a page — one or the "
+                "other, because a text and a book of pictures are read "
+                "differently")
+
+    if has_page:
+        if not doc:
+            return "has a page anchor with no book"
+        if doc not in pages:
+            return f"cites the page images of {doc}, which are not in the corpus"
+        page, want = anchor.get("page"), anchor.get("sha256")
+        if page not in pages[doc]:
+            return f"cites page {page} of {doc}, which has no such page"
+        if not want:
+            # The whole argument for accepting an image citation at all.
+            return (f"cites page {page} of {doc} with no sha256 — a page number "
+                    f"on its own says only that the book is that long, which "
+                    f"anybody could write without opening it")
+        if pages[doc][page] != want:
+            return (f"cites page {page} of {doc}, and that page is not the one "
+                    f"whose hash is recorded")
+        if len(str(anchor.get("shows") or "")) < 24:
+            return (f"cites page {page} of {doc} without saying what the page "
+                    f"shows, so nobody can tell whether we read it or counted "
+                    f"to it")
+        return None
+
+    quote = anchor.get("quote")
     if not doc or not quote:
         return "has an anchor with no document or no quote"
     if len(quote) < 24:
@@ -116,8 +197,11 @@ def sweep(write: bool = True) -> tuple[dict, list]:
     Returns (counts by tier after any demotion, list of demotion sentences).
     """
     docs = _corpus_docs()
+    pages = _corpus_pages()
     counts = {t: 0 for t in TIERS}
     counts["unlabelled"] = 0
+    counts["read (quoted)"] = 0
+    counts["read (page image)"] = 0
     demoted: list[str] = []
 
     for name in sorted(os.listdir(IDIOM_DIR)):
@@ -134,13 +218,16 @@ def sweep(write: bool = True) -> tuple[dict, list]:
             if tier not in TIERS:
                 counts["unlabelled"] += 1
                 continue
-            if tier == "read" and not docs:
+            if tier == "read" and not docs and not pages:
                 # No corpus: nothing was verified, and nothing is demoted.
                 counts["read"] += 1
                 continue
-            why = verify(idiom, docs)
+            why = verify(idiom, docs, pages)
             if why is None:
                 counts[tier] += 1
+                if tier == "read":
+                    counts["read (page image)" if (idiom.get("anchor") or {})
+                           .get("page") is not None else "read (quoted)"] += 1
                 continue
             demoted.append(f"{idiom.get('slug')}: {why}")
             counts["canon"] += 1
@@ -163,17 +250,21 @@ def main(argv: list[str]) -> int:
     docs = _corpus_docs()
     counts, demoted = sweep(write="--check" not in argv and "--ratio" not in argv)
 
-    if not docs:
+    pages = _corpus_pages()
+    if not docs and not pages:
         print("  no corpus on this machine, so no `read` claim was verified — "
               "run: python3 corpus.py")
     else:
-        print(f"  corpus: {len({d for d in docs if '/' in d})} documents")
+        print(f"  corpus: {len({d for d in docs if '/' in d})} documents, "
+              f"{sum(len(p) for p in pages.values())} page images")
 
-    total = sum(counts.values())
-    for tier in TIERS + ("unlabelled",):
+    total = sum(counts[t] for t in TIERS) + counts["unlabelled"]
+    for tier in TIERS + ("read (quoted)", "read (page image)", "unlabelled"):
         if counts[tier] or tier in TIERS:
+            indent = "  " if tier.startswith("read (") else ""
             share = 100.0 * counts[tier] / total if total else 0.0
-            print(f"  {tier:<11} {counts[tier]:>4}  {share:4.0f}%")
+            print(f"  {indent}{tier:<{18 - len(indent)}} {counts[tier]:>4}"
+                  + (f"  {share:4.0f}%" if not indent else ""))
 
     if demoted:
         verb = "would be demoted" if "--check" in argv else "DEMOTED to canon"

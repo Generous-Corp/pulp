@@ -67,7 +67,12 @@
           "message": "the modulated oscillator is not in the audio path"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "listen_for": {
+        "sounds_like": "one note, wavering around itself at a rate you could tap along with — fast enough to read as expression and slow enough that you never lose the pitch it is decorating",
+        "confusable_with": "audio-rate modulation of the same input, which stops being movement and becomes timbre; and a trill, where the pitch arrives somewhere else rather than returning",
+        "$grounding": "The useful band is roughly 4 to 8 Hz, and that is measured rather than guessed: across the 66 LFO rate settings in the recipe catalogue of Welsh's Synthesizer Cookbook, the ones marked 'moderate' cluster at 4, 5, 6 and 7.5 Hz, with 'slow' below 2.5 Hz and 'fast' at 10 Hz and above. Two independent sources land in the same place: Synth Secrets puts violin vibrato at 5 to 8 Hz and brass at around 5 Hz. Depth is the other half and is small — the catalogue's commonest setting is 5%, and one clarinet recipe uses a single cent."
+      }
     },
     {
       "slug": "tremolo",
