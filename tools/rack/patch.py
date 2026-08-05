@@ -1933,6 +1933,17 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
 GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
+#: The headers that come with the gate, so a change to the measurement rebuilds
+#: it. Comparing the binary against patch_gate.cpp alone left an edited
+#: measurement running as its predecessor until something else touched the .cpp.
+GATE_HEADERS = [os.path.join(HERE, n) for n in
+                ("patch_behaviour.hpp", "patch_behaviour_json.hpp")]
+#: Pulp's own header-only estimators, which the behaviour measurement uses
+#: rather than hand-rolling f0 and an FFT. ROOT is the checkout in a source
+#: tree and Contents/Resources in the app, and core/signal/include ships in
+#: both -- module generation already refuses to run without it.
+GATE_INCLUDE = os.path.join(os.path.normpath(os.path.join(HERE, "..", "..")),
+                            "core", "signal", "include")
 # Resolved by the one resolver every component shares (fetch_sdk.py), never
 # by a private path -- patch.py once looked only at ~/SDKs/Rack-SDK, so an
 # SDK fetch_sdk.py had installed was an SDK this gate could not see. Patch
@@ -1967,20 +1978,37 @@ def _plugin_dir() -> str | None:
     return None
 
 
-def _build_gate() -> str | None:
+def build_gate() -> tuple[str | None, str]:
+    """The gate binary, or None and the reason there isn't one.
+
+    The reason is returned rather than swallowed. A compile error and a missing
+    SDK both used to produce a bare None, and the one message downstream --
+    "no SDK; audibility not checked" -- was a lie in the first case: the SDK was
+    right there and the gate had failed to build. A check that reports the wrong
+    cause sends the next hour to the wrong place.
+    """
     import subprocess
-    if os.path.exists(GATE_BIN) and \
-            os.path.getmtime(GATE_BIN) > os.path.getmtime(GATE_SRC):
-        return GATE_BIN
+    newest_src = max(os.path.getmtime(p) for p in [GATE_SRC] + GATE_HEADERS
+                     if os.path.exists(p))
+    if os.path.exists(GATE_BIN) and os.path.getmtime(GATE_BIN) > newest_src:
+        return GATE_BIN, ""
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
-        return None
+        return None, f"no Rack SDK at {SDK}"
+    if not os.path.isdir(GATE_INCLUDE):
+        return None, (f"Pulp's signal headers are not at {GATE_INCLUDE}; "
+                      "the behaviour measurement needs them (reinstall the "
+                      "toolchain)")
     os.makedirs(CACHE_DIR, exist_ok=True)
     r = subprocess.run(
         ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
+         f"-I{HERE}", f"-I{GATE_INCLUDE}",
          f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
+         "-framework", "Accelerate",
          os.path.join(SDK, "libRack.dylib")],
         capture_output=True, text=True)
-    return GATE_BIN if r.returncode == 0 else None
+    if r.returncode == 0:
+        return GATE_BIN, ""
+    return None, "the gate did not compile:\n" + (r.stderr or r.stdout).strip()
 
 
 # Devices that exist to carry audio somewhere else -- screen sharing, remote
@@ -2148,10 +2176,12 @@ def sounds(patch: dict) -> tuple[bool, str]:
     """
     import subprocess
     import tempfile
-    gate = _build_gate()
+    gate, why = build_gate()
     pdir = _plugin_dir()
-    if not gate or not pdir:
-        return True, "(no SDK; audibility not checked)"
+    if not gate:
+        return True, f"(audibility not checked: {why})"
+    if not pdir:
+        return True, "(no unpacked plugin directory; audibility not checked)"
     with tempfile.NamedTemporaryFile("w", suffix=".vcv", delete=False) as f:
         json.dump(patch, f)
         tmp = f.name

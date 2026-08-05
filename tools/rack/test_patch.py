@@ -17,14 +17,17 @@ otherwise look perfect.
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
 import sys
+import tempfile
 import patch as patch_mod
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import patch as P  # noqa: E402
+import patch_behaviour as pb  # noqa: E402
 
 
 def mod(mid, plugin, model, pos=(0, 0), params=None):
@@ -224,7 +227,7 @@ def check_silence_mechanism() -> int:
     distinction.
     """
     import subprocess
-    gate = P._build_gate()
+    gate = P.build_gate()[0]
     pdir = P._plugin_dir()
     if not gate or not pdir:
         print("  --     no Rack SDK here, so the DSP cannot be run")
@@ -859,13 +862,13 @@ def check_gate_crash_is_not_silence() -> tuple:
     with open(dead, "w") as f:
         f.write("#!/bin/sh\nkill -SEGV $$\n")
     os.chmod(dead, os.stat(dead).st_mode | stat.S_IEXEC)
-    gate, pdir = P._build_gate, P._plugin_dir
-    P._build_gate = lambda: dead
+    gate, pdir = P.build_gate, P._plugin_dir
+    P.build_gate = lambda: (dead, "")
     P._plugin_dir = lambda: home
     try:
         ok, got = P.sounds(patch)
     finally:
-        P._build_gate, P._plugin_dir = gate, pdir
+        P.build_gate, P._plugin_dir = gate, pdir
     if ok:
         bad += 1
         print("  WRONG  a gate that died was read as a patch that sounds")
@@ -946,7 +949,7 @@ def check_gate_survives_third_party() -> tuple:
     # Bogaudio reads the sample rate in its CONSTRUCTOR (null context, 0x10)
     # and CV funk's Alloy allocates in onSampleRateChange (null buffer, 0x0);
     # each survives the other's fix, so one is not a proxy for the other.
-    gate = P._build_gate()
+    gate = P.build_gate()[0]
     pdir = P._plugin_dir()
     inv = P.inventory()
     victims = [(p, m) for p, m in (("Bogaudio", None), ("CVfunk", "Alloy"),
@@ -2533,6 +2536,201 @@ def check_melody_is_written() -> tuple:
     return bad, 8
 
 
+def _behaviour_report(cable: dict) -> str:
+    """A gate report carrying one measured cable, without running a gate.
+
+    The seam's job is turning numbers into verdicts, and that job can be tested
+    with numbers typed by hand -- which is the only way it can be tested on a
+    machine with no Rack, and the only way a hostile case (a cable that was
+    never really pitched) can be produced on demand.
+    """
+    import json as _json
+    base = {
+        "source": "VCO out 0", "seconds": 6.0, "finite": True,
+        "mean_abs_v": 1.0, "peak_abs_v": 5.0,
+        "pitch": {"windows": 120, "voiced_windows": 120, "voiced_fraction": 1.0,
+                  "notes": 1, "distinct_pitches": 1, "pitch_changes": 0,
+                  "semitone_range": 0, "median_hz": 220.0},
+        "dynamics": {"peak_rms": 3.5, "mean_rms": 3.5, "end_rms": 3.5,
+                     "end_over_peak": 1.0, "duty_cycle": 1.0, "rms_trend": 0.0},
+        "onsets": {"onsets": 0, "per_second": 0.0, "interval_mean_ms": 0.0,
+                   "interval_cv": 0.0, "interval_trend": 0.0,
+                   "periodicity": 0.0, "period_ms": 0.0},
+        "spectrum": {"centroid_mean_hz": 220.0, "centroid_cv": 0.0,
+                     "centroid_trend": 0.0, "centroid_range_octaves": 0.0,
+                     "active_windows": 120},
+    }
+    for group, fields in cable.items():
+        base[group].update(fields) if isinstance(fields, dict) else None
+    block = {"schema": 1, "settings": {}, "loudest": 0, "cables": [base]}
+    return ("patch gate: 2 modules\n  ok    VCO out 0 carries signal\n" +
+            pb.MARKER + _json.dumps(block) + "\npatch gate passed\n")
+
+
+def check_behaviour_is_measured() -> tuple:
+    """The gate must report what a patch DOES, and the report must be usable.
+
+    The complaint that started this was a "simple highly melodic patch" that
+    came back as one held note -- and passed every check, because every check
+    measured presence. A held note has signal on every cable, resolves to real
+    modules and reaches an audio interface. Presence was never the property.
+
+    Three halves again, and none of them alone is the check:
+
+    1. The MEASUREMENT tells synthesised signals apart. That lives in
+       `test_patch_behaviour.cpp`, which needs no Rack -- it makes its own
+       signals, so the right answers are known rather than eyeballed -- and its
+       `--prove` mode additionally runs every signal's expectations against
+       every other and fails when a set describes nothing in particular.
+    2. The THRESHOLDS name fields the gate actually emits, and cover the
+       behaviour flags the idiom library actually carries. A threshold on a
+       field nobody measures makes its flag permanently unmeasurable, silently;
+       an idiom flag with no threshold is the same dead data this replaces.
+    3. The SEAM turns those numbers into a verdict that names the fix, and
+       says "unmeasured" rather than "failed" when the number was not real.
+    """
+    import json as _json
+    import subprocess
+    bad, ran = 0, 1
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.normpath(os.path.join(here, "..", ".."))
+    src = os.path.join(here, "test_patch_behaviour.cpp")
+    include = os.path.join(root, "core", "signal", "include")
+
+    if not os.path.isdir(include):
+        print("  --     Pulp's signal headers are not in this copy, so the "
+              "measurement cannot be built")
+    else:
+        binary = os.path.join(tempfile.gettempdir(), "pulp-test-patch-behaviour")
+        build = subprocess.run(
+            ["clang++", "-std=c++20", "-O1", "-o", binary, src,
+             f"-I{here}", f"-I{include}", "-framework", "Accelerate"],
+            capture_output=True, text=True)
+        if build.returncode != 0:
+            bad += 1
+            print("  WRONG  the behaviour measurement does not compile:\n"
+                  f"{build.stderr.strip()[:2000]}")
+        else:
+            run = subprocess.run([binary, "--prove"], capture_output=True,
+                                 text=True, timeout=600)
+            if run.returncode != 0:
+                bad += 1
+                wrong = [ln for ln in run.stdout.splitlines()
+                         if "WRONG" in ln or "WEAK" in ln]
+                print("  WRONG  the behaviour measurement cannot tell the "
+                      "synthesised signals apart:\n         " +
+                      "\n         ".join(wrong[:12]))
+            else:
+                print("  ok     a held tone, a melody, a pulse train and a "
+                      "filter sweep each measure as themselves and as nothing "
+                      "else")
+
+    # Every field a threshold names must be one the gate writes. A typo here
+    # costs nothing at import and everything at run time: the field reads back
+    # as absent, the flag is UNMEASURED forever, and the gate quietly stops
+    # asking the question it was added to ask.
+    ran += 1
+    emitter = open(os.path.join(here, "patch_behaviour_json.hpp")).read()
+    emitted = set(re.findall(r'\\"([a-z_]+)\\":', emitter))
+    table = pb.load_thresholds()["flags"]
+    unknown = []
+    for flag, spec in table.items():
+        for cond in spec.get("needs", []) + spec.get("all_of", []) + spec.get("any_of", []):
+            group, _, leaf = cond["field"].partition(".")
+            if group not in emitted or leaf not in emitted:
+                unknown.append(f"{flag}: {cond['field']}")
+    if unknown:
+        bad += 1
+        print(f"  WRONG  thresholds name fields the gate never emits, so those "
+              f"flags can never be measured: {unknown}")
+    else:
+        print("  ok     every threshold names a number the gate emits")
+
+    # The dead-data check, both directions. `behaviour` sat in the idiom
+    # library consumed by nothing; a threshold consumed by no idiom is the
+    # same waste facing the other way.
+    ran += 1
+    used = set()
+    for path in glob.glob(os.path.join(here, "patch_idioms", "*.json")):
+        for idiom in (_json.load(open(path)).get("idioms") or []):
+            used.update(k for k, on in (idiom.get("behaviour") or {}).items() if on)
+    uncovered = sorted(used - set(table))
+    if uncovered:
+        bad += 1
+        print(f"  WRONG  the idiom library asks for behaviours nothing "
+              f"measures: {uncovered}")
+    else:
+        print(f"  ok     all {len(used)} behaviour flags the idioms use have "
+              f"a measurement behind them")
+
+    # The bug itself, end to end through the seam: the held note that passed.
+    ran += 1
+    held = pb.parse(_behaviour_report({}))
+    verdicts = pb.evaluate(held, {"melodic": True, "keeps_going": True})
+    by_flag = {v["flag"]: v for v in verdicts}
+    told = pb.explain(verdicts)
+    if by_flag["melodic"]["verdict"] != pb.FAIL:
+        bad += 1
+        print("  WRONG  a held single note is still reported as melodic; this "
+              "is the patch the whole complaint was about")
+    elif "step" not in told:
+        bad += 1
+        print(f"  WRONG  the melodic failure does not say what to do about "
+              f"it, so a retry has nothing to change:\n{told}")
+    elif by_flag["keeps_going"]["verdict"] != pb.PASS:
+        bad += 1
+        print("  WRONG  a tone that runs the whole six seconds is reported as "
+              "having stopped")
+    else:
+        print("  ok     a held single note fails 'melodic' with the remedy "
+              "named, and still passes 'keeps_going'")
+
+    # A melody passes. Without this the check above is satisfied by a seam
+    # that rejects everything.
+    ran += 1
+    tune = pb.parse(_behaviour_report(
+        {"pitch": {"distinct_pitches": 5, "pitch_changes": 10, "notes": 11}}))
+    verdicts = pb.evaluate(tune, {"melodic": True})
+    if verdicts[0]["verdict"] != pb.PASS:
+        bad += 1
+        print(f"  WRONG  a five-pitch, ten-change line is not melodic: "
+              f"{verdicts[0]['why']}")
+    else:
+        print("  ok     a line with five pitches and ten changes is melodic")
+
+    # UNMEASURED IS NOT FAILED. A patch whose pitch was trackable for a tenth
+    # of the run has a `distinct_pitches` reading and it is not evidence.
+    # Rejecting on it teaches a model to satisfy a number rather than a
+    # request, and leaves a person no way to see the check was hollow.
+    ran += 1
+    unpitched = pb.parse(_behaviour_report(
+        {"pitch": {"voiced_fraction": 0.08, "distinct_pitches": 1}}))
+    verdict = pb.evaluate(unpitched, {"melodic": True})[0]
+    if verdict["verdict"] != pb.UNMEASURED:
+        bad += 1
+        print(f"  WRONG  a patch whose pitch was never really trackable is "
+              f"reported as {verdict['verdict']} rather than unmeasured")
+    elif not any("8%" in w for w in verdict["why"]):
+        bad += 1
+        print(f"  WRONG  the unmeasurable verdict does not say how little was "
+              f"measured: {verdict['why']}")
+    else:
+        print("  ok     an untrackable pitch reads unmeasured, not failed, and "
+              "says how little there was")
+
+    # A behaviour nobody measures must be visible, not silently satisfied.
+    ran += 1
+    verdict = pb.evaluate(held, {"tastefully_restrained": True})[0]
+    if verdict["verdict"] != pb.UNMEASURED or "tastefully_restrained" not in \
+            " ".join(verdict["why"]):
+        bad += 1
+        print(f"  WRONG  an invented behaviour flag comes back {verdict!r} "
+              f"rather than naming itself as unmeasured")
+    else:
+        print("  ok     a behaviour with no measurement behind it says so")
+    return bad, ran
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -2555,12 +2753,13 @@ def main():
     ver_bad, ver_ran = check_version_stamping()
     vp_bad, vp_ran = check_vendor_params_reach_model()
     mel_bad, mel_ran = check_melody_is_written()
+    beh_bad, beh_ran = check_behaviour_is_measured()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
-    acq_bad += vp_bad + mel_bad
-    acq_ran += vp_ran + mel_ran
+    acq_bad += vp_bad + mel_bad + beh_bad
+    acq_ran += vp_ran + mel_ran + beh_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

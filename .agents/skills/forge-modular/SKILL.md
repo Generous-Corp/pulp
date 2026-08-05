@@ -45,6 +45,49 @@ that is cheaper than another run, every time.
   "its CV never rose", which sent five attempts to re-trigger an envelope that
   had been firing the whole time.
 
+## The gate measures behaviour; it never judges it
+
+`patch-gate` runs 6 s of the real DSP and prints TWO things about every cable
+into the audio interface: the old presence verdict (`mean_abs`, pass/warn/fail)
+and a `behaviour` block that is measurement only — pitch variety, attacks,
+level over time, brightness over time. **Nothing in the behaviour block can fail
+the gate.** Whether a patch's numbers are the right numbers is a question about
+what was ASKED for, and the request is not in that process.
+
+- The verdict lives in `patch_behaviour.py`, which maps an idiom's `behaviour`
+  flags to predicates over those numbers. Every threshold is data in
+  `patch_behaviour_thresholds.json` and **every one is an untuned guess** —
+  first cuts, not measured truths. When a threshold disagrees with somebody who
+  listened, the listener is right; edit the JSON.
+- `UNMEASURED` is not `fail`. A flag whose `needs` are unmet (a patch whose
+  pitch was trackable for 8% of the run) comes back unmeasured, because
+  rejecting on a number that was never really measured teaches the model to
+  satisfy the number instead of the request.
+- **Read `voiced_fraction` before believing `distinct_pitches`.** A staccato
+  patch whose notes are shorter than `min_note_windows` (2 windows = 100 ms)
+  reports far fewer pitches than it plays. That is the measurement being
+  conservative, not the patch being wrong; `PATCH_GATE_SET=min_note_windows=1`
+  re-runs it looser, and the report records which setting produced it.
+- `periodicity` is **not reported at all** below two onsets. A held tone's
+  detection function is flat to within arithmetic noise, and flat noise
+  autocorrelates at 0.99 — so a drone used to announce a confident pulse at a
+  meaningless lag.
+- The measurement reuses `pulp::signal::YinTrackerT` and `FftT` from
+  `core/signal/include`, which the app bundle already ships and module
+  generation already requires. The gate therefore builds with
+  `-I<root>/core/signal/include -framework Accelerate`; without those headers
+  `build_gate()` returns the reason rather than a bare `None`.
+- `PATCH_GATE_SERIES=1` adds the per-window tracks (semitones, RMS, centroid,
+  onset times) to the JSON. They are the whole diagnosis when a number reads
+  wrong and dead weight when it does not, so they are off by default.
+
+`test_patch_behaviour.cpp` is the proof, and it needs no Rack: it synthesises a
+held tone, a five-note line, steady/jittered/accelerating pulse trains, a filter
+sweep, a decaying tone and silence, and asserts each measures as itself.
+`--prove` additionally runs every signal's expectations against every other and
+**fails when an expectation set describes nothing in particular** — which is how
+a suite that measures nothing goes green. It caught one on its first run.
+
 ## What the model knows about a module
 
 `render_inventory()` in `patch.py` is the catalogue the model receives. It
