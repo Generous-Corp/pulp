@@ -615,6 +615,9 @@ commands:
       - name: --inspect-capability
         kind: option
         description: Add one capability id to --inspect=custom; repeatable. Mutating capabilities require session.control.
+      - name: --inspect-runtime-eval
+        kind: flag
+        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control, plus a live ScriptedUiSession with no effectful ReloadCapability grants; the stock all-capabilities editor path is refused. No profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
       - name: --audio-inspector
         kind: flag
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
@@ -1187,6 +1190,17 @@ commands:
         required: false
         description: Emit stable JSON for named commands, including screenshot capture or unsupported status
     subcommands:
+      - name: audit
+        summary: Read-only artifact preflight for the canonical control manifest, profile and digest markers, declared capabilities, and known external surfaces; never loads or activates the artifact.
+        args:
+          - name: artifact
+            kind: positional
+            required: true
+            description: Standalone executable or bundle to audit
+          - name: --json
+            kind: flag
+            required: false
+            description: Emit the pulp.control.audit.v1 result
       - name: profiles
         summary: List the declared off, observe, and develop profiles and capabilities
       - name: list

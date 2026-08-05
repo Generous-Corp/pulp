@@ -191,6 +191,48 @@ TEST_CASE("TraceInspector rejects an unknown Trace method", "[tracing][inspect]"
     CHECK(resp.is_error);
 }
 
+TEST_CASE("TraceInspector enforces frozen category bounds before capture",
+          "[tracing][inspect][security]") {
+    TraceInspector inspector;
+    const auto invalid = [&](std::string params) {
+        const auto response = inspector.handle(
+            request(methods::kTraceStartSession, std::move(params)));
+        CHECK(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+    };
+
+    invalid("[]");
+    invalid(R"({"categories":"render"})");
+    invalid(R"({"categories":[1]})");
+    invalid(R"({"categories":[""]})");
+    invalid(R"({"categories":["render","render"]})");
+    invalid(R"({"categories":["render"],"unexpected":true})");
+    invalid("{\"categories\":[\"" + std::string(129, 'x') + "\"]}");
+
+    std::string too_many = R"({"categories":[)";
+    for (std::size_t index = 0; index < 129; ++index) {
+        if (index != 0) too_many += ',';
+        too_many += "\"category-" + std::to_string(index) + "\"";
+    }
+    too_many += "]}";
+    invalid(std::move(too_many));
+}
+
+TEST_CASE("TraceInspector stop rejects undeclared params before state changes",
+          "[tracing][inspect][security][control-contract]") {
+    TraceInspector inspector;
+    for (const auto* params : {
+             R"({"unexpected":true})",
+             R"([])",
+             "not-json",
+         }) {
+        const auto response = inspector.handle(
+            request(methods::kTraceStopSession, params));
+        CHECK(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+    }
+}
+
 TEST_CASE("TraceInspector snapshot reports compile-time tracing state", "[tracing][inspect]") {
     TraceInspector insp;
     auto out = result_of(insp.handle(request(methods::kTraceSnapshot)));
@@ -240,6 +282,7 @@ TEST_CASE("TraceInspector bounds the capture ring",
              R"({"ring_mb":-1})",
              R"({"ring_mb":0})",
              R"({"ring_mb":513})",
+             R"({"ring_mb":80.5})",
              R"({"ring_mb":"80"})",
          }) {
         INFO(params);
@@ -248,6 +291,10 @@ TEST_CASE("TraceInspector bounds the capture ring",
         CHECK(response.is_error);
         CHECK(response.error_code == "invalid_params");
     }
+
+    const auto integral_exponent = insp.handle(request(
+        methods::kTraceStartSession, R"({"ring_mb":8e+1})"));
+    CHECK(integral_exponent.error_code != "invalid_params");
 }
 
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED

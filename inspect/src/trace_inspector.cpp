@@ -5,7 +5,10 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <cmath>
 #include <cstdint>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,6 +20,29 @@ using pulp::runtime::Tracing;
 using pulp::runtime::kTracingEnabled;
 constexpr std::int64_t kMinTraceRingMb = 1;
 constexpr std::int64_t kMaxTraceRingMb = 512;
+constexpr std::size_t kMaxTraceCategories = 128;
+constexpr std::size_t kMaxTraceCategoryBytes = 128;
+
+std::optional<std::int64_t> schema_integer(
+    choc::value::ValueView value, std::int64_t minimum,
+    std::int64_t maximum) {
+    if (value.isInt32() || value.isInt64()) {
+        const auto integer = value.isInt32()
+            ? static_cast<std::int64_t>(value.getInt32())
+            : value.getInt64();
+        if (integer >= minimum && integer <= maximum) return integer;
+        return std::nullopt;
+    }
+    if (!value.isFloat32() && !value.isFloat64()) return std::nullopt;
+    const auto number = value.isFloat64()
+        ? value.getFloat64()
+        : static_cast<double>(value.getFloat32());
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < static_cast<double>(minimum) ||
+        number > static_cast<double>(maximum))
+        return std::nullopt;
+    return static_cast<std::int64_t>(number);
+}
 }  // namespace
 
 class TraceInspector::PublicationLease final
@@ -99,41 +125,82 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
         return make_error(req.id, "Trace.startSession: invalid params JSON");
     }
 
-    std::vector<std::string> categories;
-    if (params.isObject() && params.hasObjectMember("categories") &&
-        params["categories"].isArray()) {
-        const auto& arr = params["categories"];
-        for (uint32_t i = 0; i < arr.size(); ++i)
-            categories.emplace_back(arr[i].getString());
+    if (!params.isObject()) {
+        return make_error(req.id,
+                          "Trace.startSession: params must be an object",
+                          "invalid_params");
     }
 
-    if (params.isObject() && params.hasObjectMember("out_path")) {
+    // Keep the live adapter closed exactly like trace/session-control@1.
+    // out_path retains its more specific host-authority error below.
+    if (params.hasObjectMember("out_path")) {
         return make_error(
             req.id,
             "Trace.startSession: out_path is unavailable over the inspector; "
             "the host owns the trace destination",
             "invalid_params");
     }
+    bool has_unknown_field = false;
+    params.getView().visitObjectMembers(
+        [&](std::string_view name, const choc::value::ValueView&) {
+            if (name != "categories" && name != "ring_mb")
+                has_unknown_field = true;
+        });
+    if (has_unknown_field) {
+        return make_error(
+            req.id,
+            "Trace.startSession: params contain unsupported fields",
+            "invalid_params");
+    }
+
+    std::vector<std::string> categories;
+    std::set<std::string> unique_categories;
+    if (params.hasObjectMember("categories")) {
+        const auto& arr = params["categories"];
+        if (!arr.isArray() || arr.size() > kMaxTraceCategories) {
+            return make_error(
+                req.id,
+                "Trace.startSession: categories must be an array of at most 128 strings",
+                "invalid_params");
+        }
+        for (uint32_t i = 0; i < arr.size(); ++i) {
+            const auto& category = arr[i];
+            if (!category.isString()) {
+                return make_error(
+                    req.id,
+                    "Trace.startSession: every category must be a string",
+                    "invalid_params");
+            }
+            std::string value(category.getString());
+            if (value.empty() || value.size() > kMaxTraceCategoryBytes) {
+                return make_error(
+                    req.id,
+                    "Trace.startSession: categories must contain 1 to 128 UTF-8 bytes",
+                    "invalid_params");
+            }
+            if (!unique_categories.insert(value).second) {
+                return make_error(
+                    req.id,
+                    "Trace.startSession: categories must be unique",
+                    "invalid_params");
+            }
+            categories.push_back(std::move(value));
+        }
+    }
 
     // The CLI sizes the ring in megabytes; Tracing takes kilobytes. Absent →
     // Tracing's own 80 MB default.
     std::uint32_t ring_kb = 80u * 1024u;
     if (params.isObject() && params.hasObjectMember("ring_mb")) {
-        const auto& ring = params["ring_mb"];
-        if (!ring.isInt32() && !ring.isInt64()) {
+        const auto ring_mb = schema_integer(
+            params["ring_mb"], kMinTraceRingMb, kMaxTraceRingMb);
+        if (!ring_mb) {
             return make_error(
                 req.id,
-                "Trace.startSession: ring_mb must be an integer",
+                "Trace.startSession: ring_mb must be an integer between 1 and 512",
                 "invalid_params");
         }
-        const auto ring_mb = ring.getInt64();
-        if (ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb) {
-            return make_error(
-                req.id,
-                "Trace.startSession: ring_mb must be between 1 and 512",
-                "invalid_params");
-        }
-        ring_kb = static_cast<std::uint32_t>(ring_mb) * 1024u;
+        ring_kb = static_cast<std::uint32_t>(*ring_mb) * 1024u;
     }
 
     if (!kTracingEnabled) {
@@ -191,6 +258,27 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
 }
 
 InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
+    choc::value::Value params;
+    try {
+        params = choc::json::parse(
+            req.params_json.empty() ? std::string_view("{}")
+                                    : std::string_view(req.params_json));
+    } catch (...) {
+        return make_error(req.id, "Trace.stopSession: invalid params JSON",
+                          "invalid_params");
+    }
+    bool has_fields = false;
+    if (params.isObject()) {
+        params.getView().visitObjectMembers(
+            [&](std::string_view, const choc::value::ValueView&) {
+                has_fields = true;
+            });
+    }
+    if (!params.isObject() || has_fields) {
+        return make_error(req.id,
+                          "Trace.stopSession: params must be an empty object",
+                          "invalid_params");
+    }
     if (!kTracingEnabled) {
         return make_error(
             req.id,

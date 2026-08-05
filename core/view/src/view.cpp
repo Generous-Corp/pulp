@@ -54,10 +54,8 @@ View* root_for_gesture_relationship_cleanup(View* view) {
     return view;
 }
 
-// Backs View::structure_generation(). Bumped only by remove_child (the sole
-// path that detaches a node). Starts at 1 so 0 is a reserved sentinel. Relaxed
-// ordering: tree mutation and the cache lookups that read it run on the same
-// (UI) thread; the atomic only guards against incidental cross-thread access.
+// Public compatibility generation. Internal capture/cache paths use each
+// root's generation so unrelated editors remain isolated.
 std::atomic<std::uint64_t> g_view_structure_generation{1};
 
 // Process-global count of views with subtree caching enabled (FU-3). The vast
@@ -79,6 +77,55 @@ View::View()
     : import_binding_instance_id_(next_import_binding_instance_id()),
       import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
           import_binding_instance_id_)) {}
+
+void ViewCapture::set(View* view) noexcept {
+    view_ = view;
+    instance_id_ = view ? view->import_binding_instance_id() : 0;
+    validated_root_ = view;
+    while (validated_root_ && validated_root_->parent())
+        validated_root_ = validated_root_->parent();
+    validated_root_instance_id_ =
+        validated_root_ ? validated_root_->import_binding_instance_id() : 0;
+    validated_generation_ =
+        validated_root_ ? validated_root_->root_structure_generation() : 0;
+}
+
+void ViewCapture::reset() noexcept {
+    view_ = nullptr;
+    instance_id_ = 0;
+    validated_root_ = nullptr;
+    validated_root_instance_id_ = 0;
+    validated_generation_ = 0;
+}
+
+View* ViewCapture::live_in(View& root) const noexcept {
+    if (!view_) return nullptr;
+    const auto generation = root.root_structure_generation();
+    if (validated_root_ == &root &&
+        validated_root_instance_id_ == root.import_binding_instance_id() &&
+        validated_generation_ == generation &&
+        !view_->detaching_.load(std::memory_order_acquire))
+        return view_;
+    const auto find = [&](auto&& self, View* candidate) noexcept -> View* {
+        if (candidate->detaching_.load(std::memory_order_acquire))
+            return nullptr;
+        if (candidate == view_)
+            return candidate->import_binding_instance_id() == instance_id_
+                       ? candidate
+                       : nullptr;
+        for (std::size_t i = 0; i < candidate->child_count(); ++i) {
+            if (View* found = self(self, candidate->child_at(i))) return found;
+        }
+        return nullptr;
+    };
+    View* found = find(find, &root);
+    if (found) {
+        validated_root_ = &root;
+        validated_root_instance_id_ = root.import_binding_instance_id();
+        validated_generation_ = generation;
+    }
+    return found;
+}
 
 // View destructor stays out-of-line while remaining virtual + public so vtable
 // layout + SDK contract are unchanged.
@@ -500,6 +547,19 @@ void View::prepare_for_reuse() {
     // hit-test path — a logic error, not a recoverable state.
     assert(parent_ == nullptr && "prepare_for_reuse() on a view that still has a parent");
 
+    // The allocation and its descendants are reused, but the logical row/cell
+    // is not. Rotate every identity so a capture of a nested widget from the
+    // previous occupant cannot resolve after the same subtree is reattached.
+    const auto rotate_identity = [&](auto&& self, View& view) -> void {
+        view.import_binding_instance_id_ = next_import_binding_instance_id();
+        view.import_binding_lifetime_token_ =
+            std::make_shared<const std::uint64_t>(
+                view.import_binding_instance_id_);
+        for (auto& child : view.children_)
+            self(self, *child);
+    };
+    rotate_identity(rotate_identity, *this);
+
     // Geometry / visibility / compositing — reset directly (not via setters) to
     // avoid on_resized()/request_repaint() side effects on a detached view.
     bounds_ = Rect{};
@@ -573,7 +633,22 @@ void View::set_host_actions(HostActionSurface* surface) {
     }
 }
 
+void View::set_subtree_detaching(View& view, bool detaching) noexcept {
+    view.detaching_.store(detaching, std::memory_order_release);
+    for (auto& descendant : view.children_)
+        set_subtree_detaching(*descendant, detaching);
+}
+
+void View::publish_structure_change() noexcept {
+    View* root = this;
+    while (root->parent_) root = root->parent_;
+    root->structure_generation_.fetch_add(1, std::memory_order_relaxed);
+    g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
+    invalidate_subtree_caches_up();
+}
+
 void View::add_child(std::unique_ptr<View> child) {
+    set_subtree_detaching(*child, false);
     child->parent_ = this;
     child->set_window_host(window_host_);
     child->set_plugin_view_host(plugin_view_host_);
@@ -625,30 +700,211 @@ std::unique_ptr<View> View::remove_child(View* child) {
     };
     scrub_relationships(scrub_relationships, *this);
 
-    child->on_detached();
+    View* structure_root = this;
+    while (structure_root->parent_) structure_root = structure_root->parent_;
+
+    // on_detached() intentionally runs while the old parent/clock is still
+    // reachable, but routing must already consider the whole subtree absent.
+    set_subtree_detaching(*child, true);
+    try {
+        child->on_detached();
+    } catch (...) {
+        set_subtree_detaching(*child, false);
+        throw;
+    }
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
     child->set_host_params(nullptr);
     child->set_host_actions(nullptr);
     child->parent_ = nullptr;
+    auto owned = std::move(*it);
+    children_.erase(it);
+    // Publish detachment before any hook can re-enter routing. In particular,
+    // notify_frame_clock_changed() invokes a virtual callback; a capture that
+    // was validated before removal must take its tree-walk path there rather
+    // than returning this now-detached child from the generation fast path.
+    structure_root->publish_structure_change();
     // The removed subtree can no longer reach this parent's clock. Notify it so
     // self-subscribing descendants (a live Meter that never got its own
     // on_detached — remove_child only fires that on the removed root) drop their
     // subscription now instead of lingering until the next tick.
-    child->notify_frame_clock_changed();
-    auto owned = std::move(*it);
-    children_.erase(it);
-    // A node was detached: invalidate every external liveness cache keyed on the
-    // structure generation (see View::structure_generation()).
-    g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
+    owned->notify_frame_clock_changed();
     // Structural change: this view's (and its cached ancestors') recording still
     // includes the now-removed child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
     return owned;
 }
 
+std::vector<GestureRecognizer*> View::collect_realm_reset_gestures() const {
+    std::vector<GestureRecognizer*> removed_recognizers;
+    const auto collect = [&](auto&& self, const View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (recognizer)
+                removed_recognizers.push_back(recognizer.get());
+        }
+        for (auto& child : node.children_)
+            self(self, *child);
+    };
+    for (auto& child : children_)
+        collect(collect, *child);
+    return removed_recognizers;
+}
+
+void View::prepare_children_for_realm_reset(
+    const std::vector<GestureRecognizer*>& removed_recognizers) noexcept {
+    // Gesture abandonment and relationship scrubbing are non-throwing. No
+    // virtual lifecycle callback runs while children_ is still the live owner;
+    // callbacks may mutate the root reentrantly after the ownership swap.
+    const auto abandon = [&](auto&& self, View& node) -> void {
+        if (node.gesture_arbiter_)
+            node.gesture_arbiter_->abandon();
+        for (auto& child : node.children_)
+            self(self, *child);
+    };
+    for (auto& child : children_)
+        abandon(abandon, *child);
+    if (gesture_arbiter_)
+        gesture_arbiter_->abandon();
+
+    const auto scrub = [&](auto&& self, View& node) -> void {
+        for (auto& recognizer : node.gesture_recognizers_) {
+            if (!recognizer) continue;
+            for (auto* removed : removed_recognizers) {
+                if (removed && removed != recognizer.get())
+                    recognizer->remove_relationships_to(*removed);
+            }
+        }
+        for (auto& child : node.children_)
+            self(self, *child);
+    };
+    scrub(scrub, *this);
+
+    for (auto& child : children_)
+        set_subtree_detaching(*child, true);
+}
+
+void View::finish_realm_reset_detach() noexcept {
+    // The bridge already owns this retired component, so arbitrary user/native
+    // code cannot invalidate the vector being traversed. Parent and clock stay
+    // reachable during the hook, matching remove_child()'s lifecycle contract;
+    // the bridge severs them immediately after all hooks return.
+    try {
+        on_detached();
+    } catch (...) {
+    }
+    try {
+        set_window_host(nullptr);
+    } catch (...) {
+    }
+    try {
+        set_plugin_view_host(nullptr);
+    } catch (...) {
+    }
+    try {
+        set_host_params(nullptr);
+    } catch (...) {
+    }
+    try {
+        set_host_actions(nullptr);
+    } catch (...) {
+    }
+}
+
+void View::disconnect_frame_clock_for_realm_reset() noexcept {
+    // Realm retirement can outlive replacement while a native accessibility
+    // provider drains. Make the old graph inert now rather than letting its
+    // animation callbacks continue to execute against the replacement root.
+    parent_ = nullptr;
+    const auto disconnect = [&](auto&& self, View& node) noexcept -> void {
+        // Preserve parent links inside the retired graph: an in-flight native
+        // accessibility call may still need its geometry and navigation. Only
+        // the top-level edge back into the live root is severed.
+        node.frame_clock_ = nullptr;
+        for (const auto& animation : node.animations_) {
+            if (animation.clock)
+                animation.clock->unsubscribe(animation.clock_id);
+        }
+        node.animations_.clear();
+
+        // Frame-clock hooks are native extension points and may throw.
+        // Retirement has already committed ownership, so contain each hook
+        // independently and continue through the complete subtree.
+        try {
+            node.sync_value_bindings();
+        } catch (...) {
+        }
+        try {
+            node.on_frame_clock_changed();
+        } catch (...) {
+        }
+        for (auto& child : node.children_) {
+            if (child) self(self, *child);
+        }
+    };
+    disconnect(disconnect, *this);
+}
+
+void View::retire_interaction_state_for_realm_reset(
+    std::unique_ptr<ActiveDrag>& retired_drag,
+    std::unique_ptr<RootInteractionState>& retired_interaction) noexcept {
+    assert(retired_drag == nullptr);
+    assert(retired_interaction == nullptr);
+    retired_drag = std::move(active_drag_);
+    if (interaction_state_) {
+        if (focused_input_ == interaction_state_->focused_input)
+            focused_input_ = nullptr;
+        if (active_overlay_ == interaction_state_->active_overlay)
+            active_overlay_ = nullptr;
+        retired_interaction = std::move(interaction_state_);
+    }
+}
+
+std::unique_ptr<View> View::extract_child_for_realm_reset(
+    View* child) noexcept {
+    auto it = std::find_if(children_.begin(), children_.end(),
+        [child](const auto& candidate) { return candidate.get() == child; });
+    assert(it != children_.end());
+
+    set_subtree_detaching(**it, true);
+    (*it)->parent_ = nullptr;
+    auto extracted = std::move(*it);
+    children_.erase(it);
+
+    publish_structure_change();
+    return extracted;
+}
+
+void View::adopt_child_for_realm_reset(std::unique_ptr<View> child) noexcept {
+    assert(child != nullptr);
+    assert(children_.size() < children_.capacity());
+    set_subtree_detaching(*child, false);
+    child->parent_ = this;
+    children_.push_back(std::move(child));
+
+    publish_structure_change();
+}
+
+void View::retire_children_for_realm_reset(
+    std::vector<std::unique_ptr<View>>& retired) noexcept {
+    // The deadline path owns one empty retirement slot. Swapping the vector is
+    // constant-work and cannot enter a widget destructor or host callback.
+    // Keep parent_ intact until deferred destruction. The root interaction
+    // record was retired alongside this tree, so no live platform route keeps
+    // pointers into it.
+    assert(retired.empty());
+    retired.swap(children_);
+    publish_structure_change();
+}
+
 std::uint64_t View::structure_generation() noexcept {
     return g_view_structure_generation.load(std::memory_order_relaxed);
+}
+
+std::uint64_t View::root_structure_generation() const noexcept {
+    const View* root = this;
+    while (root->parent_)
+        root = root->parent_;
+    return root->structure_generation_.load(std::memory_order_relaxed);
 }
 
 bool View::children_in_z_order() const {

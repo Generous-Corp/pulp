@@ -9,6 +9,14 @@ add_test(NAME build-check COMMAND pulp-test-build-check)
 if(Python3_Interpreter_FOUND)
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    add_test(NAME inspector-protocol-registry-complete
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --root ${PROJECT_SOURCE_DIR})
+    add_test(NAME inspector-protocol-registry-check-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/scripts/check_inspector_protocol_registry.py
+            --self-test)
     add_test(NAME auval-helper-worker-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_run_auval_component.py")
     if(UNIX)

@@ -3,6 +3,7 @@
 #include "cli_common.hpp"
 #include "mac_runtime_validators.hpp"
 #include "validator_discovery.hpp"
+#include "inspector_shipping_report.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -24,6 +25,14 @@ const char* validate_capture_backend_name(pulp::view::ScreenshotBackend backend)
         case pulp::view::ScreenshotBackend::auto_select: return "auto";
     }
     return "unknown";
+}
+
+fs::path inspector_evidence_root(fs::path artifact) {
+    if (artifact.extension() == ".app")
+        return artifact / "Contents/MacOS";
+    if (!fs::is_directory(artifact))
+        return artifact.parent_path();
+    return artifact;
 }
 
 } // namespace
@@ -126,15 +135,52 @@ int cmd_validate(const std::vector<std::string>& args) {
             if (r.status == "fail") ++fail_count;
             else if (r.status == "skip") ++skip_count;
         }
+        bool inspector_evidence_complete = true;
+        auto inspector_report = pulp::cli::inspector_shipping::empty_report();
+        if (std::find(targets.begin(), targets.end(), "standalone") !=
+            targets.end()) {
+            std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
+            for (const auto& artifact_string : positional) {
+                const fs::path artifact = artifact_string;
+                fs::path executable;
+                if (artifact.extension() == ".app") {
+                    executable = mr::resolve_standalone_executable(artifact, env);
+                } else if (fs::is_regular_file(artifact)) {
+                    executable = artifact;
+                } else {
+                    continue;
+                }
+                auto artifact_report = executable.empty()
+                    ? pulp::cli::inspector_shipping::Report{}
+                    : pulp::cli::inspector_shipping::load_exact_artifact_report(
+                          executable, inspector_evidence_root(artifact));
+                if (executable.empty())
+                    artifact_report.error =
+                        "could not resolve standalone executable for inspector "
+                        "capability scan: " + artifact.string();
+                artifact_reports.push_back(std::move(artifact_report));
+            }
+            inspector_report = pulp::cli::inspector_shipping::combine_reports(
+                std::move(artifact_reports));
+        }
+        inspector_evidence_complete = inspector_report.complete;
+        if (!inspector_evidence_complete)
+            std::cerr << "Inspector capability evidence incomplete: "
+                      << inspector_report.error << "\n";
         if (json_output || !report_path.empty()) {
             std::ostringstream report;
-            const bool tgt_install_ready = (fail_count == 0) && !(strict && skip_count > 0);
+            const bool tgt_install_ready = (fail_count == 0) &&
+                !(strict && skip_count > 0) && inspector_evidence_complete;
             report << "{\n  \"version\": 1,\n  \"target\": \""
                    << target_name << "\",\n";
             report << "  \"summary\": {\"failed\": " << fail_count
                    << ", \"skipped\": " << skip_count << "},\n";
             report << "  \"install_ready\": " << (tgt_install_ready ? "true" : "false")
                    << ",\n";
+            report << "  \"inspector_capability_evidence_complete\": "
+                   << (inspector_evidence_complete ? "true" : "false") << ",\n";
+            report << "  \"inspector_capabilities\": "
+                   << inspector_report.json << ",\n";
             report << "  \"results\": [\n";
             for (size_t i = 0; i < results.size(); ++i) {
                 const auto& r = results[i];
@@ -180,7 +226,8 @@ int cmd_validate(const std::vector<std::string>& args) {
             }
         }
         const bool strict_fail_target = strict && skip_count > 0;
-        return (fail_count > 0 || strict_fail_target) ? 1 : 0;
+        return (fail_count > 0 || strict_fail_target ||
+                !inspector_evidence_complete) ? 1 : 0;
     }
 
     auto root = resolve_active_project_root(nullptr);
@@ -558,6 +605,12 @@ int cmd_validate(const std::vector<std::string>& args) {
     }
 
     const bool strict_fail = strict && skipped_missing_tool > 0;
+    const auto inspector_report =
+        pulp::cli::inspector_shipping::load_artifact_report(build_dir);
+    const bool inspector_evidence_complete = inspector_report.complete;
+    if (!inspector_evidence_complete)
+        std::cerr << "Inspector capability evidence incomplete: "
+                  << inspector_report.error << "\n";
 
     // JSON report output
 
@@ -578,13 +631,17 @@ int cmd_validate(const std::vector<std::string>& args) {
         // Aggregate evidence + install/package readiness: a bundle is install-safe
         // only when nothing failed (and, under --strict, nothing was skipped),
         // matching `pulp build --install`'s "validation is the gate" policy.
-        const bool install_ready = (failed == 0) && !(strict && skipped > 0);
+        const bool install_ready = (failed == 0) && !(strict && skipped > 0) &&
+            inspector_evidence_complete;
         report << "  \"summary\": {\"total\": " << total
                << ", \"passed\": " << passed
                << ", \"failed\": " << failed
                << ", \"skipped\": " << skipped
                << ", \"skipped_missing_tool\": " << skipped_missing_tool << "},\n";
         report << "  \"install_ready\": " << (install_ready ? "true" : "false") << ",\n";
+        report << "  \"inspector_capability_evidence_complete\": "
+               << (inspector_evidence_complete ? "true" : "false") << ",\n";
+        report << "  \"inspector_capabilities\": " << inspector_report.json << ",\n";
         report << "  \"reports\": [\n";
         for (size_t i = 0; i < report_entries.size(); ++i) {
             report << report_entries[i];
@@ -674,5 +731,5 @@ int cmd_validate(const std::vector<std::string>& args) {
             std::cout << "No plugin screenshots captured.\n";
     }
 
-    return (failed > 0 || strict_fail) ? 1 : 0;
+    return (failed > 0 || strict_fail || !inspector_evidence_complete) ? 1 : 0;
 }

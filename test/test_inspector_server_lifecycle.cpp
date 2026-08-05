@@ -1501,6 +1501,7 @@ TEST_CASE("cleanup-worker publication loss can destroy the server owner",
 #endif
 }
 
+
 TEST_CASE("external server destruction joins its cleanup worker",
           "[inspect][publication][cleanup][external-join]") {
     TemporaryDirectory temporary;

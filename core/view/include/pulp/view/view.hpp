@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
@@ -20,6 +21,7 @@ namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
+class WidgetBridge;
 class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
 class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 class GestureArbiter; class GestureRecognizer;
@@ -32,6 +34,28 @@ struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
 class ComboBox;          // pulp/view/ui_components.hpp — held (as View*) in RootInteractionState
+class View;
+
+/// Identity-safe reference to a View captured across native event boundaries.
+/// Capturing records the root and current structure generation while the View
+/// is known-live. `live_in()` is therefore O(1) until a detach invalidates that
+/// generation; only the invalidation path walks the tree. The instance id
+/// closes allocator-address reuse (ABA) after an old realm is destroyed and a
+/// replacement view lands at the same address.
+class ViewCapture {
+public:
+    void set(View* view) noexcept;
+    void reset() noexcept;
+    bool has_value() const noexcept { return view_ != nullptr; }
+    View* live_in(View& root) const noexcept;
+
+private:
+    View* view_ = nullptr;
+    std::uint64_t instance_id_ = 0;
+    mutable View* validated_root_ = nullptr;
+    mutable std::uint64_t validated_root_instance_id_ = 0;
+    mutable std::uint64_t validated_generation_ = 0;
+};
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -80,15 +104,14 @@ public:
     void add_child(std::unique_ptr<View> child);
     std::unique_ptr<View> remove_child(View* child);
 
-    /// Process-wide monotonic counter bumped by every structural mutation that
-    /// can DETACH a node (remove_child). Never resets; starts at 1 so 0 is a
-    /// reserved "never validated" sentinel for external cache holders. add_child
-    /// does NOT bump it — adding a node cannot detach an already-reachable node,
-    /// so a pointer confirmed under some root at generation G is still under that
-    /// root at any later generation with no intervening remove_child. WidgetBridge
-    /// uses this to make its per-id widget-liveness cache O(1) on repeat lookups,
-    /// skipping the O(tree) subtree walk while the generation is unchanged.
+    /// Process-wide compatibility generation retained for existing SDK users.
+    /// New internal caches should prefer root_structure_generation() so an
+    /// unrelated editor's mutation does not invalidate their fast path.
     static std::uint64_t structure_generation() noexcept;
+    /// Generation of the top-level tree containing this view. Safe to call on
+    /// a nested subtree root; mutations anywhere under the same top-level root
+    /// invalidate identity/liveness caches that use it.
+    std::uint64_t root_structure_generation() const noexcept;
 
     size_t child_count() const { return children_.size(); }
     View* child_at(size_t index) { return children_[index].get(); }
@@ -235,7 +258,14 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; invalidate_subtree_caches_up(); }
+    void set_visible(bool v) {
+        if (visibility_quarantine_count_ > 0) {
+            visible_after_quarantine_ = v;
+            return;
+        }
+        visible_ = v;
+        invalidate_subtree_caches_up();
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
 
@@ -295,7 +325,8 @@ public:
 
     /// Mouse down with full event context.
     virtual void on_mouse_event(const MouseEvent& event) {
-        if (on_pointer_event) on_pointer_event(event);
+        auto callback = on_pointer_event;
+        if (callback) callback(event);
     }
     /// True if this widget adjusts its VALUE on a scroll-wheel over it (knobs,
     /// faders, sliders, steppers, pan). The host routes the wheel to such a
@@ -2086,6 +2117,43 @@ public:
     UserSelect user_select() const { return user_select_; }
 
 private:
+    friend class WidgetBridge;
+    friend class ViewCapture;
+
+    void begin_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_++ == 0)
+            visible_after_quarantine_ = visible_;
+        set_visible_from_quarantine(false);
+    }
+    void refresh_visibility_quarantine() noexcept {
+        set_visible_from_quarantine(false);
+    }
+    void end_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_ == 0)
+            return;
+        --visibility_quarantine_count_;
+        if (visibility_quarantine_count_ == 0)
+            set_visible(visible_after_quarantine_);
+    }
+    void set_visible_from_quarantine(bool visible) noexcept {
+        visible_ = visible;
+        invalidate_subtree_caches_up();
+    }
+    static void set_subtree_detaching(View& view, bool detaching) noexcept;
+    void publish_structure_change() noexcept;
+    std::vector<GestureRecognizer*> collect_realm_reset_gestures() const;
+    void prepare_children_for_realm_reset(
+        const std::vector<GestureRecognizer*>& removed_recognizers) noexcept;
+    void disconnect_frame_clock_for_realm_reset() noexcept;
+    void finish_realm_reset_detach() noexcept;
+    void retire_interaction_state_for_realm_reset(
+        std::unique_ptr<ActiveDrag>& retired_drag,
+        std::unique_ptr<RootInteractionState>& retired_interaction) noexcept;
+    std::unique_ptr<View> extract_child_for_realm_reset(View* child) noexcept;
+    void adopt_child_for_realm_reset(std::unique_ptr<View> child) noexcept;
+    void retire_children_for_realm_reset(
+        std::vector<std::unique_ptr<View>>& retired) noexcept;
+
     /// Recursively fire `on_frame_clock_changed()` on this view and every
     /// descendant. Used by `set_frame_clock()` so a clock installed on a root
     /// after the subtree was built reaches self-subscribing descendants.
@@ -2183,6 +2251,13 @@ private:
     /// copy is populated; `interaction()` walks up to it. Detached widgets use a
     /// process-global fallback instead (see view.cpp), never this member.
     std::unique_ptr<RootInteractionState> interaction_state_;
+    // Only the root's value is observed and bumped. Atomic prevents a native
+    // provider's incidental read from racing the owner-thread detach publish.
+    std::atomic<std::uint64_t> structure_generation_{1};
+    // Set across an entire subtree before the first virtual detach callback.
+    // ViewCapture treats this as already absent even while on_detached() still
+    // needs the old parent link to release parent-owned resources.
+    std::atomic<bool> detaching_{false};
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
@@ -2208,6 +2283,8 @@ private:
     std::string access_disabled_;
     std::string access_hidden_;
     bool visible_ = true;
+    std::size_t visibility_quarantine_count_ = 0;
+    bool visible_after_quarantine_ = true;
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;

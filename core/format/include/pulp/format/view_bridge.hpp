@@ -350,6 +350,10 @@ private:
     std::unique_ptr<view::StateStoreHostParamSurface> host_param_surface_;
     view::HostActionSurface* host_actions_ = nullptr;  ///< caller-owned; may be null
     std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
+    /// True when a processor explicitly opts its active scripted session into
+    /// in-place reload. Keep the root and host subscriptions stable across
+    /// processor generation changes.
+    bool in_place_scripted_ui_reload_ = false;
     bool uses_script_ui_ = false;
     bool uses_auto_ui_ = false;  ///< true when the editor is the AutoUi default
     bool attached_ = false;  ///< true between notify_attached() and close()

@@ -37,6 +37,10 @@ public:
     // Throws on parse/runtime errors
     choc::value::Value evaluate(const std::string& code);
 
+    bool supports_bounded_json_evaluation() const;
+    std::string evaluate_bounded_json(const std::string& code,
+                                      std::size_t max_bytes);
+
     // Run JS code asynchronously (for module-style code with imports)
     void run_module(const std::string& code,
                     ModuleResolver resolver,
@@ -72,6 +76,11 @@ public:
     // Ask the active backend to abort its in-flight evaluation at the next
     // interrupt check. Thread-safe on supporting backends; no-op otherwise.
     void request_interrupt();
+
+    // [engine thread] Consume a late interrupt after evaluation quiesces.
+    // Returns true when the request was still pending rather than consumed by
+    // the evaluation.
+    bool clear_pending_interrupt();
 
     // Check if the engine is valid
     explicit operator bool() const;

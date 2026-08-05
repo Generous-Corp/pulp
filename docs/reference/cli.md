@@ -298,6 +298,11 @@ when the pixels themselves must show live signal.
 
 #### Development Inspector profiles
 
+Shipping is a separate build/package decision from these runtime profiles. See
+[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
+for the exact target manifest, binary proof, and the separate unsafe
+`runtime.eval` acknowledgement.
+
 Standalone inspector activation requires a GPU-enabled desktop build and a
 window host that can drain accepted owning-thread work while its event loop
 exits and defer a startup-failure close to a later native event turn. Pulp
@@ -320,12 +325,18 @@ even when the protocol/client SDK components are present.
   nonempty capability set; the capability option is repeatable. A custom set
   containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
   `session.control`, because mutations require a controller lease.
+- `--inspect-runtime-eval` is the separate high-risk acknowledgement for
+  arbitrary JavaScript evaluation in the live UI realm. It requires
+  `--inspect=develop`, or `--inspect=custom` with both `runtime.eval` and
+  `session.control`. No profile or saved developer preference implies it.
 - `--inspect=off` is the default and starts no listener or discovery artifact.
 
 The active session binds only to loopback, publishes an owner-private ephemeral
 record and credential, and displays an `INSPECT <profile>` badge in the live
 window. `PULP_INSPECT_PROFILE` and comma-separated
 `PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+The explicit evaluation acknowledgement is forwarded as
+`PULP_INSPECT_RUNTIME_EVAL=1` and is never persisted.
 Plugin scanning, validation, and an ordinary `pulp run` never activate it.
 The standalone runtime supports in-place scripted-UI hot reload. A processor
 that replaces its entire editor at runtime fails inspector startup closed
@@ -1038,7 +1049,12 @@ and are only notarized + verified.
 
 For `.app` inputs, use `--output <dir>` to choose where the generated DMG lands
 instead of `artifacts/`, and `--entitlements <plist>` to override the default
-app-signing entitlements.
+app-signing entitlements. Inspector-capable apps must also pass
+`--ship-inspector`; apps that include `runtime.eval` additionally require the
+distinct `--ship-inspector-runtime-eval` acknowledgement. `share` scans the
+app executable against its adjacent capability sidecar before signing. For a
+prebuilt `.dmg` or `.pkg`, it mounts or expands the container and applies the
+same scan to every contained standalone app before accepting the flags.
 
 `release --dmg`/`--pkg` notarizes and staples the distributable it produces, so
 the artifact it leaves in `artifacts/` is Gatekeeper-ready, not merely signed.
@@ -1300,9 +1316,14 @@ plugin-format launches start no endpoint. The client reads
 owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
+The offline `audit` subcommand is the exception: it ships even when
+`PULP_ENABLE_INSPECTOR=OFF`, never connects to a session, and blocks empty or
+unauditable targets. Artifact and manifest symlinks are rejected rather than
+followed, so an audit cannot escape the directory containing its evidence.
 
 ```bash
 pulp inspect profiles --json
+pulp inspect audit path/to/MyProduct --json
 pulp inspect doctor --json
 pulp inspect list --json
 pulp inspect capabilities --json \
@@ -1323,6 +1344,7 @@ The named commands are the stable orientation surface:
 | Command | Result |
 |---|---|
 | `profiles` | Declared `off`, `observe`, and `develop` capability sets. |
+| `audit ARTIFACT` | Read-only artifact check: canonical control manifest, profile/digest markers, declared capabilities, and known external surfaces. The artifact is never loaded. |
 | `list` | Live publications, including the exact session, instance, and non-reusable publication IDs needed by every operation. |
 | `capabilities` | Authenticated available/effective authority for one exact publication; all three identity options are required. |
 | `doctor` | Discovery runtime directory, live-session count, and issues. |
@@ -1352,6 +1374,21 @@ Options:
   `inject-midi` fields; note-on duration is 1 through 2000 ms
 - `--playing`, `--position-samples`, `--tempo-bpm` - partial `set-transport` fields
 - `--json` - stable JSON for named commands
+
+`audit` is the Phase 1 authoring spelling; it needs only an artifact path and
+does not use live-session options. It exits 0 for `pass`, 1 for `block`, and 2
+for invalid invocation. JSON uses `pulp.control.audit.v1`. A later `pulp
+control audit` command may become the canonical spelling; this command remains
+the no-activation developer preflight. Sidecars are capped at 1 MiB. Directory
+mode rejects absolute or traversing artifact identities and reads each candidate
+executable once; direct-file mode applies the same safe-identity rules and
+requires an exact-named sidecar's target or product identity to match the
+artifact filename. Canonical directory sidecars must also use the manifest
+target as their stem and cannot fall back to a uniquely marker-bearing renamed
+sibling. Plugin-format subtrees never count as standalone evidence. The same
+immutable bytes are used for selection,
+known-surface detection, marker verification, `artifactDigest`, and
+`consentIdentity`.
 
 Typed parameter, MIDI, and transport mutations require the exact three-part
 publication identity and a same-connection controller lease. `inject-midi`

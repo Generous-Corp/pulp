@@ -27,6 +27,7 @@ struct ParseRunResult {
     // Development Inspector launcher profile. Empty means off.
     std::string inspector_profile;     ///< --inspect[=<profile>]
     std::vector<std::string> inspector_capabilities; ///< custom profile capability ids
+    bool inspector_runtime_eval = false; ///< --inspect-runtime-eval separate acknowledgement
 
     // Live Audio Inspector discoverability flags.
     bool audio_inspector = false;      ///< --audio-inspector (PULP_AUDIO_INSPECTOR=1)
@@ -51,7 +52,8 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args);
 
 /// Build the argv that gets passed to the launched standalone binary.
 /// Order: --headless (if set), --screenshot <path> (if set),
-/// --frames <n> (if not default), --audio-inspector (if set),
+/// --frames <n> (if not default), --inspect-runtime-eval (if set),
+/// --audio-inspector (if set),
 /// --audio-probe-json <path> (if set), --audio-scope-* (if set), then
 /// user_pass_through verbatim.
 std::vector<std::string> assemble_launch_args(const ParseRunResult& opts);
