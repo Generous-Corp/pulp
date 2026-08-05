@@ -27,6 +27,12 @@ namespace pulp::signal {
 /// Maximum supported channel count for metering.
 static constexpr int kMaxMeterChannels = 16;
 
+/// Finite samples outside this deliberately generous audio-domain ceiling are
+/// clipped before every peak, RMS, correlation, and loudness calculation.
+/// This keeps double-input arithmetic deterministic instead of allowing a
+/// finite but non-audio value to overflow a squared-energy accumulator.
+static constexpr double kMaxMeterInputMagnitude = 1.0e6;
+
 /// Speaker roles used by the BS.1770 channel summation. LFE is excluded;
 /// lateral surrounds receive 1.41 while rear channels at +/-135 degrees use
 /// 1.0 as specified for advanced channel layouts.
@@ -186,6 +192,8 @@ struct MultiChannelBallistics {
 /// correlation, clip detection, and the channel-based BS.1770-5 loudness core
 /// for up to kMaxMeterChannels. Loudness uses K-weighting, 400 ms blocks at
 /// 75% overlap, and the -70 LUFS absolute / -10 LU relative integrated gates.
+/// Finite inputs beyond +/-kMaxMeterInputMagnitude are treated as deterministic
+/// over-range audio and clipped to that supported-domain boundary.
 ///
 /// The default layout is mono, stereo, L/R/C, quad, 5.0, 5.1, then the common
 /// L/R/C/LFE/Ls/Rs/Lrs/Rrs order. Pass explicit roles for any other order.
@@ -216,6 +224,9 @@ public:
         configure_k_weighting();
         gate_energy_tree_.assign(kGateBinCount + 1, 0.0);
         gate_count_tree_.assign(kGateBinCount + 1, 0);
+        gate_node_epoch_.assign(kGateBinCount + 1, 0);
+        gate_epoch_ = 0;
+        gate_epoch_active_ = true;
 
         reset_measurement_state(num_channels_);
     }
@@ -241,11 +252,9 @@ public:
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
-                SampleType s = channels[ch][i];
                 // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
                 // accumulators irrecoverably (#2695). Treat them as silence.
-                if (!std::isfinite(static_cast<double>(s))) s = SampleType{0};
-                const double sd = static_cast<double>(s);
+                const double sd = sanitize_sample(channels[ch][i]);
                 double abs_s = std::abs(sd);
 
                 if (abs_s > block_peak_[ch]) block_peak_[ch] = abs_s;
@@ -260,12 +269,8 @@ public:
 
             // Stereo correlation
             if (num_channels >= 2) {
-                SampleType l = channels[0][i];
-                SampleType r = channels[1][i];
-                if (!std::isfinite(static_cast<double>(l))) l = SampleType{0};
-                if (!std::isfinite(static_cast<double>(r))) r = SampleType{0};
-                const double ld = static_cast<double>(l);
-                const double rd = static_cast<double>(r);
+                const double ld = sanitize_sample(channels[0][i]);
+                const double rd = sanitize_sample(channels[1][i]);
                 correlation_sum_xy_ += ld * rd;
                 correlation_sum_xx_ += ld * ld;
                 correlation_sum_yy_ += rd * rd;
@@ -289,6 +294,19 @@ public:
 
     /// Get the latest metering snapshot.
     const MultiChannelMeterData& snapshot() const { return snapshot_; }
+
+    /// Diagnostics for proving that programme reset is a logical epoch change
+    /// rather than a sweep over the prepared histogram storage.
+    std::uint64_t loudness_histogram_epoch() const { return gate_epoch_; }
+    std::size_t loudness_histogram_nodes_initialized() const {
+        return gate_nodes_initialized_;
+    }
+    std::size_t loudness_histogram_reset_work_units() const {
+        return gate_reset_work_units_;
+    }
+    static constexpr std::size_t loudness_histogram_capacity() {
+        return kGateBinCount;
+    }
 
     void reset() {
         reset_measurement_state(0);
@@ -358,13 +376,14 @@ private:
     }
 
     static constexpr double kAbsoluteGateLufs = -70.0;
-    // Cover the complete finite-double energy domain. This avoids a special
-    // overflow bin whose members could not be classified correctly when a hot
-    // programme's relative gate lies inside that bin. 0.01 LU is comfortably
-    // inside the 0.1 LU tolerance of the EBU minimum-requirements vectors.
-    static constexpr double kGateMaximumLufs = 3082.0;
+    // The input ceiling above bounds any supported 16-channel programme below
+    // +140 LUFS, including K-weighting gain and surround weights. 0.01 LU is
+    // comfortably inside the 0.1 LU EBU minimum-requirements tolerance while
+    // keeping each prepared histogram near 0.5 MiB including epoch stamps.
+    static constexpr double kGateMaximumLufs = 140.0;
     static constexpr double kGateBinWidthLu = 0.01;
-    static constexpr std::size_t kGateBinCount = 315201;
+    static constexpr std::size_t kGateBinCount = 21001;
+    static constexpr double kGateMaximumEnergy = 1.0e14;
 
     struct Biquad {
         double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
@@ -384,6 +403,13 @@ private:
         double process(double x) { return high_pass.process(shelf.process(x)); }
         void reset() { shelf.reset(); high_pass.reset(); }
     };
+
+    static double sanitize_sample(SampleType sample) {
+        const double value = static_cast<double>(sample);
+        if (!std::isfinite(value)) return 0.0;
+        return std::clamp(value, -kMaxMeterInputMagnitude,
+                          kMaxMeterInputMagnitude);
+    }
 
     static float energy_to_lufs(double energy) {
         return energy > 0.0 && std::isfinite(energy)
@@ -442,8 +468,15 @@ private:
         loudness_ring_position_ = 0;
         snapshot_.lufs_momentary = -std::numeric_limits<float>::infinity();
         snapshot_.lufs_integrated = -std::numeric_limits<float>::infinity();
-        std::fill(gate_energy_tree_.begin(), gate_energy_tree_.end(), 0.0);
-        std::fill(gate_count_tree_.begin(), gate_count_tree_.end(), 0);
+        gate_nodes_initialized_ = 0;
+        gate_reset_work_units_ = 1;
+        // A 64-bit epoch cannot wrap in a practical process lifetime. If it
+        // nevertheless exhausts, stop accumulating integrated loudness until
+        // the control thread calls prepare(); never bulk-clear on process().
+        if (gate_epoch_ == std::numeric_limits<std::uint64_t>::max())
+            gate_epoch_active_ = false;
+        else
+            ++gate_epoch_;
     }
 
     void finish_loudness_hop(int num_channels) {
@@ -459,8 +492,11 @@ private:
             double channel_energy = 0.0;
             for (const auto& hop : loudness_energy_ring_) channel_energy += hop[ch];
             channel_energy /= static_cast<double>(4 * loudness_hop_samples_);
-            channel_momentary_[ch] = energy_to_lufs(channel_weights_[ch] * channel_energy);
-            program_energy += channel_weights_[ch] * channel_energy;
+            const double weighted_energy = std::min(
+                channel_weights_[ch] * channel_energy, kGateMaximumEnergy);
+            channel_momentary_[ch] = energy_to_lufs(weighted_energy);
+            program_energy = std::min(
+                program_energy + weighted_energy, kGateMaximumEnergy);
         }
         snapshot_.lufs_momentary = energy_to_lufs(program_energy);
 
@@ -471,29 +507,41 @@ private:
     }
 
     void add_gating_block(double energy) {
+        if (!gate_epoch_active_) return;
         const double loudness = energy_to_lufs(energy);
         const double clamped = std::clamp(loudness, kAbsoluteGateLufs, kGateMaximumLufs);
         const auto bin = std::min(kGateBinCount - 1, static_cast<std::size_t>(
             (clamped - kAbsoluteGateLufs) / kGateBinWidthLu));
         for (std::size_t index = bin + 1; index <= kGateBinCount;
              index += low_bit(index)) {
+            if (gate_node_epoch_[index] != gate_epoch_) {
+                gate_node_epoch_[index] = gate_epoch_;
+                gate_energy_tree_[index] = 0.0;
+                gate_count_tree_[index] = 0;
+                ++gate_nodes_initialized_;
+            }
             gate_energy_tree_[index] += energy;
             ++gate_count_tree_[index];
         }
     }
 
     std::pair<double, std::uint64_t> gating_blocks_from(std::size_t first_bin) const {
+        if (!gate_epoch_active_) return {0.0, 0};
         double prefix_energy = 0.0;
         std::uint64_t prefix_count = 0;
         for (std::size_t index = first_bin; index > 0; index -= low_bit(index)) {
-            prefix_energy += gate_energy_tree_[index];
-            prefix_count += gate_count_tree_[index];
+            if (gate_node_epoch_[index] == gate_epoch_) {
+                prefix_energy += gate_energy_tree_[index];
+                prefix_count += gate_count_tree_[index];
+            }
         }
         double total_energy = 0.0;
         std::uint64_t total_count = 0;
         for (std::size_t index = kGateBinCount; index > 0; index -= low_bit(index)) {
-            total_energy += gate_energy_tree_[index];
-            total_count += gate_count_tree_[index];
+            if (gate_node_epoch_[index] == gate_epoch_) {
+                total_energy += gate_energy_tree_[index];
+                total_count += gate_count_tree_[index];
+            }
         }
         return {total_energy - prefix_energy, total_count - prefix_count};
     }
@@ -547,6 +595,11 @@ private:
 
     std::vector<double> gate_energy_tree_;
     std::vector<std::uint64_t> gate_count_tree_;
+    std::vector<std::uint64_t> gate_node_epoch_;
+    std::uint64_t gate_epoch_ = 0;
+    std::size_t gate_nodes_initialized_ = 0;
+    std::size_t gate_reset_work_units_ = 0;
+    bool gate_epoch_active_ = true;
 
     MultiChannelMeterData snapshot_;
 };

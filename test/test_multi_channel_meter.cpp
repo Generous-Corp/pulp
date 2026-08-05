@@ -351,22 +351,42 @@ TEST_CASE("MultiChannelMeter restarts every window across 2 to 1 to 2 topology c
     meter.process(clipped, 2, static_cast<int>(clipped_left.size()));
     REQUIRE(meter.snapshot().channels[0].clipped);
     REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
+    const auto populated_epoch = meter.loudness_histogram_epoch();
+    REQUIRE(meter.loudness_histogram_nodes_initialized() > 0);
+    REQUIRE(meter.loudness_histogram_nodes_initialized()
+            < MultiChannelMeter::loudness_histogram_capacity());
 
     std::array<float, sample_rate / 200> mono{};
     mono.fill(0.75f);
     const float* mono_channels[] = {mono.data()};
-    meter.process(mono_channels, 1, static_cast<int>(mono.size()));
-    REQUIRE(meter.snapshot().num_channels == 1);
-    REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(0.0f, 1e-6f));
-    REQUIRE_FALSE(meter.snapshot().channels[0].clipped);
-    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
 
     std::array<float, sample_rate / 100> fresh_left{};
     std::array<float, sample_rate / 100> fresh_right{};
     fresh_left.fill(0.25f);
     fresh_right.fill(-0.25f);
     const float* fresh[] = {fresh_left.data(), fresh_right.data()};
-    meter.process(fresh, 2, static_cast<int>(fresh_left.size()));
+    MultiChannelMeterData mono_snapshot;
+    bool allocated = false;
+    {
+        pulp::test::RtAllocationProbe probe;
+        meter.process(mono_channels, 1, static_cast<int>(mono.size()));
+        mono_snapshot = meter.snapshot();
+        meter.process(fresh, 2, static_cast<int>(fresh_left.size()));
+        allocated = probe.saw_allocation();
+    }
+
+    REQUIRE_FALSE(allocated);
+    REQUIRE(mono_snapshot.num_channels == 1);
+    REQUIRE_THAT(mono_snapshot.channels[0].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(mono_snapshot.channels[0].clipped);
+    REQUIRE(std::isinf(mono_snapshot.lufs_integrated));
+    REQUIRE(meter.loudness_histogram_epoch() == populated_epoch + 2);
+    REQUIRE(meter.loudness_histogram_reset_work_units()
+            < MultiChannelMeter::loudness_histogram_capacity());
+    // Neither short post-change block reaches a loudness hop. Zero initialized
+    // nodes proves the resets only advanced an epoch; they did not touch all
+    // histogram bins.
+    REQUIRE(meter.loudness_histogram_nodes_initialized() == 0);
 
     const auto& snapshot = meter.snapshot();
     REQUIRE(snapshot.num_channels == 2);
@@ -379,6 +399,49 @@ TEST_CASE("MultiChannelMeter restarts every window across 2 to 1 to 2 topology c
     REQUIRE_THAT(snapshot.correlation, WithinAbs(-1.0f, 1e-6f));
     REQUIRE(std::isinf(snapshot.lufs_momentary));
     REQUIRE(std::isinf(snapshot.lufs_integrated));
+}
+
+TEST_CASE("MultiChannelMeter64 clamps finite samples outside its audio domain",
+          "[signal][meter][loudness][f64]") {
+    constexpr int sample_rate = 48000;
+    constexpr int frames = sample_rate;
+    std::vector<double> near_limit(frames);
+    for (int i = 0; i < frames; ++i) {
+        near_limit[static_cast<std::size_t>(i)] = kMaxMeterInputMagnitude * std::sin(
+            2.0 * std::numbers::pi * 997.0 * i / sample_rate);
+    }
+    const double* near_channels[] = {near_limit.data()};
+
+    MultiChannelMeter64 near_meter;
+    near_meter.prepare(sample_rate, 1);
+    near_meter.process(near_channels, 1, frames);
+    REQUIRE(std::isfinite(near_meter.snapshot().lufs_momentary));
+    REQUIRE(std::isfinite(near_meter.snapshot().lufs_integrated));
+    REQUIRE(near_meter.snapshot().channels[0].peak <= kMaxMeterInputMagnitude);
+    REQUIRE(near_meter.snapshot().channels[0].peak > 0.99 * kMaxMeterInputMagnitude);
+
+    std::vector<double> over_limit(frames);
+    for (int i = 0; i < frames; ++i)
+        over_limit[static_cast<std::size_t>(i)] = i % 2 == 0
+            ? std::numeric_limits<double>::max()
+            : -std::numeric_limits<double>::max();
+    const double* over_channels[] = {over_limit.data()};
+
+    MultiChannelMeter64 over_meter;
+    over_meter.prepare(sample_rate, 1);
+    over_meter.process(over_channels, 1, frames);
+    const auto first = over_meter.snapshot();
+    REQUIRE_THAT(first.channels[0].peak,
+                 WithinAbs(static_cast<float>(kMaxMeterInputMagnitude), 1.0f));
+    REQUIRE_THAT(first.channels[0].rms,
+                 WithinAbs(static_cast<float>(kMaxMeterInputMagnitude), 1.0f));
+    REQUIRE(std::isfinite(first.lufs_momentary));
+    REQUIRE(std::isfinite(first.lufs_integrated));
+
+    over_meter.reset();
+    over_meter.process(over_channels, 1, frames);
+    REQUIRE_THAT(over_meter.snapshot().lufs_integrated,
+                 WithinAbs(first.lufs_integrated, 1e-5f));
 }
 
 TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
