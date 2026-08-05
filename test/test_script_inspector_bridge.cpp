@@ -6,12 +6,31 @@
 #include <pulp/view/script_inspector_bridge.hpp>
 #include <choc/text/choc_JSON.h>
 
-#include <atomic>
 #include <chrono>
+#include <memory>
+#include <mutex>
 #include <thread>
 
 using namespace pulp::view;
 using namespace std::chrono_literals;
+
+namespace pulp::view {
+struct ScriptInspectorBridgeTestAccess {
+    static bool wait_until_queued(ScriptInspectorBridge& bridge) {
+        std::unique_lock<std::mutex> lock(bridge.mutex_);
+        return bridge.state_cv_.wait_for(lock, 3s, [&] {
+            return bridge.pending_ != nullptr;
+        });
+    }
+
+    static bool wait_until_running(ScriptInspectorBridge& bridge) {
+        std::unique_lock<std::mutex> lock(bridge.mutex_);
+        return bridge.state_cv_.wait_for(lock, 3s, [&] {
+            return bridge.running_ != nullptr;
+        });
+    }
+};
+}  // namespace pulp::view
 
 TEST_CASE("Bridge reports detached before an engine is attached", "[view][script][inspector]") {
     ScriptInspectorBridge bridge;
@@ -53,6 +72,175 @@ TEST_CASE("Same-thread evaluate runs inline without a pump", "[view][script][ins
     REQUIRE(err.error.find("boom") != std::string::npos);
 }
 
+TEST_CASE("Realm reset may reattach before an inline result is published",
+          "[view][script][inspector][reset]") {
+    ScriptEngine original;
+    ScriptEngine replacement;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&original);
+
+    int resets = 0;
+    bridge.set_post_evaluation_reset([&](auto) {
+        ++resets;
+        bridge.detach();
+        bridge.attach(&replacement);
+        return std::string{};
+    });
+
+    const auto result = bridge.evaluate("40 + 2");
+    REQUIRE(result.ok);
+    REQUIRE(result.json == "42");
+    REQUIRE(resets == 1);
+    REQUIRE(bridge.capabilities().engine == "QuickJS");
+}
+
+TEST_CASE("Realm reset failure fails evaluation closed",
+          "[view][script][inspector][reset]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    bridge.set_post_evaluation_reset(
+        [](auto) { return std::string{"reload failed"}; });
+
+    const auto result = bridge.evaluate("40 + 2");
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "evaluated realm reset failed: reload failed");
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
+TEST_CASE("External detach cannot cross an in-progress realm reset",
+          "[view][script][inspector][reset][lifetime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    std::mutex gate;
+    std::condition_variable gate_cv;
+    bool reset_started = false;
+    bool reset_saw_detacher = false;
+    bool detacher_saw_reset = false;
+    bool detach_started = false;
+    bool detach_returned = false;
+    bool detach_crossed_reset = false;
+    bridge.set_post_evaluation_reset([&](auto) {
+        std::unique_lock<std::mutex> lock(gate);
+        reset_started = true;
+        gate_cv.notify_all();
+        reset_saw_detacher = gate_cv.wait_for(
+            lock, 3s, [&] { return detach_started; });
+        detach_crossed_reset = gate_cv.wait_for(
+            lock, 100ms, [&] { return detach_returned; });
+        return std::string{};
+    });
+
+    ScriptInspectorBridge::EvalResult result;
+    std::thread client([&] { result = bridge.evaluate("6 * 7", 3s); });
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+
+    std::thread detacher([&] {
+        {
+            std::unique_lock<std::mutex> lock(gate);
+            detacher_saw_reset = gate_cv.wait_for(
+                lock, 3s, [&] { return reset_started; });
+            detach_started = true;
+            gate_cv.notify_all();
+        }
+        bridge.detach();
+        {
+            std::lock_guard<std::mutex> lock(gate);
+            detach_returned = true;
+        }
+        gate_cv.notify_all();
+    });
+
+    REQUIRE(bridge.pump());
+    client.join();
+    detacher.join();
+
+    REQUIRE_FALSE(detach_crossed_reset);
+    REQUIRE(reset_saw_detacher);
+    REQUIRE(detacher_saw_reset);
+    REQUIRE(detach_returned);
+    REQUIRE(result.detached);
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
+TEST_CASE("A late engine interrupt is cleared before the next evaluation",
+          "[view][script][inspector][interrupt]") {
+    ScriptEngine engine;
+    engine.request_interrupt();
+    REQUIRE(engine.clear_pending_interrupt());
+    REQUIRE_FALSE(engine.clear_pending_interrupt());
+
+    const auto value = engine.evaluate(
+        "let total = 0;"
+        "for (let i = 0; i < 100000; ++i) total += i;"
+        "total");
+    REQUIRE(value.getWithDefault<std::int64_t>(0) == 4999950000);
+}
+
+TEST_CASE("Interrupt after evaluation completion reports no abort",
+          "[view][script][inspector][interrupt]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    const auto completed = bridge.evaluate("6 * 7");
+    REQUIRE(completed.ok);
+    REQUIRE(completed.json == "42");
+    REQUIRE_FALSE(bridge.interrupt());
+
+    const auto next = bridge.evaluate("7 * 7");
+    REQUIRE(next.ok);
+    REQUIRE(next.json == "49");
+}
+
+TEST_CASE("Owner-thread evaluate is single-flight and explicitly interruptible",
+          "[view][script][inspector]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    ScriptInspectorBridge::EvalResult contender_result;
+    bool observed_running = false;
+    bool interrupted = false;
+    std::thread contender([&] {
+        observed_running = ScriptInspectorBridgeTestAccess::wait_until_running(bridge);
+        contender_result = bridge.evaluate("6 * 7", 3s);
+        interrupted = bridge.interrupt();
+    });
+
+    const auto running_result = bridge.evaluate("while (true) {}", 3s);
+    contender.join();
+
+    REQUIRE(observed_running);
+    REQUIRE(contender_result.busy);
+    REQUIRE(interrupted);
+    REQUIRE_FALSE(running_result.ok);
+    REQUIRE(running_result.error == "evaluation interrupted");
+
+    const auto recovered = bridge.evaluate("6 * 7");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "42");
+}
+
+TEST_CASE("Owner-thread runaway evaluation has a deterministic deadline",
+          "[view][script][inspector]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    const auto timed_out = bridge.evaluate("while (true) {}", 50ms);
+    REQUIRE(timed_out.timed_out);
+    REQUIRE_FALSE(timed_out.ok);
+    REQUIRE(timed_out.error == "evaluation timed out");
+    REQUIRE_FALSE(bridge.is_busy());
+
+    const auto recovered = bridge.evaluate("21 * 2");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "42");
+}
+
 TEST_CASE("Evaluate never yields invalid JSON for non-finite numbers", "[view][script][inspector]") {
     ScriptEngine engine;
     ScriptInspectorBridge bridge;
@@ -77,17 +265,12 @@ TEST_CASE("Cross-thread evaluate marshals onto the engine thread via pump", "[vi
     bridge.attach(&engine);  // engine thread == this (main) thread
 
     ScriptInspectorBridge::EvalResult result;
-    std::atomic<bool> done{false};
     std::thread client([&] {
         result = bridge.evaluate("'a' + 'b' + 'c'", 3000ms);
-        done.store(true, std::memory_order_release);
     });
 
-    // Drive the engine thread: pump until the client's request is serviced.
-    while (!done.load(std::memory_order_acquire)) {
-        bridge.pump();
-        std::this_thread::sleep_for(1ms);
-    }
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    REQUIRE(bridge.pump());
     client.join();
 
     REQUIRE(result.ok);
@@ -100,33 +283,67 @@ TEST_CASE("Cross-thread timeout interrupts a runaway evaluation", "[view][script
     bridge.attach(&engine);
 
     ScriptInspectorBridge::EvalResult result;
-    std::atomic<bool> done{false};
     std::thread client([&] {
-        // Short timeout; the runaway loop can only end via the bridge's
-        // timeout-triggered interrupt.
-        result = bridge.evaluate("while (true) {}", 400ms);
-        done.store(true, std::memory_order_release);
+        result = bridge.evaluate("while (true) {}", 50ms);
     });
 
-    // The engine thread blocks inside this pump() running the runaway loop
-    // until the client's timeout interrupts it. A hang here is a real failure
-    // (the test harness will time out), which is the point.
-    while (!done.load(std::memory_order_acquire)) {
-        bridge.pump();
-        std::this_thread::sleep_for(1ms);
-    }
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    REQUIRE(bridge.pump());
     client.join();
 
-    // Either path proves the runaway was aborted: the interrupt landed before
-    // the second wait (ok=false with an error) or the wait window elapsed
-    // (timed_out). What must NOT happen is a successful result or a hang.
+    REQUIRE(result.timed_out);
     REQUIRE_FALSE(result.ok);
-    REQUIRE((result.timed_out || !result.error.empty()));
+    REQUIRE(result.error == "evaluation timed out");
+    REQUIRE_FALSE(bridge.is_busy());
 
     // The engine recovers after the abort.
     auto ok = bridge.evaluate("7 * 7");
     REQUIRE(ok.ok);
     REQUIRE(ok.json == "49");
+}
+
+TEST_CASE("A queued timeout cancels the request without poisoning the engine",
+          "[view][script][inspector]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    ScriptInspectorBridge::EvalResult result;
+    std::thread client([&] { result = bridge.evaluate("123", 50ms); });
+
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    client.join();
+
+    REQUIRE(result.timed_out);
+    REQUIRE_FALSE(bridge.is_busy());
+    REQUIRE_FALSE(bridge.pump());
+
+    const auto recovered = bridge.evaluate("40 + 2");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "42");
+}
+
+TEST_CASE("Interrupt cancels a queued request instead of arming the next eval",
+          "[view][script][inspector]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    ScriptInspectorBridge::EvalResult result;
+    std::thread client([&] { result = bridge.evaluate("123", 3s); });
+
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    REQUIRE(bridge.interrupt());
+    client.join();
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "evaluation interrupted before it ran");
+    REQUIRE_FALSE(bridge.is_busy());
+    REQUIRE_FALSE(bridge.pump());
+
+    const auto recovered = bridge.evaluate("40 + 2");
+    REQUIRE(recovered.ok);
+    REQUIRE(recovered.json == "42");
 }
 
 TEST_CASE("Detach wakes a blocked cross-thread evaluate", "[view][script][inspector]") {
@@ -135,22 +352,46 @@ TEST_CASE("Detach wakes a blocked cross-thread evaluate", "[view][script][inspec
     bridge.attach(&engine);
 
     ScriptInspectorBridge::EvalResult result;
-    std::atomic<bool> done{false};
     std::thread client([&] {
         result = bridge.evaluate("123", 3000ms);
-        done.store(true, std::memory_order_release);
     });
 
-    // Do NOT pump. Detach should strand the pending request with a clear error.
-    // Wait until the request is queued so the detach has something to strand.
-    while (!bridge.is_busy())
-        std::this_thread::sleep_for(1ms);
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
     bridge.detach();
-
-    while (!done.load(std::memory_order_acquire))
-        std::this_thread::sleep_for(1ms);
     client.join();
 
     REQUIRE(result.detached);
     REQUIRE_FALSE(result.ok);
+}
+
+TEST_CASE("Detach interrupts a running eval and waits for engine quiescence",
+          "[view][script][inspector]") {
+    auto engine = std::make_unique<ScriptEngine>();
+    ScriptInspectorBridge bridge;
+    bridge.attach(engine.get());
+
+    ScriptInspectorBridge::EvalResult result;
+    bool observed_running = false;
+    std::thread client([&] { result = bridge.evaluate("while (true) {}", 3s); });
+
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+    std::thread detacher([&] {
+        observed_running = ScriptInspectorBridgeTestAccess::wait_until_running(bridge);
+        bridge.detach();
+        // detach() is the lifetime fence: destroying the caller-owned engine is
+        // safe immediately after it returns, even while pump() began with that
+        // engine pointer.
+        engine.reset();
+    });
+
+    REQUIRE(bridge.pump());
+    detacher.join();
+    client.join();
+
+    REQUIRE(observed_running);
+    REQUIRE(result.detached);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE_FALSE(bridge.is_busy());
+    REQUIRE_FALSE(bridge.capabilities().can_evaluate);
+    REQUIRE(engine == nullptr);
 }

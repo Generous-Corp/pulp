@@ -5,11 +5,19 @@
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
 #include "ship_tracing_guard.hpp"
+#include "inspector_container_report.hpp"
+#include "inspector_shipping_report.hpp"
+#include "json_writer.hpp"
+#include "mac_runtime_validators.hpp"
+#include "shell_redirect.hpp"
 #include "xcode_developer_path.hpp"
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string_view>
@@ -93,20 +101,26 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
+    std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
+    std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
+    std::cout << "             --json  (emit inspector capability evidence)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
     std::cout << "             --target macos --identity \"...\" --apple-id ... --team-id ...\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (.pkg signing)\n";
     std::cout << "             --pkg | --dmg   (notarizes the signed .pkg/.dmg it builds) (item 7.5)\n";
+    std::cout << "             --ship-inspector [--ship-inspector-runtime-eval]  (package acknowledgements)\n";
     std::cout << "             --skip-sign | --skip-package | --skip-notarize      (CI flags)\n";
     std::cout << "  share      One-shot: sign → (wrap .app in DMG) → notarize → staple → verify\n";
     std::cout << "             <app|dmg|pkg> --identity \"...\" [--version X.Y.Z] [--output <dir>]\n";
     std::cout << "             [--entitlements <plist>] [creds]\n";
+    std::cout << "             [--ship-inspector] [--ship-inspector-runtime-eval]\n";
     std::cout << "             --dry-run  (print the plan without doing anything)\n";
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url <artifact-or-url> [--download-url https://...] --version 1.0.0\n";
     std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
+    std::cout << "             --json  (include inspector capability declarations)\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
     std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
     std::cout << "             --check-online  (validate the .p8 against Apple, refresh pulp-notary profile)\n";
@@ -410,8 +424,78 @@ static int ship_sign(const std::vector<std::string>& args,
 }
 
     // ── package ─────────────────────────────────────────────────────────────
-static int ship_package(const std::vector<std::string>& args,
-                       const fs::path& root, const fs::path& build_dir) {
+struct InspectorPackageEvidence {
+    pulp::cli::inspector_shipping::Report report;
+    fs::path path;
+};
+
+class ScopedOutputCapture {
+public:
+    ScopedOutputCapture(std::ostream& stream, std::streambuf* replacement)
+        : stream_(stream), original_(stream.rdbuf(replacement)) {}
+    ~ScopedOutputCapture() { stream_.rdbuf(original_); }
+    ScopedOutputCapture(const ScopedOutputCapture&) = delete;
+    ScopedOutputCapture& operator=(const ScopedOutputCapture&) = delete;
+
+private:
+    std::ostream& stream_;
+    std::streambuf* original_;
+};
+
+static bool inspector_acknowledgements_match(
+    const pulp::cli::inspector_shipping::Report& report,
+    bool ship_inspector, bool ship_inspector_runtime_eval,
+    std::string_view command) {
+    if (report.ships_inspector != ship_inspector) {
+        std::cerr << command
+                  << ": inspector manifest/acknowledgement mismatch; an intentional "
+                     "endpoint requires --ship-inspector and an ordinary artifact must "
+                     "not pass it\n";
+        return false;
+    }
+    if (report.ships_runtime_eval != ship_inspector_runtime_eval) {
+        std::cerr << command
+                  << ": runtime.eval requires the distinct unsafe "
+                     "--ship-inspector-runtime-eval acknowledgement; --ship-inspector "
+                     "does not imply it\n";
+        return false;
+    }
+    if (ship_inspector_runtime_eval && !ship_inspector) {
+        std::cerr << command
+                  << ": --ship-inspector-runtime-eval also requires --ship-inspector\n";
+        return false;
+    }
+    return true;
+}
+
+#if defined(__APPLE__)
+static std::vector<fs::path> find_standalone_apps(
+    const fs::path& build_dir, std::string_view product_filter) {
+    std::vector<fs::path> apps;
+    const auto add_apps_in = [&](const fs::path& dir) {
+        if (!fs::exists(dir)) return;
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.path().extension() != ".app") continue;
+            if (!product_filter.empty() &&
+                entry.path().stem().string() != product_filter) continue;
+            apps.push_back(entry.path());
+        }
+    };
+    add_apps_in(build_dir / "Standalone");
+    if (fs::exists(build_dir / "examples")) {
+        for (const auto& example : fs::directory_iterator(build_dir / "examples")) {
+            if (example.is_directory()) add_apps_in(example.path());
+        }
+    }
+    std::sort(apps.begin(), apps.end());
+    apps.erase(std::unique(apps.begin(), apps.end()), apps.end());
+    return apps;
+}
+#endif
+
+static int ship_package_impl(const std::vector<std::string>& args,
+                             const fs::path& root, const fs::path& build_dir,
+                             InspectorPackageEvidence& evidence) {
     const std::string sub = "package";
         auto artifacts = root / "artifacts";
         fs::create_directories(artifacts);
@@ -423,6 +507,8 @@ static int ship_package(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool ship_inspector = false;
+        bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
         // signed `.pkg` whose "Customize" pane lets the user install only the
         // formats they want (AU/VST3/CLAP/Standalone, all pre-checked). This is
@@ -474,6 +560,9 @@ static int ship_package(const std::vector<std::string>& args,
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
+            else if (args[i] == "--ship-inspector") ship_inspector = true;
+            else if (args[i] == "--ship-inspector-runtime-eval")
+                ship_inspector_runtime_eval = true;
             else return unknown_ship_arg(sub, args[i]);
         }
 
@@ -483,6 +572,69 @@ static int ship_package(const std::vector<std::string>& args,
             rc != 0) {
             return rc;
         }
+
+        std::vector<std::pair<fs::path, std::string>> inspector_artifacts;
+#if defined(__linux__)
+        if (format == "appimage" && !binary_path.empty())
+            inspector_artifacts.emplace_back(binary_path,
+                product_filter.empty() ? fs::path(binary_path).filename().string()
+                                       : product_filter);
+#endif
+#if defined(__APPLE__)
+        const auto standalone_apps = find_standalone_apps(build_dir, product_filter);
+        if (target != "android") {
+            const auto validator_env =
+                pulp::cli::mac_runtime::make_default_env();
+            for (const auto& app : standalone_apps) {
+                const auto executable =
+                    pulp::cli::mac_runtime::resolve_standalone_executable(
+                        app, validator_env);
+                if (executable.empty()) {
+                    std::cerr << "pulp ship package: could not resolve "
+                                 "CFBundleExecutable for inspector evidence scan: "
+                              << app << "\n";
+                    return 2;
+                }
+                inspector_artifacts.emplace_back(
+                    executable, app.stem().string());
+            }
+        }
+#endif
+        std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
+        artifact_reports.reserve(inspector_artifacts.size());
+        for (const auto& [artifact, product_name] : inspector_artifacts) {
+            auto artifact_report =
+                pulp::cli::inspector_shipping::load_exact_artifact_report(
+                    artifact, artifact.parent_path(), product_name);
+            if (!artifact_report.complete) {
+                std::cerr << "pulp ship package: " << artifact_report.error << "\n";
+                return 2;
+            }
+            artifact_reports.push_back(std::move(artifact_report));
+        }
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::combine_reports(
+                std::move(artifact_reports));
+        if (!inspector_report.complete) {
+            std::cerr << "pulp ship package: " << inspector_report.error << "\n";
+            return 2;
+        }
+        if (!inspector_acknowledgements_match(
+                inspector_report, ship_inspector, ship_inspector_runtime_eval,
+                "pulp ship package")) {
+            return 2;
+        }
+        if (!inspector_artifacts.empty()) {
+            const auto capability_evidence =
+                artifacts / "inspector-capability-package-input.json";
+            if (!pulp::cli::inspector_shipping::write_evidence(
+                    capability_evidence, inspector_report, "package-input")) {
+                std::cerr << "pulp ship package: could not write inspector capability evidence\n";
+                return 1;
+            }
+            evidence.path = capability_evidence;
+        }
+        evidence.report = inspector_report;
 
         if (apk_only && aab_only) {
             std::cerr << "Error: --apk-only and --aab-only are mutually exclusive.\n";
@@ -703,23 +855,6 @@ static int ship_package(const std::vector<std::string>& args,
         // build/Standalone dir AND (there is no enforced convention, and examples
         // build the standalone under their own dir) from build/examples/*/. Dedup
         // by path so an app present in both isn't packaged twice.
-        std::vector<fs::path> standalone_apps;
-        auto add_apps_in = [&](const fs::path& dir) {
-            if (!fs::exists(dir)) return;
-            for (auto& entry : fs::directory_iterator(dir)) {
-                if (entry.path().extension().string() != ".app") continue;
-                if (!product_filter.empty() &&
-                    entry.path().stem().string() != product_filter) continue;
-                standalone_apps.push_back(entry.path());
-            }
-        };
-        add_apps_in(build_dir / "Standalone");
-        if (fs::exists(build_dir / "examples"))
-            for (auto& ex : fs::directory_iterator(build_dir / "examples"))
-                if (ex.is_directory()) add_apps_in(ex.path());
-        std::sort(standalone_apps.begin(), standalone_apps.end());
-        standalone_apps.erase(std::unique(standalone_apps.begin(), standalone_apps.end()),
-                              standalone_apps.end());
         for (auto& app : standalone_apps) {
             auto name = app.stem().string();
             product_name = name;
@@ -819,17 +954,80 @@ static int ship_package(const std::vector<std::string>& args,
 #endif  // _WIN32 else
 }
 
+static int ship_package(const std::vector<std::string>& args,
+                        const fs::path& root, const fs::path& build_dir) {
+    const bool json_output =
+        std::find(args.begin(), args.end(), "--json") != args.end();
+    std::vector<std::string> package_args;
+    package_args.reserve(args.size());
+    std::copy_if(args.begin(), args.end(), std::back_inserter(package_args),
+                 [](const std::string& arg) { return arg != "--json"; });
+
+    InspectorPackageEvidence evidence;
+    std::ostringstream human_output;
+    std::ostringstream error_output;
+    int result = 0;
+    if (json_output) {
+        {
+            ScopedOutputCapture capture_stdout(std::cout, human_output.rdbuf());
+            ScopedOutputCapture capture_stderr(std::cerr, error_output.rdbuf());
+            ScopedStdoutRedirect process_output(true);
+            result = ship_package_impl(package_args, root, build_dir, evidence);
+        }
+    } else {
+        result = ship_package_impl(package_args, root, build_dir, evidence);
+    }
+    if (json_output) {
+        if (result == 0) {
+            std::cout << "{\"inspector_capabilities\": " << evidence.report.json
+                      << ", \"evidence\": "
+                      << pulp::cli::json_string(evidence.path.string())
+                      << "}\n";
+        } else {
+            auto message = error_output.str();
+            if (message.empty()) message = human_output.str();
+            std::cout << "{\"error\": " << pulp::cli::json_string(message)
+                      << ", \"exit_code\": " << result << "}\n";
+        }
+    }
+    return result;
+}
+
     // ── check ───────────────────────────────────────────────────────────────
 static int ship_check(const std::vector<std::string>& args,
                        const fs::path& root, const fs::path& build_dir) {
     const std::string sub = "check";
         std::string target;
+        bool json_output = false;
         for (size_t i = 1; i < args.size(); ++i)
             if (args[i] == "--target") {
                 if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else if (args[i] == "--json") {
+                json_output = true;
             } else {
                 return unknown_ship_arg(sub, args[i]);
             }
+
+        const auto inspector_report = target == "android"
+            ? pulp::cli::inspector_shipping::empty_report()
+            : pulp::cli::inspector_shipping::load_artifact_report(build_dir);
+        if (!inspector_report.complete) {
+            std::cerr << "pulp ship check: " << inspector_report.error << "\n";
+            return 2;
+        }
+        std::vector<std::pair<std::string, bool>> checked_artifacts;
+        const auto emit_json = [&] {
+            std::cout << "{\"inspector_capabilities\": "
+                      << inspector_report.json << ",\"artifacts\":[";
+            for (std::size_t i = 0; i < checked_artifacts.size(); ++i) {
+                if (i != 0) std::cout << ",";
+                std::cout << "{\"name\":"
+                          << pulp::cli::json_string(checked_artifacts[i].first)
+                          << ",\"signed\":"
+                          << (checked_artifacts[i].second ? "true" : "false") << "}";
+            }
+            std::cout << "]}\n";
+        };
 
         if (target == "android") {
             auto art_dir = root / "artifacts";
@@ -840,9 +1038,11 @@ static int ship_check(const std::vector<std::string>& args,
             for (auto& entry : fs::directory_iterator(art_dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".apk" || ext == ".aab") {
-                    std::cout << entry.path().filename().string() << ": ";
                     auto info = pulp::ship::check_android_signing(entry.path());
-                    if (info.is_signed) {
+                    checked_artifacts.emplace_back(
+                        entry.path().filename().string(), info.is_signed);
+                    if (!json_output && info.is_signed) {
+                        std::cout << entry.path().filename().string() << ": ";
                         std::cout << "signed";
                         if (ext == ".apk") {
                             if (info.v2_signed) std::cout << " v2";
@@ -850,11 +1050,13 @@ static int ship_check(const std::vector<std::string>& args,
                         }
                         if (!info.signer_cn.empty()) std::cout << " (" << info.signer_cn << ")";
                         std::cout << "\n";
-                    } else {
-                        std::cout << "unsigned\n";
+                    } else if (!json_output) {
+                        std::cout << entry.path().filename().string()
+                                  << ": unsigned\n";
                     }
                 }
             }
+            if (json_output) emit_json();
             return 0;
         }
 
@@ -864,12 +1066,16 @@ static int ship_check(const std::vector<std::string>& args,
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
-                    std::cout << entry.path().filename().string() << ": ";
                     auto info = pulp::ship::check_codesign(entry.path().string());
-                    std::cout << (info.is_valid ? "signed" : "unsigned") << "\n";
+                    checked_artifacts.emplace_back(
+                        entry.path().filename().string(), info.is_valid);
+                    if (!json_output)
+                        std::cout << entry.path().filename().string() << ": "
+                                  << (info.is_valid ? "signed" : "unsigned") << "\n";
                 }
             }
         }
+        if (json_output) emit_json();
         return 0;
 }
 
@@ -1142,6 +1348,7 @@ static int ship_release(const std::vector<std::string>& args,
         std::string api_key, api_key_id, api_issuer, installer_identity;
         bool want_pkg = false, want_dmg = false;
         bool skip_sign = false, skip_package = false, skip_notarize = false;
+        bool ship_inspector = false, ship_inspector_runtime_eval = false;
 
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--target") {
@@ -1168,6 +1375,10 @@ static int ship_release(const std::vector<std::string>& args,
                 want_pkg = true;
             } else if (args[i] == "--dmg") {
                 want_dmg = true;
+            } else if (args[i] == "--ship-inspector") {
+                ship_inspector = true;
+            } else if (args[i] == "--ship-inspector-runtime-eval") {
+                ship_inspector_runtime_eval = true;
             } else if (args[i] == "--skip-sign") {
                 skip_sign = true;
             } else if (args[i] == "--skip-package") {
@@ -1254,6 +1465,9 @@ static int ship_release(const std::vector<std::string>& args,
             }
             if (want_pkg) pkg_args.push_back("--pkg");
             if (want_dmg) pkg_args.push_back("--dmg");
+            if (ship_inspector) pkg_args.push_back("--ship-inspector");
+            if (ship_inspector_runtime_eval)
+                pkg_args.push_back("--ship-inspector-runtime-eval");
             // Plumb the Developer ID Installer identity so `package` signs the
             // flat package it builds — an unsigned .pkg cannot be notarized.
             if (!installer_identity.empty()) {
@@ -1695,6 +1909,7 @@ static int ship_share(const std::vector<std::string>& args,
         std::string input, identity, version, output_dir, entitlements;
         std::string api_key, api_key_id, api_issuer, apple_id, team_id, password;
         bool dry_run = false;
+        bool ship_inspector = false, ship_inspector_runtime_eval = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--identity") {
                 if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
@@ -1718,6 +1933,10 @@ static int ship_share(const std::vector<std::string>& args,
                 if (!take_ship_value(args, i, sub, args[i], password)) return 2;
             } else if (args[i] == "--dry-run") {
                 dry_run = true;
+            } else if (args[i] == "--ship-inspector") {
+                ship_inspector = true;
+            } else if (args[i] == "--ship-inspector-runtime-eval") {
+                ship_inspector_runtime_eval = true;
             } else if (!args[i].empty() && args[i][0] != '-' && input.empty()) {
                 input = args[i];
             } else {
@@ -1730,6 +1949,8 @@ static int ship_share(const std::vector<std::string>& args,
                 "Usage: pulp ship share <app-or-dmg-or-pkg> [--identity \"...\"]\n"
                 "                       [--version X.Y.Z] [--output <dir>]\n"
                 "                       [--entitlements <plist>] [notarization creds]\n"
+                "                       [--ship-inspector]\n"
+                "                       [--ship-inspector-runtime-eval]\n"
                 "                       [--dry-run]\n"
                 "Signs, notarizes, staples, and Gatekeeper-verifies a single\n"
                 "artifact for sharing. .app inputs are wrapped in a DMG first.\n";
@@ -1743,6 +1964,38 @@ static int ship_share(const std::vector<std::string>& args,
         if (ext != ".app" && ext != ".dmg" && ext != ".pkg") {
             std::cerr << "pulp ship share: unsupported input '" << ext
                       << "' — expected .app, .dmg, or .pkg.\n";
+            return 2;
+        }
+        auto inspector_report =
+            pulp::cli::inspector_shipping::empty_report();
+        if (ext == ".app") {
+            const auto executable =
+                pulp::cli::mac_runtime::resolve_standalone_executable(
+                    input, pulp::cli::mac_runtime::make_default_env());
+            if (executable.empty()) {
+                std::cerr << "pulp ship share: could not resolve CFBundleExecutable "
+                             "for inspector evidence scan: " << input << "\n";
+                return 2;
+            }
+            inspector_report =
+                pulp::cli::inspector_shipping::load_exact_artifact_report(
+                    executable, executable.parent_path());
+            if (!inspector_report.complete) {
+                std::cerr << "pulp ship share: " << inspector_report.error << "\n";
+                return 2;
+            }
+        } else if (!dry_run) {
+            std::string inspection_error;
+            if (!pulp::cli::inspector_shipping::load_container_artifact_report(
+                    input, inspector_report, inspection_error)) {
+                std::cerr << "pulp ship share: " << inspection_error << "\n";
+                return 2;
+            }
+        }
+        if ((ext == ".app" || !dry_run) &&
+            !inspector_acknowledgements_match(
+                inspector_report, ship_inspector,
+                ship_inspector_runtime_eval, "pulp ship share")) {
             return 2;
         }
 
@@ -2032,8 +2285,20 @@ int cmd_ship(const std::vector<std::string>& args) {
         return ship_doctor(args, root);
 
     auto build_dir = root / "build";
+    bool android_check = false;
+    if (sub == "check") {
+        for (std::size_t i = 1; i + 1 < args.size(); ++i) {
+            if (args[i] == "--target" && args[i + 1] == "android") {
+                android_check = true;
+                break;
+            }
+        }
+    }
     // swap-pack signs a UX bundle passed explicitly; it needs no configured build.
-    if (sub != "swap-pack" && !fs::exists(build_dir / "CMakeCache.txt")) {
+    // Android signing checks inspect Gradle artifacts and likewise do not need
+    // a native CMake build.
+    if (sub != "swap-pack" && !android_check &&
+        !fs::exists(build_dir / "CMakeCache.txt")) {
         std::cerr << "Build directory not found. Run `pulp build` first.\n";
         return 1;
     }

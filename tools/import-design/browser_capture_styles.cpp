@@ -335,8 +335,123 @@ std::optional<CapturedStyleIndex> CapturedStyleIndex::load(
         }
     }
 
+    // Per-line text boxes. `includeDOMRects` is what makes Chrome emit these,
+    // and a capture taken without it simply has no `textBoxes` — so their
+    // absence is a capture-age question, not a malformed-snapshot one, and
+    // leaves every node with an empty box list rather than failing the load.
+    index.layout_text_boxes_.resize(index.style_rows_.size());
+    const auto text_boxes = member(document, "textBoxes");
+    if (text_boxes.isObject()) {
+        const auto box_layout = member(text_boxes, "layoutIndex");
+        const auto box_bounds = member(text_boxes, "bounds");
+        const auto box_start = member(text_boxes, "start");
+        const auto box_length = member(text_boxes, "length");
+        if (box_layout.isArray() && box_bounds.isArray()) {
+            for (uint32_t i = 0; i < box_layout.size(); ++i) {
+                const auto at = static_cast<int>(i);
+                const int layout_index = json_int(box_layout[at], -1);
+                if (layout_index < 0 ||
+                    layout_index >=
+                        static_cast<int>(index.layout_text_boxes_.size())) {
+                    continue;
+                }
+                if (i >= box_bounds.size()) break;
+                const auto entry = box_bounds[at];
+                if (!entry.isArray() || entry.size() < 4) continue;
+                CapturedTextBox box;
+                box.bounds.left = entry[0].getWithDefault<double>(0.0);
+                box.bounds.top = entry[1].getWithDefault<double>(0.0);
+                box.bounds.width = entry[2].getWithDefault<double>(0.0);
+                box.bounds.height = entry[3].getWithDefault<double>(0.0);
+                if (box_start.isArray() && i < box_start.size())
+                    box.start = json_int(box_start[at], 0);
+                if (box_length.isArray() && i < box_length.size())
+                    box.length = json_int(box_length[at], 0);
+                index.layout_text_boxes_[static_cast<size_t>(layout_index)]
+                    .push_back(box);
+            }
+        }
+    }
+
+    // Which face Blink actually shaped each run with, from the sidecar beside
+    // the snapshot. Optional by design: a capture taken before that sidecar
+    // existed simply has no faces, and every consumer must already treat an
+    // empty answer as unusable rather than as agreement.
+    const auto fonts_path = snapshot_path.parent_path() / "platform-fonts.json";
+    std::ifstream fonts_input(fonts_path, std::ios::binary);
+    if (fonts_input) {
+        std::ostringstream font_bytes;
+        font_bytes << fonts_input.rdbuf();
+        try {
+            const auto report = choc::json::parse(font_bytes.str());
+            const auto runs = member(report, "runs");
+            if (runs.isArray()) {
+                for (uint32_t i = 0; i < runs.size(); ++i) {
+                    const auto run = runs[static_cast<int>(i)];
+                    if (!run.isObject()) continue;
+                    const int layout_index =
+                        json_int(member(run, "layout_index"), -1);
+                    if (layout_index < 0) continue;
+                    const auto resolved = member(run, "resolved");
+                    if (!resolved.isArray() || resolved.size() == 0) continue;
+                    // The face that shaped the MOST glyphs, not the first one
+                    // listed. Chrome does not order this array by primacy: in
+                    // every mixed run across the corpus the single-glyph
+                    // fallback is listed FIRST, so reading `resolved[0]` stores
+                    // the face that drew one character as the basis for the
+                    // whole paragraph.
+                    //
+                    // The consequence is not a near-miss, it is a permanent
+                    // refusal. A Jost paragraph containing one `→` — a glyph
+                    // Jost lacks — was stored with LucidaGrande as its basis;
+                    // native resolution of Jost can never equal that, so the
+                    // captured line breaking was rejected on every render, the
+                    // run re-derived its own, and a run resuming mid-line after
+                    // an inline span printed on top of its sibling. One arrow
+                    // in a paragraph was enough, and arrows are everywhere in
+                    // these UIs.
+                    int best_at = 0;
+                    int best_glyphs =
+                        json_int(member(resolved[0], "glyph_count"), 0);
+                    for (uint32_t r = 1; r < resolved.size(); ++r) {
+                        const int glyphs = json_int(
+                            member(resolved[static_cast<int>(r)],
+                                   "glyph_count"),
+                            0);
+                        if (glyphs > best_glyphs) {
+                            best_glyphs = glyphs;
+                            best_at = static_cast<int>(r);
+                        }
+                    }
+                    const auto face =
+                        member(resolved[best_at], "post_script_name");
+                    if (!face.isString()) continue;
+                    index.layout_resolved_face_[layout_index] =
+                        std::string(face.getString());
+                }
+            }
+        } catch (const std::exception&) {
+            // A malformed sidecar leaves the map empty, which is the same
+            // state as no sidecar: nothing validates, everything reflows.
+        }
+    }
+
     if (index.style_rows_.empty()) return std::nullopt;
     return index;
+}
+
+std::string CapturedStyleIndex::resolved_face_for_layout(int layout_index) const {
+    const auto it = layout_resolved_face_.find(layout_index);
+    return it == layout_resolved_face_.end() ? std::string{} : it->second;
+}
+
+std::vector<CapturedTextBox> CapturedStyleIndex::text_boxes_for_layout(
+    int layout_index) const {
+    if (layout_index < 0 ||
+        layout_index >= static_cast<int>(layout_text_boxes_.size())) {
+        return {};
+    }
+    return layout_text_boxes_[static_cast<size_t>(layout_index)];
 }
 
 std::optional<int> CapturedStyleIndex::layout_for_node(int node_index) const {
@@ -383,6 +498,61 @@ int CapturedStyleIndex::parent_of(int node_index) const {
     return parent_index_[static_cast<size_t>(node_index)];
 }
 
+CapturedStyleIndex::InheritedTypeScale
+CapturedStyleIndex::inherited_type_scale(int node_index) const {
+    InheritedTypeScale result;
+    // Bounded by the node count for the same reason `is_descendant` is: a
+    // snapshot is a forest of -1-terminated chains only when it is well
+    // formed, and an unbounded walk turns a malformed one into a hang rather
+    // than a wrong answer.
+    int cursor = parent_of(node_index);
+    for (size_t steps = 0; steps < parent_index_.size() && cursor >= 0;
+         ++steps, cursor = parent_of(cursor)) {
+        const auto layout = layout_for_node(cursor);
+        if (!layout) continue;
+        const auto styles = styles_for_layout(*layout);
+        const auto it = styles.find("transform");
+        if (it == styles.end() || it->second.empty() || it->second == "none")
+            continue;
+
+        // Chrome serializes computed `transform` as a matrix, so the six
+        // numbers are the whole answer — any other spelling (`matrix3d` above
+        // all) is refused rather than guessed at.
+        const auto& value = it->second;
+        if (value.rfind("matrix(", 0) != 0 || value.back() != ')') {
+            result.refused = value;
+            return result;
+        }
+        std::vector<double> n;
+        const std::string body = value.substr(7, value.size() - 8);
+        size_t start = 0;
+        while (start <= body.size()) {
+            const auto comma = body.find(',', start);
+            try {
+                n.push_back(std::stod(body.substr(
+                    start, comma == std::string::npos ? std::string::npos
+                                                      : comma - start)));
+            } catch (const std::exception&) {
+                result.refused = value;
+                return result;
+            }
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+        constexpr double kFlat = 1e-6;
+        // b and c non-zero is a rotation or a skew; a != d is two axes; a
+        // non-positive scale is a flip. A `font-size` is one positive scalar
+        // and can express none of the three.
+        if (n.size() != 6 || std::abs(n[1]) > kFlat || std::abs(n[2]) > kFlat ||
+            std::abs(n[0] - n[3]) > kFlat || n[0] <= kFlat) {
+            result.refused = value;
+            return result;
+        }
+        result.scale *= n[0];
+    }
+    return result;
+}
+
 std::string CapturedStyleIndex::attribute(int node_index,
                                           std::string_view name) const {
     if (node_index < 0 ||
@@ -422,6 +592,18 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for_layout(
         computed[property_names_[i]] = value;
     }
     return computed;
+}
+
+bool CapturedStyleIndex::has_property(std::string_view name) const {
+    return std::find(property_names_.begin(), property_names_.end(), name) !=
+           property_names_.end();
+}
+
+std::map<std::string, std::string> CapturedStyleIndex::styles_for_node(
+    int node_index) const {
+    const auto layout = node_to_layout_.find(node_index);
+    if (layout == node_to_layout_.end()) return {};
+    return styles_for_layout(layout->second);
 }
 
 std::vector<CapturedPaintNode> CapturedStyleIndex::painted_nodes() const {
@@ -506,7 +688,8 @@ std::map<std::string, std::string> CapturedStyleIndex::styles_for(
 void apply_computed_styles(const std::map<std::string, std::string>& computed,
                            const std::optional<CapturedBox>& box,
                            pulp::view::IRStyle& style,
-                           ComputedStyleScope scope) {
+                           ComputedStyleScope scope,
+                           double type_scale) {
     const auto lookup = [&computed](const char* name) -> std::string {
         const auto it = computed.find(name);
         return it == computed.end() ? std::string{} : it->second;
@@ -529,9 +712,21 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     const auto color = lookup("color");
     if (!is_absent(color)) style.color = color;
 
+    // A type length is authored in the untransformed space, while the box it
+    // will be drawn into is the post-transform one. Only lengths get the
+    // factor: `font-weight` and the family are unitless, and a percentage
+    // resolves against a reference that already carries the scale.
+    const auto set_type_length = [&](const char* name,
+                                     std::optional<float>& field,
+                                     double reference) {
+        set_length(name, field, reference);
+        if (field && type_scale != 1.0)
+            field = static_cast<float>(*field * type_scale);
+    };
+
     // Typography. Inherited, so it is the half a text run legitimately owns.
     set_string("font-family", style.font_family);
-    set_length("font-size", style.font_size, reference_height);
+    set_type_length("font-size", style.font_size, reference_height);
     const auto weight = lookup("font-weight");
     if (!is_absent(weight)) {
         if (const auto parsed = parse_number(weight))
@@ -540,12 +735,23 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     set_string("font-style", style.font_style);
     const auto align = lookup("text-align");
     if (!is_absent(align) && align != "start") style.text_align = align;
-    set_length("letter-spacing", style.letter_spacing, reference_width);
-    set_length("line-height", style.line_height, reference_height);
+    set_type_length("letter-spacing", style.letter_spacing, reference_width);
+    set_type_length("line-height", style.line_height, reference_height);
     set_string("text-transform", style.text_transform);
     const auto decoration = lookup("text-decoration-line");
     if (!is_absent(decoration)) style.text_decoration = decoration;
-    set_string("white-space", style.white_space);
+    // Read with the raw lookup, NOT `set_string`.
+    //
+    // `is_absent` treats `normal` as "this property contributes nothing",
+    // which is right for `text-transform` and `mix-blend-mode` and wrong for
+    // exactly one property: `white-space: normal` is the value that turns
+    // wrapping ON. Chrome serializes it on every wrapping node, so dropping it
+    // left `white_space` unset — and the materializer cannot tell an unset
+    // field from a capture that never carried the property, so it declined to
+    // enable multi-line and every paragraph drew its first line and dropped
+    // the rest. A gate that cannot fire, reported as if it had been evaluated.
+    const auto white_space = lookup("white-space");
+    if (!white_space.empty()) style.white_space = white_space;
 
     if (scope == ComputedStyleScope::text_only) return;
 
@@ -608,8 +814,33 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
                    style.border_bottom_color);
     set_side_color("border-left-color", style.border_left_width,
                    style.border_left_color);
-    if (style.border_top_width && *style.border_top_width > 0.0f)
-        set_string("border-top-style", style.border_style);
+    // A border's style has to come from a side that actually HAS a border.
+    // Reading only the top edge lost `border-left: 1px dashed` entirely: the
+    // top edge has no width, so nothing was recorded and the left edge painted
+    // solid. The capture protocol records all four edges for this reason.
+    const auto side_style = [&](const char* name,
+                                const std::optional<float>& width)
+        -> std::optional<std::string> {
+        if (!width || *width <= 0.0f) return std::nullopt;
+        std::optional<std::string> out;
+        set_string(name, out);
+        return out;
+    };
+    const std::optional<std::string> edge_styles[4] = {
+        side_style("border-top-style", style.border_top_width),
+        side_style("border-right-style", style.border_right_width),
+        side_style("border-bottom-style", style.border_bottom_width),
+        side_style("border-left-style", style.border_left_width),
+    };
+    // `border_style` is one slot, so a box whose edges disagree keeps the first
+    // edge that has one. That is a known narrowing, not a silent one: it is
+    // still better than dropping the only style a one-edge border has.
+    bool uniform_style = true;
+    for (const auto& edge : edge_styles) {
+        if (!edge) continue;
+        if (!style.border_style) style.border_style = edge;
+        else if (*style.border_style != *edge) uniform_style = false;
+    }
 
     const bool uniform_color =
         style.border_top_color && style.border_right_color &&
@@ -628,7 +859,7 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     // A border only reads as one when it has a width, a style, and a colour;
     // Chrome reports a colour for every element whether or not one is drawn.
-    if (uniform_width && uniform_color && style.border_style &&
+    if (uniform_width && uniform_color && uniform_style && style.border_style &&
         *style.border_width > 0.0f) {
         std::ostringstream shorthand;
         shorthand << *style.border_width << "px " << *style.border_style << ' '
@@ -638,16 +869,51 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     const auto radius = lookup("border-radius");
     if (!is_absent(radius)) {
-        // The shorthand may carry up to four corners and an optional second
-        // axis after a slash. The IR's single radius takes the first corner;
-        // per-corner fidelity is a separate field set no source populates yet.
+        // Expand the shorthand to all four corners. Taking only the first
+        // collapses `12px 12px 0 0` — a card whose media area rounds at the top
+        // and squares off where it meets its caption — into one value, so the
+        // background paints a plain rectangle inside a rounded border.
+        //
+        // A second axis after a slash makes the corners elliptical. Nothing
+        // downstream carries two radii per corner, so an elliptical value keeps
+        // only its horizontal axis rather than being dropped: a wrong-but-round
+        // corner is closer than a square one, and the alternative silently
+        // discards the whole declaration.
         const auto horizontal = split_top_level(radius, '/').front();
         const auto corners = split_tokens(horizontal);
-        if (!corners.empty()) {
-            if (const auto length = parse_length(corners.front(),
-                                                 reference_min)) {
-                style.border_radius = *length;
-            }
+        const auto corner_at = [&](std::size_t i) -> std::optional<float> {
+            if (i >= corners.size()) return std::nullopt;
+            return parse_length(corners[i], reference_min);
+        };
+        // CSS box-corner shorthand: 1 value sets all four; 2 sets TL/BR then
+        // TR/BL; 3 sets TL, TR/BL, BR; 4 sets TL TR BR BL, clockwise from
+        // top-left.
+        std::optional<float> tl, tr, br, bl;
+        switch (corners.size()) {
+            case 0: break;
+            case 1: tl = tr = br = bl = corner_at(0); break;
+            case 2: tl = br = corner_at(0); tr = bl = corner_at(1); break;
+            case 3:
+                tl = corner_at(0);
+                tr = bl = corner_at(1);
+                br = corner_at(2);
+                break;
+            default:
+                tl = corner_at(0);
+                tr = corner_at(1);
+                br = corner_at(2);
+                bl = corner_at(3);
+                break;
+        }
+        if (tl) style.border_top_left_radius = *tl;
+        if (tr) style.border_top_right_radius = *tr;
+        if (br) style.border_bottom_right_radius = *br;
+        if (bl) style.border_bottom_left_radius = *bl;
+        // The single-radius slot stays populated for consumers that read only
+        // it, and only when every corner agrees — a uniform value it can
+        // represent without lying about the other three.
+        if (tl && tr && br && bl && *tl == *tr && *tr == *br && *br == *bl) {
+            style.border_radius = *tl;
         }
     }
 
@@ -661,15 +927,31 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     set_string("cursor", style.cursor);
 
+    // `pointer-events` was in the captured-property list but reached no IR
+    // field, so a design had no way to mark a layer as decoration. That is
+    // load-bearing on a panel: the design stacks glows and gradient bands over
+    // its controls, and without this every one of them wins the hit-test
+    // against the control beneath it — the panel renders correctly and
+    // responds to nothing, with no escape hatch for the author.
+    //
+    // `auto` is the initial value and carries no information, so it is dropped
+    // the way `overflow: visible` is below; only a real opt-out survives.
+    const auto pointer_events = lookup("pointer-events");
+    if (!is_absent(pointer_events) && pointer_events != "auto")
+        style.pointer_events = pointer_events;
+
     const auto overflow = lookup("overflow");
     if (!is_absent(overflow) && overflow != "visible")
         style.overflow = overflow;
 
-    // `transform` is deliberately NOT carried. The paint box this node is
-    // placed by is already the transformed rectangle, so re-applying the
-    // matrix would rotate or scale the control a second time — off its own
-    // artwork. Recovering an authored rotation means separating the untransformed
-    // box from the painted one, which the capture does not report today.
+    // `transform` is deliberately NOT carried from computed style. The paint
+    // box this node is placed by is already the transformed rectangle, so
+    // re-applying the matrix would rotate or scale the control a second time —
+    // off its own artwork. A rotation is the one case where the two CAN be
+    // separated, and the tree lowering does that on its own terms: it solves
+    // the element's rectangle back out of the bounding box and writes both the
+    // box and a `rotate()` onto the node. Doing it here instead would set the
+    // angle without shrinking the box, which is the double-application above.
 }
 
 }  // namespace pulp::import_design

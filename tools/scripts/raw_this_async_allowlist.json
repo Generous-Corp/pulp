@@ -125,6 +125,16 @@
       "path": "core/runtime/src/websocket_channel.cpp",
       "needle": "std::thread([raw = chan.get()]",
       "reason": "WebSocketChannel factory transfers unique ownership only after starting the reader and destructor closes then joins it"
+    },
+    {
+      "path": "core/view/src/script_inspector_bridge.cpp",
+      "needle": "std::thread watchdog([this, req]",
+      "reason": "run_claimed_request joins the scoped watchdog before returning; the bridge, request, mutex, and engine therefore outlive every watchdog access"
+    },
+    {
+      "path": "core/view/src/scripted_ui.cpp",
+      "needle": "std::thread watchdog([&]",
+      "reason": "load_script_before_deadline joins the scoped watchdog before returning, so its captured stack synchronization state, bridge, and engine remain alive"
     }
   ]
 }

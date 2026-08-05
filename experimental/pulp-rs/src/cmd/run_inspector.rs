@@ -43,6 +43,10 @@ pub(crate) fn parse_arg(
         options.inspector_capabilities.push(capability.to_owned());
         return Ok(Some(index + 1));
     }
+    if argument == "--inspect-runtime-eval" {
+        options.inspector_runtime_eval = true;
+        return Ok(Some(index + 1));
+    }
     Ok(None)
 }
 
@@ -60,10 +64,27 @@ pub(crate) fn validate(options: &RunOptions) -> Result<(), String> {
             .any(|item| item == capability)
     };
     if options.inspector_profile == "custom"
-        && (has("state.write") || has("authoring.tweaks"))
+        && (has("state.write") || has("authoring.tweaks") || has("runtime.eval"))
         && !has("session.control")
     {
         return Err("custom inspector mutation capabilities require session.control".to_owned());
+    }
+    if options.inspector_profile == "custom"
+        && has("runtime.eval")
+        && !options.inspector_runtime_eval
+    {
+        return Err(
+            "runtime.eval requires the separate --inspect-runtime-eval acknowledgement".to_owned(),
+        );
+    }
+    if options.inspector_runtime_eval
+        && options.inspector_profile != "develop"
+        && !(options.inspector_profile == "custom" && has("runtime.eval"))
+    {
+        return Err(
+            "--inspect-runtime-eval requires --inspect=develop or a custom runtime.eval capability"
+                .to_owned(),
+        );
     }
     Ok(())
 }
@@ -81,11 +102,14 @@ pub(crate) fn append_launch_env(options: &RunOptions, environment: &mut Vec<(Str
             options.inspector_capabilities.join(","),
         ));
     }
+    if options.inspector_runtime_eval {
+        environment.push(("PULP_INSPECT_RUNTIME_EVAL".to_owned(), "1".to_owned()));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::run_parse::{assemble_launch_env, parse_run_options};
+    use super::super::run_parse::{assemble_launch_args, assemble_launch_env, parse_run_options};
 
     fn argv(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
@@ -134,6 +158,49 @@ mod tests {
                 "--inspect=custom",
                 "--inspect-capability",
                 "state.write,session.control",
+            ]),
+        ] {
+            assert!(!parse_run_options(&invalid).error.is_empty());
+        }
+    }
+
+    #[test]
+    fn runtime_evaluation_requires_the_separate_acknowledgement() {
+        let develop = parse_run_options(&argv(&["--inspect=develop", "--inspect-runtime-eval"]));
+        assert!(develop.error.is_empty());
+        assert!(develop.inspector_runtime_eval);
+        assert_eq!(
+            assemble_launch_args(&develop),
+            vec!["--inspect-runtime-eval".to_owned()]
+        );
+        assert_eq!(
+            assemble_launch_env(&develop),
+            vec![
+                ("PULP_INSPECT_PROFILE".to_owned(), "develop".to_owned()),
+                ("PULP_INSPECT_RUNTIME_EVAL".to_owned(), "1".to_owned()),
+            ]
+        );
+
+        let custom = parse_run_options(&argv(&[
+            "--inspect=custom",
+            "--inspect-capability=session.control",
+            "--inspect-capability=runtime.eval",
+            "--inspect-runtime-eval",
+        ]));
+        assert!(custom.error.is_empty());
+
+        for invalid in [
+            argv(&["--inspect-runtime-eval"]),
+            argv(&["--inspect=observe", "--inspect-runtime-eval"]),
+            argv(&[
+                "--inspect=custom",
+                "--inspect-capability=session.control",
+                "--inspect-capability=runtime.eval",
+            ]),
+            argv(&[
+                "--inspect=custom",
+                "--inspect-capability=runtime.eval",
+                "--inspect-runtime-eval",
             ]),
         ] {
             assert!(!parse_run_options(&invalid).error.is_empty());

@@ -348,10 +348,20 @@ constexpr Digest kGpuHelloInter14 {
     /*darkness_sum=*/31403,
 };
 
+// Moves with the raster CJK digest and for the same reason: bundled Inter
+// carries no CJK, so 日本語 leaves the primary face for the system fallback
+// cascade instead of being served by the CoreText substitute that used to
+// answer for "Inter". Measured identical to the raster path here — the two
+// backends diverge on Latin (`kGpuHelloInter14` stayed at 244 while raster
+// moved to 210) but agree on CJK, because the fallback face is the same on
+// both.
+//
+// This file is Apple-only (`PULP_HAS_SKIA && __APPLE__`), so it needs no
+// platform split — unlike the raster CJK constant, which did.
 constexpr Digest kGpuCjkInter14 {
     /*width=*/128, /*height=*/32,
-    /*opaque_pixels=*/190,
-    /*darkness_sum=*/24749,
+    /*opaque_pixels=*/365,
+    /*darkness_sum=*/46850,
 };
 
 constexpr Digest kGpuHelloWorldMono12 {

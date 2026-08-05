@@ -80,7 +80,6 @@ struct StandaloneConfig {
     // types when inspector support is compiled out.
     std::string inspector_profile;
     std::vector<std::string> inspector_capabilities;
-
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()
     // and writes to this path, then closes the window. Codified in the SDK
@@ -171,6 +170,12 @@ struct StandaloneConfig {
     // UI MIDI path, so they reach the processor only if it accepts MIDI input;
     // on a processor that ignores MIDI the keys are silent by construction.
     bool enable_musical_typing_keyboard = false;
+
+    // Separate high-risk acknowledgement for arbitrary evaluation in the live
+    // scripted UI realm. No profile or persisted setting implies this bit.
+    // Appended to preserve every legacy positional aggregate initializer.
+    bool inspector_runtime_eval = false;
+
 };
 
 namespace detail {

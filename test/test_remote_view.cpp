@@ -238,32 +238,7 @@ TEST_CASE("RemoteViewSession - metadata includes exact size hints and multiple p
     bridge.detach_remote(session);
 }
 
-TEST_CASE("RemoteViewSession - remote sets param, host StateStore reflects it", "[remote_view]") {
-    StubProcessor p;
-    state::StateStore store;
-    p.set_state_store(&store);
-    p.define_parameters(store);
-
-    format::ViewBridge bridge(p, store);
-    REQUIRE(bridge.open());
-
-    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
-    runtime::JsonRpcPeer remote_peer(*remote_chan);
-
-    auto* session = bridge.attach_remote_channel(std::move(host_chan));
-    REQUIRE(session != nullptr);
-
-    // Drive a parameter change from the remote.
-    REQUIRE(remote_peer.notify("view.param_set",
-        R"({"id":1,"normalized":0.75})"));
-
-    REQUIRE(wait_for([&]{ return store.get_normalized(1) > 0.7f; }));
-    REQUIRE(store.get_normalized(1) == Catch::Approx(0.75f));
-
-    bridge.detach_remote(session);
-}
-
-TEST_CASE("RemoteViewSession - remote param_set accepts numeric JSON variants",
+TEST_CASE("RemoteViewSession - remote cannot mutate host parameters",
           "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
@@ -279,9 +254,11 @@ TEST_CASE("RemoteViewSession - remote param_set accepts numeric JSON variants",
     auto* session = bridge.attach_remote_channel(std::move(host_chan));
     REQUIRE(session != nullptr);
 
-    REQUIRE(remote_peer.notify("view.param_set", R"({"id":1.0,"normalized":1})"));
-    REQUIRE(wait_for([&]{ return store.get_normalized(1) > 0.99f; }));
-    REQUIRE(store.get_normalized(1) == Catch::Approx(1.0f));
+    store.set_normalized(1, 0.25f);
+    REQUIRE(remote_peer.notify("view.param_set",
+        R"({"id":1,"normalized":0.75})"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    REQUIRE(store.get_normalized(1) == Catch::Approx(0.25f));
 
     bridge.detach_remote(session);
 }

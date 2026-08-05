@@ -164,6 +164,10 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             r.inspector_capabilities.push_back(std::move(capability));
             continue;
         }
+        if (a == "--inspect-runtime-eval") {
+            r.inspector_runtime_eval = true;
+            continue;
+        }
         if (a == "--audio-inspector") {
             r.audio_inspector = true;
             continue;
@@ -442,9 +446,22 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     };
     if (r.inspector_profile == "custom"
         && (has_inspector_capability("state.write")
-            || has_inspector_capability("authoring.tweaks"))
+            || has_inspector_capability("authoring.tweaks")
+            || has_inspector_capability("runtime.eval"))
         && !has_inspector_capability("session.control")) {
         r.error = "custom inspector mutation capabilities require session.control";
+    }
+    if (r.inspector_profile == "custom"
+        && has_inspector_capability("runtime.eval")
+        && !r.inspector_runtime_eval) {
+        r.error = "runtime.eval requires the separate --inspect-runtime-eval acknowledgement";
+    }
+    if (r.inspector_runtime_eval
+        && r.inspector_profile != "develop"
+        && !(r.inspector_profile == "custom"
+             && has_inspector_capability("runtime.eval"))) {
+        r.error = "--inspect-runtime-eval requires --inspect=develop or a custom "
+                  "runtime.eval capability";
     }
 
     return r;
@@ -462,6 +479,9 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
     if (opts.frames != 1) {
         out.push_back("--frames");
         out.push_back(std::to_string(opts.frames));
+    }
+    if (opts.inspector_runtime_eval) {
+        out.push_back("--inspect-runtime-eval");
     }
     if (opts.audio_inspector) {
         out.push_back("--audio-inspector");

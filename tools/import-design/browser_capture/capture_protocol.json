@@ -123,6 +123,17 @@
         "string_count"
       ]
     },
+    "platform_fonts": {
+      "type": "object",
+      "description": "The typefaces Blink resolved for the captured text, as opposed to the families the style rows requested. Optional: captures taken before this sidecar existed carry no such record, and they are still valid captures.",
+      "required": [
+        "schema",
+        "report",
+        "text_run_count",
+        "resolved_run_count",
+        "face_count"
+      ]
+    },
     "states": {
       "type": "array",
       "minItems": 1,

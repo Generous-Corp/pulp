@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.778.1
+    VERSION 0.785.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -384,49 +384,81 @@ if(ANDROID)
     pulp_wire_android_sources()
 endif()
 
-add_library(pulp-standalone STATIC
+set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
-    core/format/src/settings_panel.cpp
-)
+    core/format/src/settings_panel.cpp)
+add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-target_include_directories(pulp-standalone
-    PUBLIC
+function(_pulp_configure_standalone_target target)
+    target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-        $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(pulp-standalone
-    PUBLIC
-        pulp::format
-        pulp::view
-        $<BUILD_INTERFACE:yogacore>
-        $<INSTALL_INTERFACE:Pulp::yogacore>
-        $<BUILD_INTERFACE:SDL3::SDL3-static>
-        $<INSTALL_INTERFACE:Pulp::sdl3-static>
-)
+        $<INSTALL_INTERFACE:include>)
+    target_link_libraries(${target} PUBLIC
+        pulp::format pulp::view
+        $<BUILD_INTERFACE:yogacore> $<INSTALL_INTERFACE:Pulp::yogacore>
+        $<BUILD_INTERFACE:SDL3::SDL3-static> $<INSTALL_INTERFACE:Pulp::sdl3-static>)
+endfunction()
+_pulp_configure_standalone_target(pulp-standalone)
+target_compile_definitions(pulp-standalone PRIVATE PULP_ENABLE_INSPECTOR=0)
 
-# The inspector protocol/session/client foundation is CPU-only and installable
-# when the optional SDK component is requested. inspect/CMakeLists.txt adds the
-# GPU/view overlay target only where that stack exists.
-if(PULP_ENABLE_INSPECTOR)
-    add_subdirectory(inspect)
-endif()
+# The control manifest and protocol registry are CPU-only audit data and remain
+# available even when live Inspector support is disabled. inspect/CMakeLists.txt
+# returns after that foundation in production-stripped configurations.
+add_subdirectory(inspect)
 
-# The visual Cmd+I overlay belongs only to the standalone authoring target.
-# Keeping this dependency off pulp-format is what prevents ordinary plugin
-# targets from inheriting inspector archives through the format SDK.
+# Inspector-capable standalone archives are optional SDK components. The
+# ordinary `pulp::standalone` target above is deliberately inspector-free;
+# pulp_add_plugin selects one of these only after an exact shipping declaration.
 if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
-    target_sources(pulp-standalone PRIVATE
-        core/format/src/standalone_inspector.cpp)
-    target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
-    target_compile_definitions(pulp-standalone PRIVATE
-        PULP_ENABLE_INSPECTOR=1
-        PULP_HAS_INSPECT=1)
-else()
-    target_compile_definitions(pulp-standalone PRIVATE
-        PULP_ENABLE_INSPECTOR=0)
+    set(_pulp_standalone_inspector_sources
+        ${_pulp_standalone_sources}
+        core/format/src/standalone_inspector.cpp
+        core/format/src/standalone_inspector_capture.cpp
+        core/format/src/standalone_inspector_policy.cpp
+        core/format/src/standalone_runtime_eval_dispatch.cpp)
+    add_library(pulp-standalone-inspector STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector ALIAS pulp-standalone-inspector)
+    _pulp_configure_standalone_target(pulp-standalone-inspector)
+    target_link_libraries(pulp-standalone-inspector PRIVATE pulp::inspect)
+    target_compile_definitions(pulp-standalone-inspector PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=0)
+
+    add_library(pulp-standalone-inspector-runtime-eval STATIC
+        ${_pulp_standalone_inspector_sources})
+    add_library(pulp::standalone-inspector-runtime-eval ALIAS
+        pulp-standalone-inspector-runtime-eval)
+    _pulp_configure_standalone_target(pulp-standalone-inspector-runtime-eval)
+    target_link_libraries(pulp-standalone-inspector-runtime-eval PRIVATE
+        pulp::inspect pulp::inspect-runtime-eval)
+    target_compile_definitions(pulp-standalone-inspector-runtime-eval PRIVATE
+        PULP_ENABLE_INSPECTOR=1 PULP_HAS_INSPECT=1
+        PULP_STANDALONE_RUNTIME_EVAL_COMPONENT=1)
+
+    get_target_property(_ordinary_standalone_links pulp-standalone LINK_LIBRARIES)
+    get_target_property(_inspector_standalone_links pulp-standalone-inspector LINK_LIBRARIES)
+    get_target_property(_eval_standalone_links
+        pulp-standalone-inspector-runtime-eval LINK_LIBRARIES)
+    if("pulp::inspect" IN_LIST _ordinary_standalone_links OR
+       "pulp::inspect-runtime-eval" IN_LIST _ordinary_standalone_links)
+        message(FATAL_ERROR "ordinary pulp::standalone inherited an inspector component")
+    endif()
+    if("pulp::inspect-runtime-eval" IN_LIST _inspector_standalone_links)
+        message(FATAL_ERROR "generic inspector standalone inherited runtime.eval")
+    endif()
+    if(NOT "pulp::inspect" IN_LIST _inspector_standalone_links OR
+       NOT "pulp::inspect-runtime-eval" IN_LIST _eval_standalone_links)
+        message(FATAL_ERROR "declared standalone inspector component graph is incomplete")
+    endif()
+    unset(_ordinary_standalone_links)
+    unset(_inspector_standalone_links)
+    unset(_eval_standalone_links)
+    unset(_pulp_standalone_inspector_sources)
 endif()
+unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 # tools/timeline publishes through core/project_package, so the target does not
@@ -686,3 +718,11 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()
 endif()
+
+# Optional design pack for the agent-panel invariant test. The fixture links a
+# stylesheet that lives with the design system rather than in Pulp, so the test
+# skips without it instead of importing an unstyled page and reporting green.
+set(PULP_DESIGN_PANEL_PACK_CSS "" CACHE FILEPATH
+    "Design-pack stylesheet for test/fixtures/agent-panels")
+set(PULP_DESIGN_PANEL_PACK_FONTS "" CACHE PATH
+    "Directory of the design pack's @font-face files")

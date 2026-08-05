@@ -1577,6 +1577,10 @@ struct CliOptions {
     SnapshotSemantics snapshot_semantics = SnapshotSemantics::fail;
     bool allow_network_fetch = false;
     bool allow_browser_network = false;
+    /// Lower every painted node natively rather than emitting the capture as a
+    /// photograph with overlays. See the flag parse site for why this had no
+    /// way to be turned on before.
+    bool native_panel_lowering = false;
     std::string browser_path;
     std::string browser_interactions_path;
     bool offline = false;
@@ -1840,6 +1844,15 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.allow_network_fetch = true;
         } else if (std::strcmp(argv[i], "--allow-browser-network") == 0) {
             opt.allow_browser_network = true;
+        } else if (std::strcmp(argv[i], "--native-panel-lowering") == 0) {
+            // Lower every painted node instead of emitting the capture as one
+            // photograph with overlays. The option existed and was threaded all
+            // the way to `lower_browser_capture_to_ir`, but NOTHING could set
+            // it: no flag, no environment read, no CMake option — only the
+            // tests, in-process. So the whole native-lowering path was
+            // unreachable from the product, and a shipped panel stayed a
+            // faithful_capture bitmap with buttons on top.
+            opt.native_panel_lowering = true;
         } else if (std::strcmp(argv[i], "--browser") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --browser requires an executable path\n";
@@ -2020,6 +2033,7 @@ int main(int argc, char* argv[]) {
     auto& snapshot_semantics = cli.snapshot_semantics;
     auto& allow_network_fetch = cli.allow_network_fetch;
     auto& allow_browser_network = cli.allow_browser_network;
+    const bool native_panel_lowering = cli.native_panel_lowering;
     auto& browser_path = cli.browser_path;
     auto& browser_interactions_path = cli.browser_interactions_path;
     auto& offline = cli.offline;
@@ -2488,6 +2502,7 @@ int main(int argc, char* argv[]) {
          .dry_run = dry_run,
          .supports_faithful_capture =
              artifact_emit != ArtifactEmit::swiftui,
+         .native_panel_lowering = native_panel_lowering,
          .validate = validate},
         content);
     if (const auto* failure =

@@ -55,6 +55,10 @@ struct BrowserHtmlCaptured {
     std::filesystem::path reference_png;
     std::filesystem::path semantic_report;
     std::vector<std::shared_ptr<BrowserCaptureWorkspace>> workspaces;
+    /// Lowering succeeded but part of the design could not be drawn for a
+    /// reason the CALLER can fix — carried out so the CLI prints it rather
+    /// than leaving it in a node attribute nobody reads.
+    std::vector<std::string> warnings;
 };
 
 using BrowserHtmlImportResult = std::variant<

@@ -8,9 +8,13 @@
 #include <pulp/view/view.hpp>
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_UTF8.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -30,6 +34,97 @@ using pulp::view::motion::SampleEvent;
 using pulp::view::motion::TraceBuilder;
 using pulp::view::motion::TraceHandle;
 using pulp::view::motion::TraceOptions;
+
+std::optional<std::int64_t> schema_integer(
+    choc::value::ValueView value, std::int64_t minimum,
+    std::int64_t maximum) {
+    if (value.isInt32() || value.isInt64()) {
+        const auto integer = value.isInt32()
+            ? static_cast<std::int64_t>(value.getInt32())
+            : value.getInt64();
+        if (integer >= minimum && integer <= maximum) return integer;
+        return std::nullopt;
+    }
+    if (!value.isFloat32() && !value.isFloat64()) return std::nullopt;
+    const auto number = value.isFloat64()
+        ? value.getFloat64()
+        : static_cast<double>(value.getFloat32());
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < static_cast<double>(minimum) ||
+        number > static_cast<double>(maximum))
+        return std::nullopt;
+    return static_cast<std::int64_t>(number);
+}
+
+bool schema_string(choc::value::ValueView value, std::size_t minimum,
+                   std::size_t maximum) {
+    if (!value.isString()) return false;
+    const std::string_view text = value.getString();
+    if (text.empty()) return minimum == 0;
+    if (choc::text::findInvalidUTF8Data(text.data(), text.size()) != nullptr)
+        return false;
+    const auto codepoints = static_cast<std::size_t>(std::count_if(
+        text.begin(), text.end(), [](unsigned char byte) {
+            return (byte & 0xc0u) != 0x80u;
+        }));
+    return codepoints >= minimum && codepoints <= maximum;
+}
+
+template <std::size_t N>
+bool has_only_members(choc::value::ValueView value,
+                      const std::array<std::string_view, N>& allowed) {
+    if (!value.isObject()) return false;
+    bool valid = true;
+    value.visitObjectMembers(
+        [&](std::string_view name, const choc::value::ValueView&) {
+            if (std::find(allowed.begin(), allowed.end(), name) == allowed.end())
+                valid = false;
+        });
+    return valid;
+}
+
+template <std::size_t N>
+bool schema_string_array(choc::value::ValueView value,
+                         const std::array<std::string_view, N>& allowed,
+                         std::size_t maximum) {
+    if (!value.isArray() || value.size() > maximum) return false;
+    std::set<std::string_view> seen;
+    for (std::uint32_t index = 0; index < value.size(); ++index) {
+        const auto item = value[index];
+        if (!item.isString()) return false;
+        const std::string_view text = item.getString();
+        if (std::find(allowed.begin(), allowed.end(), text) == allowed.end() ||
+            !seen.insert(text).second)
+            return false;
+    }
+    return true;
+}
+
+constexpr std::array<std::string_view, 3> kStartTraceFields = {
+    "view_name", "fps", "metrics"};
+constexpr std::array<std::string_view, 6> kGeometryFields = {
+    "kind", "name", "node_id", "properties", "space", "source"};
+constexpr std::array<std::string_view, 4> kScrollFields = {
+    "kind", "name", "node_id", "properties"};
+constexpr std::array<std::string_view, 8> kGeometryProperties = {
+    "minX", "minY", "maxX", "maxY", "midX", "midY", "width", "height"};
+constexpr std::array<std::string_view, 14> kScrollProperties = {
+    "contentOffsetX", "contentOffsetY", "visibleRectMinX", "visibleRectMinY",
+    "visibleRectWidth", "visibleRectHeight", "contentSizeWidth",
+    "contentSizeHeight", "insetTop", "insetBottom", "insetLeft", "insetRight",
+    "scrollableMaxX", "scrollableMaxY"};
+constexpr std::array<std::string_view, 4> kGeometrySpaces = {
+    "view-local", "view-global", "window", "screen"};
+constexpr std::array<std::string_view, 2> kGeometrySources = {
+    "layout", "presentation"};
+
+template <std::size_t N>
+bool schema_enum(choc::value::ValueView value,
+                 const std::array<std::string_view, N>& allowed) {
+    if (!value.isString()) return false;
+    const std::string_view text = value.getString();
+    return std::find(allowed.begin(), allowed.end(), text) != allowed.end();
+}
 
 GeometryProperty parse_geometry_property(std::string_view s) {
     if (s == "minX")   return GeometryProperty::MinX;
@@ -52,9 +147,8 @@ GeometrySpace parse_geometry_space(std::string_view s) {
 }
 
 // CamelCase property names mirror what TraceBuilder emits into fixtures,
-// so callers can pass the same names back through the wire. Unknown names
-// fall back to ContentOffsetX silently (defensive; the inspector should
-// not crash on a typo).
+// so callers can pass the same names back through the wire. Callers validate
+// against the frozen enum before invoking this conversion.
 pulp::view::motion::ScrollProperty parse_scroll_property(std::string_view s) {
     using SP = pulp::view::motion::ScrollProperty;
     if (s == "contentOffsetX")   return SP::ContentOffsetX;
@@ -175,45 +269,110 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
         return make_error(req.id, "Motion.startTrace: invalid params JSON");
     }
 
+    if (!has_only_members(params, kStartTraceFields)) {
+        return make_error(req.id,
+                          "Motion.startTrace: params contain unsupported fields",
+                          "invalid_params");
+    }
+
     std::string view_name = "Trace";
-    if (params.isObject() && params.hasObjectMember("view_name")) {
+    if (params.hasObjectMember("view_name")) {
+        if (!schema_string(params["view_name"], 1, 128))
+            return make_error(
+                req.id,
+                "Motion.startTrace: 'view_name' must contain 1 to 128 Unicode characters",
+                "invalid_params");
         view_name = std::string(params["view_name"].getString());
     }
     int fps = 15;
-    if (params.isObject() && params.hasObjectMember("fps")) {
-        fps = static_cast<int>(params["fps"].getInt64());
+    if (params.hasObjectMember("fps")) {
+        const auto parsed = schema_integer(params["fps"], 1, 240);
+        if (!parsed)
+            return make_error(req.id,
+                              "Motion.startTrace: 'fps' must be an integer from 1 to 240",
+                              "invalid_params");
+        fps = static_cast<int>(*parsed);
     }
 
-    TraceBuilder builder = Coordinator::instance().trace(view_name, {fps});
-
-    if (!params.isObject() || !params.hasObjectMember("metrics") ||
+    if (!params.hasObjectMember("metrics") ||
         !params["metrics"].isArray()) {
-        return make_error(req.id, "Motion.startTrace: 'metrics' array required");
+        return make_error(req.id, "Motion.startTrace: 'metrics' array required",
+                          "invalid_params");
     }
 
     const auto& metrics = params["metrics"];
+    if (metrics.size() < 1 || metrics.size() > 32) {
+        return make_error(
+            req.id,
+            "Motion.startTrace: 'metrics' must contain 1 to 32 entries",
+            "invalid_params");
+    }
+
+    // Validate the entire frozen request shape before creating a TraceBuilder.
+    // A malformed later metric must not partially configure or attach a trace.
     for (uint32_t i = 0; i < metrics.size(); ++i) {
         const auto& m = metrics[i];
-        if (!m.isObject() || !m.hasObjectMember("kind")) {
-            return make_error(req.id, "Motion.startTrace: metric requires 'kind'");
+        if (!m.isObject() || !m.hasObjectMember("kind") || !m["kind"].isString()) {
+            return make_error(req.id, "Motion.startTrace: metric requires string 'kind'",
+                              "invalid_params");
         }
-        std::string kind(m["kind"].getString());
-        std::string name = m.hasObjectMember("name")
-                               ? std::string(m["name"].getString())
-                               : kind;
+        const std::string_view kind = m["kind"].getString();
+        const auto valid_common_fields = [&]() {
+            return m.hasObjectMember("node_id") &&
+                   schema_string(m["node_id"], 1, 256) &&
+                   (!m.hasObjectMember("name") ||
+                    schema_string(m["name"], 1, 128));
+        };
 
         if (kind == "geometry") {
-            if (!m.hasObjectMember("node_id")) {
-                return make_error(req.id, "Motion.startTrace: geometry requires 'node_id'");
-            }
-            std::string node_id(m["node_id"].getString());
+            const bool valid = has_only_members(m, kGeometryFields) &&
+                               valid_common_fields() &&
+                               (!m.hasObjectMember("properties") ||
+                                schema_string_array(m["properties"],
+                                                    kGeometryProperties, 8)) &&
+                               (!m.hasObjectMember("space") ||
+                                schema_enum(m["space"], kGeometrySpaces)) &&
+                               (!m.hasObjectMember("source") ||
+                                schema_enum(m["source"], kGeometrySources));
+            if (!valid)
+                return make_error(req.id,
+                                  "Motion.startTrace: invalid geometry metric shape",
+                                  "invalid_params");
+        } else if (kind == "scroll-geometry" || kind == "scrollGeometry") {
+            const bool valid = has_only_members(m, kScrollFields) &&
+                               valid_common_fields() &&
+                               (!m.hasObjectMember("properties") ||
+                                schema_string_array(m["properties"],
+                                                    kScrollProperties, 14));
+            if (!valid)
+                return make_error(req.id,
+                                  "Motion.startTrace: invalid scroll metric shape",
+                                  "invalid_params");
+        } else {
+            return make_error(req.id,
+                              "Motion.startTrace: unsupported metric kind: " +
+                                  std::string(kind),
+                              "invalid_params");
+        }
+    }
+
+    TraceBuilder builder = Coordinator::instance().trace(view_name, {fps});
+    for (uint32_t i = 0; i < metrics.size(); ++i) {
+        const auto& m = metrics[i];
+        const std::string kind(m["kind"].getString());
+        const std::string name = m.hasObjectMember("name")
+                                     ? std::string(m["name"].getString())
+                                     : kind;
+
+        if (kind == "geometry") {
+            const std::string node_id(m["node_id"].getString());
             auto* target = pulp::view::ViewInspector::find_by_id(*root_, node_id);
             if (!target) {
                 return make_error(req.id,
                                   "Motion.startTrace: node not found: " + node_id);
             }
             std::vector<GeometryProperty> props;
-            if (m.hasObjectMember("properties") && m["properties"].isArray()) {
+            if (m.hasObjectMember("properties")) {
                 const auto& parr = m["properties"];
                 for (uint32_t j = 0; j < parr.size(); ++j) {
                     props.push_back(parse_geometry_property(parr[j].getString()));
@@ -235,11 +394,7 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
             // "scroll-geometry" (kebab-case, matches our other
             // inspector spellings) and the camelCase form Swift /
             // Kotlin facades pass through verbatim.
-            if (!m.hasObjectMember("node_id")) {
-                return make_error(req.id,
-                    "Motion.startTrace: scroll-geometry requires 'node_id'");
-            }
-            std::string node_id(m["node_id"].getString());
+            const std::string node_id(m["node_id"].getString());
             auto* view_target = pulp::view::ViewInspector::find_by_id(*root_, node_id);
             if (!view_target) {
                 return make_error(req.id,
@@ -252,7 +407,7 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
                     + node_id);
             }
             std::vector<pulp::view::motion::ScrollProperty> props;
-            if (m.hasObjectMember("properties") && m["properties"].isArray()) {
+            if (m.hasObjectMember("properties")) {
                 const auto& parr = m["properties"];
                 for (uint32_t j = 0; j < parr.size(); ++j) {
                     props.push_back(parse_scroll_property(parr[j].getString()));
@@ -264,9 +419,6 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
             } else {
                 builder.scroll_geometry(name, *scroll_target, std::move(props));
             }
-        } else {
-            return make_error(req.id,
-                              "Motion.startTrace: unsupported metric kind: " + kind);
         }
     }
 
@@ -298,7 +450,15 @@ InspectorMessage MotionInspector::stop_trace(const InspectorMessage& req) {
     if (!params.isObject() || !params.hasObjectMember("trace_id")) {
         return make_error(req.id, "Motion.stopTrace: 'trace_id' required");
     }
-    const std::int64_t id = params["trace_id"].getInt64();
+    constexpr std::int64_t kMaximumJsonSafeInteger = 9007199254740991LL;
+    const auto parsed = schema_integer(
+        params["trace_id"], 0, kMaximumJsonSafeInteger);
+    if (!parsed)
+        return make_error(
+            req.id,
+            "Motion.stopTrace: 'trace_id' must be a nonnegative JSON-safe integer",
+            "invalid_params");
+    const std::int64_t id = *parsed;
     bool removed = false;
     {
         std::lock_guard<std::mutex> lock(mtx_);

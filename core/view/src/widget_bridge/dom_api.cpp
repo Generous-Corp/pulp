@@ -29,7 +29,9 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
             if (auto* p = existing->parent()) {
                 // Move the existing subtree to the new parent - don't erase widgets.
                 auto removed = p->remove_child(existing);
-                self.widgets_[childId] = removed.get();
+                // Reparenting preserves the original creator; this is a cache
+                // refresh, not a new ownership claim for this bridge.
+                self.widgets_.cache(childId, removed.get());
                 self.resolve_parent(parentId)->add_child(std::move(removed));
                 return choc::value::Value();
             }

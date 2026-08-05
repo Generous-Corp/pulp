@@ -1305,6 +1305,65 @@ TEST_CASE("Interactive promotion ignores presentational cursor-only frames",
     REQUIRE(node.type == "frame");
 }
 
+// A node lowered from a browser capture carries `paint_class`, and its
+// appearance is the browser's own. Promoting it hands it the widget's DEFAULT
+// chrome, which paints OVER the captured fill rather than alongside it — so a
+// green toggle and a borderless nav icon both came out as the same grey
+// rounded box, and every selected state in a captured panel became invisible.
+//
+// `cursor: pointer` is what did the damage, because a web design puts it on
+// every clickable thing — tabs, cards, nav items, mode switches — and the
+// browser draws none of them any differently for it. It is a hover affordance,
+// not ink.
+TEST_CASE("a captured node keeps its own appearance instead of widget chrome",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "STEREO";
+    node.style.cursor = "pointer";
+    node.style.background_color = "rgb(22, 218, 120)";
+    node.attributes["paint_class"] = "native";
+
+    REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
+    REQUIRE(promote_interactive_frames(node) == 0);
+    REQUIRE(node.type == "frame");
+}
+
+// The same node WITHOUT the capture marker still promotes. The authoring
+// lanes — v0, Figma, Stitch — rely on this signal to turn a clickable div into
+// a real control, and gating it on the capture marker must not disturb them.
+TEST_CASE("an authored cursor-pointer frame still promotes",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "STEREO";
+    node.style.cursor = "pointer";
+    node.style.background_color = "rgb(22, 218, 120)";
+
+    REQUIRE(classify_interactive_signal(node) ==
+            WidgetPromotionSignal::cursor_pointer);
+    REQUIRE(promote_interactive_frames(node) == 1);
+    REQUIRE(node.type == "button");
+}
+
+// The marker covers a declared `role="button"` too, and deliberately: what
+// breaks the panel is a widget's default chrome painting over the captured
+// appearance, and that happens whatever prompted the promotion. Interactivity
+// on this lane comes from the semantic report, which names its controls and
+// lowers them separately — nothing is lost by not also sniffing markup here.
+TEST_CASE("a captured node is not promoted on a declared button role either",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "Save";
+    node.attributes["role"] = "button";
+    node.attributes["paint_class"] = "native";
+
+    REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
+    REQUIRE(promote_interactive_frames(node) == 0);
+    REQUIRE(node.type == "frame");
+}
+
 TEST_CASE("Interactive promotion runs before content-hash anchors",
           "[view][import][diagnostics]") {
     const std::string json = R"json({

@@ -53,12 +53,24 @@ void paint_mod_ring_knob(canvas::Canvas& canvas, const Rect& rect, float value,
     canvas.set_stroke_color(style.ring);
     canvas.stroke_arc(center.x, center.y, radius, track_start, value_end);
 
-    // Indicator: a radius pointing at the value.
+    // Indicator: a mark pointing at the value.
+    //
+    // From the centre by default, which is the stock knob's spoke. A caller
+    // that gave the pointer an inner radius gets a TICK between the two radii
+    // instead — the shape a knob needs when the box it is drawn in is somebody
+    // else's artwork rather than its own body.
+    const float span = std::min(rect.width, rect.height);
+    const float ind_in = style.indicator_inner_scale > 0.0f
+                             ? span * style.indicator_inner_scale
+                             : 0.0f;
+    const float ind_out = style.indicator_outer_scale > 0.0f
+                              ? span * style.indicator_outer_scale
+                              : radius;
+    const float ux = std::cos(value_end), uy = std::sin(value_end);
     canvas.set_stroke_color(style.indicator);
     canvas.set_line_width(style.indicator_width);
-    canvas.stroke_line(center.x, center.y,
-                       center.x + radius * std::cos(value_end),
-                       center.y + radius * std::sin(value_end));
+    canvas.stroke_line(center.x + ind_in * ux, center.y + ind_in * uy,
+                       center.x + ind_out * ux, center.y + ind_out * uy);
 }
 
 void paint_level_fader(canvas::Canvas& canvas, const Rect& rect, float value,

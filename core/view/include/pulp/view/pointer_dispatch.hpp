@@ -93,6 +93,8 @@ struct PointerAttributes {
     /// RotateRecognizer key their touch maps on it, so two touches that share an
     /// id collapse into one and no multi-touch gesture can ever form.
     int pointer_id = 0;
+    float altitude_angle = 0.0f;  ///< Stylus altitude above the display plane.
+    float azimuth_angle = 0.0f;   ///< Stylus direction around the display plane.
 };
 
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
@@ -287,6 +289,16 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host, MouseButton button,
                       const PointerAttributes& pointer);
+
+/// Cancel an in-flight gesture through the same identity-safe terminal router
+/// as `deliver_mouse_up`. The legacy channel receives `on_mouse_cancel`, the
+/// modern event and ancestor bubble carry `is_cancelled`, and clicks are always
+/// suppressed. Keeping cancellation here ensures release and cancel share the
+/// same pre-callback ancestor snapshot and liveness checks.
+void deliver_mouse_cancel(View& root, View* target, Point root_pt,
+                          uint16_t modifiers, int click_count,
+                          MouseButton button,
+                          const PointerAttributes& pointer = {});
 
 /// Close the press bracket when a recognizer CLAIMS the pointer mid-gesture,
 /// after a press was already delivered to `target`.

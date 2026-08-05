@@ -109,6 +109,14 @@ public:
     // Throws std::runtime_error on parse/runtime errors.
     virtual choc::value::Value evaluate(const std::string& code) = 0;
 
+    // Evaluate and serialize directly inside the backend while enforcing the
+    // byte/depth/cycle bounds during traversal. Backends that cannot provide
+    // that resource guarantee must leave this unsupported.
+    virtual bool supports_bounded_json_evaluation() const { return false; }
+    virtual std::string evaluate_bounded_json(const std::string&, std::size_t) {
+        throw std::runtime_error("bounded JSON evaluation is unsupported");
+    }
+
     // Run JS code as a module with import resolution. Completion is invoked
     // when the engine reports module execution has either succeeded or failed.
     virtual void run_module(const std::string& code,
@@ -170,6 +178,13 @@ public:
     // while no evaluation is running would abort the *next* one, so callers
     // (see ScriptInspectorBridge) only arm it while an evaluation is in flight.
     virtual void request_interrupt() {}
+
+    // Consume an interrupt that arrived after the backend's final check. Called
+    // on the engine thread after evaluation quiesces so a persistent cancel
+    // flag cannot abort the next otherwise-unrelated evaluation.
+    // Returns true when a still-pending flag was cleared, proving that the
+    // completed evaluation did not consume the interrupt request.
+    virtual bool clear_pending_interrupt() { return true; }
 
     // ── Forward-compatibility capability flags (HostObject / TypedArray / Promise) ──
     // These are defined now so all backends can be designed with them in mind.

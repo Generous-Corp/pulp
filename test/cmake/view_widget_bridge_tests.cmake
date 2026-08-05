@@ -46,7 +46,8 @@ add_executable(pulp-test-inspector-domain-helpers
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
-    pulp::audio pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
+    pulp::audio pulp::canvas pulp::state pulp::runtime pulp::view-core
+    Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
 # CPU-only inspector session policy, capability enforcement, and lease tests.
@@ -69,6 +70,30 @@ add_executable(pulp-test-inspector-test-input
 target_link_libraries(pulp-test-inspector-test-input PRIVATE
     pulp::inspect-protocol Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-test-input)
+
+add_executable(pulp-test-control-manifest test_control_manifest.cpp)
+target_link_libraries(pulp-test-control-manifest PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-manifest
+    PROPERTIES LABELS "inspect;control;manifest")
+
+add_executable(pulp-test-control-identity test_control_identity.cpp)
+target_link_libraries(pulp-test-control-identity PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-identity
+    PROPERTIES LABELS "inspect;control;identity")
+
+add_executable(pulp-test-control-peer test_control_peer.cpp)
+target_link_libraries(pulp-test-control-peer PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-peer
+    PROPERTIES LABELS "inspect;control;identity;peer")
+
+add_executable(pulp-test-control-grants test_control_grants.cpp)
+target_link_libraries(pulp-test-control-grants PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-grants
+    PROPERTIES LABELS "inspect;control;grants")
 
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
@@ -102,12 +127,21 @@ catch_discover_tests(pulp-test-inspector-discovery)
 add_executable(
     pulp-test-inspector-client
     test_inspector_client.cpp
+    test_inspector_server_async_lifecycle.cpp
     test_inspector_server_lifecycle.cpp
     test_inspector_client_limits.cpp
 )
 target_link_libraries(pulp-test-inspector-client PRIVATE
     pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
+target_include_directories(pulp-test-inspector-client PRIVATE
+    ${PROJECT_SOURCE_DIR}/inspect/src)
 catch_discover_tests(pulp-test-inspector-client)
+
+add_executable(pulp-test-inspector-value-channel-telemetry
+    test_value_channel_telemetry_broker.cpp)
+target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
+    pulp::inspect-telemetry pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
@@ -158,6 +192,29 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     target_link_libraries(pulp-test-inspector-domains PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector-domains
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspector-runtime-domain
+        test_inspector_runtime_domain.cpp)
+    target_link_libraries(pulp-test-inspector-runtime-domain PRIVATE
+        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-runtime-domain
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
+    add_executable(pulp-test-inspect-runtime-eval-component
+        test_runtime_eval_component.cpp)
+    target_link_libraries(pulp-test-inspect-runtime-eval-component PRIVATE
+        pulp::inspect-runtime-eval pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspect-runtime-eval-component)
+
+    add_test(NAME pulp-inspect-runtime-eval-archive-boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DEVAL_ARCHIVE=$<TARGET_FILE:pulp-inspect-runtime-eval>
+            -DBASE_INSPECT=$<TARGET_FILE:pulp-inspect>
+            -DBASE_RUNTIME=$<TARGET_FILE:pulp-inspect-runtime>
+            -DBASE_PROTOCOL=$<TARGET_FILE:pulp-inspect-protocol>
+            -DBASE_CLIENT=$<TARGET_FILE:pulp-inspect-client>
+            -DBASE_FORMAT=$<TARGET_FILE:pulp-format>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/inspect_runtime_eval_archive_check.cmake)
 
     add_executable(pulp-test-inspector-hook-lifecycle
         test_inspector_hook_lifecycle.cpp)
@@ -229,14 +286,25 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
 endif()
 endif()
 
-# An ordinary pulp-format consumer is the inspector-stripped artifact fixture.
+# An ordinary pulp::standalone consumer is the inspector-stripped artifact fixture.
 # The post-build scan is non-vacuous when inspector components are present:
 # it first proves their archive contains pulp::inspect symbols, then rejects
 # every defined pulp::inspect symbol in this consumer.
 add_executable(pulp-test-inspector-stripped-artifact
     fixtures/inspector_stripped_artifact.cpp)
 target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
-    pulp::format)
+    pulp::standalone)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_SHIP_INSPECTOR_RUNTIME_EVAL FALSE)
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_CAPABILITIES "")
+set(PULP_pulp-test-inspector-stripped-artifact_INSPECTOR_MANIFEST_DIRECTORY
+    "${CMAKE_BINARY_DIR}/pulp-inspector-test-manifests")
+_pulp_configure_inspector_shipping(
+    pulp-test-inspector-stripped-artifact
+    "com.pulp.test.inspector-stripped"
+    "Inspector Stripped Artifact")
+_pulp_attach_inspector_shipping(
+    pulp-test-inspector-stripped-artifact pulp-test-inspector-stripped-artifact)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
 unset(_pulp_inspector_symbol_tool)
@@ -269,7 +337,7 @@ else()
             "-DSTRIPPED_ARTIFACT=$<TARGET_FILE:pulp-test-inspector-stripped-artifact>"
             "-DINSPECTOR_ARCHIVE=${_pulp_inspector_archive}"
             -P "${CMAKE_CURRENT_LIST_DIR}/check_inspector_stripped_artifact.cmake"
-        COMMENT "Checking ordinary format consumers contain no inspector symbols")
+        COMMENT "Checking ordinary standalone consumers contain no inspector symbols")
     unset(_pulp_inspector_archive)
 endif()
 unset(_pulp_compiler_dir)

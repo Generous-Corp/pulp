@@ -20,6 +20,23 @@ struct CapturedBox {
     double height = 0.0;
 };
 
+/// One inline line box Chrome laid a text run out on.
+///
+/// A run that wraps produces several of these. The layout node's own `bounds`
+/// is their union — the paragraph's block, not any single line — so a measured
+/// advance is only comparable against a line box, never against the run's box.
+/// `start` and `length` are character offsets into the layout node's text,
+/// which is what makes the comparison well-defined: they name exactly the
+/// substring whose advance the box records.
+///
+/// A box can also start to the right of its run's block when the run continues
+/// a line an earlier inline sibling began.
+struct CapturedTextBox {
+    CapturedBox bounds;
+    int start = 0;
+    int length = 0;
+};
+
 /// One node Chrome actually laid out and painted, in the order it painted it.
 ///
 /// The DOM snapshot's layout array holds exactly the nodes that produced a
@@ -78,8 +95,45 @@ public:
     std::map<std::string, std::string> styles_for_layout(
         int layout_index) const;
 
+    /// Computed declarations for one DOM node, or empty when that node
+    /// produced no layout object.
+    ///
+    /// Empty is a real answer, not an error: an SVG `<defs>` subtree, a
+    /// `display: none` element, and a comment all legitimately have no solved
+    /// style. A caller that needs a property from such a node has to fall back
+    /// to the authored attribute.
+    std::map<std::string, std::string> styles_for_node(int node_index) const;
+
+    /// Whether the capture asked Chrome for this property at all.
+    ///
+    /// Distinguishes "the browser resolved it to nothing" from "no consumer
+    /// can ever know" — an older capture is missing whole properties, and a
+    /// caller that reads absence as a value silently invents one.
+    bool has_property(std::string_view name) const;
+
     /// The box Chrome laid the element out at, in page coordinates.
     std::optional<CapturedBox> bounds_for(int backend_node_id) const;
+
+    /// The inline line boxes Chrome broke one layout node's text across, in
+    /// document order.
+    ///
+    /// Empty for a node that laid out no text. A single-line run returns one
+    /// box, which is why a caller must not treat "one box" as "the run's own
+    /// bounds": the two agree only when the run happens not to wrap, and code
+    /// that reads the bounds instead agrees with this on every unwrapped run
+    /// and is wrong on every wrapped one.
+    std::vector<CapturedTextBox> text_boxes_for_layout(int layout_index) const;
+
+    /// The PostScript name of the face Blink actually shaped this run with, or
+    /// empty when the capture recorded none.
+    ///
+    /// Read from the `platform-fonts.json` sidecar beside the snapshot. The
+    /// computed `font-family` is a REQUEST — a list whose entries may be
+    /// webfonts that failed to load or families the host lacks — so it cannot
+    /// answer which typeface produced the recorded line breaks. Anything
+    /// validating captured layout has to compare against the face, and an
+    /// empty answer must be treated as "cannot validate" rather than "matches".
+    std::string resolved_face_for_layout(int layout_index) const;
 
     /// Every laid-out node, in Chrome's paint order, ties broken by document
     /// order. This is the set a native renderer has to draw.
@@ -95,6 +149,24 @@ public:
 
     /// Walk up `parentIndex` from `node_index`. Returns -1 at the root.
     int parent_of(int node_index) const;
+
+    /// The product of every ancestor `transform` scale above `node_index`.
+    ///
+    /// Nested transforms multiply, so a run three levels down inherits the
+    /// product rather than its nearest wrapper's factor. Type carries one
+    /// scalar — a `font-size` — so only a uniform, positive, unrotated scale
+    /// can be folded into it: `scale(0.9, 1.2)` needs two axes and a flip or a
+    /// rotation needs a matrix. Those are REFUSED rather than approximated,
+    /// because a plausible wrong number is harder to find later than a
+    /// recorded refusal.
+    struct InheritedTypeScale {
+        double scale = 1.0;
+        /// Empty when the chain reduced. Otherwise the offending computed
+        /// `transform`, so the refusal names the value that caused it.
+        std::string refused;
+        bool ok() const { return refused.empty(); }
+    };
+    InheritedTypeScale inherited_type_scale(int node_index) const;
 
     /// A node's DOM `nodeType` (1 element, 3 text), or 0 when out of range.
     ///
@@ -138,6 +210,12 @@ private:
     std::vector<int> layout_paint_order_;            ///< layout index → order
     std::vector<std::vector<int>> style_rows_;       ///< layout index → strings
     std::vector<CapturedBox> layout_bounds_;
+    /// layout index → its line boxes. Sized with the layout, so a lookup for a
+    /// node that laid out no text is a bounds check rather than a miss.
+    std::vector<std::vector<CapturedTextBox>> layout_text_boxes_;
+    /// layout index → the PostScript name Blink resolved, when the capture
+    /// carried a platform-fonts sidecar.
+    std::unordered_map<int, std::string> layout_resolved_face_;
 };
 
 /// Which half of an element's appearance to fold onto a node.
@@ -158,11 +236,19 @@ enum class ComputedStyleScope {
 /// `display` are deliberately not written, because the caller has already
 /// placed the node from the design's paint box and the page's own layout values
 /// would fight that placement.
+///
+/// `type_scale` is the uniform scale the node's box already carries from an
+/// ancestor `transform` — see `inherited_type_scale`. The snapshot's box is
+/// post-transform while `font-size` and `letter-spacing` are the untransformed
+/// computed values, so placing that box and filling it with unscaled type
+/// draws every run `1 / scale` too wide. Multiplying the type lengths by the
+/// same factor the box already carries is what puts them in one space.
 void apply_computed_styles(
     const std::map<std::string, std::string>& computed,
     const std::optional<CapturedBox>& box,
     pulp::view::IRStyle& style,
-    ComputedStyleScope scope = ComputedStyleScope::box_and_text);
+    ComputedStyleScope scope = ComputedStyleScope::box_and_text,
+    double type_scale = 1.0);
 
 /// Split a CSS list on top-level commas, ignoring commas nested in functions
 /// (`rgba(0, 0, 0, .5)` is one value, not four).
