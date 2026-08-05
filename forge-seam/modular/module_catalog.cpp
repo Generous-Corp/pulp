@@ -120,6 +120,13 @@ std::vector<ModuleEntry> load_all() {
 ///
 /// Keyed on the index's size and write time, which costs one stat per keystroke
 /// and no parse at all when nothing has changed.
+/// Bumped by all() on every reload, and by nothing else. Living beside the
+/// cache rather than being derived from the file separately is the point: a
+/// second stat of the same path could see a change the cache had not adopted
+/// yet, or miss one it had, and then a reader keyed on it would be confidently
+/// out of step with the list it is guarding.
+std::uint64_t g_generation = 0;
+
 const std::vector<ModuleEntry>& all() {
     static std::vector<ModuleEntry> entries;
     static bool loaded = false;
@@ -139,17 +146,111 @@ const std::vector<ModuleEntry>& all() {
         seen_size = size;
         seen_time = time;
         loaded = true;
+        ++g_generation;
     }
     return entries;
 }
 
+/// One UTF-8 sequence at `i`, advancing it past what was read.
+///
+/// A byte that begins nothing valid is returned as itself, so a name that is
+/// not well-formed UTF-8 folds to something rather than to nothing.
+std::uint32_t next_code_point(const std::string& s, std::size_t& i) {
+    const auto b0 = static_cast<unsigned char>(s[i]);
+    const auto tail = [&](std::size_t k) {
+        return i + k < s.size() &&
+               (static_cast<unsigned char>(s[i + k]) & 0xC0) == 0x80;
+    };
+    const auto bits = [&](std::size_t k) {
+        return static_cast<std::uint32_t>(static_cast<unsigned char>(s[i + k]) & 0x3F);
+    };
+    if (b0 < 0x80) { ++i; return b0; }
+    if ((b0 & 0xE0) == 0xC0 && tail(1)) {
+        const std::uint32_t cp = ((b0 & 0x1FU) << 6) | bits(1);
+        i += 2;
+        return cp;
+    }
+    if ((b0 & 0xF0) == 0xE0 && tail(1) && tail(2)) {
+        const std::uint32_t cp = ((b0 & 0x0FU) << 12) | (bits(1) << 6) | bits(2);
+        i += 3;
+        return cp;
+    }
+    if ((b0 & 0xF8) == 0xF0 && tail(1) && tail(2) && tail(3)) {
+        const std::uint32_t cp =
+            ((b0 & 0x07U) << 18) | (bits(1) << 12) | (bits(2) << 6) | bits(3);
+        i += 4;
+        return cp;
+    }
+    ++i;
+    return b0;
+}
+
+void append_utf8(std::string& out, std::uint32_t cp) {
+    if (cp < 0x80) {
+        out += static_cast<char>(cp);
+    } else if (cp < 0x800) {
+        out += static_cast<char>(0xC0 | (cp >> 6));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        out += static_cast<char>(0xE0 | (cp >> 12));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (cp >> 18));
+        out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    }
+}
+
+/// Simple lowercase, for the scripts a maker's name is plausibly written in.
+///
+/// Case-folding ASCII alone was not enough and the library says so: `ÄSK` is a
+/// real maker, and it folded to "Äsk" here while patch.py's `fold_name` -- which
+/// is Unicode-aware in both halves -- folded it to "äsk". So "@äsk" named the
+/// maker in a prompt and found nothing in the list. The other three non-ASCII
+/// makers agreed only by accident: `Instruō`, `Hügelton Instruments` and
+/// `nozoïd` are already lowercase, which is the one case where the two rules
+/// cannot differ.
+///
+/// EVERY RANGE BELOW WAS CHECKED CODE POINT BY CODE POINT AGAINST PYTHON'S
+/// `str.lower()`, which is the authority on the other side of the seam. The
+/// exclusions are the whole of the disagreement:
+///
+///   - U+00D7 is the multiplication sign, not a letter with a case.
+///   - U+03A2 is unassigned.
+///   - U+0130 (dotted capital I) lowercases to TWO code points, `i` plus a
+///     combining dot, which a per-character fold cannot express. Left alone.
+///
+/// Outside these ranges a code point passes through unchanged, so a maker
+/// writing in a script not listed would be reachable only in the case they
+/// wrote it. None does; `check_maker_names_as_written` is the guard that says
+/// so about the corpus rather than about this function.
+std::uint32_t lower_code_point(std::uint32_t cp) {
+    if (cp < 0x80)
+        return static_cast<std::uint32_t>(
+            std::tolower(static_cast<unsigned char>(cp)));
+    if (cp == 0x0178) return 0x00FF;                       // Y-diaeresis
+    if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) return cp + 32;
+    // Latin Extended-A pairs adjacent code points and changes parity twice.
+    if (cp >= 0x0100 && cp <= 0x0137 && cp % 2 == 0 && cp != 0x0130) return cp + 1;
+    if (cp >= 0x0139 && cp <= 0x0148 && cp % 2 == 1) return cp + 1;
+    if (cp >= 0x014A && cp <= 0x0177 && cp % 2 == 0) return cp + 1;
+    if (cp >= 0x0179 && cp <= 0x017E && cp % 2 == 1) return cp + 1;
+    if (cp >= 0x0391 && cp <= 0x03A9 && cp != 0x03A2) return cp + 32;
+    if (cp >= 0x0410 && cp <= 0x042F) return cp + 32;
+    if (cp >= 0x0400 && cp <= 0x040F) return cp + 80;
+    return cp;
+}
+
 /// Part of a name, as opposed to a separator somebody may or may not type.
 ///
-/// Letters and digits, plus every byte outside ASCII: "Instruō" is a maker,
-/// and a byte-wise alphanumeric test in the C locale would answer no to its
-/// last two bytes and quietly shorten the name to "instru".
-bool folds_in(unsigned char c) {
-    return c >= 0x80 || std::isalnum(c) != 0;
+/// Letters and digits, plus every code point outside ASCII: "Instruō" is a
+/// maker, and a byte-wise alphanumeric test in the C locale would answer no to
+/// its last character and quietly shorten the name to "instru".
+bool folds_in(std::uint32_t cp) {
+    return cp >= 0x80 ||
+           std::isalnum(static_cast<unsigned char>(cp)) != 0;
 }
 
 /// Case-folded, and with the separators people leave out removed.
@@ -165,12 +266,17 @@ bool folds_in(unsigned char c) {
 /// reachable only by typing their punctuation exactly, so "@Catro Blanco" and
 /// "@psfx" found nothing. This is also the rule patch.py's `fold_name` applies
 /// on the other side of the seam, and the two are meant to be one behaviour.
+///
+/// Walked a CODE POINT at a time, not a byte at a time, because case is a
+/// property of characters and half of `Ä` is not a character. See
+/// lower_code_point for which scripts that covers and where it stops.
 std::string fold(const std::string& s) {
     std::string out;
     out.reserve(s.size());
-    for (const char c : s) {
-        if (!folds_in(static_cast<unsigned char>(c))) continue;
-        out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (std::size_t i = 0; i < s.size();) {
+        const auto cp = next_code_point(s, i);
+        if (!folds_in(cp)) continue;
+        append_utf8(out, lower_code_point(cp));
     }
     return out;
 }
@@ -273,11 +379,19 @@ std::string without_brand(const std::string& text, const std::string& brand,
     if (!starts_fold(brand, q)) return text;
     const auto brand_len = fold(brand).size();
     if (fold(q).size() > brand_len) return text;
-    // Counted with fold()'s own rule, so the walk and `brand_len` cannot
-    // disagree about what a character is.
+    // Walked by producing fold()'s own output and measuring THAT, rather than
+    // by counting source characters and assuming the two agree. They agree
+    // today only because every mapping happens to preserve a character's
+    // encoded length; a mapping that did not would silently cut a name mid
+    // character.
     std::size_t taken = 0, i = 0;
-    for (; i < text.size() && taken < brand_len; ++i)
-        if (folds_in(static_cast<unsigned char>(text[i]))) ++taken;
+    while (i < text.size() && taken < brand_len) {
+        const auto cp = next_code_point(text, i);
+        if (!folds_in(cp)) continue;
+        std::string one;
+        append_utf8(one, lower_code_point(cp));
+        taken += one.size();
+    }
     auto rest = text.substr(i);
     while (!rest.empty() && (rest.front() == ' ' || rest.front() == '-'))
         rest.erase(rest.begin());
@@ -480,6 +594,14 @@ std::vector<MentionCandidate> search_entries(const std::vector<ModuleEntry>& ent
 std::vector<MentionCandidate> search_modules(const std::string& query,
                                              std::size_t limit) {
     return search_entries(all(), query, limit);
+}
+
+std::uint64_t catalog_generation() {
+    // all() is what does the stat and the reload, so asking it is what keeps
+    // the number and the list in step. A separate stat here would be a second
+    // opinion about the same file, and the two would disagree eventually.
+    all();
+    return g_generation;
 }
 
 CatalogCounts catalog_counts() {

@@ -18,6 +18,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -93,6 +94,14 @@ public:
     std::unique_ptr<pulp::view::View> build();
 
     void set_source(MentionSource source) { source_ = std::move(source); }
+
+    /// Where "has the library changed under us?" is answered, for a test that
+    /// supplies its own library. Unset, the live catalogue answers it, so the
+    /// app needs no wiring and cannot lose this by forgetting to do any — the
+    /// failure that would leave here is a stale cache, which is silent.
+    void set_corpus_generation(std::function<std::uint64_t()> generation) {
+        corpus_generation_ = std::move(generation);
+    }
 
     /// Called with the slug when a row is chosen.
     std::function<void(const std::string& slug)> on_choose;
@@ -211,6 +220,7 @@ private:
     pulp::view::View* root_ = nullptr;
     pulp::view::View* list_ = nullptr;
     MentionSource source_;
+    std::function<std::uint64_t()> corpus_generation_;
     std::vector<MentionCandidate> candidates_;
     std::string query_;
     int selected_ = 0;
@@ -231,7 +241,15 @@ private:
     /// back to the prose. Anything it grows into cannot match either — the
     /// search is monotone — so this bounds the cost of an '@' left behind in
     /// a long prompt without bounding how long a maker's name may be.
+    ///
+    /// ONLY WITHIN ONE GENERATION OF THE LIBRARY. Monotonicity is a statement
+    /// about a fixed corpus, and this corpus reloads itself: the index arrives
+    /// a minute after launch on a machine that has never had one. Held across
+    /// that, the guard keeps a mention closed against a library that now
+    /// matches it — silently, and unrecoverably short of deleting back past
+    /// the abandonment.
     std::string abandoned_;
+    std::uint64_t abandoned_generation_ = 0;
 };
 
 }  // namespace forge_modular

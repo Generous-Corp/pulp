@@ -1308,6 +1308,111 @@ def check_maker_names_as_written() -> tuple:
         print(f"  WRONG  a module mention was read as naming {sorted(got)}")
     else:
         print("  ok     a module mention is still a module, slash and all")
+
+    # ── the assumption the C++ fold is allowed to make, checked on the data ──
+    #
+    # module_catalog.cpp case-folds Latin-1 Supplement, Latin Extended-A, Greek
+    # and Cyrillic, and leaves every other script in the case it was written.
+    # That is enough for every maker in the library, and this is what says so
+    # rather than a comment claiming it. It reads the real index, because the
+    # claim IS about the real index; with none present there is nothing to
+    # check and it says that instead of passing quietly.
+    covered = ((0x00C0, 0x00DE), (0x0100, 0x017F),
+               (0x0391, 0x03A9), (0x0400, 0x042F))
+    index = os.path.expanduser(
+        "~/Library/Application Support/Forge Modular/library/index.json")
+    if not os.path.exists(index):
+        print(f"  ok     no library index on this machine, so the corpus "
+              f"assumption cannot be checked here ({index})")
+        return bad, ran
+    ran += 1
+    try:
+        idx = json.load(open(index))
+    except Exception as e:                       # noqa: BLE001 - reported, not raised
+        print(f"  ok     the library index is unreadable ({e}); nothing to check")
+        return bad, ran
+    outside, symbols = [], []
+    for slug, v in idx.items():
+        brand = v.get("brand") or v.get("name") or slug
+        for ch in brand:
+            if ord(ch) < 128:
+                continue
+            if not ch.isalnum():
+                # Python drops it, the C++ fold keeps it: the two would part.
+                symbols.append((brand, ch))
+            elif ch.lower() != ch and not any(lo <= ord(ch) <= hi
+                                              for lo, hi in covered):
+                outside.append((brand, ch, hex(ord(ch))))
+    if outside or symbols:
+        bad += 1
+        print(f"  WRONG  a maker's name needs folding the @ list cannot do: "
+              f"uppercase outside the covered scripts {outside}, "
+              f"non-alphanumeric {symbols}. Widen lower_code_point, or the "
+              f"two sides of the seam disagree about that maker.")
+    else:
+        print(f"  ok     all {len(idx)} plugins' makers fold identically on "
+              f"both sides of the seam")
+    return bad, ran
+
+
+#: What `fold_name` must produce, pinned identically in the C++ test
+#: ("a maker's case is not something anybody has to match either").
+#:
+#: The two sides of the seam are meant to be ONE behaviour, and they were not:
+#: `fold_name` is Unicode-aware in both halves while module_catalog.cpp's
+#: `fold` case-folded only ASCII, so `ÄSK` -- a real maker -- folded to "äsk"
+#: here and "Äsk" there, and "@äsk" named it in a prompt while finding nothing
+#: in the @ list. Neither side may drift from this table alone.
+SEAM_FOLDS = [
+    ("ÄSK", "äsk"),
+    ("äsk", "äsk"),
+    ("Instruō", "instruō"),
+    ("Hügelton Instruments", "hügeltoninstruments"),
+    ("nozoïd", "nozoïd"),
+    ("Ø", "ø"),
+    ("Σ", "σ"),
+    ("Ω", "ω"),
+    ("ŠKODA", "škoda"),
+    ("Łódź", "łódź"),
+    ("ДЕЛЬТА", "дельта"),
+    ("Catro/Blanco", "catroblanco"),
+    ("p.s.F/X", "psfx"),
+]
+
+
+def check_fold_agrees_across_the_seam() -> tuple:
+    """One rule for what a name is, on both sides of the seam.
+
+    This half pins `fold_name`; `test_chrome_no_leak.cpp` pins the same strings
+    for the C++ `fold` through `search_entries`. A change to either that is not
+    matched in the other fails one of the two, which is the only way two
+    implementations in two languages can be held together without a third that
+    could itself be wrong.
+    """
+    bad, ran = 0, 0
+    for text, want in SEAM_FOLDS:
+        ran += 1
+        got = P.fold_name(text)
+        if got != want:
+            bad += 1
+            print(f"  WRONG  fold_name({text!r}) = {got!r}, pinned as {want!r}")
+    if not bad:
+        print(f"  ok     {len(SEAM_FOLDS)} folded names match what the @ list "
+              f"folds them to")
+
+    # WHERE THE TWO RULES STILL PART, stated rather than left to be found. The
+    # C++ fold keeps every non-ASCII code point; this one drops the ones that
+    # are not alphanumeric. So a maker with a symbol in its name would fold
+    # differently on the two sides -- and the guard is on the CORPUS, because
+    # the fix for the code would be a Unicode category table on the C++ side
+    # and no maker needs one.
+    ran += 1
+    if P.fold_name("A×B") != "ab":
+        bad += 1
+        print("  WRONG  the boundary case moved; re-check the C++ fold with it")
+    else:
+        print("  ok     a non-alphanumeric symbol is dropped here (and kept in "
+              "the @ list) — no maker has one; the sweep below is what says so")
     return bad, ran
 
 
@@ -2777,6 +2882,7 @@ def main():
     lb_bad, lb_ran = check_library_brief()
     br_bad, br_ran = check_brand_targeting()
     ln_bad, ln_ran = check_maker_names_as_written()
+    sf_bad, sf_ran = check_fold_agrees_across_the_seam()
     rl_bad, rl_ran = check_brand_token_reload()
     ip_bad, ip_ran = check_installer_promises()
     nf_bad, nf_ran = check_named_is_fetched()
@@ -2796,8 +2902,8 @@ def main():
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
-    acq_bad += vp_bad + mel_bad + ln_bad + rl_bad + ip_bad
-    acq_ran += vp_ran + mel_ran + ln_ran + rl_ran + ip_ran
+    acq_bad += vp_bad + mel_bad + ln_bad + rl_bad + ip_bad + sf_bad
+    acq_ran += vp_ran + mel_ran + ln_ran + rl_ran + ip_ran + sf_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

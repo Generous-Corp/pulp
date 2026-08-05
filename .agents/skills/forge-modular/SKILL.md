@@ -316,9 +316,42 @@ their own version of it:
   underscore and nothing else**, so those same two could be reached only by
   typing their punctuation exactly. It now drops every ASCII non-alphanumeric,
   which is the rule `fold_name` was already applying on the other side.
-  **Keep the non-ASCII bytes**: `std::isalnum` in the C locale answers no to a
-  UTF-8 continuation byte, so a byte-wise test shortens `Instruō` to `instru`
-  and makes it collide with anything else starting that way.
+  **Keep the non-ASCII code points**: `std::isalnum` in the C locale answers no
+  to a UTF-8 continuation byte, so a byte-wise test shortens `Instruō` to
+  `instru` and makes it collide with anything else starting that way.
+
+**The two folds are one behaviour, and "ASCII case-folding" is not enough to
+make them so.** `fold_name` is `str.lower()` plus `str.isalnum()`, both
+Unicode-aware. `fold` case-folded only ASCII, so `ÄSK` — a real maker — folded
+to `äsk` in a prompt and `Äsk` in the list, and **`@äsk` found nothing**. The
+other three non-ASCII makers (`Instruō`, `Hügelton Instruments`, `nozoïd`)
+agreed only by luck: all three are already lowercase, the one quadrant where
+the two rules cannot differ. A sweep that types every name the way its maker
+writes it will never see this — vary the case.
+
+`fold` now walks **code points, not bytes** (half of `Ä` is not a character) and
+case-folds Latin-1 Supplement, Latin Extended-A, Greek and Cyrillic. Every range
+was checked against Python's `str.lower()` code point by code point; the
+exclusions are the whole of the disagreement (`U+00D7` ×, `U+03A2` unassigned,
+`U+0130` whose lowercase is two code points). Outside those ranges a code point
+passes through in the case it was written, and **the guard for that is on the
+corpus, not the code**: `check_maker_names_as_written` sweeps the real index for
+an uppercase character outside the covered scripts, or any non-alphanumeric
+non-ASCII one (which Python drops and `fold` keeps). Widening the C++ side to
+full Unicode would mean a category table no maker needs yet.
+
+**It is case-folding, not transliteration.** `Instruo` and `Instruō` must stay
+two makers; merging them is worse than the bug being fixed because it is silent
+and it changes what an already-stored token resolves to. Assert that as a
+**count of maker rows**, never as which row leads — with the diacritic folded
+away both names match exactly and the winner is whichever the catalogue lists
+first, which an assertion about `hits[0]` passes straight through. That version
+was written, mutated, and did not fail.
+
+Pinned identically on both sides: `SEAM_FOLDS` in `test_patch.py` and the table
+in `test_chrome_no_leak.cpp`. Two implementations in two languages can only be
+held together by the same literals on both, never by a third implementation that
+could itself be wrong.
 
 Sweep the real index before believing a matcher change is complete. Every one of
 these was found by asking whether all 375 makers can be named, not by reading
@@ -334,9 +367,31 @@ matches when its folded form is a substring of an entry's folded name, slug or
 maker, and every longer query contains the shorter one, so a token that matches
 nothing cannot grow into one that matches something. The overlay remembers the
 token it abandoned; anything that token grows into is dismissed with one string
-compare instead of a search of 4,700 modules. Rely on that property if you
-touch `matches()`: widening it to a fuzzy or subsequence match would break the
-proof and put an unbounded search on every keystroke.
+compare instead of a search. That is worth having: measured over a library the
+size of the real one, a 500-character dead token costs **24 ms a keystroke** to
+re-answer (2 chars: 1.1 ms, 120 chars: 6.6 ms), so deleting the cache is not an
+option and neither is capping the span by guessing.
+
+Rely on that property if you touch `matches()`: widening it to a fuzzy or
+subsequence match would break the proof and put an unbounded search on every
+keystroke.
+
+**And the proof is about a FIXED corpus, which this one is not.** `all()`
+reloads itself when the index changes, by design, because on a machine that has
+never had an index the file arrives about a minute after launch. A cached
+"nothing matched" therefore expires: somebody types `@Catro Blanco` into an
+empty library, the index lands carrying that very maker, and a guard with no
+invalidation keeps the list shut against it — silently, and recoverable only by
+deleting back past the abandonment, which nobody will guess. `abandoned_` is
+paired with `catalog_generation()`, which `all()` itself bumps on reload;
+deriving that number from a second stat of the same file would let the counter
+and the list disagree about when the change happened.
+
+The general shape, worth carrying past this file: **a cache of a negative
+answer needs the same invalidation as a cache of a positive one**, and an
+optimisation justified by a proof is only as durable as the proof's unstated
+assumptions. Write the assumption into the comment so the next reader can see
+what would break it.
 
 ## The `@` list ranks two kinds of row on one scale, and installedness is not one of them
 

@@ -1,5 +1,11 @@
 #include "forge/mention_overlay.hpp"
 
+// For catalog_generation() only. The overlay still learns nothing about where
+// the library lives or how it is built -- it asks one question, "has it
+// changed since I last decided nothing matched", which is the same level of
+// abstraction as the search function it is handed.
+#include "forge/module_catalog.hpp"
+
 #include <forge/design_tokens.hpp>
 
 #include <pulp/view/buttons.hpp>
@@ -387,14 +393,29 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     // substring of that entry's folded name, slug or maker, and every longer
     // query contains the shorter one — so a token that matches nothing cannot
     // grow into one that matches something. That is a proof rather than a
-    // heuristic, and it is what pays for the span above being uncapped: once
-    // "@vco into" has died, the rest of the sentence costs one string compare
-    // per keystroke instead of a search of 4,700 modules.
-    if (!abandoned_.empty() && token->rfind(abandoned_, 0) == 0) {
-        if (open_) close();
-        return false;
+    // heuristic, and it is what pays for the span above being uncapped:
+    // measured over a library the size of the real one, a 500-character dead
+    // token costs 24 ms a keystroke to re-answer and this costs one compare.
+    //
+    // BUT IT IS A PROOF ABOUT A FIXED CORPUS, AND THIS ONE MOVES. The
+    // catalogue reloads itself when the index changes, which on a machine that
+    // has never had one happens about a minute after launch — so "@Catro
+    // Blanco" typed into an empty library is abandoned, the index lands
+    // carrying that very maker, and without this generation check the list
+    // stays shut against it for as long as the words remain in the prompt.
+    // Asked only when there is a decision to re-examine, so the ordinary
+    // keystroke does not pay for it.
+    auto generation = [this] {
+        return corpus_generation_ ? corpus_generation_() : catalog_generation();
+    };
+    if (!abandoned_.empty()) {
+        if (abandoned_generation_ == generation() &&
+            token->rfind(abandoned_, 0) == 0) {
+            if (open_) close();
+            return false;
+        }
+        abandoned_.clear();
     }
-    abandoned_.clear();
     refresh(*token);
     // A query that reaches across a space is a GUESS that a maker's name is
     // being typed. It is right for "@CV funk" and wrong for "@vco into a
@@ -403,6 +424,7 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     // and the words go back to being ordinary text.
     if (candidates_.empty() && spans_a_space(*token)) {
         abandoned_ = *token;
+        abandoned_generation_ = generation();
         if (open_) close();
         return false;
     }
