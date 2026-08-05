@@ -119,8 +119,15 @@ def evaluate_cable(cable: dict, flag: str, spec: dict) -> dict:
     if not ok:
         return {"flag": flag, "verdict": UNMEASURED, "source": cable.get("source", "?"),
                 "why": why}
+    # A flag with no conditions at all is a data error, and the arithmetic
+    # answer -- "none of zero conditions were met, so it fails" -- would reject
+    # a patch for something nobody wrote down. Say so instead.
+    if not spec.get("all_of") and not spec.get("any_of"):
+        return {"flag": flag, "verdict": UNMEASURED, "source": cable.get("source", "?"),
+                "why": [f"'{flag}' has no conditions in "
+                        f"{os.path.basename(THRESHOLDS)}, so nothing was checked"]}
     conds = spec.get("all_of")
-    ok, why = _check(cable, conds, True) if conds is not None else \
+    ok, why = _check(cable, conds, True) if conds else \
         _check(cable, spec.get("any_of", []), False)
     return {"flag": flag, "verdict": PASS if ok else FAIL,
             "source": cable.get("source", "?"), "why": [] if ok else why}

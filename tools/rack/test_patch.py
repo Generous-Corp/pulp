@@ -2561,7 +2561,7 @@ def _behaviour_report(cable: dict) -> str:
                      "active_windows": 120},
     }
     for group, fields in cable.items():
-        base[group].update(fields) if isinstance(fields, dict) else None
+        base[group].update(fields)
     block = {"schema": 1, "settings": {}, "loudest": 0, "cables": [base]}
     return ("patch gate: 2 modules\n  ok    VCO out 0 carries signal\n" +
             pb.MARKER + _json.dumps(block) + "\npatch gate passed\n")
@@ -2635,16 +2635,21 @@ def check_behaviour_is_measured() -> tuple:
     table = pb.load_thresholds()["flags"]
     unknown = []
     for flag, spec in table.items():
+        if not spec.get("all_of") and not spec.get("any_of"):
+            unknown.append(f"{flag}: no conditions at all")
         for cond in spec.get("needs", []) + spec.get("all_of", []) + spec.get("any_of", []):
             group, _, leaf = cond["field"].partition(".")
             if group not in emitted or leaf not in emitted:
-                unknown.append(f"{flag}: {cond['field']}")
+                unknown.append(f"{flag}: no such number as {cond['field']}")
+            if cond.get("op") not in pb._OPS:
+                unknown.append(f"{flag}: no comparison called {cond.get('op')!r}")
     if unknown:
         bad += 1
-        print(f"  WRONG  thresholds name fields the gate never emits, so those "
-              f"flags can never be measured: {unknown}")
+        print(f"  WRONG  thresholds the gate can never satisfy, so those flags "
+              f"are unmeasurable forever: {unknown}")
     else:
-        print("  ok     every threshold names a number the gate emits")
+        print("  ok     every threshold names a number the gate emits and a "
+              "comparison the reader knows")
 
     # The dead-data check, both directions. `behaviour` sat in the idiom
     # library consumed by nothing; a threshold consumed by no idiom is the

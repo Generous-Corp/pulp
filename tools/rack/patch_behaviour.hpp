@@ -262,6 +262,37 @@ inline double coefficient_of_variation(const std::vector<double>& v) {
     return std::sqrt(var) / std::fabs(mean);
 }
 
+/// RMS per analysis window, and the number of whole windows the run holds.
+///
+/// One definition, used by the level measure and by the spectrum's decision
+/// about which windows are worth transforming. Two nearly-identical loops would
+/// drift, and "active" would quietly come to mean two different things inside
+/// one report.
+inline std::vector<double> window_rms(const std::vector<float>& x, long win) {
+    std::vector<double> out;
+    if (win < 1) return out;
+    const std::size_t windows = x.size() / static_cast<std::size_t>(win);
+    out.reserve(windows);
+    for (std::size_t w = 0; w < windows; ++w) {
+        double acc = 0.0;
+        for (long i = 0; i < win; ++i) {
+            const double v = x[w * static_cast<std::size_t>(win) + static_cast<std::size_t>(i)];
+            acc += v * v;
+        }
+        out.push_back(std::sqrt(acc / static_cast<double>(win)));
+    }
+    return out;
+}
+
+/// The level below which a window carries nothing worth measuring. The ratio
+/// follows the patch's own level so a quiet patch is not read as mostly
+/// silent; the absolute floor stops a genuinely silent patch reading as fully
+/// active relative to its own arithmetic noise.
+inline double active_floor(const std::vector<double>& rms, const Settings& s) {
+    const double peak = rms.empty() ? 0.0 : *std::max_element(rms.begin(), rms.end());
+    return std::max(s.active_floor_v, s.active_floor_ratio * peak);
+}
+
 inline int semitone_of(double hz) {
     if (!(hz > 0.0) || !std::isfinite(hz)) return -1;
     return static_cast<int>(std::lround(69.0 + 12.0 * std::log2(hz / 440.0)));
@@ -354,18 +385,10 @@ inline PitchMeasure measure_pitch(const std::vector<float>& x, const Settings& s
 inline DynamicsMeasure measure_dynamics(const std::vector<float>& x, const Settings& s) {
     DynamicsMeasure out;
     const long win = std::max(1L, std::lround(s.window_ms * s.sample_rate / 1000.0));
-    const std::size_t windows = x.size() / static_cast<std::size_t>(win);
+    out.window_rms = detail::window_rms(x, win);
+    const std::size_t windows = out.window_rms.size();
     if (windows == 0) return out;
 
-    out.window_rms.reserve(windows);
-    for (std::size_t w = 0; w < windows; ++w) {
-        double acc = 0.0;
-        for (long i = 0; i < win; ++i) {
-            const double v = x[w * static_cast<std::size_t>(win) + static_cast<std::size_t>(i)];
-            acc += v * v;
-        }
-        out.window_rms.push_back(std::sqrt(acc / static_cast<double>(win)));
-    }
     out.peak_rms = *std::max_element(out.window_rms.begin(), out.window_rms.end());
     double sum = 0.0;
     for (double v : out.window_rms) sum += v;
@@ -380,7 +403,7 @@ inline DynamicsMeasure measure_dynamics(const std::vector<float>& x, const Setti
     out.end_rms = std::sqrt(tail_acc / static_cast<double>(tail));
     out.end_over_peak = out.peak_rms > 0.0 ? out.end_rms / out.peak_rms : 0.0;
 
-    const double floor_v = std::max(s.active_floor_v, s.active_floor_ratio * out.peak_rms);
+    const double floor_v = detail::active_floor(out.window_rms, s);
     std::size_t active = 0;
     for (double v : out.window_rms) if (v > floor_v) ++active;
     out.duty_cycle = static_cast<double>(active) / static_cast<double>(windows);
@@ -529,20 +552,10 @@ inline SpectrumMeasure measure_spectrum(const std::vector<float>& x, const Setti
         window_fn[static_cast<std::size_t>(i)] = static_cast<float>(
             0.5 - 0.5 * std::cos(2.0 * M_PI * i / (n - 1)));
 
-    // The same floor the dynamics use, so "active" means one thing in the whole
-    // report rather than two things that nearly agree.
-    double peak_rms = 0.0;
-    std::vector<double> rms(windows, 0.0);
-    for (std::size_t w = 0; w < windows; ++w) {
-        double acc = 0.0;
-        for (long i = 0; i < win; ++i) {
-            const double v = x[w * static_cast<std::size_t>(win) + static_cast<std::size_t>(i)];
-            acc += v * v;
-        }
-        rms[w] = std::sqrt(acc / static_cast<double>(win));
-        peak_rms = std::max(peak_rms, rms[w]);
-    }
-    const double floor_v = std::max(s.active_floor_v, s.active_floor_ratio * peak_rms);
+    // The same floor the dynamics use, from the same helper, so "active" means
+    // one thing in the whole report rather than two things that nearly agree.
+    const std::vector<double> rms = detail::window_rms(x, win);
+    const double floor_v = detail::active_floor(rms, s);
 
     out.centroid_hz.assign(windows, 0.0);
     std::vector<double> active;
