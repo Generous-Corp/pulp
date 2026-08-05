@@ -79,6 +79,28 @@ APP="$STAGED_ROOT/$(basename "$APP")"
 TOOLS_DEST="$APP/Contents/Resources/tools/rack"
 mkdir -p "$TOOLS_DEST"
 ditto "$REPO/tools/rack" "$TOOLS_DEST"
+
+# ditto copies the directory, not the repository's view of it, so anything
+# gitignored beside the tools ships too. `.corpus/` is reference texts fetched
+# for the citation checker -- copyrighted books and cloned git repositories,
+# deliberately never committed. Shipping it put those inside a SIGNED,
+# notarization-bound installer, and the embedded .git directories broke the
+# bundle seal on the way: Apple rejected the build with "the signature of the
+# binary is invalid" rather than anything about the files themselves.
+#
+# So prune, then PROVE the prune worked. A silent failure here redistributes
+# somebody else's book under our signature, which is the one outcome that
+# cannot be fixed after release.
+for junk in .corpus __pycache__ .git .DS_Store .pytest_cache; do
+    find "$TOOLS_DEST" -name "$junk" -maxdepth 3 -exec rm -rf {} + 2>/dev/null || true
+done
+leaked="$(find "$TOOLS_DEST" \( -name .corpus -o -name .git -o -name __pycache__ \) \
+          2>/dev/null | head -3)"
+if [[ -n "$leaked" ]]; then
+    echo "staging failed: unshippable material survived the prune:" >&2
+    echo "$leaked" >&2
+    exit 1
+fi
 # The uninstaller lives beside the app that offers it. The SDK fetch does
 # not need staging of its own: fetch_sdk.py ships inside tools/rack above,
 # and it is the ONE resolver-and-fetcher (a second shell copy of it shipped

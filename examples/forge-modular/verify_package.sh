@@ -174,6 +174,19 @@ else
     say_bad "the shipped DSP vocabulary extracts $vocab lines — the model would be given none"
 fi
 
+# Reference texts fetched for the citation checker are gitignored, and ditto
+# does not read .gitignore -- so they shipped once, inside a signed installer.
+# Checked here as well as at staging because this runs against the built
+# artifact, which is the only thing that can prove what a user would receive.
+leaked="$(find "$ROOT/Contents/Resources" \( -name .corpus -o -name .git \) \
+          2>/dev/null | head -1)"
+if [[ -z "$leaked" ]]; then
+    say_ok "no fetched reference texts ride along in the payload"
+else
+    say_bad "the payload carries $leaked — a signed installer would
+         redistribute somebody else's copyrighted text"
+fi
+
 # Measured parameter bounds, counted rather than merely present. An empty or
 # range-less seed is the failure that looks like success: it ships, it parses,
 # and every module still reaches the model with no bounds, which is the state
