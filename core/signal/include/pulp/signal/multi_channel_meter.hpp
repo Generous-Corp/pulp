@@ -99,8 +99,10 @@ struct MultiChannelMeterData {
     std::array<ChannelLevels, kMaxMeterChannels> channels{};
     int num_channels = 0;
     float correlation = 0.0f;    // Stereo correlation (-1 to +1), valid when num_channels >= 2
-    float lufs_momentary = -std::numeric_limits<float>::infinity(); // BS.1770 K-weighted, 400 ms
     float lufs_integrated = -std::numeric_limits<float>::infinity(); // BS.1770 gated, start to current block
+    // Appended after the legacy aggregate fields so positional aggregate
+    // initialization continues to bind its fourth value to lufs_integrated.
+    float lufs_momentary = -std::numeric_limits<float>::infinity(); // BS.1770 K-weighted, 400 ms
 };
 
 /// Configurable ballistics for multi-channel meter display (UI thread).
@@ -199,7 +201,7 @@ public:
     }
 
     /// Prepare the loudness meter with an explicit speaker layout. Integrated
-    /// gating uses a prepared 0.001 LU Fenwick histogram: memory and update
+    /// gating uses a prepared 0.01 LU Fenwick histogram: memory and update
     /// cost remain fixed regardless of measurement duration. Allocation occurs
     /// only here.
     void prepare(double sample_rate, int num_channels,
@@ -215,22 +217,7 @@ public:
         gate_energy_tree_.assign(kGateBinCount + 1, 0.0);
         gate_count_tree_.assign(kGateBinCount + 1, 0);
 
-        // Reset accumulators
-        for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
-            block_peak_[ch] = 0.0f;
-            block_sum_sq_[ch] = 0.0f;
-            block_clipped_[ch] = false;
-        }
-        block_samples_ = 0;
-        correlation_sum_xy_ = 0.0;
-        correlation_sum_xx_ = 0.0;
-        correlation_sum_yy_ = 0.0;
-        correlation_samples_ = 0;
-
-        reset_loudness_state();
-
-        snapshot_ = {};
-        snapshot_.num_channels = num_channels_;
+        reset_measurement_state(num_channels_);
     }
 
     /// Process a block of interleaved or deinterleaved audio.
@@ -241,17 +228,16 @@ public:
 
         for (int ch = 0; ch < num_channels; ++ch) {
             if (channels[ch] == nullptr) {
-                clear_inactive_channel_accumulators(ch, num_channels);
-                if (ch < 2) reset_correlation_accumulators();
                 num_channels = ch;
                 break;
             }
         }
 
-        if (num_channels != loudness_num_channels_) {
-            reset_loudness_state();
-            loudness_num_channels_ = num_channels;
-        }
+        // A topology transition starts a new measurement programme. Reset all
+        // windows together so peak/RMS/clip/correlation and loudness never mix
+        // samples from different layouts.
+        if (num_channels != active_num_channels_)
+            reset_measurement_state(num_channels);
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {
@@ -305,6 +291,11 @@ public:
     const MultiChannelMeterData& snapshot() const { return snapshot_; }
 
     void reset() {
+        reset_measurement_state(0);
+    }
+
+private:
+    void reset_measurement_state(int active_channels) {
         for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
             block_peak_[ch] = 0.0f;
             block_sum_sq_[ch] = 0.0f;
@@ -317,23 +308,8 @@ public:
         correlation_samples_ = 0;
         reset_loudness_state();
         snapshot_ = {};
-    }
-
-private:
-    void clear_channel_accumulators(int ch) {
-        block_peak_[ch] = 0.0f;
-        block_sum_sq_[ch] = 0.0;
-        block_clipped_[ch] = false;
-        loudness_hop_energy_[ch] = 0.0;
-        for (auto& hop : loudness_energy_ring_) hop[ch] = 0.0;
-        k_filters_[ch].reset();
-        snapshot_.channels[ch] = {};
-    }
-
-    void clear_inactive_channel_accumulators(int first_channel, int limit) {
-        limit = std::clamp(limit, 0, kMaxMeterChannels);
-        for (int ch = first_channel; ch < limit; ++ch)
-            clear_channel_accumulators(ch);
+        active_num_channels_ = active_channels;
+        snapshot_.num_channels = active_channels;
     }
 
     void reset_correlation_accumulators() {
@@ -382,9 +358,13 @@ private:
     }
 
     static constexpr double kAbsoluteGateLufs = -70.0;
-    static constexpr double kGateMaximumLufs = 30.0;
-    static constexpr double kGateBinWidthLu = 0.001;
-    static constexpr std::size_t kGateBinCount = 100001;
+    // Cover the complete finite-double energy domain. This avoids a special
+    // overflow bin whose members could not be classified correctly when a hot
+    // programme's relative gate lies inside that bin. 0.01 LU is comfortably
+    // inside the 0.1 LU tolerance of the EBU minimum-requirements vectors.
+    static constexpr double kGateMaximumLufs = 3082.0;
+    static constexpr double kGateBinWidthLu = 0.01;
+    static constexpr std::size_t kGateBinCount = 315201;
 
     struct Biquad {
         double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
@@ -460,7 +440,6 @@ private:
         loudness_hop_position_ = 0;
         loudness_hops_completed_ = 0;
         loudness_ring_position_ = 0;
-        loudness_num_channels_ = num_channels_;
         snapshot_.lufs_momentary = -std::numeric_limits<float>::infinity();
         snapshot_.lufs_integrated = -std::numeric_limits<float>::infinity();
         std::fill(gate_energy_tree_.begin(), gate_energy_tree_.end(), 0.0);
@@ -553,7 +532,7 @@ private:
     int loudness_hop_position_ = 0;
     std::uint64_t loudness_hops_completed_ = 0;
     std::size_t loudness_ring_position_ = 0;
-    int loudness_num_channels_ = 0;
+    int active_num_channels_ = 0;
     std::array<KWeighting, kMaxMeterChannels> k_filters_{};
     std::array<double, kMaxMeterChannels> channel_weights_{};
     std::array<double, kMaxMeterChannels> loudness_hop_energy_{};

@@ -8,11 +8,47 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
+#include <numbers>
+#include <type_traits>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp::signal;
+
+namespace {
+
+double biquad_response_db(const LoudnessBiquadCoefficients& coefficients,
+                          double frequency, double sample_rate) {
+    const auto z = std::polar(1.0, -2.0 * std::numbers::pi * frequency / sample_rate);
+    const auto z2 = z * z;
+    return 20.0 * std::log10(std::abs(
+        (coefficients.b0 + coefficients.b1 * z + coefficients.b2 * z2) /
+        (1.0 + coefficients.a1 * z + coefficients.a2 * z2)));
+}
+
+double k_weighting_response_db(double frequency, double sample_rate) {
+    const auto coefficients = k_weighting_coefficients(sample_rate);
+    REQUIRE(coefficients.valid);
+    return biquad_response_db(coefficients.shelf, frequency, sample_rate)
+         + biquad_response_db(coefficients.high_pass, frequency, sample_rate);
+}
+
+} // namespace
+
+static_assert(std::is_aggregate_v<MultiChannelMeterData>);
+
+TEST_CASE("MultiChannelMeterData preserves legacy positional aggregate initialization",
+          "[signal][meter][compatibility]") {
+    std::array<ChannelLevels, kMaxMeterChannels> channels{};
+    MultiChannelMeterData legacy{channels, 2, 0.25f, -17.5f};
+
+    REQUIRE(legacy.num_channels == 2);
+    REQUIRE_THAT(legacy.correlation, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(legacy.lufs_integrated, WithinAbs(-17.5f, 1e-6f));
+    REQUIRE(std::isinf(legacy.lufs_momentary));
+}
 
 TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after prepare",
           "[signal][meter][rt-safety]") {
@@ -184,6 +220,45 @@ TEST_CASE("K-weighting design reproduces the BS.1770 48 kHz coefficient tables",
     REQUIRE_FALSE(k_weighting_coefficients(0.0).valid);
 }
 
+TEST_CASE("K-weighting arbitrary-rate design has the independently tabulated response",
+          "[signal][meter][loudness]") {
+    // Values were calculated independently from the BS.1770 analog prototype
+    // and a bilinear transform, rather than from this implementation's output.
+    REQUIRE_THAT(k_weighting_response_db(100.0, 44100.0),
+                 WithinAbs(-1.129671272642, 1e-9));
+    REQUIRE_THAT(k_weighting_response_db(1000.0, 44100.0),
+                 WithinAbs(0.700461752790, 1e-9));
+    REQUIRE_THAT(k_weighting_response_db(10000.0, 44100.0),
+                 WithinAbs(4.045849905647, 1e-9));
+    REQUIRE_THAT(k_weighting_response_db(100.0, 96000.0),
+                 WithinAbs(-1.155142518290, 1e-9));
+    REQUIRE_THAT(k_weighting_response_db(1000.0, 96000.0),
+                 WithinAbs(0.680401211521, 1e-9));
+    REQUIRE_THAT(k_weighting_response_db(10000.0, 96000.0),
+                 WithinAbs(4.019537351811, 1e-9));
+}
+
+TEST_CASE("MultiChannelMeter matches EBU Tech 3341 minimum-requirements Test 1",
+          "[signal][meter][loudness][ebu-vector]") {
+    // Fetch-free numeric representation of EBU Tech 3341 v4.0, Table 1,
+    // Test 1: stereo, in-phase 1000 Hz sine, -23.0 dBFS peak per channel,
+    // 20 seconds, expected M/S/I -23.0 +/- 0.1 LUFS. Source:
+    // https://tech.ebu.ch/files/live/sites/tech/files/shared/tech/tech3341v4_0.pdf
+    constexpr int sample_rate = 48000;
+    constexpr int duration_samples = 20 * sample_rate;
+    constexpr float amplitude = 0.0707945784384138f; // 10^(-23/20)
+    auto vector = pulp::test::audio::make_sine(
+        2, duration_samples, 1000.0f, sample_rate, amplitude);
+    const float* channels[] = {vector.channel(0).data(), vector.channel(1).data()};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 2);
+    meter.process(channels, 2, duration_samples);
+
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(-23.0f, 0.1f));
+    REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(-23.0f, 0.1f));
+}
+
 TEST_CASE("MultiChannelMeter matches the BS.1770 997 Hz reference level",
           "[signal][meter][loudness]") {
     constexpr int sample_rate = 48000;
@@ -242,6 +317,68 @@ TEST_CASE("MultiChannelMeter integrated loudness uses absolute and relative gate
     REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(-23.141f, 0.02f));
     constexpr float ungated_negative_control = -25.977f;
     REQUIRE(std::abs(ungated_negative_control - meter.snapshot().lufs_integrated) > 2.8f);
+}
+
+TEST_CASE("MultiChannelMeter gates finite programmes above 40 LUFS",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    constexpr int segment_frames = sample_rate * 2;
+    auto hot = pulp::test::audio::make_sine(
+        1, segment_frames, 997.0f, sample_rate, 200.0f);
+    const float* hot_channels[] = {hot.channel(0).data()};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 1);
+    meter.process(hot_channels, 1, segment_frames);
+
+    // Hot blocks are about +43.01 LUFS, putting their relative gate above the
+    // old +30 LUFS histogram ceiling. The integrated result must remain finite.
+    REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
+    REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(43.01f, 0.03f));
+}
+
+TEST_CASE("MultiChannelMeter restarts every window across 2 to 1 to 2 topology changes",
+          "[signal][meter][loudness][rt-safety]") {
+    constexpr int sample_rate = 48000;
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 2);
+
+    std::array<float, sample_rate * 4 / 10> clipped_left{};
+    std::array<float, sample_rate * 4 / 10> clipped_right{};
+    clipped_left.fill(1.2f);
+    clipped_right.fill(1.2f);
+    const float* clipped[] = {clipped_left.data(), clipped_right.data()};
+    meter.process(clipped, 2, static_cast<int>(clipped_left.size()));
+    REQUIRE(meter.snapshot().channels[0].clipped);
+    REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
+
+    std::array<float, sample_rate / 200> mono{};
+    mono.fill(0.75f);
+    const float* mono_channels[] = {mono.data()};
+    meter.process(mono_channels, 1, static_cast<int>(mono.size()));
+    REQUIRE(meter.snapshot().num_channels == 1);
+    REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(meter.snapshot().channels[0].clipped);
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+
+    std::array<float, sample_rate / 100> fresh_left{};
+    std::array<float, sample_rate / 100> fresh_right{};
+    fresh_left.fill(0.25f);
+    fresh_right.fill(-0.25f);
+    const float* fresh[] = {fresh_left.data(), fresh_right.data()};
+    meter.process(fresh, 2, static_cast<int>(fresh_left.size()));
+
+    const auto& snapshot = meter.snapshot();
+    REQUIRE(snapshot.num_channels == 2);
+    REQUIRE_THAT(snapshot.channels[0].peak, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(snapshot.channels[0].rms, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(snapshot.channels[1].peak, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(snapshot.channels[1].rms, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_FALSE(snapshot.channels[0].clipped);
+    REQUIRE_FALSE(snapshot.channels[1].clipped);
+    REQUIRE_THAT(snapshot.correlation, WithinAbs(-1.0f, 1e-6f));
+    REQUIRE(std::isinf(snapshot.lufs_momentary));
+    REQUIRE(std::isinf(snapshot.lufs_integrated));
 }
 
 TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
