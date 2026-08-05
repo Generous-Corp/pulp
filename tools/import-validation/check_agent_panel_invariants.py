@@ -101,9 +101,22 @@ def main() -> int:
     try:
         shutil.copy(panel, work / "panel.html")
         shutil.copy(args.pack_css, work / "styles.css")
-        # The pack's @font-face rules resolve relative to the page. A 404 on any
-        # of them aborts the whole capture as `capture-source-unresolved`, which
-        # reads like a broken design rather than a missing asset.
+        # The pack's @font-face rules resolve relative to the page, so stage the
+        # fonts beside it when they are available.
+        #
+        # Fonts are NOT required for the clipped fixture, whose only job is to be
+        # refused: measured, the real pack stylesheet with no fonts/ directory at
+        # all reproduces `capture-control-clipped` byte for byte, same four
+        # controls, same 109px. Ten @font-face rules 404 and the capture
+        # proceeds. (An earlier comment here claimed a font 404 aborts the whole
+        # capture as `capture-source-unresolved`; that is not true for this
+        # fixture. Do not rely on it when simplifying.)
+        #
+        # The STYLESHEET is a different matter and is load-bearing even here:
+        # with an empty one the page trips `capture-negative-overflow` first,
+        # which is the wrong reason, and a by-name gate then fails rather than
+        # skipping. Fonts matter for the POSITIVE panels, which score fidelity
+        # over real text runs.
         if args.pack_fonts and Path(args.pack_fonts).is_dir():
             (work / "fonts").mkdir(exist_ok=True)
             for f in Path(args.pack_fonts).glob("*.ttf"):
