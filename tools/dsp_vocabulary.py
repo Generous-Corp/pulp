@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive what `pulp::signal` actually exposes, straight from the headers.
+"""Render the legacy `pulp::signal` vocabulary from the capability manifest.
 
 This lives in Pulp's tools/ rather than beside any one consumer, because more
 than one thing needs it and none of them should own it:
@@ -8,10 +8,10 @@ than one thing needs it and none of them should own it:
     Pulp really provides instead of guessing;
   * Forge's graph -> C++ exporter validates its emitter table against it.
 
-Both previously hand-maintained their own idea of the API, and both got it
-wrong in the same way: a plausible-but-invented signature that only a compiler
-caught. A single derived source removes that whole class of drift, and means a
-new class in core/signal reaches every consumer without anyone editing a list.
+The installed agent-capability manifest is now the consumer-facing authority.
+`scan_headers()` remains private regeneration plumbing used by the manifest
+writer/freshness gate; normal JSON and Markdown output read the checked
+manifest projection so consumers cannot observe a competing inventory.
 
 Output: markdown for prompting, or `--json` for machine consumers.
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import sys
 
@@ -100,7 +101,8 @@ def public_methods(text: str, cls: str):
     return uniq[:7]
 
 
-def scan():
+def scan_headers():
+    """Regeneration input; consumers use scan(), which reads the manifest."""
     found = {}
     for root, _, files in os.walk(SIGNAL):
         for fn in sorted(files):
@@ -121,6 +123,12 @@ def scan():
             if classes:
                 found[rel] = classes
     return found
+
+
+def scan():
+    manifest = pathlib.Path(HERE).parent / "docs/status/agent-capabilities.json"
+    document = json.loads(manifest.read_text())
+    return document["compatibility"]["signal_vocabulary"]["entries"]
 
 
 def grouped(found):

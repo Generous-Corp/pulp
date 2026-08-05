@@ -554,8 +554,12 @@ choices, or product policy.
 
 The first inventory covers representative public signal processing, instrument
 voice allocation, MPE note ownership, exact tick/swing timebase types, and host
-transport projection. A checked C++ fixture includes and instantiates every
-advertised symbol. Maintainers validate or regenerate both artifacts with:
+transport projection. Swing projection uses an exact rational ratio; inverse
+recovery is bounded by integer-tick rounding rather than exact. A checked C++
+fixture includes and instantiates every advertised symbol. A separate acceptance
+test installs the SDK, configures an outside consumer, reads the installed
+manifest, and compiles/links against the exported targets. Maintainers validate
+or regenerate both artifacts with:
 
 ```bash
 python3 tools/scripts/agent_capability_manifest.py --check
@@ -563,8 +567,10 @@ python3 tools/scripts/agent_capability_manifest.py --json
 python3 tools/scripts/agent_capability_manifest.py --write
 ```
 
-`tools/dsp_vocabulary.py` remains available with its existing signal-only JSON
-and Markdown output while consumers migrate to the installed manifest.
+`tools/dsp_vocabulary.py` remains available with its exact signal-only JSON and
+Markdown output while consumers migrate. That renderer reads the complete
+compatibility projection stored in the manifest; its private header scan is
+used only to regenerate and freshness-check that payload.
 
 ---
 

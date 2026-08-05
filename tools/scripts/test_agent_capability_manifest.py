@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import pathlib
 import subprocess
 import sys
@@ -29,6 +30,9 @@ def main() -> int:
     expect_failure("duplicate-key.json", "duplicate capability key")
     expect_failure("missing-symbol.json", "outside curated exports")
     expect_failure("missing-descriptor.json", "references missing Forge descriptor")
+    expect_failure("wrong-types.json", "summary must be a non-empty string")
+    expect_failure("nested-wrong-types.json", "units must be an array of non-empty strings")
+    expect_failure("count-drift.json", "counts must exactly match")
 
     canonical = json.loads(run("--json").stdout)
     with tempfile.TemporaryDirectory() as temp:
@@ -39,9 +43,22 @@ def main() -> int:
         result = run("--check", "--snapshot", str(stale))
         assert result.returncode != 0 and "STALE" in result.stderr, result.stderr
 
-    legacy = subprocess.run([sys.executable, str(ROOT / "tools/dsp_vocabulary.py"), "--json"],
-                            cwd=ROOT, text=True, capture_output=True, check=True)
+    vocabulary_tool = ROOT / "tools/dsp_vocabulary.py"
+    spec = importlib.util.spec_from_file_location("pulp_dsp_vocabulary_test", vocabulary_tool)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    header_projection = module.scan_headers()
+    expected_json = json.dumps(header_projection, indent=2) + "\n"
+    legacy = subprocess.run([sys.executable, str(vocabulary_tool), "--json"], cwd=ROOT,
+                            text=True, capture_output=True, check=True)
+    assert legacy.stdout == expected_json, "legacy JSON output changed or bypassed the manifest"
+    legacy_markdown = subprocess.run([sys.executable, str(vocabulary_tool)], cwd=ROOT,
+                                     text=True, capture_output=True, check=True)
+    assert legacy_markdown.stdout == module.markdown(header_projection) + "\n"
     vocabulary = json.loads(legacy.stdout)
+    manifest_projection = canonical["compatibility"]["signal_vocabulary"]["entries"]
+    assert vocabulary == manifest_projection == header_projection
     advertised_signal = [row for row in canonical["capabilities"] if row["domain"] == "signal"]
     for row in advertised_signal:
         relative = row["include"].removeprefix("pulp/signal/")
@@ -49,7 +66,7 @@ def main() -> int:
         class_name = row["symbol"].split("::")[-1].split("<", 1)[0]
         assert any(item["class"] == class_name for item in vocabulary[relative]), class_name
 
-    print("agent-capabilities: 5 negative/compatibility checks passed")
+    print("agent-capabilities: 10 negative/compatibility checks passed")
     return 0
 
 
