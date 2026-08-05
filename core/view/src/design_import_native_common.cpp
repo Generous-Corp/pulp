@@ -1318,7 +1318,8 @@ static std::optional<Color> parse_any_css_color(const std::string& value) {
 }
 
 void apply_visual_style(View& view, const IRStyle& style,
-                        bool skip_border = false) {
+                        bool skip_border = false,
+                        bool skip_box_shadow = false) {
     if (style.background_color) {
         if (auto color = parse_any_css_color(*style.background_color))
             view.set_background_color(*color);
@@ -1344,7 +1345,12 @@ void apply_visual_style(View& view, const IRStyle& style,
     // The first layer paints ON TOP (View::add_box_shadow appends and the
     // painter iterates in reverse), which is the order the IR already holds, so
     // set-then-append reproduces the cascade without reversing anything here.
-    if (!style.box_shadow.empty()) {
+    //
+    // `skip_box_shadow` is for a node whose body is painted by the layer
+    // BENEATH it — see body_is_painted_beneath(). Installing the stack there
+    // draws every layer a second time over the copy that layer already drew,
+    // and two composites of one translucent layer are not one composite.
+    if (!skip_box_shadow && !style.box_shadow.empty()) {
         bool first = true;
         for (const auto& layer : style.box_shadow) {
             // A layer whose colour will not parse is DROPPED rather than
@@ -1670,6 +1676,19 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
     }
     if (auto stroke_width = attr_float(node, "stroke-width"))
         line.set_stroke_width(*stroke_width);
+}
+
+// True when this node's BODY is drawn by the layer beneath it — the capture
+// bitmap (`capture`) or the lowered native node it was hoisted out of
+// (`underlay`). The lowering records Chrome's computed appearance on the
+// control regardless, so its geometry survives a round-trip; painting that
+// appearance again composites every box-shadow layer TWICE. Doubling a
+// 0.5-alpha offset layer takes its halo to 0.75 and stretches the visible
+// tail, which reads as a dark crescent under a dial that the browser draws
+// with a clean gap.
+bool body_is_painted_beneath(const IRNode& node) {
+    const auto body = attr(node, "designed_body").value_or("");
+    return body == "underlay" || body == "capture";
 }
 
 // Skin a knob with its captured body disc when hoist_captured_art_knobs +
@@ -2031,7 +2050,8 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_identity(*view, node, resolved);
     apply_layout(*view, node, parent_direction);
     apply_visual_style(*view, node.style,
-                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
+                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
+                       /*skip_box_shadow=*/body_is_painted_beneath(node));
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 

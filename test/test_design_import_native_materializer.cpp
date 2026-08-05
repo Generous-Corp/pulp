@@ -3204,3 +3204,47 @@ TEST_CASE("Fader::paint consults its paint delegate, as Knob::paint does",
     REQUIRE(painter->last_horizontal == false);
     REQUIRE(painter->last_thumb_pos == Catch::Approx(0.25f));
 }
+
+TEST_CASE("a lowered control does not repaint the box-shadow its underlay drew",
+          "[view][import][native-materializer][shadow]") {
+    // A bound dial is lowered into a CONTROL node placed over the native node
+    // it came from, and Chrome's computed appearance is recorded on that
+    // control so its geometry survives a round-trip. `designed_body` states
+    // that the BODY is the layer beneath — but the materializer installed the
+    // recorded shadow stack on the control as well, so every layer composited
+    // twice. Two composites of one translucent layer are not one composite: a
+    // 0.5-alpha offset layer reaches 0.75 and its tail stretches, which on a
+    // real panel reads as a dark crescent under the dial where the browser
+    // leaves a clean gap.
+    DesignIR ir;
+    ir.root = frame("root", 200.0f, 200.0f, LayoutDirection::column);
+
+    const auto stack = parse_css_box_shadow(
+        "rgba(0, 0, 0, 0.5) 0px 18px 36px 0px, "
+        "rgba(0, 0, 0, 0.34) 0px 4px 9px 0px");
+    REQUIRE(stack.size() == 2);
+
+    // The lowered native node the dial was hoisted out of. It draws the body.
+    auto underlay = frame("dial", 160.0f, 160.0f, LayoutDirection::column);
+    underlay.style.background_color = "rgb(247, 240, 224)";
+    underlay.style.box_shadow = stack;
+    ir.root.children.push_back(std::move(underlay));
+
+    // The control hoisted over it, carrying the same recorded appearance.
+    auto control = frame("CUTOFF", 160.0f, 160.0f, LayoutDirection::column);
+    control.audio_widget = AudioWidgetType::knob;
+    control.attributes["binding"] = "cutoff";
+    control.attributes["designed_body"] = "underlay";
+    control.style.background_color = "rgb(247, 240, 224)";
+    control.style.box_shadow = stack;
+    ir.root.children.push_back(std::move(control));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    // The underlay still paints the design's shadow: the control must lose its
+    // duplicate, not the design its depth.
+    CHECK(root->child_at(0)->box_shadows().size() == 2);
+    CHECK(root->child_at(1)->box_shadows().empty());
+}

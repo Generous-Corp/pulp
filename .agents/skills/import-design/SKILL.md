@@ -5235,6 +5235,42 @@ correctness bug before it was made explicit; treat them as invariants.
   The area metric is blind to this: forge moved 0.0522 → 0.0520 for a change
   that visibly corrected every card corner. Judge it on a magnified crop.
 
+- **A lowered control carries a COPY of the body beneath it, so anything it
+  repaints is composited twice.** `lower_semantic_controls` builds the control
+  node fresh and then calls `apply_computed_styles` to record Chrome's resolved
+  appearance on it — gradient, radius, and the whole box-shadow stack — while
+  `designed_body` (`underlay` or `capture`) states that the body is drawn by the
+  layer beneath. Both are deliberate: the copy keeps the control's geometry
+  through a round trip. What is NOT safe is painting that copy. Two composites
+  of one translucent layer are not one composite, and a 0.5-alpha offset shadow
+  reaches 0.75 with a stretched tail — a dark crescent under a dial where the
+  browser leaves a clean gap.
+
+  The tell is directional and everywhere at once: EVERY lowered control on the
+  panel is darker than Chrome just outside its box, worst under the biggest
+  dial, and the excess follows each layer's own coverage, so an offset layer
+  shows heavily on the offset side and faintly all the way round. That is one
+  defect, not two. Measure it as mean luma in the ring OUTSIDE the control's box
+  — a whole-panel percentage at tolerance 16 cannot see the 1-10 luma half of it
+  at all.
+
+  Watch for the same shape in any other property the control copies:
+  `apply_visual_style` still installs background, gradient and border on it. An
+  opaque background over an identical opaque background is invisible, which is
+  why only the shadow was caught.
+
+- **`box-shadow` and `filter: drop-shadow()` do NOT share a blur→sigma
+  conversion, and the plausible unification is wrong.** Measured off Chrome 151
+  at six radii (black shadow on white, DPR 1, Gaussian-CDF fit to the rendered
+  coverage, residual ~0.2/255): `box-shadow: 0 0 Npx` renders with sigma = N/2
+  exactly — which is what `skia_canvas_box_shadow.cpp` already does and what the
+  CSS spec says — while `drop-shadow(0 0 Npx)` on the same page fits sigma = N.
+  Because the two spellings visibly differ for the same N, "correcting"
+  box-shadow to Skia's `ConvertRadiusToSigma(blur/2)` (`0.2887*blur + 0.5`) is a
+  convincing change that is 1.7x too tight. `test_box_shadow_cache.cpp` pins the
+  measured law. If a shadow looks too heavy, suspect what is painting it twice
+  before suspecting the blur.
+
 - **A slow `pulp-import-design` run is usually the scratch sweep, not the
   import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
   removes stale scratch siblings before every run by walking the temp root, so
