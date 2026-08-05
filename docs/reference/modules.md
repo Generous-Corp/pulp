@@ -499,9 +499,45 @@ The named collection is a 12-TET compatibility vocabulary, not a claim of
 microtonal support. More tuning systems belong in the provider-neutral MIDI
 tuning APIs rather than in this representation.
 
-This module is the shared-theory foundation sub-slice. It does not yet provide
-pitch spelling, chord recognition, voicing constraints, or minimum-motion
-voice leading; those remain separate later additions rather than implied
+### Generative pattern kernels
+
+`BinaryPattern<MaxSteps>` defaults to a 64-step capacity and reports overflow
+instead of truncating. The following operations are bounded, `constexpr`, and
+allocation-free during evaluation:
+
+- `euclidean_pattern()` returns a deterministic onset-first rotation, accepts a
+  silent zero-pulse pattern, and rejects zero steps, excess pulses, and capacity
+  overflow. This API returns `10010` for `(steps=5, pulses=2)`; conventional
+  E-notation orders arguments `(pulses, steps)`.
+- `PatternWalker` supports forward, reverse, ping-pong, and random
+  traversal. `reset()` restores index zero for forward/ping-pong and the final
+  index for reverse. Random traversal consumes a caller-supplied deterministic
+  random word and has no internal stream to rewind; calling `next()` without a
+  word in random mode fails explicitly.
+- `PreparedMarkovModel<MaxStates>` defaults to 16 states. `prepare()` consumes a
+  row-major table of unsigned integer weights on the control thread and rejects
+  empty, oversized, malformed, or zero-total rows. Its fixed state capacity and
+  32-bit weights make the 64-bit cumulative row total non-overflowing. `next()`
+  is a const bounded lookup from a caller-supplied random word, with no
+  allocation or failure except an invalid state.
+- `cellular_evolve()` applies an elementary 8-bit cellular rule with explicit
+  wrapping or fixed-off edges.
+- `looping_shift_register()` rotates the last bit to the first and optionally
+  flips the copied bit using an integer numerator/denominator mutation chance.
+  Mutation consumes a caller-supplied random word. Empty input and invalid
+  probabilities fail without changing the input.
+
+Random words are mapped to bounded choices with full-domain multiply-high
+reduction rather than remainder reduction.
+
+Construction and transformation results carry explicit errors rather than
+silently truncating or repairing invalid input. None of these APIs owns
+randomness, transport, event ordering, a transform chain, or a callback
+accumulator. Callers obtain coordinate-seeded draws from the canonical timebase
+randomness lane, so callback partition never enters these kernels.
+
+The theory surface does not provide pitch spelling, chord recognition, voicing
+constraints, or minimum-motion voice leading; those are not implied
 capabilities of `ChordFormula`.
 
 ---
