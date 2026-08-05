@@ -273,6 +273,57 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## Ranges are measured by a headless Rack, and both halves are traps
+
+Parameter ranges (`minValue` / `maxValue` / `defaultValue`) come off a
+`ParamQuantity`, which exists only on a widget Rack has built. So they can only
+be measured from inside a running Rack — and for the whole life of the feature
+they never were, because measuring them meant a person opening Rack and
+dragging in the modules they cared about. `tools/rack/measure_ranges.py`
+removes the person: it writes a patch, opens it headless, and reads the map
+back. Two things make that work, and neither is guessable.
+
+**A headless Rack never runs a frame, so `step()` never fires.** CARTOG's
+rescan-on-count-change lives in `step()`, which is the per-frame callback:
+`Rack -h <patch>` loads the patch, builds every widget, and tears the scene
+down without stepping once. The widget existed and its panel loaded; nothing
+ever asked it to measure. The scan therefore ALSO hangs off `onAdd()`, which
+Rack fires as each module joins the scene, during patch load. Keep both —
+`onAdd` is the only path a headless run has, `step()` is what keeps an
+interactive session current.
+
+**`onAdd` fires per module, in patch order, so the scanner goes LAST.** Verified
+against Rack, not assumed: named first, CARTOG logs `placed alongside 1
+modules` and writes a map holding none of its subjects; named last, `alongside
+44`. `getModules()` already includes CARTOG itself when its `onAdd` runs, so
+the count is subjects + 1. `scan()` records the count it measured, so `step()`
+compares against what was actually seen rather than against a number a caller
+remembered to set.
+
+**Every automated run must be killed, and Rack holds that against the next
+one.** Headless Rack has no way to exit on its own, so the harness kills it —
+and the next launch decides it crashed last session and blocks in
+`osdialog_message` → `NSAlert runModal` on *"VCV Rack crashed during the last
+session … Clear your patch and start over?"*. There is no window and nobody at
+the keyboard, so it waits forever; the log stops dead after `Creating patch
+manager` and the run reports a library with no ranges in it. `--safe` is not an
+escape — it skips the plugins too. Against the real user directory the failures
+accumulate: measured on a working machine, 2 of 5 launches loaded the patch,
+then 0 of 8.
+
+The fix is a **throwaway Rack user directory per launch** (`make_scratch`),
+with the module library symlinked in and `settings.json` + `licenses` copied
+so a Pro launch stays licensed. A directory Rack has never seen has no last
+session to have crashed in: 5 of 5. It also stops the scan clobbering the
+user's autosave, log and open rack.
+
+**A zero here is never evidence on its own.** A wedged launch, a scanner placed
+first, and a genuinely empty library all produce the same "measured nothing".
+So the harness reads Rack's own log for `forge: CARTOG placed alongside N` and
+fails loudly with the reason instead of reporting a total, and its verdict is
+which models still lack ranges rather than whether a number went up. Modules
+with no params at all (CV funk's blanks, our MULT) are not a shortfall.
+
 ## Count the readers before you trust a format
 
 Every shared format here had more parsers than anybody was checking, and the

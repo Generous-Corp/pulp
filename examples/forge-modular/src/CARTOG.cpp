@@ -8,6 +8,7 @@
 
 #include <cxxabi.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <typeinfo>
@@ -441,6 +442,12 @@ struct CARTOGWidget : rack::app::ModuleWidget {
 
     void scan() {
         if (!APP || !APP->scene || !APP->scene->rack) return;
+        // The rack this measurement is current for. step() compares against
+        // it to decide whether the contents have changed since, so recording
+        // it here rather than at each call site means every scan -- the one
+        // on placement, the one on a count change, the button -- leaves the
+        // same mark, and none of them can forget to.
+        last_count = static_cast<int>(APP->scene->rack->getModules().size());
 
         std::string out = "{\n  \"modules\": [\n";
         bool first_mod = true;
@@ -555,6 +562,41 @@ struct CARTOGWidget : rack::app::ModuleWidget {
 
     int last_count = -1;
 
+    /// Scan the moment this widget joins the rack, because a scan driven only
+    /// from step() cannot run where nobody is watching.
+    ///
+    /// step() is the per-frame callback, so everything below it -- the
+    /// rescan-on-count-change and the button -- exists only while a window is
+    /// drawing. `Rack -h <patch>` loads the patch and tears the scene down
+    /// without ever running a frame, so the one situation where a scan has to
+    /// happen unattended was the one situation where it could not: the widget
+    /// was built, its panel was loaded, and nothing ever asked it to measure.
+    ///
+    /// onAdd fires as RackWidget takes each module, in the order the patch
+    /// lists them, so a patch naming CARTOG LAST has every subject placed by
+    /// the time this runs. That ordering is the harness's job, not a
+    /// requirement: a patch that puts CARTOG first still ends up fully
+    /// measured, because step() rescans on the count change -- it just needs a
+    /// frame, which an interactive session has and a headless load does not.
+    void onAdd(const AddEvent& e) override {
+        rack::app::ModuleWidget::onAdd(e);
+        if (!mod) return;
+        if (!APP || !APP->scene || !APP->scene->rack) return;
+        // Added to the RACK, not to something else. onAdd fires for any
+        // parent, and the module browser builds a preview of every model it
+        // lists -- so answering "is this a rack change?" with anything softer
+        // would sweep the whole library each time somebody scrolled the
+        // browser. A widget is in the rack by the time its own onAdd runs, so
+        // membership is the exact question and it can simply be asked.
+        const std::vector<rack::app::ModuleWidget*> placed =
+            APP->scene->rack->getModules();
+        if (std::find(placed.begin(), placed.end(), this) == placed.end())
+            return;
+        INFO("forge: CARTOG placed alongside %d modules; scanning",
+             static_cast<int>(placed.size()));
+        scan();
+    }
+
     void step() override {
         rack::app::ModuleWidget::step();
         if (!mod) return;
@@ -567,10 +609,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         // but the layout may not be.
         if (APP && APP->scene && APP->scene->rack) {
             const int n = static_cast<int>(APP->scene->rack->getModules().size());
-            if (n != last_count) {
-                last_count = n;
-                scan();
-            }
+            if (n != last_count) scan();       // scan() records what it saw
         }
 
         const bool down = mod->params[CARTOGModule::L::SCAN_PARAM].getValue() > 0.5f;
