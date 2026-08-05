@@ -38,7 +38,6 @@ endif()
 # from the subprocess/backend target so protocol validation and intake policy
 # can be tested without launching Chromium.
 add_executable(pulp-test-browser-capture-import
-    test_browser_capture_backdrop_filter.cpp
     test_browser_capture_ir.cpp
     test_browser_capture_text_metrics.cpp
     test_browser_capture_tree.cpp
@@ -59,6 +58,10 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp)
+if(PULP_HAS_SKIA)
+    target_sources(pulp-test-browser-capture-import PRIVATE
+        test_browser_capture_backdrop_filter.cpp)
+endif()
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
