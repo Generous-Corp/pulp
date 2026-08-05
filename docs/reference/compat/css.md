@@ -38,6 +38,34 @@ mapping, evidence, and caveat text.
 
 ## Recently changed
 
+- **A sized gradient layer TILES, and an all-`px` stop list resolves** —
+  two halves of one change, and they only work together. Previously
+  `background-size` reached `View` and stopped: it was a storage-only
+  slot that the paint path never read, so a gradient CSS had sized into
+  a tile painted **once** across the whole box. A
+  `linear-gradient(colour 1px, transparent 1px)` at
+  `background-size: 100% 32px` is only a scanline pattern if it repeats;
+  drawn once it is a single hairline.
+
+  The second half is the stop reader. A colour-stop list written
+  entirely in `px` now resolves against the gradient line at paint time —
+  which is the only place the line, and the `background-size` tile it may
+  belong to, is actually known.
+
+  **These do not work separately, and the failure is silent in both
+  directions.** Tiling alone moves zero pixels, because the untiled stop
+  list still resolves to a flat wash; the stop fix alone removes the wash
+  but produces no scanlines, because nothing repeats. Landing either half
+  by itself looks exactly like a broken implementation.
+
+  Still unsupported, and now stated precisely rather than lumped
+  together: `background-position` on a gradient layer, and
+  `background-size` on a **non-repeating** layer — both are stored and
+  ignored at paint. `cover` / `contain` / `auto` continue to mean the
+  element's box, because CSS gives a gradient no intrinsic size to fit. A
+  stop list that **mixes** `px` with percentages still reads the `px`
+  term as a raw 0..1 parameter.
+
 - **`backdropFilter` is a filter CHAIN at paint time, not blur-only** —
   the catalog entry moves from `parses blur(Npx) → setBackdropFilter(id,
   blur_px)` to `css_filter_chain → View::set_backdrop_filter_chain →

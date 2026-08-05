@@ -599,9 +599,9 @@
       ],
       "unsupportedValues": [
         "radial-gradient(... at <length> ...) \u2014 an `at` position given as a LENGTH is ignored and the shape silently re-centres; only keywords and percentages resolve (css_gradient.cpp axis_frac)",
-        "background-size / background-position on a gradient layer \u2014 both are stored on the View and ignored at paint, so a gradient that CSS sizes into a tile paints once across the whole box instead of tiling",
+        "background-position on a gradient layer, and `background-size` on a NON-repeating one: both are stored on the View and ignored at paint. `background-size` IS honoured wherever the layer repeats, so the gradient paints into the sized tile and the tile covers the box. `cover` / `contain` / `auto` still mean the element's box, because CSS gives a gradient no intrinsic size to fit",
         "a named-keyword <color> (e.g. `red`) resolves to opaque WHITE \u2014 parse_css_color has no named-colour table. Captured designs never hit this because Chromium serializes computed styles to rgb()/oklab(); hand-authored CSS does",
-        "a bare <length> colour-stop position (e.g. `#fff 0 1px`) is read as a raw 0..1 parameter instead of being resolved against the gradient line",
+        "a colour-stop list MIXING `px` lengths with percentages (e.g. `#fff 0%, #000 1px`) reads the `px` term as a raw 0..1 parameter. A list written ENTIRELY in `px` resolves against the gradient line at paint, which is the only place the line, and the `background-size` tile it may belong to, is known",
         "an elliptical radial degrades to a circle of its horizontal radius on the CoreGraphics backend; only Skia carries the per-axis local matrix"
       ],
       "tests": [
@@ -678,9 +678,9 @@
       ],
       "unsupportedValues": [
         "radial-gradient(... at <length> ...) — an `at` position given as a LENGTH is ignored and the shape silently re-centres; only keywords and percentages resolve (css_gradient.cpp axis_frac)",
-        "background-size / background-position on a gradient layer — both are stored on the View and ignored at paint, so a gradient that CSS sizes into a tile paints once across the whole box instead of tiling",
+        "background-position on a gradient layer, and `background-size` on a NON-repeating one: both are stored on the View and ignored at paint. `background-size` IS honoured wherever the layer repeats, so the gradient paints into the sized tile and the tile covers the box. `cover` / `contain` / `auto` still mean the element's box, because CSS gives a gradient no intrinsic size to fit",
         "a named-keyword <color> (e.g. `red`) resolves to opaque WHITE — parse_css_color has no named-colour table",
-        "a bare <length> colour-stop position (e.g. `#fff 0 1px`) is read as a raw 0..1 parameter instead of being resolved against the gradient line",
+        "a colour-stop list MIXING `px` lengths with percentages (e.g. `#fff 0%, #000 1px`) reads the `px` term as a raw 0..1 parameter. A list written ENTIRELY in `px` resolves against the gradient line at paint, which is the only place the line, and the `background-size` tile it may belong to, is known",
         "an elliptical radial degrades to a circle of its horizontal radius on the CoreGraphics backend; only Skia carries the per-axis local matrix"
       ],
       "tests": [

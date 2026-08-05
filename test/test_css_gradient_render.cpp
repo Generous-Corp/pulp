@@ -56,6 +56,34 @@ void require_same_render(const std::string& a, const std::string& b) {
     CHECK(cmp.similarity > 0.999f);
 }
 
+// The tiled twin of `render_css`: the same box, plus the `background-size` and
+// `background-repeat` a design pass writes when it wants a gradient repeated
+// rather than stretched.
+std::vector<uint8_t> render_css_tiled(const std::string& css,
+                                      const std::string& size,
+                                      const std::string& repeat = "repeat") {
+    View v;
+    v.set_bounds({0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize)});
+    v.set_background_color({20, 20, 20, 255});
+    v.set_background_size(size);
+    v.set_background_repeat(repeat);
+    REQUIRE(apply_css_background_gradient(v, css));
+    return render_to_png(v, kSize, kSize, 1.0f, ScreenshotBackend::skia);
+}
+
+// The pixel half of `require_same_render`, for cases whose two sides are not
+// both plain CSS strings. Same bar: the reference must contain a gradient
+// before a similarity check on it means anything.
+void require_same_pixels(const std::vector<uint8_t>& lhs,
+                         const std::vector<uint8_t>& rhs) {
+    const auto content = analyze_screenshot_content(rhs);
+    INFO("reference luminance stddev: " << content.luminance_stddev);
+    REQUIRE(content.luminance_stddev > 1.0);
+    const auto cmp = compare_screenshots(lhs, rhs);
+    INFO("similarity " << cmp.similarity << " mean_error " << cmp.mean_error);
+    CHECK(cmp.similarity > 0.999f);
+}
+
 // Eight bands of red-then-green across the box, written one band at a time.
 // On a kSize box with the line running `to right`, that is what a 20px
 // repeating band means: 20px is 12.5% of 160, and the colour flips halfway.
@@ -516,6 +544,64 @@ TEST_CASE("an unresolvable repeating band degrades instead of dropping",
         INFO("css: " << css);
         CHECK(applied);
     }
+}
+
+// ── A gradient CSS sizes into a tile, and the two halves it takes ──────────
+//
+// The construct is one line of authored CSS:
+//
+//     background-image: linear-gradient(<colour> 1px, transparent 1px);
+//     background-size:  100% 32px;
+//
+// and it needs TWO things this renderer did not do. `background-size` has to
+// size the box the gradient paints into, and the `1px` stops have to resolve
+// against THAT box rather than be read as the parameter 1.0. Either one alone
+// paints the wrong picture, so the three cases below pin the halves separately
+// and then together — a fix that lands one of them and reads an unchanged panel
+// as a failure is the specific mistake these exist to prevent.
+
+// Half one, on an untiled box: a stop list written entirely in `px` is a
+// LENGTH along the gradient line. Read as a parameter instead, `40px` means
+// 40.0, which clamps to the end of the ramp and floods the box with the first
+// colour.
+TEST_CASE("a colour stop written in px is a length along the line",
+          "[view][gradient][linear]") {
+    // The line runs `to bottom` across a kSize box, so 40px is a quarter of it.
+    require_same_render("linear-gradient(#ff0000 40px, #0000ff 40px)",
+                        "linear-gradient(#ff0000 25%, #0000ff 25%)");
+}
+
+// Half two, with stops that need no resolving: `background-size` shrinks the
+// box each layer paints into, and `background-repeat` covers the element with
+// copies of it. The equivalent is the repeating spelling of the same picture,
+// whose tiling two cases above already pin in pixels.
+TEST_CASE("background-size tiles a gradient instead of stretching it",
+          "[view][gradient][linear]") {
+    require_same_pixels(
+        render_css_tiled("linear-gradient(#ff0000 0%, #0000ff 100%)",
+                         "100% 40px"),
+        render_css("repeating-linear-gradient(#ff0000 0px, #0000ff 40px)"));
+}
+
+// Both halves, on the declaration this was found for. A one-pixel stop over a
+// 32px tile is a scanline every 32px; over the element's own box it is one
+// hairline at the top, and read as a parameter it is a flat wash. The negative
+// check is the point of the case: the tiled render must NOT equal the untiled
+// one, or a half-landed fix would pass this file.
+TEST_CASE("a one-pixel stop over a sized tile is a scanline per tile",
+          "[view][gradient][linear]") {
+    const std::string scanline =
+        "linear-gradient(#ff0000 1px, rgba(0, 0, 0, 0) 1px)";
+    const auto tiled = render_css_tiled(scanline, "100% 32px");
+    require_same_pixels(
+        tiled,
+        render_css("repeating-linear-gradient(#ff0000 0px, #ff0000 1px, "
+                   "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 32px)"));
+
+    const auto untiled = render_css(scanline);
+    const auto cmp = compare_screenshots(tiled, untiled);
+    INFO("tiled vs untiled similarity " << cmp.similarity);
+    CHECK(cmp.similarity < 0.999f);
 }
 
 // `repeating-radial-gradient` hits the same prefix miss and is admitted by the

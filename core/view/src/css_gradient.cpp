@@ -647,9 +647,13 @@ bool parse_one_gradient(const std::string& gradient,
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
         std::vector<StopUnit> units;
+        // The units are collected for BOTH spellings now. A repeating
+        // gradient needs them to find its band; a plain one needs them to know
+        // that its stops are still raw pixel lengths, which is the difference
+        // between a scanline and a flat wash.
         if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
                          /*angular=*/false, line_length(x0, y0, x1, y1),
-                         linear_repeats ? &units : nullptr))
+                         &units))
             return false;
         if (!colors.empty()) {
             // The band a repeating linear tiles runs from 0 to its LAST stop,
@@ -670,16 +674,25 @@ bool parse_one_gradient(const std::string& gradient,
             // had a background, so an unsupported gradient FORM reads as a
             // tiling bug in the painter — and the search goes to the paint
             // path, where there is nothing to find.
+            // "Every stop was written in `want`", with the one exception
+            // above: an unpositioned FIRST stop resolves to 0, which is where
+            // CSS puts it anyway and which reads the same in either unit.
+            const auto stops_all_in = [&](StopUnit want) {
+                if (units.empty() || want == StopUnit::none) return false;
+                for (std::size_t i = 0; i < units.size(); ++i) {
+                    if (i == 0 && units[i] == StopUnit::none) continue;
+                    if (units[i] != want) return false;
+                }
+                return true;
+            };
+
             float repeat_span = 0.0f;
             auto repeat_unit = View::BackgroundGradient::RepeatUnit::px;
+            bool positions_in_px = false;
             if (linear_repeats) {
                 const StopUnit band_unit =
                     units.empty() ? StopUnit::none : units.back();
-                bool uniform = band_unit != StopUnit::none;
-                for (std::size_t i = 0; i < units.size() && uniform; ++i) {
-                    if (i == 0 && units[i] == StopUnit::none) continue;
-                    uniform = units[i] == band_unit;
-                }
+                const bool uniform = stops_all_in(band_unit);
                 const float band =
                     *std::max_element(positions.begin(), positions.end());
                 if (uniform && band > 0.0f) {
@@ -696,11 +709,23 @@ bool parse_one_gradient(const std::string& gradient,
                         "the first has no position of its own); painting it "
                         "once instead: {}", gradient);
                 }
+            } else {
+                // A plain linear whose stops are ALL `px` lengths keeps them as
+                // lengths. The reader above has no line to divide them by, and
+                // the painter's line is the `background-size` TILE's whenever
+                // the layer is tiled — so collapsing them here would resolve
+                // them against the wrong box even once a box exists.
+                //
+                // Left as parameters, `1px` means 1.0, which is the END of the
+                // ramp: `linear-gradient(<colour> 1px, transparent 1px)` puts
+                // both stops there and floods the box with the first colour.
+                positions_in_px = stops_all_in(StopUnit::pixels);
             }
             out = {}; out.type = 1;
             out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
             out.linear_repeat = repeat_span;
             out.linear_repeat_unit = repeat_unit;
+            out.positions_in_px = positions_in_px;
             // The endpoints above are the best this box can give; when the
             // direction depends on the box, hand the painter the CSS intent so
             // it can redo the arithmetic once the view is laid out. Without

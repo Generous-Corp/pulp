@@ -1907,6 +1907,22 @@ public:
         enum class RepeatUnit { px, line_fraction };
         RepeatUnit linear_repeat_unit = RepeatUnit::px;
 
+        /// True when `positions` still hold raw `px` LENGTHS rather than 0..1
+        /// parameters, because every stop named one. The divisor is the
+        /// gradient LINE, whose length is a function of the laid-out box — and
+        /// of the `background-size` TILE when the layer is tiled — so the
+        /// division belongs at paint, beside `linear_repeat_unit`, which
+        /// carries its band's unit forward for the same reason.
+        ///
+        /// `linear-gradient(<colour> 1px, transparent 1px)` under
+        /// `background-size: 100% 32px` is a scanline every 32px. Read as
+        /// parameters instead, both stops land at 1.0 — the far end of the
+        /// ramp — and the layer paints its first colour over the WHOLE box.
+        /// That is a monotone wash, and it reads as a missing tile rather than
+        /// as a misread stop, which is why the two halves have to land
+        /// together.
+        bool positions_in_px = false;
+
         /// How a radial gradient's radii are sized, per css-images-3.
         /// `max_side` is not a CSS keyword — it is the pre-existing
         /// `radius x max(w,h)` circle the explicit setter has always meant,

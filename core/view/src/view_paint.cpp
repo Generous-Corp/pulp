@@ -26,7 +26,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace pulp::view {
@@ -624,6 +626,98 @@ void View::apply_overflow_and_clip_path(canvas::Canvas& canvas) {
     }
 }
 
+namespace {
+
+// CSS `background-size` resolved against a box: the size of the tile each
+// background-image layer paints into. `background-repeat` decides how many
+// copies follow, and it collapses into the same two numbers — an axis that
+// does not repeat keeps the element's own extent, so the tile loop below emits
+// exactly one row or column there without a second concept.
+//
+// Only the LENGTH and PERCENTAGE forms resolve here. `cover` / `contain` /
+// `auto` size a layer against its INTRINSIC dimensions, and CSS gives a
+// gradient none — so for the gradient stack all three mean "the element's own
+// box", which is a single untiled pass and exactly what this path did before
+// tiling existed.
+struct BackgroundTile {
+    float w = 0.0f, h = 0.0f;
+};
+
+// One `background-size` component in pixels, against `extent`. A keyword or a
+// unit this does not read returns nullopt, which drops the whole declaration
+// rather than tiling one axis on a guess.
+std::optional<float> background_size_axis(const std::string& tok, float extent) {
+    if (tok.empty()) return std::nullopt;
+    const auto number = [&](std::size_t unit_len) -> std::optional<float> {
+        if (tok.size() <= unit_len) return std::nullopt;
+        const std::string head = tok.substr(0, tok.size() - unit_len);
+        try {
+            std::size_t used = 0;
+            const float v = std::stof(head, &used);
+            if (used != head.size()) return std::nullopt;
+            return v;
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+    if (tok.back() == '%') {
+        const auto v = number(1);
+        return v ? std::optional<float>(*v * 0.01f * extent) : std::nullopt;
+    }
+    if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "px") == 0)
+        return number(2);
+    return std::nullopt;
+}
+
+BackgroundTile resolve_background_tile(const std::string& size_css,
+                                       const std::string& repeat_css,
+                                       float box_w, float box_h) {
+    BackgroundTile tile;
+    if (size_css.empty() || box_w <= 0.0f || box_h <= 0.0f) return tile;
+
+    // A SIZED, NON-REPEATING layer is deliberately left on the old path. Its
+    // ink lands wherever `background-position` says, and position is still a
+    // storage-only slot — so honouring the size without the origin would move
+    // paint to a place nothing has verified. Tiling is what this resolves; the
+    // sized-once case is its own change.
+    if (repeat_css == "no-repeat") return tile;
+
+    std::vector<std::string> parts;
+    std::istringstream in(size_css);
+    for (std::string tok; in >> tok;) parts.push_back(tok);
+    if (parts.empty() || parts.size() > 2) return tile;
+
+    const auto w = background_size_axis(parts[0], box_w);
+    // A single value sizes the x axis and leaves y `auto`, which for a gradient
+    // is the element's own height.
+    const auto h = parts.size() == 2 ? background_size_axis(parts[1], box_h)
+                                     : std::optional<float>(box_h);
+    if (!w || !h || !(*w > 0.0f) || !(*h > 0.0f)) return tile;
+    tile.w = *w;
+    tile.h = *h;
+
+    // `repeat-x` / `repeat-y` pin the other axis to the element, so that axis
+    // yields one tile and no ink moves along it. `round` and `space` differ
+    // only in how the remainder is distributed and tile here as `repeat` does —
+    // a closer approximation than not tiling at all, and named so nobody reads
+    // the omission as support.
+    if (repeat_css == "repeat-x") tile.h = box_h;
+    else if (repeat_css == "repeat-y") tile.w = box_w;
+    return tile;
+}
+
+// A stop list this long fits on the stack. Paint runs inside a ScopedNoAlloc
+// region, so resolving raw `px` stop positions must not reach for a vector; a
+// longer list keeps its raw positions and paints as it did before, which is
+// wrong but bounded and is not a shape a design pass emits.
+constexpr int kMaxInlineStops = 64;
+
+// A tile a fraction of a pixel wide would turn one fill into thousands. Past
+// this the layer paints once, as it did before tiling existed.
+constexpr int kMaxTilesPerAxis = 512;
+
+}  // namespace
+
 void View::paint_background_and_border(canvas::Canvas& canvas) {
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
@@ -687,31 +781,46 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
 
     // Paint background gradient if set (CSS background: linear/radial/conic).
     // The canvas + Skia/CoreGraphics backends implement all three; the View
-    // just dispatches on the stored type. cx/cy are box fractions; radial
-    // radius is a fraction of the larger box dimension; conic angle is radians.
-    // CSS lists background layers first-on-top, so paint the stack in reverse:
-    // the last entry goes down first and the first entry lands over it. Each
-    // pass is self-contained (set gradient → fill → clear), so layering needs
-    // only the loop.
+    // just dispatches on the stored type. cx/cy are TILE fractions; radial
+    // radius is a fraction of the larger tile dimension; conic angle is
+    // radians. CSS lists background layers first-on-top, so paint the stack in
+    // reverse: the last entry goes down first and the first entry lands over
+    // it. Each pass is self-contained (set gradient → fill → clear), so
+    // layering needs only the loop.
+    //
+    // `background-size` sizes the box a layer paints INTO and
+    // `background-repeat` tiles that box across the element. Both reached the
+    // View and stopped there, so a scanline authored as
+    // `linear-gradient(<colour> 1px, transparent 1px)` under
+    // `background-size: 100% 32px` painted ONE gradient stretched across the
+    // whole element — a monotone wash where the design asked for a stripe every
+    // 32px. Every layer in the stack shares the tile, so it resolves once.
+    const BackgroundTile bg_tile = resolve_background_tile(
+        background_size(), background_repeat(), bounds_.width, bounds_.height);
+    const bool bg_tiles =
+        bg_tile.w > 0.0f && bg_tile.h > 0.0f &&
+        (bg_tile.w < bounds_.width - 0.01f ||
+         bg_tile.h < bounds_.height - 0.01f) &&
+        bounds_.width <= bg_tile.w * static_cast<float>(kMaxTilesPerAxis) &&
+        bounds_.height <= bg_tile.h * static_cast<float>(kMaxTilesPerAxis);
+    const float tile_w = bg_tiles ? bg_tile.w : bounds_.width;
+    const float tile_h = bg_tiles ? bg_tile.h : bounds_.height;
+
     for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
         if (layer->type <= 0 || layer->colors.empty()) continue;
         const int grad_n = static_cast<int>(layer->colors.size());
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
-        if (layer->type == 2) {  // radial
-            const ResolvedRadial r =
-                resolve_radial(*layer, bounds_.width, bounds_.height);
-            canvas.set_fill_gradient_radial_elliptical(
-                r.cx, r.cy, r.rx, r.ry, grad_c, grad_p, grad_n);
-        } else if (layer->type == 3) {  // conic / sweep
-            // One call for both spellings: a plain conic spans a full turn, so
-            // the repeating entry point resolves to the same shader for it.
-            canvas.set_fill_gradient_conic_repeating(
-                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
-                layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
-        } else {  // linear
-            float lx0 = layer->x0, ly0 = layer->y0;
-            float lx1 = layer->x1, ly1 = layer->y1;
+        float stop_buf[kMaxInlineStops];
+
+        // A linear layer's LINE is a function of the tile, not of which tile,
+        // so it is resolved once per layer here and only its origin moves
+        // below. Untiled, the tile IS the element's box and every expression
+        // is what it always was.
+        float lx0 = layer->x0, ly0 = layer->y0;
+        float lx1 = layer->x1, ly1 = layer->y1;
+        float band_span = 0.0f;  // > 0 when a repeating band tiles the line
+        if (layer->type == 1) {
             if (layer->linear_from != BackgroundGradient::LinearFrom::endpoints) {
                 float radians = layer->linear_angle;
                 if (layer->linear_from == BackgroundGradient::LinearFrom::corner) {
@@ -725,14 +834,14 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                     // atan2(HEIGHT, width) — the transposed atan2(w, h) is a
                     // different angle on any box that is not square, and on a
                     // 160x100 box it misses Chrome's boundary by 48px.
-                    const float a = std::atan2(bounds_.height, bounds_.width);
+                    const float a = std::atan2(tile_h, tile_w);
                     radians = layer->corner_y < 0.0f
                                   ? layer->corner_x * a
                                   : 3.14159265f - layer->corner_x * a;
                 }
                 // The line runs through the centre; its length is the box's
                 // projection onto it, so the end stops sit on the corners.
-                const float w = bounds_.width, h = bounds_.height;
+                const float w = tile_w, h = tile_h;
                 const float dx = std::sin(radians), dy = -std::cos(radians);
                 const float len = std::fabs(w * dx) + std::fabs(h * dy);
                 lx0 = (w * 0.5f - dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
@@ -740,44 +849,108 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                 lx1 = (w * 0.5f + dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
                 ly1 = (h * 0.5f + dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
             }
-            // A repeating linear's stops span ONE BAND, so the shader gets
-            // the band's endpoints and tiles it along the line rather than
-            // being stretched across the box. The band arrives either as a CSS
-            // length or as a fraction of the line, and the line's length is
-            // only knowable here — which is the whole reason the parser hands
-            // the unit forward instead of collapsing it.
-            //
-            // A band that already covers the line has nothing to repeat and
-            // degrades to the plain form, mirroring the conic above.
-            const float px0 = lx0 * bounds_.width, py0 = ly0 * bounds_.height;
-            const float px1 = lx1 * bounds_.width, py1 = ly1 * bounds_.height;
-            const float line_dx = px1 - px0, line_dy = py1 - py0;
+            const float line_dx = (lx1 - lx0) * tile_w;
+            const float line_dy = (ly1 - ly0) * tile_h;
             const float line_len =
                 std::sqrt(line_dx * line_dx + line_dy * line_dy);
+
+            // A repeating linear's stops span ONE BAND, so the shader gets the
+            // band's endpoints and tiles it along the line rather than being
+            // stretched across the box. The band arrives either as a CSS length
+            // or as a fraction of the line, and the line's length is only
+            // knowable here — which is the whole reason the parser hands the
+            // unit forward instead of collapsing it.
+            //
+            // A band that already covers the line has nothing to repeat and
+            // degrades to the plain form, mirroring the conic below.
             const float band =
                 layer->linear_repeat_unit == BackgroundGradient::RepeatUnit::px
                     ? layer->linear_repeat
                     : layer->linear_repeat * line_len;
-            if (band > 0.0f && line_len > 0.0f && band < line_len) {
-                const float span = band / line_len;
-                canvas.set_fill_gradient_linear_repeating(
-                    px0, py0, px0 + line_dx * span, py0 + line_dy * span,
-                    grad_c, grad_p, grad_n);
-            } else {
-                canvas.set_fill_gradient_linear(px0, py0, px1, py1,
-                                                grad_c, grad_p, grad_n);
+            if (band > 0.0f && line_len > 0.0f && band < line_len)
+                band_span = band / line_len;
+
+            // Raw `px` stop positions divide by the line, and the line is the
+            // TILE's whenever `background-size` shrank the layer. That is the
+            // second half of the same defect and it cannot land separately:
+            // against the element's 128px box a one-pixel stop is 1/128 and
+            // draws ONE hairline at the top, against the 32px tile it is 1/32
+            // and draws the stripe the design asked for, once per tile.
+            if (layer->positions_in_px && line_len > 0.0f &&
+                grad_n <= kMaxInlineStops) {
+                for (int i = 0; i < grad_n; ++i)
+                    stop_buf[i] =
+                        layer->positions[static_cast<std::size_t>(i)] / line_len;
+                grad_p = stop_buf;
             }
         }
+
+        // Set this layer's shader for ONE tile, whose top-left is (ox, oy) in
+        // the view's own coordinates.
+        const auto set_layer_shader = [&](float ox, float oy) {
+            if (layer->type == 2) {  // radial
+                const ResolvedRadial r = resolve_radial(*layer, tile_w, tile_h);
+                canvas.set_fill_gradient_radial_elliptical(
+                    ox + r.cx, oy + r.cy, r.rx, r.ry, grad_c, grad_p, grad_n);
+            } else if (layer->type == 3) {  // conic / sweep
+                // One call for both spellings: a plain conic spans a full turn,
+                // so the repeating entry point resolves to the same shader.
+                canvas.set_fill_gradient_conic_repeating(
+                    ox + layer->x0 * tile_w, oy + layer->y0 * tile_h,
+                    layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
+            } else {  // linear
+                const float px0 = ox + lx0 * tile_w, py0 = oy + ly0 * tile_h;
+                const float px1 = ox + lx1 * tile_w, py1 = oy + ly1 * tile_h;
+                if (band_span > 0.0f) {
+                    canvas.set_fill_gradient_linear_repeating(
+                        px0, py0, px0 + (px1 - px0) * band_span,
+                        py0 + (py1 - py0) * band_span, grad_c, grad_p, grad_n);
+                } else {
+                    canvas.set_fill_gradient_linear(px0, py0, px1, py1,
+                                                    grad_c, grad_p, grad_n);
+                }
+            }
+        };
+
+        if (!bg_tiles) {
+            set_layer_shader(0.0f, 0.0f);
+            if (use_per_corner) {
+                build_corner_path(bounds_.width, bounds_.height,
+                                                   eff_tl, eff_tr, eff_bl, eff_br);
+                canvas.fill_current_path();
+            } else if (eff_r > 0) {
+                canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+            } else {
+                canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+            }
+            canvas.clear_fill_gradient();
+            continue;
+        }
+
+        // A tiled layer fills RECTANGLES, so the element's own shape has to
+        // come from the clip rather than from the fill. `clip_rect` is the
+        // floor every backend implements; a rounded box additionally clips to
+        // its corner path, and a backend without a path clip no-ops that and
+        // leaves the tiles square-cornered rather than spilling past the box.
+        canvas.save();
+        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
-            canvas.fill_current_path();
+                              eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.clip();
         } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-        } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+            build_corner_path(bounds_.width, bounds_.height,
+                              eff_r, eff_r, eff_r, eff_r);
+            canvas.clip();
         }
-        canvas.clear_fill_gradient();
+        for (float ty = 0.0f; ty < bounds_.height; ty += tile_h) {
+            for (float tx = 0.0f; tx < bounds_.width; tx += tile_w) {
+                set_layer_shader(tx, ty);
+                canvas.fill_rect(tx, ty, tile_w, tile_h);
+                canvas.clear_fill_gradient();
+            }
+        }
+        canvas.restore();
     }
 
     paint_border(canvas, use_per_corner, build_corner_path,
