@@ -1763,6 +1763,36 @@ Gotchas learned wiring this:
   hardcoded pixel constants (repo rule: every visual importer fix must be a
   generalizable rule reading the design data).
 
+### A designed control: installing a painter is not the same as it being consulted
+
+`apply_designed_body_skin` (`core/view/src/design_import_native_common.cpp`) is
+what makes a control whose design already painted its own body stop drawing a
+stock body over it. It installs a `WidgetPainter` via
+`apply_designed_control_skin`, and the widget's `paint` is supposed to give that
+delegate first refusal.
+
+**Only the widget kinds whose `paint` actually calls `effective_painter()` honour
+it.** `Knob::paint` does. `Fader::paint` did not, and `WidgetPainter::paint_linear`
+had no caller anywhere in the repo — so installing the skin on a fader compiled,
+ran, returned `true`, and moved zero pixels. `Meter` still has no painter hook at
+all (`WidgetPainter` has `paint_rotary` / `paint_linear` / `paint_button_background`
+and nothing for a level), so a designed meter still paints its stock body.
+
+Checks worth doing before believing a designed-control skin works:
+
+- Grep the hook for a **call site**, not just an override. An overridden virtual
+  with no caller is indistinguishable from a working one at compile time.
+- Assert both halves in the test: `widget->painter() != nullptr` proves the
+  install, and a counting painter reaching the hook proves the consult. Use
+  `painter()` and not `effective_painter()` for the install assertion, because
+  the latter walks up to an ancestor and will pass on a widget that was never
+  skinned itself.
+- A designed control's **Chrome-relative pixel diff is not a success metric.**
+  The design authors a bare track or a bare disc and the widget supplies the
+  value layer, so the oracle has no fill, no thumb and no arc to match. Fixing a
+  designed fader makes that region score WORSE against Chrome while being more
+  correct. Judge it by what the widget stopped overpainting, not by the number.
+
 ### Native codegen fidelity gaps
 
 The render uses `generate_native_node` in `core/view/src/design_codegen.cpp`

@@ -3109,3 +3109,98 @@ TEST_CASE("a promoted TextButton still reaches an interactive descendant",
     // ...and the outer button still owns its own body.
     REQUIRE(root->hit_test({70.0f, 60.0f}) == outer);
 }
+
+namespace {
+
+/// Counts the delegate hooks the widgets actually reach, so a test can tell
+/// "the skin was installed" apart from "the skin was installed AND consulted".
+class HookCountingPainter final : public WidgetPainter {
+public:
+    bool paint_rotary(pulp::canvas::Canvas&, const RotaryPaintState&, View&) override {
+        ++rotary;
+        return true;
+    }
+    bool paint_linear(pulp::canvas::Canvas&, const LinearPaintState& state, View&) override {
+        ++linear;
+        last_horizontal = state.horizontal;
+        last_thumb_pos = state.thumb_pos;
+        return true;
+    }
+    int rotary = 0;
+    int linear = 0;
+    bool last_horizontal = false;
+    float last_thumb_pos = -1.0f;
+};
+
+}  // namespace
+
+TEST_CASE("a designed fader gets the value-only skin, like a designed knob",
+          "[view][import][native-materializer][designed-control]") {
+    // The design already painted the track, so the widget must contribute only
+    // the value layer. apply_designed_body_skin installs that contract, and it
+    // was wired into the knob case only — a designed fader kept its full stock
+    // body and drew a track, a fill and an oversized thumb over the design's own.
+    //
+    // The knob leg is the CONTROL. It passes before this change, which is what
+    // proves the fixture can report success rather than being a probe that never
+    // fires on either leg.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 200.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    knob_node.attributes["design_track"] = "rgba(60,50,30,0.18)";
+    knob_node.attributes["design_indicator"] = "#2A2418";
+
+    auto fader_node = frame("drive", 10.0f, 96.0f, LayoutDirection::column);
+    fader_node.audio_widget = AudioWidgetType::fader;
+    fader_node.attributes["designed_body"] = "underlay";
+    fader_node.attributes["design_accent"] = "#C4622A";
+    fader_node.attributes["design_track"] = "rgba(60,50,30,0.18)";
+    fader_node.attributes["design_indicator"] = "#2A2418";
+
+    ir.root.children.push_back(std::move(knob_node));
+    ir.root.children.push_back(std::move(fader_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    // painter(), not effective_painter(): the latter walks up to an ancestor, so
+    // it would pass on a widget that was never skinned itself.
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->painter() != nullptr);
+
+    auto* fader = dynamic_cast<Fader*>(root->child_at(1));
+    REQUIRE(fader != nullptr);
+    REQUIRE(fader->painter() != nullptr);
+}
+
+TEST_CASE("Fader::paint consults its paint delegate, as Knob::paint does",
+          "[view][import][native-materializer][designed-control]") {
+    // Installing the delegate is not enough. WidgetPainter::paint_linear had no
+    // caller anywhere, so a skinned fader painted its stock body regardless and
+    // the install moved zero pixels. Assert the hook is reached, and assert the
+    // knob's alongside it so a silent regression in either is visible.
+    pulp::canvas::RecordingCanvas canvas;
+    auto painter = std::make_shared<HookCountingPainter>();
+
+    Knob knob;
+    knob.set_bounds({0, 0, 64.0f, 64.0f});
+    knob.set_painter(painter);
+    knob.paint(canvas);
+    REQUIRE(painter->rotary == 1);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 10.0f, 96.0f});
+    fader.set_orientation(Fader::Orientation::vertical);
+    fader.set_value(0.25f);
+    fader.set_painter(painter);
+    fader.paint(canvas);
+    REQUIRE(painter->linear == 1);
+    REQUIRE(painter->last_horizontal == false);
+    REQUIRE(painter->last_thumb_pos == Catch::Approx(0.25f));
+}

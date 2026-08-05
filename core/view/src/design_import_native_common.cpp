@@ -1897,6 +1897,11 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (semantics.fader_thumb_corner_radius)
                 fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
+            // Same contract the knob case takes above: a design that painted its
+            // own track owns the body, and the widget contributes only the value
+            // layer. Without it a designed fader drew a stock track, fill and
+            // thumb over the authored track the box pipeline had already painted.
+            apply_designed_body_skin(*fader, node);
             return fader;
         }
         case NativeWidgetKind::meter: {
