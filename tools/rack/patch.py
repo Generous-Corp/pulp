@@ -154,11 +154,14 @@ def inventory() -> dict:
     return inv
 
 
-PORTMAP = os.path.join(RACK_USER, "forge-portmap.json")
-
-
 def _add_portmap(inv: dict) -> None:
     """Fold in real port names and positions recorded from inside Rack.
+
+    Entries come from this machine's scan and from the ranges shipped with the
+    build, the local one winning wherever both describe a module -- see
+    `portmap_seed`. A module nobody here has ever placed still arrives with
+    named ports and real bounds, so a fresh install is not a machine that
+    knows nothing until somebody scans for it.
 
     Written by the CARTOG module, which is the only thing that can see them:
     a port's index, name and jack position exist solely in compiled widget
@@ -170,13 +173,9 @@ def _add_portmap(inv: dict) -> None:
     the LEFT of input 0 (1V/octave), so guessing indices from panel layout --
     or labelling badges left-to-right by index -- produces confident nonsense.
     """
-    if not os.path.exists(PORTMAP):
-        return
-    try:
-        doc = json.load(open(PORTMAP))
-    except Exception:
-        return
-    for entry in doc.get("modules", []):
+    import portmap_seed
+
+    for entry in portmap_seed.entries(inv):
         plug = inv.get(entry.get("plugin"))
         if not plug:
             continue
