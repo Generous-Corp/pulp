@@ -2449,7 +2449,7 @@ def check_melody_is_written() -> tuple:
     bad = 0
     idioms = idiom_check.load_idioms()
 
-    got = idiom_check.resolve(
+    got = idiom_check.resolve_exact(
         "simple highly melodic patch using only @CV funk modules", idioms)
     if got != "sequenced-voice":
         bad += 1
@@ -2458,7 +2458,7 @@ def check_melody_is_written() -> tuple:
     else:
         print("  ok     a melodic request claims the sequenced-voice idiom")
 
-    got = idiom_check.resolve("a melodic kick drum pattern", idioms)
+    got = idiom_check.resolve_exact("a melodic kick drum pattern", idioms)
     if got != "kick-drum":
         bad += 1
         print(f"  WRONG  a named idiom lost to the melodic implication: {got!r}")
@@ -2521,16 +2521,58 @@ def check_melody_is_written() -> tuple:
     else:
         print("  ok     a drone is not asked to write a melody")
 
-    # When nothing resolves, the gap must be SAID, not silently accepted.
+    # When nothing NAMES an idiom, two things must hold: the gap is SAID, and
+    # whatever we fell back to must not be able to reject the patch.
+    #
+    # This used to assert the fallback was None. It is no longer -- resolution
+    # is total, so an unmatched request gets the nearest idiom by wording. The
+    # property that mattered is unchanged and is what is asserted here: a guess
+    # informs the model and never gates. Asserting `is None` would now be
+    # asserting the mechanism instead of the property, and would have to be
+    # rewritten again the next time the fallback improves.
     said = []
     claimed = P.claim_idiom("four bars of blorp", idioms, say=said.append)
-    if claimed is not None or not any("no idiom" in s for s in said):
+    if claimed.gating or not any("no idiom" in s for s in said):
         bad += 1
-        print(f"  WRONG  an unmatched request claims {claimed!r} and says "
-              f"{said!r}; a silent coverage gap is how this shipped")
+        print(f"  WRONG  an unmatched request resolved to {claimed!r} and said "
+              f"{said!r}; a guess must never gate, and a silent coverage gap "
+              f"is how this shipped")
     else:
         print("  ok     an unmatched request says its checks are thinner")
-    return bad, 8
+
+    # Resolution is TOTAL. There is no prompt that resolves to nothing at all
+    # and therefore silently gates nothing -- which is the shape of the
+    # original fault, where "highly melodic" matched no idiom and a held note
+    # passed every check it was given.
+    unresolved = [p for p in
+                  ("four bars of blorp", "something rhythmic and evolving",
+                   "make me a fat bass sound", "a shimmering ambient pad",
+                   "zzzz qqqq wwww", "")
+                  if idiom_check.resolve_intent(p, idioms) is None]
+    if unresolved:
+        bad += 1
+        print(f"  WRONG  these prompts resolved to nothing at all: "
+              f"{unresolved}; resolution has to answer")
+    else:
+        print("  ok     every request resolves to something, however weakly")
+
+    # And the tiers have to MEAN different things, or totality is a lie told
+    # with more words: a named request gates, a resemblance does not.
+    named = idiom_check.resolve_intent("a krell patch", idioms)
+    guess = idiom_check.resolve_intent("a shimmering ambient pad", idioms)
+    if not named.gating or named.how not in ("named", "implied"):
+        bad += 1
+        print(f"  WRONG  a request that names an idiom does not gate: {named!r}")
+    else:
+        print("  ok     a named idiom may reject a patch")
+    if guess.gating or guess.slug is None or guess.how != "nearest":
+        bad += 1
+        print(f"  WRONG  a resemblance gates, or found nothing: {guess!r}; "
+              f"rejecting on a guess teaches the model to satisfy the guess")
+    else:
+        print("  ok     a nearest-by-wording guess informs and cannot reject")
+
+    return bad, 11
 
 
 

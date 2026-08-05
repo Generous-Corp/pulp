@@ -1906,7 +1906,7 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
             import idiom_check as _ic                       # noqa: PLC0415
             import patch_vocabulary as _pv                  # noqa: PLC0415
             _idioms = _ic.load_idioms()
-            _slug = _ic.resolve(prompt, _idioms)
+            _slug = _ic.resolve_exact(prompt, _idioms)
             if _slug:
                 _idiom = _idioms[_slug]
                 # `check` returns the reasons a patch would FAIL the idiom. An
@@ -3050,22 +3050,29 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
 
 
 def claim_idiom(prompt: str, idioms: dict, say=None):
-    """Which idiom this request claims, with the gap SAID when none does.
+    """Which idiom this request claims, and whether it may reject a patch.
 
-    resolve() returning None is not an error, but it thins the checks down
-    to wiring and audibility, and that thinning used to be invisible:
-    "highly melodic" matched no idiom, so no structure was claimed, and a
-    patch that droned one held note passed every check it was given. A
-    coverage gap the transcript never mentions is one nobody notices until
-    a human listens.
+    Resolution used to return None whenever a request was worded in a way no
+    idiom happened to spell, which thinned the checks down to wiring and
+    audibility -- the two almost every patch passes. "Highly melodic" matched
+    no idiom, so no structure was claimed, and a patch that droned one held
+    note passed every check it was given.
+
+    Saying so was the first fix and it was not enough: a transcript line tells
+    a person nothing was checked, it does not check anything. Resolution is
+    now total, so the question changed from "did anything match" to "how
+    strongly", and the answer carries its own tier.
+
+    Only a NAMED or IMPLIED idiom may reject. A nearest-by-wording guess is
+    told to the model as a guide and cannot fail a patch -- rejecting on a
+    resemblance teaches the model to satisfy our guess rather than the
+    request, which is the failure this whole layer exists to avoid.
     """
     import idiom_check
-    claimed = idiom_check.resolve(prompt, idioms)
-    if not claimed:
-        (say or (lambda m: print(m, flush=True)))(
-            "  no idiom matched this request; only the wiring and "
-            "audibility of the patch will be checked")
-    return claimed
+    intent = idiom_check.resolve_intent(prompt, idioms)
+    if intent.how != "named" and intent.how != "implied":
+        (say or (lambda m: print(m, flush=True)))("  " + intent.why)
+    return intent
 
 
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
@@ -3085,7 +3092,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     claimed = claim_idiom(prompt, idioms)
     contract = contract.replace(
         patch_vocabulary.MARKER,
-        patch_vocabulary.for_prompt(prompt, idioms) if claimed
+        patch_vocabulary.for_prompt(prompt, idioms) if claimed.slug
         else patch_vocabulary.render(idioms))
 
     # Checked where the model receives it, not where it was rendered: the DSP
@@ -3098,7 +3105,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     # one wiring fix AND one audio fix had no attempts left, which is what the
     # first dozen-prompt run showed. More constraints, more chances to satisfy
     # them -- otherwise adding a gate makes the product worse.
-    if claimed:
+    if claimed.gating:
         retries += 2
 
     for attempt in range(retries + 1):
@@ -3221,16 +3228,17 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             print("    keeping the patch anyway: it is structurally sound, "
                   "and nothing here says it is silent.", flush=True)
         if ok or crashed:
-            if claimed:
-                missing = idiom_check.check(patch, inv, idioms[claimed])
+            if claimed.gating:
+                missing = idiom_check.check(patch, inv,
+                                            idioms[claimed.slug])
                 if missing:
                     # Named, so the retry can fix the connection rather than
                     # guessing what "rejected" meant.
-                    print(f"  not a {claimed} patch yet:")
+                    print(f"  not a {claimed.slug} patch yet:")
                     for m in missing:
                         print(f"    - {m}")
-                    ctx = (f"This has to be a {claimed} patch. "
-                           f"{idioms[claimed].get('is', '')}\n\n"
+                    ctx = (f"This has to be a {claimed.slug} patch. "
+                           f"{idioms[claimed.slug].get('is', '')}\n\n"
                            "It is missing:\n" +
                            "\n".join(f"  - {m}" for m in missing))
                     # Kept for the same reason a silent one is: "wrong idiom"
@@ -3247,7 +3255,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 # one held note through perfect wiring, which is the shipped
                 # bug this check exists to catch before anyone listens.
                 unwritten, deferred = idiom_check.check_behaviour(
-                    patch, inv, idioms[claimed])
+                    patch, inv, idioms[claimed.slug])
                 # SAY what could not be read, rather than counting it as a
                 # pass. A behaviour nobody measured and a behaviour that held
                 # produce the same silence otherwise, and that silence is
@@ -3256,18 +3264,18 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 for d in deferred:
                     print(f"  not settled by reading — {d}", flush=True)
                 if unwritten:
-                    print(f"  wired as a {claimed}, but the music is not "
+                    print(f"  wired as a {claimed.slug}, but the music is not "
                           f"written:")
                     for m in unwritten:
                         print(f"    - {m}")
-                    ctx = (f"The wiring is right for a {claimed} patch, but "
+                    ctx = (f"The wiring is right for a {claimed.slug} patch, but "
                            "the values that make it MUSIC are missing:\n" +
                            "\n".join(f"  - {m}" for m in unwritten))
                     keep_attempt(patch, "music not written:\n" +
                                  "\n".join(f"  - {m}" for m in unwritten),
                                  attempt + 1, "music-not-written")
                     continue
-                print(f"  idiom holds: {claimed}")
+                print(f"  idiom holds: {claimed.slug}")
             return patch, why
         # Silence, measured. A crash never reaches here.
         keep_attempt(patch, report, attempt + 1, "silent")
