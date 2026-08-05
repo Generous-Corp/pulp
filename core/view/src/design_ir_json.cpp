@@ -397,6 +397,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("textOverflow", s.text_overflow);
     set_opt_str("overflow", s.overflow);
     set_opt_str("cursor", s.cursor);
+    set_opt_str("pointerEvents", s.pointer_events);
     set_opt_str("position", s.position);
     set_opt_float("top", s.top);
     set_opt_float("left", s.left);
@@ -1940,6 +1941,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
         out << '}';
     }
     write_string_member(out, first, "cursor", s.cursor);
+    write_string_member(out, first, "pointerEvents", s.pointer_events);
     write_string_member(out, first, "position", s.position);
     write_float_member(out, first, "top", s.top);
     write_float_member(out, first, "left", s.left);

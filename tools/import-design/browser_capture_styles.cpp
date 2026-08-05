@@ -927,6 +927,19 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
 
     set_string("cursor", style.cursor);
 
+    // `pointer-events` was in the captured-property list but reached no IR
+    // field, so a design had no way to mark a layer as decoration. That is
+    // load-bearing on a panel: the design stacks glows and gradient bands over
+    // its controls, and without this every one of them wins the hit-test
+    // against the control beneath it — the panel renders correctly and
+    // responds to nothing, with no escape hatch for the author.
+    //
+    // `auto` is the initial value and carries no information, so it is dropped
+    // the way `overflow: visible` is below; only a real opt-out survives.
+    const auto pointer_events = lookup("pointer-events");
+    if (!is_absent(pointer_events) && pointer_events != "auto")
+        style.pointer_events = pointer_events;
+
     const auto overflow = lookup("overflow");
     if (!is_absent(overflow) && overflow != "visible")
         style.overflow = overflow;

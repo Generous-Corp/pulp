@@ -164,6 +164,16 @@ struct IRStyle {
     std::optional<std::string> text_overflow;
     std::optional<std::string> overflow;               // hidden, scroll, auto
     std::optional<std::string> cursor;
+    /// CSS `pointer-events`. Captured alongside `cursor` and lowered onto
+    /// View::PointerEvents.
+    ///
+    /// It is load-bearing on a designed panel, which is not obvious: a design
+    /// stacks decorative bands (glows, gradient washes, vignettes) over its
+    /// controls and opts them out of hit-testing. Drop this and every one of
+    /// those bands eats the presses meant for the control beneath it, so the
+    /// panel renders correctly and responds to nothing — and the author has no
+    /// escape hatch, because saying `pointer-events: none` does nothing.
+    std::optional<std::string> pointer_events;         // auto, none
     std::optional<std::string> position;               // absolute, relative
     std::optional<float> top, left, right, bottom;
     std::optional<int> z_index;

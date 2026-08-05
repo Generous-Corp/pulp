@@ -1555,6 +1555,17 @@ void apply_visual_style(View& view, const IRStyle& style,
                 view.set_clip_marker_tolerance(true);
         }
     }
+    // `pointer-events` is a design's only way to say "this layer is decoration,
+    // do not let it eat presses". A panel stacks glows, gradient washes and
+    // vignette bands over its controls; without this the topmost band wins every
+    // hit-test and the panel renders correctly while responding to nothing.
+    //
+    // Only `none` is honoured. The other CSS values (`visiblePainted`, `stroke`,
+    // `fill`, ...) are SVG-specific hit-test modes that this tree has no
+    // equivalent for, and treating them as `auto` matches what a browser does
+    // for a non-SVG box.
+    if (style.pointer_events && *style.pointer_events == "none")
+        view.set_pointer_events(View::PointerEvents::none);
     if (style.position) {
         if (auto position = parse_position(*style.position)) view.set_position(*position);
     }

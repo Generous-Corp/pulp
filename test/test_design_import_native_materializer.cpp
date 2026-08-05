@@ -3443,3 +3443,56 @@ TEST_CASE("a design's declared pointer overrides the derived tick",
     CHECK(radius_of(line->f[0], line->f[1]) == Catch::Approx(64.0f).margin(0.5f));
     CHECK(radius_of(line->f[2], line->f[3]) == Catch::Approx(92.0f).margin(0.5f));
 }
+
+TEST_CASE("a decorative layer that opts out of hit-testing stops eating presses",
+          "[view][import][native-materializer][pointer-events]") {
+    // The shape of a real failure: a generated panel rendered correctly and
+    // responded to nothing, because the design stacks full-width decorative
+    // bands (glows, gradient washes, vignettes) over its controls.
+    //
+    // `pointer-events` was in the capture's property list and reached no IR
+    // field, so it was dropped at the parse boundary. The design's only way to
+    // say "this band is decoration" did nothing, and hit-testing follows paint
+    // order — so the band above the knob won every press meant for it.
+    //
+    // The band is deliberately declared AFTER the knob and given a positive
+    // z-index, which is what the failing panel did: a positioned element with a
+    // positive z-index paints above z-auto content regardless of document
+    // order, so appending controls last does not save them.
+    DesignIR ir;
+    ir.root = frame("panel", 200.0f, 200.0f, LayoutDirection::column);
+
+    auto knob_node = frame("cutoff", 200.0f, 200.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto glow = frame("glow", 200.0f, 200.0f, LayoutDirection::column);
+    glow.style.position = "absolute";
+    glow.style.top = 0.0f;
+    glow.style.left = 0.0f;
+    glow.style.z_index = 5;
+    glow.style.pointer_events = "none";
+    ir.root.children.push_back(std::move(glow));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 200.0f, 200.0f});
+    root->layout_children();
+
+    auto* band = root->child_at(1);
+    REQUIRE(band != nullptr);
+    // The property has to survive capture -> IR -> View. Asserting the View
+    // state rather than the IR field is deliberate: the IR carrying it while
+    // the materializer ignores it is exactly the failure mode this covers, and
+    // an IR-only assertion passes against it.
+    CHECK(band->pointer_events() == View::PointerEvents::none);
+
+    // The discriminating check. Press the knob's centre — the exact point the
+    // operability gate drags — and require the knob to receive it. Without the
+    // opt-out the band is hit-testable, sits above, and answers instead.
+    View* hit = root->hit_test({100.0f, 100.0f});
+    REQUIRE(hit != nullptr);
+    INFO("press at the knob centre landed on a view that is "
+         << (dynamic_cast<Knob*>(hit) != nullptr ? "the knob" : "NOT the knob"));
+    CHECK(dynamic_cast<Knob*>(hit) != nullptr);
+}

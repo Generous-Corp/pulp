@@ -478,6 +478,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("textTransform", s.text_transform);
     emit_str("overflow", s.overflow);
     emit_str("cursor", s.cursor);
+    emit_str("pointerEvents", s.pointer_events);
     emit_str("position", s.position);
     emit_px("top", s.top);
     emit_px("left", s.left);
