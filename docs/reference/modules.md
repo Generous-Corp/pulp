@@ -636,6 +636,27 @@ mixer.push_dry(input_channels, 2, num_frames);
 mixer.mix_wet(output_channels, 2, num_frames);
 ```
 
+### Routing and parallel-path alignment
+
+The signal module owns shared routing math so fixed-topology processors and
+runtime graphs use the same gain and latency contracts:
+
+| Primitive | Header | Contract |
+|---|---|---|
+| Orthonormal mid/side | `mid_side.hpp` | Self-inverse, mono-compatible, energy-preserving stereo transform plus mono-safe width |
+| Signed audio matrix | `audio_matrix_mixer.hpp` | Fixed 16×16 default capacity, sample-continuous cell automation, explicit raw or peak-normalized headroom |
+| N-way crossfade | `nway_crossfade.hpp` | Adjacent-path cosine/sine weights with unit summed power |
+| Click-free path switcher | `path_switcher.hpp` | Fixed-capacity, retargetable smoothstep transitions with block-split deterministic weights |
+| Path latency aligner | `path_latency_aligner.hpp` | Prepared N-path/channel delay storage with maximum-path latency reporting and impulse-exact alignment |
+
+All process paths are allocation-free after preparation. The matrix copies its
+inputs to bounded scratch and therefore supports input/output aliasing. The path
+switcher requires disjoint mono source/destination buffers. The latency aligner
+supports only exact corresponding in-place pairs, not partial or cross-path
+aliases. Overlap checks cover the full processed byte ranges. Latency-set
+changes clear alignment history; matrix and switch automation preserve their
+sample trajectory across host block boundaries.
+
 ### Convolution — load an impulse response
 
 `PartitionedConvolver` is partitioned for one fixed block size, and `process()`
@@ -777,6 +798,9 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
 | Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
 | Matrix | `matrix.hpp` | 2×2 through 4×4 matrix math for mid/side encoding, rotation, spatial processing |
+| Routing matrix | `audio_matrix_mixer.hpp` | Fixed-capacity signed audio routing with continuous gain automation and explicit headroom policy |
+| Mid/side | `mid_side.hpp` | Orthonormal stereo encode/decode and mono-safe width |
+| N-way routing | `nway_crossfade.hpp`, `path_switcher.hpp`, `path_latency_aligner.hpp` | Constant-power path morphing, click-free selection, and exact latency alignment |
 | Panner | `panner.hpp` | Stereo and surround panning with equal-power or linear law |
 | Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
 | Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |

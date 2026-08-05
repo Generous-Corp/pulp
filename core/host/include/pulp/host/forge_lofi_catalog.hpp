@@ -58,6 +58,7 @@
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
+#include <pulp/signal/mid_side.hpp>
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/phaser.hpp>
 #include <pulp/signal/reverb.hpp>
@@ -1313,15 +1314,14 @@ inline CustomNodeType make_auto_pan_node() {
 }
 
 // ── Width — TRUE STEREO, "Width" ─────────────────────────────────────────
-// A mid-side width control. It splits the stereo signal into a MID (the mono
-// sum) and a SIDE (the difference) component, scales the SIDE by `width`, and
-// recombines:
-//   mid = (L + R) / 2;  side = (L − R) / 2;
-//   L' = mid + width·side;  R' = mid − width·side.
-// width = 0 collapses the side entirely → L' = R' = mid, a mono image; width = 1
-// reconstructs the original L/R exactly (unity); width > 1 amplifies the side,
-// widening the image past the original. It is true stereo because it operates on
-// the SUM and DIFFERENCE of the two channels — the relationship between them —
+// A mid-side width control backed by the shared orthonormal transform. It
+// splits stereo into energy-preserving MID/SIDE coordinates, scales SIDE by
+// `width`, and applies the inverse transform.
+// width = 0 collapses the side entirely → L' = R' = (L + R) / 2, a mono image;
+// width = 1 reconstructs the original L/R exactly (unity); width > 1 amplifies
+// the side, widening the image past the original. It is true stereo because it
+// operates on the SUM and DIFFERENCE of the two channels — the relationship
+// between them —
 // which a per-channel instance cannot compute.
 //   * width (0 .. 2): mono at 0, unity at 1, up to 2× the side energy at 2.
 // Worst-case gain: at width = 2, L' = 1.5·L − 0.5·R, whose peak magnitude for
@@ -1354,14 +1354,11 @@ inline CustomNodeType make_width_node() {
             float* or_ = out.channel_ptr(1);
             for (int k = 0; k < n; ++k) {
                 const auto off = static_cast<std::int32_t>(k);
-                const float width =
-                    std::clamp(params.value_at(kWidthAmount, off), 0.0f, 2.0f);
                 const float l = il[static_cast<std::size_t>(k)];
                 const float r = ir[static_cast<std::size_t>(k)];
-                const float mid = 0.5f * (l + r);
-                const float side = 0.5f * (l - r);
-                ol[static_cast<std::size_t>(k)] = mid + width * side;
-                or_[static_cast<std::size_t>(k)] = mid - width * side;
+                signal::stereo_width(l, r, params.value_at(kWidthAmount, off),
+                                     ol[static_cast<std::size_t>(k)],
+                                     or_[static_cast<std::size_t>(k)]);
             }
         };
     return t;
