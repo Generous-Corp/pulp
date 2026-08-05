@@ -79,7 +79,10 @@
      "message": "there is no amplifier, so nothing shapes the loudness"
     }
    ],
-   "provenance": "canon"
+   "provenance": "canon",
+   "realises": [
+    "envelope-shape-conventions"
+   ]
   },
   {
    "slug": "west-coast-voice",
@@ -147,7 +150,10 @@
    "anchor": {
     "doc": "patch-tweak-reading-order.txt",
     "quote": "a low-pass gate: the combination of a low-pass filter and a VCA"
-   }
+   },
+   "realises": [
+    "envelope-shape-conventions"
+   ]
   },
   {
    "slug": "sequenced-voice",
@@ -274,7 +280,10 @@
      "message": "the oscillator is not patched into anything"
     }
    ],
-   "provenance": "canon"
+   "provenance": "canon",
+   "realises": [
+    "envelope-shape-conventions"
+   ]
   },
   {
    "slug": "fm-voice",
@@ -337,7 +346,10 @@
      "message": "the carrier never reaches an amplifier"
     }
    ],
-   "provenance": "canon"
+   "provenance": "canon",
+   "realises": [
+    "modulation-rate-boundary"
+   ]
   },
   {
    "slug": "quantized-voice",
@@ -624,7 +636,10 @@
      "less": "body-resonance-bank"
     },
     "$comment": "A bank of parallel band-pass filters summed. Tuned to the vowel formants it reads as a voice; tuned to an instrument's body resonances it reads as that instrument. One structure, and the tuning is what a checker cannot see."
-   }
+   },
+   "realises": [
+    "fixed-body-resonances"
+   ]
   },
   {
    "slug": "acid-voice",

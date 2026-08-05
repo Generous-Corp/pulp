@@ -283,7 +283,10 @@
           "message": "the filter never reaches an amplifier"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "realises": [
+        "filter-sweep-span"
+      ]
     },
     {
       "slug": "randomly-gated-noise",
@@ -445,7 +448,10 @@
           "message": "the filter never reaches the audio path"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "realises": [
+        "filter-sweep-span"
+      ]
     },
     {
       "slug": "dynamic-fm-index",

@@ -207,6 +207,17 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
             for slot, names in sorted(by_slot.items()):
                 lines.append(f"  {slot}: {', '.join(names)}")
 
+    # WHAT IS KNOWN ABOUT THE TECHNIQUE, as opposed to about the wiring. Read
+    # lazily and skipped silently when absent: the generator worked before this
+    # existed and has to keep working when it does not.
+    try:
+        import knowledge                                 # noqa: PLC0415
+        known = knowledge.render_for(slug, None, idioms)
+    except Exception:                                    # noqa: BLE001
+        known = ""
+    if known:
+        lines += ["", known.rstrip()]
+
     listen = idiom.get("listen_for") or {}
     if listen.get("sounds_like"):
         lines += ["", f"It should sound like: {listen['sounds_like']}"]

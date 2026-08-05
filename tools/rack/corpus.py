@@ -45,7 +45,33 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CORPUS = os.path.join(HERE, ".corpus")
+# WHERE THE CORPUS LIVES, AND WHY NOT HERE.
+#
+# Machine-local, under Forge Modular's application-support directory, beside
+# the other caches that are this machine's business and nobody else's.
+#
+# It used to sit at `tools/rack/.corpus`, and that was a real hole rather than
+# an untidiness. `package.sh` stages the toolchain with `ditto "$REPO/tools/rack"`,
+# and ditto copies the DIRECTORY -- it has never heard of .gitignore. So 113 MB
+# of other people's books went inside an app bundle that was then signed with a
+# Developer ID and uploaded to Apple: three commercial books, five vendor
+# manuals, and the cloned repositories' .git directories. The embedded .git is
+# the only reason it was rejected rather than shipped.
+#
+# Gitignoring it was correct and insufficient, because gitignore has no
+# authority over a file copy. Anything under `tools/rack/` is inside a
+# directory that gets copied wholesale into a signed artifact, so a cache of
+# fetched text must not live there at all. Out here it cannot be reached by a
+# ditto of the source tree, which makes the guarantee structural instead of
+# vigilant. The .gitignore entry stays as well: two independent ways to be
+# impossible.
+#
+# NOTHING OF IT EVER NEEDS TO SHIP. The corpus exists so the anchor checker can
+# verify OUR citations while WE write records. A user never re-verifies our
+# provenance against the source, so relocating it costs nothing.
+CORPUS = os.environ.get(
+    "PULP_RACK_CORPUS",
+    os.path.expanduser("~/Library/Application Support/Forge Modular/.corpus"))
 
 #: Repositories cloned shallowly. (directory, url, what it is good for)
 REPOS = [

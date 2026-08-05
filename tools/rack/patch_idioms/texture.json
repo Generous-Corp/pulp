@@ -381,7 +381,10 @@
       "anchor": {
         "doc": "patch-tweak-reading-order.txt",
         "quote": "through a ring modulator, as shown here, messes with the shell tone, turning wooden con- gas into metal timbales"
-      }
+      },
+      "realises": [
+        "modulation-rate-boundary"
+      ]
     },
     {
       "slug": "wavefolded-texture",

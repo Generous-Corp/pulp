@@ -48,7 +48,17 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IDIOM_DIR = os.path.join(HERE, "patch_idioms")
-CORPUS = os.path.join(HERE, ".corpus")
+# Machine-local, and deliberately NOT under tools/rack -- see corpus.py
+# for the signed-installer incident that put it here.
+CORPUS = os.environ.get(
+    "PULP_RACK_CORPUS",
+    os.path.expanduser("~/Library/Application Support/Forge Modular/.corpus"))
+
+#: Swept alongside the idioms. A MODULE GLOBAL, not a path built inside
+#: `sweep`, so a test can redirect it — one that could not is how a sandboxed
+#: run reached the real knowledge base in write mode and stripped every anchor
+#: in it.
+KNOWLEDGE_DIR = os.path.join(HERE, "knowledge", "technique")
 
 TIERS = ("read", "canon", "inferred")
 
@@ -204,16 +214,26 @@ def sweep(write: bool = True) -> tuple[dict, list]:
     counts["read (page image)"] = 0
     demoted: list[str] = []
 
-    for name in sorted(os.listdir(IDIOM_DIR)):
-        if not name.endswith(".json") or name.startswith("_"):
-            continue
-        path = os.path.join(IDIOM_DIR, name)
+    # The knowledge base is swept alongside the idioms, and its NUMBERS are
+    # swept individually: a technique can be common knowledge while one figure
+    # in it came out of a specific book, and an unverifiable figure is exactly
+    # the thing that turns a reference into plausible mush.
+    files = [os.path.join(IDIOM_DIR, n) for n in sorted(os.listdir(IDIOM_DIR))
+             if n.endswith(".json") and not n.startswith("_")]
+    tech = KNOWLEDGE_DIR
+    if os.path.isdir(tech):
+        files += [os.path.join(tech, n) for n in sorted(os.listdir(tech))
+                  if n.endswith(".json") and not n.startswith("_")]
+
+    for path in files:
         with open(path) as f:
             raw = f.read()
         doc = json.loads(raw)
         changed = False
 
-        for idiom in doc.get("idioms", []):
+        for idiom in list(doc.get("idioms", [])) + list(doc.get("entries", [])) \
+                + [n for e in doc.get("entries", [])
+                   for n in (e.get("numbers") or [])]:
             tier = idiom.get("provenance")
             if tier not in TIERS:
                 counts["unlabelled"] += 1
@@ -229,7 +249,9 @@ def sweep(write: bool = True) -> tuple[dict, list]:
                     counts["read (page image)" if (idiom.get("anchor") or {})
                            .get("page") is not None else "read (quoted)"] += 1
                 continue
-            demoted.append(f"{idiom.get('slug')}: {why}")
+            demoted.append(
+                f"{idiom.get('slug') or idiom.get('id') or idiom.get('quantity')}"
+                f": {why}")
             counts["canon"] += 1
             if write:
                 idiom["provenance"] = "canon"

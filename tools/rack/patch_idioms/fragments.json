@@ -114,7 +114,10 @@
           "message": "the gated modulation never reaches a pitch input"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "realises": [
+        "vibrato-rate"
+      ]
     },
     {
       "slug": "keyboard-tracking",
@@ -934,7 +937,10 @@
           "message": "no audio passes through the filter"
         }
       ],
-      "provenance": "canon"
+      "provenance": "canon",
+      "realises": [
+        "modulation-rate-boundary"
+      ]
     },
     {
       "slug": "hard-sync",

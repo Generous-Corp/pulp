@@ -651,14 +651,20 @@ def _swept(idioms: list, docs: dict, write: bool = True, pages: dict | None = No
     import json
     import provenance_check as pc
     idir, cdir = _sandbox(idioms, docs, pages)
-    old = pc.IDIOM_DIR, pc.CORPUS
+    # EVERY path the sweep touches, not just the ones it obviously touches.
+    # KNOWLEDGE_DIR was added later and missed here, so these sandboxed runs
+    # swept the real knowledge base against an empty corpus, in write mode, and
+    # deleted its anchors. A sandbox that covers most of the inputs is not a
+    # sandbox.
+    old = pc.IDIOM_DIR, pc.CORPUS, pc.KNOWLEDGE_DIR
     pc.IDIOM_DIR, pc.CORPUS = idir, cdir
+    pc.KNOWLEDGE_DIR = os.path.join(idir, "no-knowledge-here")
     try:
         counts, demoted = pc.sweep(write=write)
         with open(os.path.join(idir, "cases.json")) as f:
             after = {i["slug"]: i for i in json.load(f)["idioms"]}
     finally:
-        pc.IDIOM_DIR, pc.CORPUS = old
+        pc.IDIOM_DIR, pc.CORPUS, pc.KNOWLEDGE_DIR = old
     return counts, demoted, after
 
 
@@ -821,6 +827,104 @@ def check_provenance() -> int:
     return bad
 
 
+def check_knowledge() -> int:
+    """The technique layer: portable, grounded, and never load-bearing.
+
+    Three properties, and each has a way of failing silently. An entry that
+    drifts into naming modules still reads perfectly. A number invented with
+    confidence is indistinguishable from a measured one. And a generator that
+    quietly depends on the knowledge base is fine here and broken on any
+    machine that has not got it.
+    """
+    import copy                                          # noqa: PLC0415
+    import knowledge                                     # noqa: PLC0415
+    import corpus                                        # noqa: PLC0415
+    idioms = idiom_check.load_idioms()
+    base = knowledge.load()
+    bad = 0
+
+    # THE INCIDENT GUARD. `tools/rack/.corpus` was copied into a signed,
+    # notarised app bundle by a `ditto` of the source tree -- 113 MB of other
+    # people's books, uploaded to Apple. Gitignore has no authority over a file
+    # copy, so the fix is that the cache does not live in the copied tree at
+    # all. This is the assertion that keeps it out.
+    inside = os.path.abspath(corpus.CORPUS).startswith(HERE + os.sep)
+    if inside:
+        print(f"  WRONG  the corpus is inside the shipped tree at "
+              f"{corpus.CORPUS} — a ditto of tools/rack would put somebody "
+              f"else's books inside a signed installer")
+        bad += 1
+    else:
+        print("  ok     the corpus lives outside the tree that gets packaged")
+
+    if knowledge.problems(base, idioms):
+        print(f"  WRONG  the technique layer does not pass its own lint: "
+              f"{knowledge.problems(base, idioms)[:3]}")
+        bad += 1
+    else:
+        print(f"  ok     {len(base)} technique entries pass the lint")
+
+    CASES = [
+        ("realisation vocabulary in our own prose",
+         lambda e: e["vibrato-rate"].__setitem__(
+             "why", e["vibrato-rate"]["why"] + " Patch the modulator to the "
+             "oscillator's frequency jack with a cable."),
+         "belongs in the idiom"),
+        ("a cross-reference pointing back at an idiom",
+         lambda e: e["vibrato-rate"].__setitem__(
+             "what", e["vibrato-rate"]["what"] + " See `krell` for the wiring."),
+         "points at the idiom"),
+        ("a number with no account of where it came from",
+         lambda e: e["vibrato-rate"]["numbers"][0].__setitem__(
+             "grounding", "well known"),
+         "no account of where it came from"),
+        ("a number claiming to be read with no anchor",
+         lambda e: e["vibrato-rate"]["numbers"][0].pop("anchor", None) or
+                   e["vibrato-rate"]["numbers"][0].__setitem__(
+                       "provenance", "read"),
+         "carries no anchor"),
+        ("an entry that never says why the technique works",
+         lambda e: e["vibrato-rate"].__setitem__("why", "because it does"),
+         "does not say why it works"),
+    ]
+    for name, break_it, expect in CASES:
+        broken = copy.deepcopy(base)
+        break_it(broken)
+        got = knowledge.problems(broken, idioms)
+        if not any(expect in g for g in got):
+            print(f"  WRONG  {name}: the lint said nothing useful: {got[:2]}")
+            bad += 1
+        else:
+            print(f"  ok     {name}")
+
+    # OPTIONAL MEANS OPTIONAL. With the technique layer emptied, a contract
+    # still has to build and still has to carry the idiom's requirements. The
+    # generator worked before this existed; it has to keep working where it
+    # does not.
+    real = knowledge.TECHNIQUE_DIR
+    try:
+        knowledge.TECHNIQUE_DIR = os.path.join(HERE, "does-not-exist")
+        text = patch_vocabulary.for_prompt("a classic subtractive voice", idioms)
+    finally:
+        knowledge.TECHNIQUE_DIR = real
+    if "subtractive-voice" not in text or "envelope has to open" not in text:
+        print("  WRONG  with no knowledge base the contract lost the idiom "
+              "itself")
+        bad += 1
+    else:
+        print("  ok     the contract still builds with no knowledge base at all")
+
+    # And with it, the numbers actually arrive. A layer nothing reads is a
+    # layer that cannot help.
+    got = patch_vocabulary.for_prompt("a classic subtractive voice", idioms)
+    if "envelope-shape-conventions" not in got:
+        print("  WRONG  the technique an idiom declares never reaches the model")
+        bad += 1
+    else:
+        print("  ok     the technique behind an idiom reaches the model")
+    return bad
+
+
 def check_notice() -> int:
     """The published page says what the data says, and quotes nobody.
 
@@ -941,6 +1045,9 @@ def main() -> int:
 
     print("\ncitations can be caught:")
     bad += check_provenance()
+
+    print("\nthe knowledge base is portable and optional:")
+    bad += check_knowledge()
 
     print("\nthe notice tells the truth:")
     bad += check_notice()

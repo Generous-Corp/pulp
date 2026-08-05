@@ -28,15 +28,21 @@
     "produce a record that looks exactly like a read one and is fiction, which is",
     "the failure this whole tier exists to prevent, so it is not here."
   ],
-
   "idioms": [
     {
       "slug": "ensemble-vibrato",
       "kind": "fragment",
       "family": "fragment",
       "slot": "pitch",
-      "names": ["ensemble vibrato", "section vibrato"],
-      "implies": ["make it sound like several players", "string section", "many players in unison"],
+      "names": [
+        "ensemble vibrato",
+        "section vibrato"
+      ],
+      "implies": [
+        "make it sound like several players",
+        "string section",
+        "many players in unison"
+      ],
       "is": "Vibrato taken to each of several oscillators tuned in unison rather than to the pair as a whole, so the sound reads as several players who happen to agree rather than one instrument being wobbled.",
       "sounds_right_when": "it thickens into a section — you hear more than one player, and no single wobble you can follow.",
       "source": "ARP 2600 Patch Book to Behringer 2600 (Carl Bratcher), the Cello Section patch",
@@ -47,42 +53,87 @@
         "sha256": "76055f3dbc8c3475495573ec1e2e26c6434b2be90b536740000cdbf1b77cc398",
         "shows": "a panel diagram captioned Cello Section: two oscillators tuned in unison an octave below middle C, a third oscillator running below hearing taken to each of them for vibrato, and a note to add slight portamento"
       },
-      "at_least": {"lfo": 1, "multiple": 1, "audio_oscillator": 2, "mixer": 1},
+      "at_least": {
+        "lfo": 1,
+        "multiple": 1,
+        "audio_oscillator": 2,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "split-the-vibrato", "from_module": "lfo", "from_port": "cv_out",
-         "to_module": "multiple", "to_port": "any_in",
-         "describe": "the modulator has to be split, because it has to reach more than one oscillator"},
-        {"id": "to-each-oscillator", "from_module": "multiple", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "cv_in",
-         "describe": "a copy has to reach an oscillator's frequency input — one modulator on one oscillator of a pair is a detuned tone with a wobble in half of it"},
-        {"id": "summed", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "mixer", "to_port": "audio_in",
-         "describe": "the oscillators have to be summed, or there is no ensemble to hear"}
+        {
+          "id": "split-the-vibrato",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "multiple",
+          "to_port": "any_in",
+          "describe": "the modulator has to be split, because it has to reach more than one oscillator"
+        },
+        {
+          "id": "to-each-oscillator",
+          "from_module": "multiple",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "cv_in",
+          "describe": "a copy has to reach an oscillator's frequency input — one modulator on one oscillator of a pair is a detuned tone with a wobble in half of it"
+        },
+        {
+          "id": "summed",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the oscillators have to be summed, or there is no ensemble to hear"
+        }
       ],
       "behaviour": {},
       "listen_for": {
         "sounds_like": "a small string section rather than a synthesizer: the players are together on the note and never quite together on the wobble, so the sound breathes without any one movement standing out",
         "confusable_with": "a single oscillator with vibrato, which has one countable wobble, and a plain detuned pair, which beats at a fixed rate and does not breathe. The source's own instruction is to listen to each oscillator on its own and set its vibrato separately, which is the tell: the vibratos are meant to differ.",
         "expect": [
-          {"field": "pitch.voiced_fraction", "op": ">=", "value": 0.5,
-           "why": "an ensemble is still playing a note; if the pitch cannot be tracked for half the run the vibrato depth has gone past a section and into a chorus effect"}
+          {
+            "field": "pitch.voiced_fraction",
+            "op": ">=",
+            "value": 0.5,
+            "why": "an ensemble is still playing a note; if the pitch cannot be tracked for half the run the vibrato depth has gone past a section and into a chorus effect"
+          }
         ]
       },
       "common_mistakes": [
-        {"id": "one-voice-only", "do": "cut", "requirement": "to-each-oscillator",
-         "message": "the vibrato never reaches an oscillator, so nothing wavers"},
-        {"id": "unsplit", "do": "cut", "requirement": "split-the-vibrato",
-         "message": "the modulator is never split, so it can only reach one oscillator and the section is one player wide"},
-        {"id": "unsummed", "do": "cut", "requirement": "summed",
-         "message": "the oscillators are never summed, so there is no section"}
+        {
+          "id": "one-voice-only",
+          "do": "cut",
+          "requirement": "to-each-oscillator",
+          "message": "the vibrato never reaches an oscillator, so nothing wavers"
+        },
+        {
+          "id": "unsplit",
+          "do": "cut",
+          "requirement": "split-the-vibrato",
+          "message": "the modulator is never split, so it can only reach one oscillator and the section is one player wide"
+        },
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the oscillators are never summed, so there is no section"
+        }
+      ],
+      "realises": [
+        "vibrato-rate"
       ]
     },
-
     {
       "slug": "gliding-intervals",
       "family": "generative",
-      "names": ["gliding intervals", "sliding pattern"],
-      "implies": ["a pattern that slides between notes", "stepped melody that glides", "intervals that swoop"],
+      "names": [
+        "gliding intervals",
+        "sliding pattern"
+      ],
+      "implies": [
+        "a pattern that slides between notes",
+        "stepped melody that glides",
+        "intervals that swoop"
+      ],
       "is": "A sample-and-hold clocked by an oscillator running below hearing, with the held voltage passed through a lag before it plays the note — so a repeating pattern arrives, and every interval in it is travelled rather than jumped.",
       "sounds_right_when": "a pattern recurs, and each move between its notes is audibly swooped rather than stepped.",
       "source": "ARP 2600 Patch Book to Behringer 2600 (Carl Bratcher), the Gliding Intervals patch",
@@ -93,34 +144,72 @@
         "sha256": "58dd2ec67f4887b064283ff266ed0343c65677195fd640e4cf407ab46a834856",
         "shows": "a panel diagram captioned Gliding Intervals, with the third oscillator switched below hearing as the pattern source, the sample-and-hold in the signal path, the voltage processor's lag engaged, and notes to tune that oscillator for the pattern and the sample-and-hold's level for the size of the interval"
       },
-      "at_least": {"clock": 1, "sample_and_hold": 1, "slew": 1, "audio_oscillator": 1},
+      "at_least": {
+        "clock": 1,
+        "sample_and_hold": 1,
+        "slew": 1,
+        "audio_oscillator": 1
+      },
       "topology": [
-        {"id": "clocked", "from_module": "clock", "from_port": "clock_out",
-         "to_module": "sample_and_hold", "to_port": "clock_in",
-         "describe": "something has to tell the sample-and-hold when to take a value — on the source instrument this is an oscillator switched below hearing, and its frequency is what sets the pattern"},
-        {"id": "lagged", "from_module": "sample_and_hold", "from_port": "cv_out",
-         "to_module": "slew", "to_port": "cv_in",
-         "describe": "the held voltage has to pass through a lag, which is the whole difference between this and a stepped melody"},
-        {"id": "to-pitch", "from_module": "slew", "from_port": "cv_out",
-         "to_module": "audio_oscillator", "to_port": "pitch_in",
-         "describe": "the LAGGED voltage has to be what plays the note; patching the held voltage straight to pitch alongside it defeats the lag"}
+        {
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "sample_and_hold",
+          "to_port": "clock_in",
+          "describe": "something has to tell the sample-and-hold when to take a value — on the source instrument this is an oscillator switched below hearing, and its frequency is what sets the pattern"
+        },
+        {
+          "id": "lagged",
+          "from_module": "sample_and_hold",
+          "from_port": "cv_out",
+          "to_module": "slew",
+          "to_port": "cv_in",
+          "describe": "the held voltage has to pass through a lag, which is the whole difference between this and a stepped melody"
+        },
+        {
+          "id": "to-pitch",
+          "from_module": "slew",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the LAGGED voltage has to be what plays the note; patching the held voltage straight to pitch alongside it defeats the lag"
+        }
       ],
-      "behaviour": {"keeps_going": true},
+      "behaviour": {
+        "keeps_going": true
+      },
       "listen_for": {
         "sounds_like": "a line that never arrives cleanly: each note leans into the next, and because the sampled values repeat, the same swoops come round again. How far apart the notes are is one knob — the level of the sampled voltage — and how fast the pattern turns over is another.",
         "confusable_with": "a stepped random melody, where every note lands square. If you cannot hear the journey between notes, nothing is lagging the voltage.",
         "expect": [
-          {"field": "pitch.distinct_pitches", "op": ">=", "value": 3,
-           "why": "fewer than three pitches is not a pattern, and the lag would have nothing to travel between"}
+          {
+            "field": "pitch.distinct_pitches",
+            "op": ">=",
+            "value": 3,
+            "why": "fewer than three pitches is not a pattern, and the lag would have nothing to travel between"
+          }
         ]
       },
       "common_mistakes": [
-        {"id": "unclocked", "do": "cut", "requirement": "clocked",
-         "message": "nothing clocks the sample-and-hold, so it holds one value and the pattern never advances"},
-        {"id": "no-glide", "do": "cut", "requirement": "lagged",
-         "message": "the held voltage never reaches the lag, so the intervals step rather than glide"},
-        {"id": "unplayed", "do": "cut", "requirement": "to-pitch",
-         "message": "the lagged voltage never reaches a pitch input"}
+        {
+          "id": "unclocked",
+          "do": "cut",
+          "requirement": "clocked",
+          "message": "nothing clocks the sample-and-hold, so it holds one value and the pattern never advances"
+        },
+        {
+          "id": "no-glide",
+          "do": "cut",
+          "requirement": "lagged",
+          "message": "the held voltage never reaches the lag, so the intervals step rather than glide"
+        },
+        {
+          "id": "unplayed",
+          "do": "cut",
+          "requirement": "to-pitch",
+          "message": "the lagged voltage never reaches a pitch input"
+        }
       ]
     }
   ]

@@ -974,6 +974,16 @@ def check_written(patch: dict, inv: dict, idiom: dict,
 # does not measure. Each of those reads as data and checks nothing.
 
 
+def _technique_ids() -> set:
+    """The technique entries, read lazily so the idiom library never depends
+    on the knowledge base existing. Absent knowledge means less help."""
+    try:
+        import knowledge                     # noqa: PLC0415
+    except ImportError:
+        return set()
+    return set(knowledge.load())
+
+
 _INF = float("inf")
 _OPS_SET = (">=", "<=", ">", "<", "==")
 
@@ -1204,6 +1214,15 @@ def library_problems(idioms: dict | None = None,
                        f"nothing without one")
         if len(str(idiom.get("source") or "")) < 10:
             bad.append(f"{slug} does not say where it came from")
+
+        # The one link between the two layers, and it points this way on
+        # purpose: an idiom names the instrument-agnostic technique it builds,
+        # and the technique layer never names an idiom. A dangling name here
+        # is a realisation claiming to build something that does not exist.
+        for tid in idiom.get("realises") or []:
+            if tid not in _technique_ids():
+                bad.append(f"{slug} says it realises {tid}, which is not a "
+                           f"technique this knowledge base holds")
 
         # 7. The calibration. Free text is what a person hears; `expect` is
         #    the same claim in the numbers the gate reports, and it is the only
