@@ -618,6 +618,41 @@ TEST_CASE("stable host source/frame anchor survives callback and loop partitions
     REQUIRE(reviewer_point->frame_offset == 1'666);
 }
 
+TEST_CASE("host grid projection rejects the exclusive signed frame bound",
+          "[timebase][grid]") {
+    const std::array tempo_points{TempoPoint{{0}, 60.0}};
+    const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
+    const std::array meter_points{MeterPoint{{0}, {4, 4}}};
+    const auto meter = meter_map(meter_points);
+    GridProjectionRange range{0, 1, {0}, {0}, {1}, {{0}}, {{1}}, 0};
+    range.host_beat_mapping = true;
+    range.host_tick_start = 0.0;
+    range.host_tick_end = 1.0;
+    range.has_precise_host_ticks = true;
+    range.host_anchor = {0.0, 0, 1.0};
+    range.absolute_frame_start = 0;
+    range.has_host_anchor = true;
+    std::array<GridProjectionPoint, 1> output{{{77, {88}, {{99}}, {{11}, {22}}, 33}}};
+
+    const auto project = [&] {
+        return project_grid(tempo, meter,
+                            {BeatDivision::Quarter, GridAnchor::Timeline, true},
+                            std::span<const GridProjectionRange>(&range, 1), output);
+    };
+    const auto positive = project();
+    REQUIRE(positive);
+    REQUIRE(positive.count == 1);
+    REQUIRE(output[0].frame_offset == 0);
+
+    output[0].frame_offset = 77;
+    range.host_anchor = {-1.0, std::numeric_limits<std::int64_t>::max(), 1.0};
+    const auto exclusive_upper = project();
+    REQUIRE(exclusive_upper);
+    REQUIRE(exclusive_upper.count == 0);
+    REQUIRE(exclusive_upper.required == 0);
+    REQUIRE(output[0].frame_offset == 77);
+}
+
 TEST_CASE("grid candidate preflight bounds incoherent remote-sample ranges", "[timebase][grid]") {
     const std::array tempo_points{TempoPoint{{0}, 120.0}};
     const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
