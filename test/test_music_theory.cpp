@@ -42,6 +42,19 @@ constexpr std::array<ChordQuality, kChordQualityCount> kChordQualities{{
     ChordQuality::octave,
 }};
 
+constexpr std::uint16_t inversion_oracle(std::uint16_t mask, int axis) noexcept {
+    std::uint16_t expected = 0;
+    for (int source = 0; source < kPitchClassesPerOctave; ++source) {
+        if ((mask & (1u << source)) == 0)
+            continue;
+        int destination = (2 * axis - source) % kPitchClassesPerOctave;
+        if (destination < 0)
+            destination += kPitchClassesPerOctave;
+        expected = static_cast<std::uint16_t>(expected | (1u << destination));
+    }
+    return expected;
+}
+
 } // namespace
 
 TEST_CASE("pitch classes have checked and wrapped construction", "[music]") {
@@ -161,10 +174,16 @@ TEST_CASE("pitch-class inversion is an involution around every axis", "[music]")
         REQUIRE(set);
         for (int axis = 0; axis < kPitchClassesPerOctave; ++axis) {
             const auto inverted = set->inverted(static_cast<PitchClass>(axis));
+            CHECK(inverted.mask() == inversion_oracle(mask, axis));
             CHECK(inverted.inverted(static_cast<PitchClass>(axis)) == *set);
             CHECK(inverted.size() == set->size());
         }
     }
+
+    const auto major_triad = PitchClassSet::from_mask(0x0091u);
+    REQUIRE(major_triad);
+    CHECK(major_triad->inverted(PitchClass::c).mask() == 0x0121u);
+    CHECK(major_triad->inverted(PitchClass::c) != *major_triad);
 }
 
 TEST_CASE("named chord quality identities and formulas are stable", "[music]") {

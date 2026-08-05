@@ -1,5 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
+#include "chord_scale_names.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -16,37 +18,11 @@ runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemI
 constexpr std::uint8_t kPitchClassCount = 12;
 
 constexpr bool valid_chord_quality(ChordQuality quality) noexcept {
-    switch (quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Minor:
-    case ChordQuality::Diminished:
-    case ChordQuality::Augmented:
-    case ChordQuality::Dominant7:
-    case ChordQuality::Major7:
-    case ChordQuality::Minor7:
-    case ChordQuality::HalfDiminished7:
-    case ChordQuality::Suspended2:
-    case ChordQuality::Suspended4:
-        return true;
-    }
-    return false;
+    return detail::music_chord_quality(quality).has_value();
 }
 
 constexpr bool valid_scale_mode(ScaleMode mode) noexcept {
-    switch (mode) {
-    case ScaleMode::Major:
-    case ScaleMode::NaturalMinor:
-    case ScaleMode::HarmonicMinor:
-    case ScaleMode::MelodicMinor:
-    case ScaleMode::Dorian:
-    case ScaleMode::Phrygian:
-    case ScaleMode::Lydian:
-    case ScaleMode::Mixolydian:
-    case ScaleMode::Locrian:
-    case ScaleMode::Chromatic:
-        return true;
-    }
-    return false;
+    return detail::music_scale_mode(mode).has_value();
 }
 
 constexpr bool valid_chord_voicing(ChordVoicing voicing) noexcept {

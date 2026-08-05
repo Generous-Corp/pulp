@@ -194,6 +194,20 @@ inline constexpr std::array<ScaleCompatibilityEntry, 10> kPulpSignalScales{{
     {"minor_pentatonic", NamedScale::minor_pentatonic},
 }};
 
+// These indices match timeline::ScaleMode and its persisted spelling.
+inline constexpr std::array<ScaleCompatibilityEntry, 10> kPulpTimelineScales{{
+    {"major", NamedScale::major},
+    {"natural_minor", NamedScale::natural_minor},
+    {"harmonic_minor", NamedScale::harmonic_minor},
+    {"melodic_minor", NamedScale::melodic_minor},
+    {"dorian", NamedScale::dorian},
+    {"phrygian", NamedScale::phrygian},
+    {"lydian", NamedScale::lydian},
+    {"mixolydian", NamedScale::mixolydian},
+    {"locrian", NamedScale::locrian},
+    {"chromatic", NamedScale::chromatic},
+}};
+
 // These indices match Forge's saved ten-scale transform selector.
 inline constexpr std::array<ScaleCompatibilityEntry, 10> kForgeRuntimeScales{{
     {"major", NamedScale::major},

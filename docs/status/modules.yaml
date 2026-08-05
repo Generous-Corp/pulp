@@ -17,7 +17,7 @@ modules:
   - name: timeline
     summary: Immutable timeline snapshots automation curves and standalone-compilable unattached parameter-target lane values with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
     status: experimental
-    dependencies: [runtime, timebase]
+    dependencies: [music, runtime, timebase]
     docs: reference/modules.md#timeline
 
   - name: project_package
@@ -139,7 +139,7 @@ modules:
   - name: signal
     summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, measured analog VCF voicings, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite), convolution, compressor, limiter, reverb (including the multirate FDN reverb), chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer, plus the modulation and utility toolkit (deterministic RNG, LFO, slew/sample-hold/quantizer control tools, trigger and gate kit, envelope family, VCA, low-pass gate, mod matrix, unit conversions)
     status: usable
-    dependencies: []
+    dependencies: [music, runtime]
     docs: reference/modules.md#signal
 
   - name: state
