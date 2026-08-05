@@ -385,6 +385,19 @@ _WAVE_EDGED = ("SQUARE", "SQR", "PULSE", "PLS")
 LFO_TAGS = {"LFO", "Low-frequency oscillator", "Clock generator"}
 OSC_TAGS = {"VCO", "Oscillator"}
 
+# What a module says it is when it EMITS a clock. `Clock` on its own is not
+# one of Rack's canonical tags and twelve installed modules use it regardless,
+# so a list holding only the canonical spellings describes the documentation
+# rather than the library.
+#
+# Deliberately not `CLOCK_TAGS`, which already exists further down and means
+# something else -- which group a cable belongs to for colouring, and which
+# counts a Sequencer and an Arpeggiator as clock-like. Defining a second one
+# under the same name shadowed this one silently: the module-level rebinding
+# won at call time, so a jack named "Beat" kept reading as Cv and the fix
+# looked like it had simply not worked.
+EMITS_CLOCK_TAGS = {"Clock", "Clock generator", "Clock modulator"}
+
 
 def infer_port_role(name: str | None, tags: list | None,
                     kind: str = "in") -> str | list | None:
@@ -419,6 +432,20 @@ def infer_port_role(name: str | None, tags: list | None,
             return role
     if words & set(_NUMBERED):
         return "Audio" if has_tag(tags, AUDIO_TAGS) else "Cv"
+
+    # An unremarkable output on a CLOCK is a clock. What else would it be?
+    #
+    # A clock's jacks are named for musical divisions -- AS's BPMClock emits
+    # "Beat", "Eights", "Sixteenths" and "Bar" -- and not one of those is a
+    # word any table above lists, so every one of them fell through to "Cv"
+    # and the module could not satisfy `the sequencer has to be clocked`. The
+    # most obvious clock on the machine had no usable clock output.
+    #
+    # Reached only after the tables, so a jack that NAMES itself keeps what it
+    # said: BPMClock's own "Reset" and "Run" are still triggers. The module's
+    # tags do the narrowing, exactly as they do for an LFO's square above.
+    if kind == "out" and has_tag(tags, EMITS_CLOCK_TAGS):
+        return ["Cv", "Clock", "Gate", "Trigger"]
     return "Cv"
 
 

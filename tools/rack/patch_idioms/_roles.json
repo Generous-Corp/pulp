@@ -99,7 +99,16 @@
       "is": "broadband noise, the raw material for random and for texture"
     },
     "clock": {
+      "$comment": [
+        "`Clock` on its own is not one of Rack's canonical tags, and twelve",
+        "installed modules use it anyway -- AS's BPMClock, JW's SimpleClock,",
+        "mscHack's MasterClockx4, NYSTHI's TIMEX among them. Leaving it out",
+        "meant the most obvious clock on the machine matched no role at all,",
+        "so `the sequencer has to be clocked` rejected patches that were",
+        "plainly clocked. A tag is whatever the plugin's author typed."
+      ],
       "tags": [
+        "Clock",
         "Clock generator",
         "Clock modulator",
         "Low-frequency oscillator",
@@ -325,8 +334,17 @@
       ]
     },
     "cv_out": {
+      "$comment": [
+        "`Pitch` is here because a pitch CV IS a CV -- the most specific",
+        "kind of one. Without it a sequencer whose output is honestly named",
+        "'Pitch CV (1V/oct)' classified as Pitch, failed a requirement asking",
+        "for cv_out, and the best-named jack on the machine could not feed an",
+        "oscillator. A sibling whose jack read 'Step CV' passed, so the",
+        "better-labelled module was the one that failed."
+      ],
       "ports": [
-        "Cv"
+        "Cv",
+        "Pitch"
       ],
       "labels": [
         "CV",

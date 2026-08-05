@@ -11,7 +11,8 @@
  ],
  "captured_from": {
   "Fundamental": "2.6.4",
-  "Core": ""
+  "Core": "",
+  "AS": "2.0.6"
  },
  "plugins": {
   "Fundamental": {
@@ -630,6 +631,28 @@
      "name": "Notes",
      "tags": [
       "Blank"
+     ]
+    }
+   }
+  },
+  "AS": {
+   "modules": {
+    "BPMClock": {
+     "name": "BPM Clock",
+     "tags": [
+      "Clock"
+     ],
+     "inputs": [
+      "Run CV",
+      "Reset CV"
+     ],
+     "outputs": [
+      "Beat",
+      "Eights",
+      "Sixteenths",
+      "Bar",
+      "Reset",
+      "Run"
      ]
     }
    }

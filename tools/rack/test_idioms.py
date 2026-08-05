@@ -107,11 +107,20 @@ PORT_ROLES = [
     # The same waveform name means different things on different modules.
     ("Fundamental", "LFO", "out", 0, "Cv"),         # Sine, below hearing
     ("Fundamental", "LFO", "out", 3, "Cv"),         # Square, primarily a CV
+    # A clock's jacks are named for musical divisions, and none of those words
+    # appears in any role table. Read as plain CVs, the most obvious clock on
+    # the machine had no clock output and could not satisfy "the sequencer has
+    # to be clocked" -- while its own Reset and Run, which DO name themselves,
+    # keep what they said.
+    ("AS", "BPMClock", "out", 0, "Cv"),             # Beat, and also a clock
+    ("AS", "BPMClock", "out", 4, "Trigger"),        # Reset
+    ("AS", "BPMClock", "out", 5, "Trigger"),        # Run
 ]
 
 # A jack that is honestly more than one thing, and the kinds it must satisfy.
 DUAL_ROLE = [
     ("Fundamental", "LFO", "out", 3, ("cv_out", "clock_out", "gate_out")),
+    ("AS", "BPMClock", "out", 0, ("cv_out", "clock_out", "gate_out")),
 ]
 
 # Textbook patches, built from a bare Rack install and nothing else. Each one
@@ -192,6 +201,142 @@ QUANTIZER = [
     ("quantizer fed but its output unused",
      [(1, 0, 2, 0), (3, 2, 4, 0)], False, "has to be what reaches"),
 ]
+
+
+# Four defects that rejected patches a person would call correct, each with
+# the case that proves the fix did not simply make the check agreeable.
+#
+# These are written against REAL jack names and REAL tags rather than
+# synthesised ones, which is the gap that let all four through: the idiom
+# self-test builds its own modules, so it can only ever prove the checker
+# consistent with itself. Every module below is one somebody has installed,
+# and the names are what its author typed.
+SEQUENCED = [
+    # The clock is tagged only `Clock`, and its output is called "Beat".
+    # Neither was recognised, so this patch -- which plays a melody, verified
+    # by listening -- was rejected for not being clocked.
+    ("clocked by a module tagged only Clock", None, True, None),
+    # The controls. Each cuts ONE requirement's only cable, and the rejection
+    # has to name that requirement rather than any of the others.
+    ("the clock cable cut", (5, 0, 1, 1), False, "has to be clocked"),
+    ("the pitch cable cut", (1, 1, 2, 0), False, "pitch has to reach"),
+    ("the gate cable cut", (1, 4, 3, 4), False, "gate has to fire"),
+]
+
+# What each fix must accept, and what it must still refuse. A widening that
+# only ever says yes is a rubber stamp, so every row here has a partner.
+ROLE_FIXES = [
+    # A tag is whatever the author typed, and twelve installed modules type
+    # `Clock`. A filter is still not a clock.
+    ("a module tagged Clock is a clock", "module", ("clock", ["Clock"]), True),
+    ("a filter is not", "module", ("clock", ["Filter"]), False),
+    # A pitch CV is the most specific kind of CV. Audio is not a CV.
+    ("a Pitch jack satisfies cv_out", "port",
+     ("cv_out", "Pitch", "Pitch CV (1V/oct)"), True),
+    ("an audio jack does not", "port", ("cv_out", "Audio", "Sawtooth"), False),
+    # An oscillator's square is audio however a clock's square is read; a
+    # clock retriggering an envelope is the point, a VCO doing it thousands of
+    # times a second is the bug that not_ports exists for.
+    ("an oscillator's square is not a clock output", "port",
+     ("clock_out", "Audio", "Square"), False),
+]
+
+# An unremarkable output on a clock is a clock; a jack that names itself keeps
+# what it said; and nothing about being a clock changes an INPUT.
+CLOCK_INFERENCE = [
+    ("Beat", ["Clock"], "out", "Clock", True),
+    ("Sixteenths", ["Clock"], "out", "Clock", True),
+    ("Reset", ["Clock"], "out", "Trigger", True),
+    ("Beat", ["Clock"], "in", "Clock", False),
+    ("Sawtooth", ["Oscillator"], "out", "Audio", True),
+    ("Sawtooth", ["Oscillator"], "out", "Clock", False),
+]
+
+
+def check_sequenced_voice(idioms) -> int:
+    """The user's melodic case, end to end, on modules that really exist."""
+    inv = vendor_inventory()
+    roles = idiom_check.load_roles()
+    mods = [("Fundamental", "SEQ3"), ("Fundamental", "VCO"),
+            ("Fundamental", "ADSR"), ("Fundamental", "VCA"),
+            ("AS", "BPMClock"), AUDIO2]
+    wires = [(1, 1, 2, 0),    # the sequence's pitch reaches the oscillator
+             (1, 4, 3, 4),    # its gate fires the envelope
+             (5, 0, 1, 1),    # "Beat", on a module tagged only Clock
+             (2, 2, 4, 2), (3, 0, 4, 0), (4, 0, 6, 0)]
+    bad = 0
+    for name, cut, should_hold, expect in SEQUENCED:
+        patch = _p(mods, [w for w in wires if w != cut])
+        problems = idiom_check.check(patch, inv, idioms["sequenced-voice"],
+                                     roles)
+        held = not problems
+        if held != should_hold:
+            print(f"  WRONG  {name}: expected "
+                  f"{'holds' if should_hold else 'fails'}, got "
+                  f"{'holds' if held else problems}")
+            bad += 1
+        elif expect and not any(expect in p for p in problems):
+            print(f"  WRONG  {name}: failed, but not for {expect!r}: {problems}")
+            bad += 1
+        else:
+            print(f"  ok     {name}")
+    return bad
+
+
+def check_role_fixes() -> int:
+    """Each widening accepts what it was widened for and still refuses the rest."""
+    roles = idiom_check.load_roles()
+    bad = 0
+    for name, kind, args, want in ROLE_FIXES:
+        if kind == "module":
+            role, tags = args
+            got = idiom_check._module_matches(role, {"tags": tags}, roles)
+        else:
+            pk, role, label = args
+            got = idiom_check._port_matches(pk, role, label, roles)
+        if got != want:
+            print(f"  WRONG  {name}: got {got}, wanted {want}")
+            bad += 1
+    if not bad:
+        print(f"  ok     {len(ROLE_FIXES)} role and port rules, each with its "
+              f"refusal")
+
+    sys.path.insert(0, HERE)
+    import patch as patch_mod
+    for label, tags, kind, want_role, should in CLOCK_INFERENCE:
+        got = patch_mod.infer_port_role(label, tags, kind)
+        holds = want_role in (got if isinstance(got, list) else [got])
+        if holds != should:
+            print(f"  WRONG  {label!r} on {tags} ({kind}) reads {got!r}; "
+                  f"{want_role} should be {should}")
+            bad += 1
+    if not bad:
+        print(f"  ok     {len(CLOCK_INFERENCE)} inferred jack roles")
+
+    # Our own manifest, which is where an explicit role can SUBTRACT capability.
+    import json
+    lfo = json.load(open(os.path.join(
+        HERE, "..", "..", "examples", "forge-modular", "modules", "lfo.json")))
+    vco = json.load(open(os.path.join(
+        HERE, "..", "..", "examples", "forge-modular", "modules", "vco.json")))
+    def role_of(doc, name):
+        for m in doc["modules"]:
+            for o in m.get("outputs", []):
+                if o.get("name") == name:
+                    r = o.get("role")
+                    return r if isinstance(r, list) else [r]
+        return []
+    if "Clock" not in role_of(lfo, "Square"):
+        print("  WRONG  our LFO's square is not a clock, so it cannot clock "
+              "our own sequencer while a vendor's identical jack can")
+        bad += 1
+    elif role_of(vco, "Pulse") != ["Audio"]:
+        print("  WRONG  our VCO's pulse is no longer audio-only, so an "
+              "oscillator can now be read as a clock")
+        bad += 1
+    else:
+        print("  ok     our LFO's square clocks, and our VCO's pulse does not")
+    return bad
 
 
 def check_unknown_ports(idioms) -> int:
@@ -454,6 +599,10 @@ def main() -> int:
 
     print("\nthe modules everyone actually has:")
     bad += check_vendor(idioms)
+
+    print("\nthe melodic case, on modules that really exist:")
+    bad += check_sequenced_voice(idioms)
+    bad += check_role_fixes()
     bad += check_unknown_ports(idioms)
     bad += check_vendor_freshness()
 
