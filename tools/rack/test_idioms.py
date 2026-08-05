@@ -827,6 +827,121 @@ def check_provenance() -> int:
     return bad
 
 
+def check_multi_idiom() -> int:
+    """A request with several right answers, and the one that must still fail.
+
+    From a real run: "a highly melodic patch using cv funk modules" matched
+    four idioms, was gated on one, failed that one's requirement five times and
+    produced nothing. Three routes to exactly what was asked for were never
+    mentioned to the model.
+
+    The fix is any-of gating over the alternatives, and the whole risk in it is
+    that any-of is a weaker gate. It is not, and that is what most of this
+    tests: every alternative still has to hold in full, and the drone that
+    prompted the gate in the first place satisfies none of them.
+    """
+    idioms = idiom_check.load_idioms()
+    roles = idiom_check.load_roles()
+    inv = idiom_check._fixture_inventory(roles)
+    bad = 0
+
+    # Alternatives are recognised, and composable idioms are NOT swept into
+    # them. The base rate matters: a classifier that says "alternatives" for
+    # everything would pass the first four of these and be useless.
+    KIN = [
+        ("sequenced-voice", "sample-and-hold-melody", True),
+        ("sequenced-voice", "turing-machine", True),
+        ("sample-and-hold-melody", "self-clocked-melody", True),
+        # Two drums are an arrangement, not two answers -- you use two
+        # amplifiers. The first version of this classifier got this wrong,
+        # because it asked whether the fixture could build both at once and the
+        # fixture has one module per role.
+        ("kick-drum", "hi-hat", False),
+        ("sub-bass-voice", "reverb-wash", False),
+        ("drone-cluster", "shimmer", False),
+    ]
+    for a, b, want in KIN:
+        got = b in idiom_check.alternatives_to(a, idioms, roles)
+        if got != want:
+            print(f"  WRONG  {a} vs {b}: called "
+                  f"{'alternatives' if got else 'composable'}")
+            bad += 1
+        else:
+            print(f"  ok     {a:24} and {b:22} are "
+                  f"{'alternatives' if want else 'composable'}")
+
+    read = idiom_check.resolve_all("a highly melodic patch using cv funk modules",
+                                   idioms, roles)
+    if len(read.alternatives) < 3:
+        print(f"  WRONG  the melodic request offers only "
+              f"{len(read.alternatives)} other route(s)")
+        bad += 1
+    else:
+        print(f"  ok     the melodic request offers {len(read.alternatives)} "
+              f"other routes, not one")
+
+    group = [read.primary.slug] + read.alternatives
+
+    # A patch that correctly realises one of the alternatives passes, where
+    # today it is rejected for not being the idiom nobody asked for by name.
+    other = idiom_check.synthesize(idioms["sample-and-hold-melody"], inv, roles)
+    if not idiom_check.check(other, inv, idioms["sequenced-voice"], roles):
+        print("  WRONG  the control is broken: a sample-and-hold melody already "
+              "passes as a sequenced-voice, so this proves nothing")
+        bad += 1
+    else:
+        built, _ = idiom_check.check_any(other, inv, group, idioms, roles)
+        if built != "sample-and-hold-melody":
+            print(f"  WRONG  a correct sample-and-hold melody was not accepted "
+                  f"(got {built!r})")
+            bad += 1
+        else:
+            print("  ok     a correct melody by another route is accepted as "
+                  "what it is")
+
+    # THE GATE IS NOT LOOSER. The patch the whole idiom layer exists to reject
+    # -- an oscillator wired to the output and nothing else -- must fail EVERY
+    # alternative, and be told what each one wanted.
+    drone = {"modules": [{"id": 1, "plugin": "Fixture", "model": "audio_oscillator"},
+                         {"id": 2, "plugin": "Fixture", "model": "any"}],
+             "cables": [{"outputModuleId": 1, "outputId": 0,
+                         "inputModuleId": 2, "inputId": 0}]}
+    built, per_slug = idiom_check.check_any(drone, inv, group, idioms, roles)
+    if built:
+        print(f"  WRONG  a one-held-note drone was accepted as {built}")
+        bad += 1
+    elif len(per_slug) != len(group):
+        print(f"  WRONG  only {len(per_slug)} of {len(group)} alternatives "
+              f"reported what they wanted")
+        bad += 1
+    else:
+        print(f"  ok     a one-held-note drone is rejected by all "
+              f"{len(group)} routes, each naming what it wanted")
+
+    # And every alternative offered is one a patch could actually satisfy. An
+    # unbuildable alternative would be advice that wastes a retry.
+    unbuildable = [s for s in group
+                   if idiom_check.synthesize(idioms[s], inv, roles) is None]
+    if unbuildable:
+        print(f"  WRONG  offered alternatives nothing can build: {unbuildable}")
+        bad += 1
+    else:
+        print(f"  ok     all {len(group)} offered routes are buildable")
+
+    # The model is TOLD. Reporting them to a log and not to the contract is
+    # what the failing run actually did.
+    text = patch_vocabulary.for_prompt(
+        "a highly melodic patch using cv funk modules", idioms)
+    missing = [s for s in read.alternatives if s not in text]
+    if missing:
+        print(f"  WRONG  alternatives never reach the model: {missing}")
+        bad += 1
+    else:
+        print("  ok     every alternative reaches the model, with its "
+              "requirements")
+    return bad
+
+
 def check_knowledge() -> int:
     """The technique layer: portable, grounded, and never load-bearing.
 
@@ -1045,6 +1160,9 @@ def main() -> int:
 
     print("\ncitations can be caught:")
     bad += check_provenance()
+
+    print("\na request with more than one right answer:")
+    bad += check_multi_idiom()
 
     print("\nthe knowledge base is portable and optional:")
     bad += check_knowledge()

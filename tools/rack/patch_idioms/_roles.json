@@ -247,7 +247,9 @@
         "V/OCT",
         "1V/OCT",
         "PITCH"
-      ]
+      ],
+      "$comment": "SINGULAR: a voice has one pitch at a time, so two idioms that both claim to drive an oscillator's 1V/octave input are two ANSWERS to one request rather than two parts of it. Adding a second oscillator does not reconcile them -- it gives you a second melody, which is not what was asked for. This is the one port where that is true, and it is what lets a request matching four different ways to make a melody be gated on whichever one the patch actually built. Contrast an amplifier's control input: two drums both wanting an envelope on a VCA is an arrangement, and you simply use two VCAs.",
+      "singular": true
     },
     "gate_in": {
       "ports": [

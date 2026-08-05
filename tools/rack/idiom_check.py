@@ -167,6 +167,127 @@ def fragments_for(slug: str, idioms: dict | None = None) -> list[str]:
     return out
 
 
+def _singular_terminals(idiom: dict, roles: dict) -> set:
+    """The destinations this idiom claims that only ONE thing may drive.
+
+    A voice has one pitch at a time. Two idioms that both end at an
+    oscillator's 1V/octave input are therefore two ANSWERS to one request, not
+    two parts of it -- adding a second oscillator does not reconcile them, it
+    gives you a second melody nobody asked for.
+
+    Everything else is an arrangement. Two drums both wanting an envelope on an
+    amplifier is not a conflict; you use two amplifiers. Which is why the flag
+    lives on the PORT in `_roles.json` and is set on exactly one of them: the
+    distinction is musical, and inferring it structurally does not work. The
+    first attempt asked whether the two idioms' requirements could be built
+    together at all, and that called a kick drum and a hi-hat alternatives --
+    they contend for the fixture's single amplifier, which says nothing about
+    music and everything about the fixture having one module per role.
+    """
+    out = set()
+    for req in idiom.get("topology") or []:
+        to = req.get("to_module", "any")
+        port = req.get("to_port", "any_in")
+        if to in ("any", "output") or roles["roles"].get(to, {}).get("fan_in"):
+            continue
+        if not roles["ports"].get(port, {}).get("singular"):
+            continue
+        out.add((to, port))
+    return out
+
+
+def alternatives_to(slug: str, idioms: dict | None = None,
+                    roles: dict | None = None) -> list[str]:
+    """The other whole idioms that answer the same request a different way."""
+    idioms = idioms if idioms is not None else load_idioms()
+    roles = roles if roles is not None else load_roles()
+    if slug not in idioms or idioms[slug].get("kind") == "fragment":
+        return []
+    mine = _singular_terminals(idioms[slug], roles)
+    if not mine:
+        return []
+    return sorted(s for s, i in idioms.items()
+                  if s != slug and i.get("kind") != "fragment"
+                  and _singular_terminals(i, roles) & mine)
+
+
+class Reading(NamedTuple):
+    """Everything a request was taken to be asking for, not just the winner.
+
+    `resolve_intent` answers with ONE idiom, which is a single answer to a
+    request that is usually several things. That was known and reported and
+    never acted on, and then it cost a run: a request for a melodic patch
+    matched four idioms, was checked against one, failed that one's
+    requirement five times and produced nothing -- while three other routes to
+    exactly what was asked for went unmentioned to the model.
+
+    So the reading is now structured rather than printed:
+
+      primary       the idiom `resolve_intent` picked, and the only one whose
+                    tier decides whether anything may reject at all.
+      alternatives  other idioms that answer the SAME request a different way,
+                    because they drive the same singular destination. A patch
+                    satisfying any of these has done what was asked.
+      also          idioms the request touches that COMPOSE with the primary
+                    rather than replacing it. Reported, never gating -- a
+                    request for a bassline with reverb should not be rejected
+                    for having no reverb, which is what gating on these would
+                    do the first time somebody said a word we happen to index.
+      fragments     techniques the request names that decorate rather than
+                    replace. Offered, never gating.
+    """
+    primary: Intent
+    alternatives: list
+    also: list
+    fragments: list
+
+
+def resolve_all(prompt: str, idioms: dict | None = None,
+                roles: dict | None = None) -> Reading:
+    idioms = idioms if idioms is not None else load_idioms()
+    roles = roles if roles is not None else load_roles()
+    intent = resolve_intent(prompt, idioms)
+    if not intent.slug:
+        return Reading(intent, [], [], [])
+
+    touched = {s for slugs in reading(prompt, idioms)["known"].values()
+               for s in slugs} - {intent.slug}
+    kin = set(alternatives_to(intent.slug, idioms, roles))
+    return Reading(
+        intent,
+        sorted(touched & kin),
+        sorted(s for s in touched - kin
+               if idioms[s].get("kind") != "fragment"),
+        sorted(s for s in touched if idioms[s].get("kind") == "fragment"))
+
+
+def check_any(patch: dict, inv: dict, slugs, idioms: dict | None = None,
+              roles: dict | None = None):
+    """(the slug this patch satisfies, problems per slug).
+
+    The gate for a request with more than one right answer. A patch that
+    correctly realises ANY of the offered alternatives has done what was asked;
+    one that realises none is told what each of them was missing, so a retry
+    can pick the route it came closest to instead of being pushed back at the
+    only one it was given.
+
+    This is not a loosening. Every alternative still has to hold in full, and
+    a patch that plays one held note satisfies none of them -- which is tested,
+    because that is the failure the gate exists to catch.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    roles = roles if roles is not None else load_roles()
+    problems: dict[str, list] = {}
+    for slug in slugs:
+        if slug not in idioms:
+            continue
+        got = check(patch, inv, idioms[slug], roles)
+        if not got:
+            return slug, {}
+        problems[slug] = got
+    return None, problems
+
+
 def resolve_exact(prompt: str, idioms: dict | None = None) -> str | None:
     """Which idiom a prompt is asking for, decided here and not by the model.
 

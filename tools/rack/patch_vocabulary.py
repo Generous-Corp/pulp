@@ -131,7 +131,9 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     is then graded against it learns to pick easy targets.
     """
     idioms = idioms if idioms is not None else load_idioms()
-    intent = resolve_intent(prompt, idioms)
+    from idiom_check import resolve_all                  # noqa: PLC0415
+    read = resolve_all(prompt, idioms)
+    intent = read.primary
     slug = intent.slug
     if not slug:
         return ""
@@ -163,6 +165,32 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     if need:
         listed = ", ".join(f"{n} {role}" for role, n in sorted(need.items()))
         lines += ["", f"It needs at least: {listed}."]
+
+    # OTHER ROUTES TO THE SAME REQUEST, and they have to be offered or they may
+    # as well not exist. A request for a melodic patch matches four idioms; the
+    # model used to be told about one, and when the rack it had made that one
+    # awkward it kept failing at it rather than taking a route that was right
+    # there. Naming them costs a paragraph and turns one answer into four.
+    if read.alternatives:
+        lines += ["", "This request has more than one right answer. Any ONE of "
+                      "these satisfies it — build whichever suits the modules "
+                      "you have, and you will be checked against the one you "
+                      "actually built, not against the first:"]
+        for other in read.alternatives:
+            lines.append(f"  - **{other}**: {idioms[other].get('is', '')}")
+            for r in idioms[other].get("topology") or []:
+                lines.append(f"      - {r.get('describe', '')}")
+
+    # Things the request also touches that ADD to the patch rather than
+    # replacing it. Offered, never required: a bassline that arrives without
+    # the reverb somebody mentioned is still a bassline.
+    extra = list(read.also) + list(read.fragments)
+    if extra:
+        lines += ["", "The request also mentions these, which go ON TOP of the "
+                      "patch above rather than instead of it. Add them if they "
+                      "belong; nothing rejects a patch for leaving one out:"]
+        for other in extra:
+            lines.append(f"  - {other}: {idioms[other].get('is', '')}")
 
     # An idiom on a continuum is one position on it, and the neighbouring
     # position is usually a KNOB away. Saying so is the difference between

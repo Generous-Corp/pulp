@@ -3163,12 +3163,22 @@ def claim_idiom(prompt: str, idioms: dict, say=None):
     # the library also knows "shimmer", so half the request was dropped on the
     # floor without a word said. Reported, never acted on: picking two idioms
     # and checking both would reject patches for not being two things at once.
+    # One idiom is one answer to a request that is usually several things.
+    # This used to print the rest as "not checked" and stop there, which cost a
+    # run: a melodic request matched four idioms, was gated on one, failed that
+    # one five times and shipped nothing -- while three other routes to exactly
+    # what was asked for were never mentioned to the model. They are now
+    # separated by whether they REPLACE the primary or ADD to it, and both
+    # kinds reach the model through the contract.
+    full = idiom_check.resolve_all(prompt, idioms)
+    if full.alternatives:
+        out(f"  the same request is also answered by: "
+            f"{', '.join(full.alternatives)} — any one of them counts")
+    extra = list(full.also) + list(full.fragments)
+    if extra:
+        out(f"  the request also touches: {', '.join(extra[:4])}"
+            f"{' ...' if len(extra) > 4 else ''} — offered, not required")
     read = idiom_check.reading(prompt, idioms)
-    others = sorted({s for slugs in read["known"].values() for s in slugs}
-                    - {intent.slug})
-    if others:
-        out(f"  the request also touches: {', '.join(others[:4])}"
-            f"{' ...' if len(others) > 4 else ''} — not checked")
     if read["unknown"]:
         out(f"  no idiom uses these words, so nothing checks them: "
             f"{', '.join(read['unknown'])}")
@@ -3340,8 +3350,22 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # reinstates the bug the other side fixed.
         if verdict == AUDIBLE or crashed:
             if claimed.gating:
-                missing = idiom_check.check(patch, inv,
-                                            idioms[claimed.slug])
+                # GATED ON THE GROUP, NOT ON THE FIRST NAME. Where a request
+                # has several right answers -- four ways to make a melody --
+                # the patch is checked against all of them and passes if it
+                # correctly built ANY. Not a loosening: each alternative still
+                # has to hold in full, and a patch that plays one held note
+                # satisfies none of them, which is tested. What it stops is
+                # rejecting a correct sample-and-hold melody for not being the
+                # sequencer patch nobody asked for by name.
+                group = [claimed.slug] + idiom_check.resolve_all(
+                    prompt, idioms).alternatives
+                built, per_slug = idiom_check.check_any(patch, inv, group,
+                                                        idioms)
+                missing = [] if built else per_slug.get(claimed.slug, [])
+                if built and built != claimed.slug:
+                    print(f"  built as {built}, which answers this request "
+                          f"as well as {claimed.slug} would have")
                 if missing:
                     # Named, so the retry can fix the connection rather than
                     # guessing what "rejected" meant.
