@@ -239,6 +239,7 @@ public:
             case CanvasCapability::filter_chain:
             case CanvasCapability::mask_layer:
             case CanvasCapability::backdrop_filter:
+            case CanvasCapability::backdrop_filter_chain:
             case CanvasCapability::bloom_layer:
             case CanvasCapability::sksl_draw:
             case CanvasCapability::sksl_post_effect:
@@ -308,6 +309,10 @@ public:
                                             float sweep_turns,
                                             const Color* colors, const float* positions,
                                             int count) override;
+    /// One band plus SkTileMode::kRepeat — Skia does the repetition.
+    void set_fill_gradient_linear_repeating(float x0, float y0, float x1, float y1,
+                                             const Color* colors, const float* positions,
+                                             int count) override;
     void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
@@ -379,6 +384,9 @@ public:
                                Color tint) override;
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
+    void save_backdrop_filter_chain(float x, float y, float w, float h,
+                                    const FilterChainEntry* chain,
+                                    int count) override;
 
     // Box shadow uses SkImageFilters::DropShadowOnly for outset shadows; inset
     // shadows clip to the box and stroke with a blurred mask.

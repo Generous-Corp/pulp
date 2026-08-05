@@ -77,16 +77,83 @@ struct BundledBlob {
 // the CMake SOURCES list in sync — there is intentionally no auto-discovery,
 // so failures show up as a "file not declared" link error rather than a
 // silent runtime miss.
-const std::array<BundledBlob, 2>& bundled_blobs() {
-    static const std::array<BundledBlob, 2> kBlobs = {{
+const std::array<BundledBlob, 6>& bundled_blobs() {
+    static const std::array<BundledBlob, 6> kBlobs = {{
         {"Inter-Regular.ttf",
          pulp_bundled_fonts::Inter_Regular_ttf,
          pulp_bundled_fonts::Inter_Regular_ttf_size},
         {"JetBrainsMono-Regular.ttf",
          pulp_bundled_fonts::JetBrainsMono_Regular_ttf,
          pulp_bundled_fonts::JetBrainsMono_Regular_ttf_size},
+        {"Jost-Regular.ttf",
+         pulp_bundled_fonts::Jost_Regular_ttf,
+         pulp_bundled_fonts::Jost_Regular_ttf_size},
+        // Jost's other weights, because a family bundled at ONE weight is a
+        // family that abandons itself: `match_bundled_typeface` refuses a face
+        // whose weight is too far from the request, so a 600 heading fell all
+        // the way past the bundle to a platform substitute ~10% wider.
+        {"Jost-Medium.ttf",
+         pulp_bundled_fonts::Jost_Medium_ttf,
+         pulp_bundled_fonts::Jost_Medium_ttf_size},
+        {"Jost-SemiBold.ttf",
+         pulp_bundled_fonts::Jost_SemiBold_ttf,
+         pulp_bundled_fonts::Jost_SemiBold_ttf_size},
+        {"Jost-Bold.ttf",
+         pulp_bundled_fonts::Jost_Bold_ttf,
+         pulp_bundled_fonts::Jost_Bold_ttf_size},
     }};
     return kBlobs;
+}
+
+// Best face for `style` among the faces of one family, in three passes.
+// Shared by the bundled cache and the plugin-registered registry so a family
+// is weighted the same way whichever side it was loaded from.
+//
+// Pass 1 — exact weight + slant. The ideal path.
+//
+// Pass 2 — closest same-slant face within one approximate CSS weight step.
+// A family that ships several weights should satisfy a request from its own
+// members before the cascade abandons it for a system face. The bound is what
+// keeps that from overcorrecting: a family holding only a Regular must NOT
+// swallow a Bold request and mask the real system Bold, so a gap wider than
+// one step still returns nullptr and lets the cascade keep walking.
+//
+// Pass 3 — variable-font eligibility. A variable face is stored once at its
+// default `wght` instance, so a far-off request (700 against a 400 default)
+// fails passes 1-2 on static distance even though the face can actually
+// render it. Hand back the base face so the resolver can `makeClone` it at
+// the requested weight rather than dropping the design's typeface entirely.
+// Slant is never synthesized here — the `wght` axis governs weight only.
+sk_sp<SkTypeface> best_style_match(const std::vector<sk_sp<SkTypeface>>& faces,
+                                   SkFontStyle style) {
+    for (const auto& f : faces) {
+        if (!f) continue;
+        SkFontStyle have = f->fontStyle();
+        if (have.weight() == style.weight() && have.slant() == style.slant()) {
+            return f;
+        }
+    }
+
+    constexpr int kMaxWeightGap = 200;
+    sk_sp<SkTypeface> best;
+    int best_gap = std::numeric_limits<int>::max();
+    for (const auto& f : faces) {
+        if (!f) continue;
+        SkFontStyle have = f->fontStyle();
+        if (have.slant() != style.slant()) continue;
+        int gap = std::abs(have.weight() - style.weight());
+        if (gap > kMaxWeightGap) continue;
+        if (gap < best_gap) { best_gap = gap; best = f; }
+    }
+    if (best) return best;
+
+    for (const auto& f : faces) {
+        if (!f) continue;
+        if (f->fontStyle().slant() != style.slant()) continue;
+        float lo = 0, hi = 0, def = 0;
+        if (face_wght_axis(f.get(), lo, hi, def)) return f;
+    }
+    return nullptr;
 }
 
 // First call with a non-null `mgr` lazily materialises every blob into an
@@ -101,11 +168,12 @@ const std::array<BundledBlob, 2>& bundled_blobs() {
 // degradation), `call_once` would burn the once-flag and the *next* caller
 // with a real mgr would see an empty cache forever. Use a guard flag that
 // only flips on success.
-const std::unordered_map<std::string, sk_sp<SkTypeface>>&
+const std::unordered_map<std::string, std::vector<sk_sp<SkTypeface>>>&
 ensure_registered(SkFontMgr* mgr) {
     static std::mutex lock;
     static bool initialized = false;
-    static std::unordered_map<std::string, sk_sp<SkTypeface>> by_family;
+    static std::unordered_map<std::string, std::vector<sk_sp<SkTypeface>>>
+        by_family;
 
     std::lock_guard<std::mutex> guard(lock);
     if (initialized || !mgr) return by_family;
@@ -124,10 +192,15 @@ ensure_registered(SkFontMgr* mgr) {
         face->getFamilyName(&family);
         if (family.isEmpty()) continue;
 
-        // First face wins for a given family. The bundle currently has at
-        // most one face per family, so collisions just mean we shipped a
-        // duplicate — keep the first deterministically.
-        by_family.emplace(std::string(family.c_str()), std::move(face));
+        // Every face of a family is kept. A family is a set of weights, and
+        // the reported family name is the same string for all of them —
+        // CoreText reports "Jost" for Jost-Regular through Jost-Bold alike.
+        // Keying one face per family name silently discards the rest, which
+        // reads downstream as "the family is bundled at Regular only": the
+        // weight match then misses and a 600 heading falls past the bundle to
+        // a platform substitute. Order follows `bundled_blobs()`, so style
+        // matching among equally-good candidates is deterministic.
+        by_family[std::string(family.c_str())].push_back(std::move(face));
     }
 
     initialized = true;
@@ -143,17 +216,11 @@ sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
     auto it = cache.find(family);
     if (it == cache.end()) return nullptr;
 
-    // The bundle currently ships only Regular/Upright faces. If the caller
-    // wants something else (bold, italic, ...) return nullptr so the
-    // skia_canvas typeface lookup keeps walking and lets
-    // SkFontMgr::matchFamilyStyle pick a system-installed bold/italic
-    // variant. Otherwise bundled fonts would hijack off-style requests and
-    // break CSS weight/slant matching.
-    SkFontStyle have = it->second->fontStyle();
-    if (have.weight() != style.weight() || have.slant() != style.slant()) {
-        return nullptr;
-    }
-    return it->second;
+    // Style-match across the family's faces rather than against a single one.
+    // A request the bundle cannot serve from its own weights still returns
+    // nullptr, so the cascade keeps walking to a system-installed variant
+    // instead of the bundle hijacking every off-style request.
+    return best_style_match(it->second, style);
 }
 
 std::size_t bundled_font_count() {
@@ -165,9 +232,11 @@ std::vector<RegisteredTypeface> bundled_typefaces_snapshot() {
     sk_sp<SkFontMgr> mgr = platform_font_manager();
     if (!mgr) return out;
     const auto& cache = ensure_registered(mgr.get());
-    out.reserve(cache.size());
-    for (const auto& [family, face] : cache) {
-        if (face) out.push_back(RegisteredTypeface{family, face});
+    out.reserve(bundled_font_count());
+    for (const auto& [family, faces] : cache) {
+        for (const auto& face : faces) {
+            if (face) out.push_back(RegisteredTypeface{family, face});
+        }
     }
     return out;
 }
@@ -199,14 +268,17 @@ sk_sp<SkTypeface> bundled_fallback_typeface() {
     const auto& cache = ensure_registered(mgr.get());
     if (cache.empty()) return nullptr;
     auto inter = cache.find("Inter");
-    if (inter != cache.end()) return inter->second;
+    if (inter != cache.end() && !inter->second.empty()) return inter->second.front();
     // No Inter in this build: pick the lexicographically first family so the
-    // choice is deterministic (the cache is an unordered_map).
-    const std::pair<const std::string, sk_sp<SkTypeface>>* best = nullptr;
-    for (const auto& entry : cache) {
-        if (!best || entry.first < best->first) best = &entry;
+    // choice is deterministic (the cache is an unordered_map). Within a
+    // family the first face is the one `bundled_blobs()` declares first.
+    const std::string* best = nullptr;
+    const std::vector<sk_sp<SkTypeface>>* best_faces = nullptr;
+    for (const auto& [family, faces] : cache) {
+        if (faces.empty()) continue;
+        if (!best || family < *best) { best = &family; best_faces = &faces; }
     }
-    return best ? best->second : nullptr;
+    return best_faces ? best_faces->front() : nullptr;
 }
 
 // ── Plugin-registered font registry ──────────────────────────────────────
@@ -317,60 +389,7 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     auto& map = registered_fonts();
     auto it = map.find(family);
     if (it == map.end() || it->second.faces.empty()) return nullptr;
-
-    // Pass 1: exact match on weight + slant. This is the ideal path: caller
-    // asked for Regular/Upright, a Regular/Upright is registered, hand it back
-    // unchanged.
-    for (const auto& f : it->second.faces) {
-        if (!f) continue;
-        SkFontStyle have = f->fontStyle();
-        if (have.weight() == style.weight() && have.slant() == style.slant()) {
-            return f;
-        }
-    }
-
-    // Pass 2: best-effort closest match, but only within a tight tolerance.
-    // Multi-face registrations should let a Regular request land on a nearby
-    // family member such as SemiBold instead of forcing a system fallback that
-    // loses Unicode coverage. An unbounded closest match overcorrects: a
-    // family registered with only a Regular/Upright face would still satisfy a
-    // Bold or Italic request, hijacking every weight/slant variant and masking
-    // the real system Bold/Italic. Bound the heuristic to same-slant faces
-    // within one approximate CSS weight step; genuinely off-style requests
-    // return nullptr so the cascade keeps walking.
-    constexpr int kMaxWeightGap = 200;
-    sk_sp<SkTypeface> best;
-    int best_gap = std::numeric_limits<int>::max();
-    for (const auto& f : it->second.faces) {
-        if (!f) continue;
-        SkFontStyle have = f->fontStyle();
-        if (have.slant() != style.slant()) continue;  // slant must match exactly
-        int gap = std::abs(have.weight() - style.weight());
-        if (gap > kMaxWeightGap) continue;             // weight too far off-style
-        if (gap < best_gap) { best_gap = gap; best = f; }
-    }
-    if (best) return best;
-
-    // Pass 3: variable-font weight eligibility.
-    //
-    // A registered variable font is stored as one typeface at its default
-    // `wght` instance (e.g. Funnel Display defaults to 400). A request for
-    // a far-off weight (700) fails passes 1-2 above because the static
-    // weight gap (300) exceeds kMaxWeightGap. But the face can actually
-    // RENDER 700 — its `wght` axis covers it. Rather than dropping to a
-    // heavier system fallback (which loses the design's typeface entirely),
-    // return the base variable face so the resolver can `makeClone` it at
-    // the requested weight. Same slant is still required; the wght axis
-    // only governs weight, not slant. Static faces are untouched (they have
-    // no wght axis), so single-static-Regular families keep returning
-    // nullptr for truly off-style requests.
-    for (const auto& f : it->second.faces) {
-        if (!f) continue;
-        if (f->fontStyle().slant() != style.slant()) continue;
-        float lo = 0, hi = 0, def = 0;
-        if (face_wght_axis(f.get(), lo, hi, def)) return f;
-    }
-    return nullptr;
+    return best_style_match(it->second.faces, style);
 }
 
 std::vector<RegisteredTypeface> registered_typefaces_snapshot() {

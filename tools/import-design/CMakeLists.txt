@@ -29,6 +29,7 @@ add_executable(pulp-import-design
     browser_capture_styles.cpp
     browser_capture_tree.cpp
     browser_capture_validation.cpp
+    svg_shape_lowering.cpp
     claude_html_dependencies.cpp
     html_project_stager.cpp
     html_intake.cpp

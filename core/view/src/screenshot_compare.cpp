@@ -31,6 +31,7 @@ struct RawImage {
 static constexpr uint64_t kMaxDecodedPixels = 8192ull * 8192ull;
 static constexpr uint32_t kMaxTrackedContentColors = 65536u;
 
+
 #ifdef __APPLE__
 static constexpr CGBitmapInfo kRgbaBitmapInfo =
     static_cast<CGBitmapInfo>(static_cast<uint32_t>(kCGBitmapByteOrder32Big) |

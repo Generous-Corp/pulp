@@ -744,6 +744,37 @@ void Knob::paint(canvas::Canvas& canvas) {
 // ── Fader ────────────────────────────────────────────────────────────────────
 
 void Fader::paint(canvas::Canvas& canvas) {
+    // A paint delegate installed on this fader or on any ancestor gets first
+    // refusal, exactly as Knob::paint gives it. It declines by default, in which
+    // case the stock rendering below runs unchanged.
+    //
+    // WidgetPainter::paint_linear existed with no caller, so a delegate could be
+    // installed on a fader and never consulted: the install compiled, ran, and
+    // moved zero pixels. An imported fader whose design already painted its own
+    // track therefore still drew the stock track, fill and thumb on top of it.
+    if (auto* p = effective_painter()) {
+        LinearPaintState s;
+        s.bounds = local_bounds();
+        s.enabled = enabled();
+        s.hovered = is_hovered();
+        s.pressed = dragging_;
+        s.focused = has_focus();
+        s.horizontal = orientation_ == Orientation::horizontal;
+        // The delegate normalizes thumb_pos across [track_min, track_max], so a
+        // 0..1 track hands it position_for_value() unchanged — including the
+        // skew, which is what keeps a skewed fader's skin agreeing with its
+        // stock rendering.
+        s.thumb_pos = position_for_value();
+        s.track_min = 0.0f;
+        s.track_max = 1.0f;
+        s.thumb_size = orientation_ == Orientation::horizontal ? thumb_width_
+                                                               : thumb_height_;
+        s.value = value_;
+        s.value_min = 0.0;
+        s.value_max = 1.0;
+        if (p->paint_linear(canvas, s, *this)) return;
+    }
+
     auto b = local_bounds();
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 

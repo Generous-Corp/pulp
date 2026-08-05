@@ -131,6 +131,13 @@ InterprocessConnection::~InterprocessConnection() {
     disconnect_impl(true);
 }
 
+std::optional<runtime::LocalPeerCredentials>
+InterprocessConnection::local_peer_credentials() const {
+    if (impl_->transport != IpcTransport::LocalSocket || !impl_->socket.is_open())
+        return std::nullopt;
+    return impl_->socket.local_peer_credentials();
+}
+
 void InterprocessConnection::set_on_connected(std::function<void()> callback) {
     std::lock_guard lock(callback_mutex_);
     on_connected = std::move(callback);
@@ -185,6 +192,15 @@ bool InterprocessConnection::connect(
     bool ok = false;
     if (transport == IpcTransport::NamedPipe) {
         ok = impl_->pipe.connect_client(name);
+    } else if (transport == IpcTransport::LocalSocket) {
+        if (name.empty() || !impl_->socket.create(SocketType::Local)) {
+            state_.store(IpcState::Error);
+            return false;
+        }
+        impl_->socket.set_write_timeout(
+            std::chrono::milliseconds(
+                write_timeout_ms_.load(std::memory_order_relaxed)));
+        ok = impl_->socket.connect_local(name, timeout);
     } else {
         // connect() requires "host:port" — host alone is meaningless
         // for a client (no default), so reject endpoints that omit it.
@@ -238,6 +254,21 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     bool ok = false;
     if (transport == IpcTransport::NamedPipe) {
         ok = impl_->pipe.create_server(name);
+    } else if (transport == IpcTransport::LocalSocket) {
+        if (name.empty() || !impl_->socket.create(SocketType::Local)) {
+            state_.store(IpcState::Error);
+            return false;
+        }
+        impl_->socket.set_write_timeout(
+            std::chrono::milliseconds(
+                write_timeout_ms_.load(std::memory_order_relaxed)));
+        if (impl_->socket.bind_local(name) && impl_->socket.listen(1)) {
+            auto client = impl_->socket.accept();
+            if (client) {
+                impl_->socket = std::move(*client);
+                ok = true;
+            }
+        }
     } else {
         // Single-client server: host may be omitted, in which case
         // we bind on all interfaces.
@@ -391,7 +422,7 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
     const auto configured_timeout = std::chrono::milliseconds(
         write_timeout_ms_.load(std::memory_order_relaxed));
     const bool has_frame_deadline =
-        impl_->transport == IpcTransport::Socket &&
+        impl_->transport != IpcTransport::NamedPipe &&
         configured_timeout > std::chrono::milliseconds(0);
     const auto frame_deadline =
         std::chrono::steady_clock::now() + configured_timeout;
@@ -485,7 +516,7 @@ void InterprocessConnection::set_write_timeout(
     const auto value = std::max(timeout, std::chrono::milliseconds(0));
     write_timeout_ms_.store(value.count(), std::memory_order_relaxed);
     std::lock_guard write_lock(impl_->write_mutex);
-    if (impl_->transport == IpcTransport::Socket && impl_->socket.is_open())
+    if (impl_->transport != IpcTransport::NamedPipe && impl_->socket.is_open())
         impl_->socket.set_write_timeout(value);
 }
 
@@ -566,13 +597,14 @@ void InterprocessConnection::read_loop(std::uint64_t generation) {
     using Clock = std::chrono::steady_clock;
     std::optional<Clock::time_point> frame_deadline;
     auto clear_read_timeout = [this] {
-        if (impl_->transport == IpcTransport::Socket)
+        if (impl_->transport != IpcTransport::NamedPipe)
             (void)impl_->socket.set_read_timeout(std::chrono::milliseconds(0));
     };
     auto read_exact = [this, &frame_deadline, &is_current](uint8_t* dst, size_t size) {
         size_t read_so_far = 0;
         while (read_so_far < size && is_current()) {
-            if (frame_deadline && impl_->transport == IpcTransport::Socket) {
+            if (frame_deadline &&
+                impl_->transport != IpcTransport::NamedPipe) {
                 const auto remaining = std::chrono::duration_cast<
                     std::chrono::milliseconds>(*frame_deadline - Clock::now());
                 if (remaining <= std::chrono::milliseconds(0))
@@ -709,6 +741,8 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
     server_impl_->transport = transport;
     server_impl_->name = std::string(name);
 
+    if (transport == IpcTransport::NamedPipe)
+        return false;
     if (transport == IpcTransport::Socket) {
         // Multi-client listener: host may be omitted, in which case
         // we bind on all interfaces.
@@ -720,12 +754,17 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         server_impl_->listen_socket.create(SocketType::TCP);
         if (!server_impl_->listen_socket.bind(host, endpoint->port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;
+    } else {
+        if (name.empty() || !server_impl_->listen_socket.create(SocketType::Local))
+            return false;
+        if (!server_impl_->listen_socket.bind_local(name)) return false;
+        if (!server_impl_->listen_socket.listen(5)) return false;
     }
 
     running_.store(true);
     accept_thread_ = std::thread([this]() {
         while (running_.load()) {
-            if (server_impl_->transport == IpcTransport::Socket) {
+            if (server_impl_->transport != IpcTransport::NamedPipe) {
                 auto client_sock = server_impl_->listen_socket.accept();
                 if (!client_sock) continue;
                 if (!running_.load()) {
@@ -738,7 +777,7 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                     max_message_bytes_.load(std::memory_order_relaxed));
                 auto first_dispatch_gate = std::make_shared<std::atomic<bool>>(false);
                 // Inject the accepted socket via friend access
-                conn->impl_->transport = IpcTransport::Socket;
+                conn->impl_->transport = server_impl_->transport;
                 conn->impl_->socket = std::move(*client_sock);
                 conn->set_write_timeout(std::chrono::milliseconds(
                     write_timeout_ms_.load(std::memory_order_relaxed)));
@@ -781,7 +820,7 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
 
 void InterprocessConnectionServer::stop() {
     const bool was_running = running_.exchange(false);
-    if (was_running && server_impl_->transport == IpcTransport::Socket &&
+    if (was_running && server_impl_->transport != IpcTransport::NamedPipe &&
         server_impl_->listen_socket.is_open()) {
         // Close before join so accept() cannot keep the accept thread blocked
         // on a listener that is no longer meant to serve clients.

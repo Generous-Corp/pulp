@@ -1,6 +1,18 @@
 # CLI unit and shellout test target registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+add_executable(pulp-test-inspector-shipping-report
+    test_inspector_shipping_report.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/inspector_shipping_report.cpp)
+target_include_directories(pulp-test-inspector-shipping-report PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include
+    ${choc_SOURCE_DIR})
+target_link_libraries(pulp-test-inspector-shipping-report PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-shipping-report
+    PROPERTIES LABELS "inspect;ship;cli")
+
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -437,6 +449,7 @@ catch_discover_tests(pulp-test-cli-validator-discovery)
 add_executable(pulp-test-cli-mac-runtime-validators
     test_cli_mac_runtime_validators.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
 )
 target_include_directories(pulp-test-cli-mac-runtime-validators PRIVATE
     ${CMAKE_SOURCE_DIR}

@@ -1,0 +1,25 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: #202020; }
+  /* One flat, strongly-coloured backdrop, so each filtered box's interior is a
+     single colour Chrome computed — the expected value is read off Chrome's
+     own PNG rather than recomputed from the same maths as the renderer. */
+  #panel { position:relative; width:400px; height:160px; background:#c04020; }
+  .fx { position:absolute; top:50px; width:60px; height:60px; }
+  #gray  { left:10px;  backdrop-filter: grayscale(1); }
+  #inv   { left:90px;  backdrop-filter: invert(1); }
+  #sat   { left:170px; backdrop-filter: saturate(0.1); }
+  /* Two functions in one list, so the composition order is exercised too. */
+  #both  { left:250px; backdrop-filter: grayscale(1) brightness(1.6); }
+  /* Authored as a percentage. Chrome normalizes it to sepia(0.8) before the
+     snapshot, which is worth knowing: a computed value never reaches the
+     parser as a percentage, so this box exercises sepia rather than %. */
+  #pct   { left:330px; backdrop-filter: sepia(80%); }
+</style>
+<div id="panel">
+  <div class="fx" id="gray"></div>
+  <div class="fx" id="inv"></div>
+  <div class="fx" id="sat"></div>
+  <div class="fx" id="both"></div>
+  <div class="fx" id="pct"></div>
+</div>

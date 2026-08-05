@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -134,13 +135,20 @@ int main(int argc, char** argv) {
     if ((exit_screenshot.empty() || frames <= 0) && app_quit_after_ms <= 0 &&
         quit_on_request_arm.empty() && close_on_request_arm.empty())
         return 3;
+    const auto request_arm =
+        !quit_on_request_arm.empty() ? quit_on_request_arm : close_on_request_arm;
+    config.headless = true;
     if (!exit_screenshot.empty()) {
         config.screenshot_path = std::move(exit_screenshot);
         config.screenshot_frame_delay = frames;
+    } else {
+        config.screenshot_path = request_arm.empty()
+            ? (std::filesystem::temp_directory_path()
+               / "pulp-inspector-process-fixture-hidden.png").string()
+            : request_arm + ".hidden.png";
+        config.screenshot_frame_delay = std::numeric_limits<int>::max();
     }
     app.set_config(config);
-    const auto request_arm =
-        !quit_on_request_arm.empty() ? quit_on_request_arm : close_on_request_arm;
     const bool quit_on_request = !quit_on_request_arm.empty();
     auto hook_fired = std::make_shared<std::atomic<bool>>(false);
     auto action_executed = std::make_shared<std::atomic<bool>>(false);

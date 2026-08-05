@@ -7,11 +7,13 @@
 #define PULP_TEST_HAS_GPU_SURFACE 0
 #endif
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <vector>
 #include <filesystem>
 #include <fstream>
@@ -23,7 +25,20 @@ using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
 
+static_assert(offsetof(ScriptedUiOptions, granted_capabilities)
+              > offsetof(ScriptedUiOptions, value_channel_access));
+
 namespace {
+
+TEST_CASE("ScriptedUiOptions preserves its legacy positional aggregate prefix",
+          "[view][scripted-ui][compat]") {
+    ScriptedUiOptions options{
+        fs::path{"ui.js"}, fs::path{"theme.json"}, {},
+        true, false, nullptr, {}};
+    REQUIRE(options.enable_hot_reload);
+    REQUIRE_FALSE(options.enable_theme_reload);
+    REQUIRE(options.granted_capabilities.has(ReloadCapability::Exec));
+}
 
 fs::path make_temp_dir(const char* stem) {
     auto unique = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -494,6 +509,7 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     root.set_theme(Theme::dark());
 
     StateStore store;
+    int repaint_count = 0;
     ScriptedUiSession session(root, store, {
         .script_path = script_path,
         .enable_hot_reload = true,
@@ -504,7 +520,6 @@ TEST_CASE("ScriptedUiSession keeps repaint callback across reload", "[view][scri
     REQUIRE(session.load(&error));
     REQUIRE(error.empty());
 
-    int repaint_count = 0;
     session.set_repaint_callback([&] { ++repaint_count; });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

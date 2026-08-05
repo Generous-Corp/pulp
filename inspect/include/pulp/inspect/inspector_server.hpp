@@ -15,19 +15,20 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace pulp::inspect {
 
-/// Waitable proof that an InspectorServer's cleanup worker has exited and all
+/// Waitable proof that an InspectorServer's owned workers have exited and all
 /// stop transitions, callback-deferred teardown, and causal server callbacks
 /// have completed, and that the dispatcher has released every accepted posted
 /// RPC callable.
 /// Capture this before allowing publication/domain callbacks to destroy the
 /// server. Wait only from a thread outside inspector callbacks and RPC
 /// execution: an RPC callback can be the work that must finish before the
-/// fence becomes ready. Cleanup-worker self-waits are mechanically refused.
+/// fence becomes ready. Owned-worker self-waits are mechanically refused.
 class InspectorServerShutdownFence {
 public:
     struct State;
@@ -66,6 +67,25 @@ struct InspectorServerConfig {
     // Appended for source-compatible test/host injection. When absent, each
     // authenticated server generation creates a default main-thread RPC.
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
+    // Exact authenticated methods whose potentially blocking session dispatch
+    // runs on a bounded server worker instead of the connection reader. This
+    // lets the same connection deliver a concurrent control request (for
+    // example Runtime.interrupt) while the first request is still in flight.
+    std::vector<std::string> asynchronous_methods;
+    std::size_t max_asynchronous_requests = 64;
+};
+
+/// Outcome of delivering one generation-scoped event to one authenticated
+/// transport client. Telemetry brokers use the lossy outcomes as debt carried
+/// into their next delivered sample; reliable overflow closes the client.
+enum class InspectorTargetedEventResult {
+    Queued,
+    QueuedAfterLossyEviction,
+    DroppedLossy,
+    ReliableOverflow,
+    ClientNotFound,
+    EventUnavailable,
+    MessageTooLarge,
 };
 
 /// TCP server exposing the inspector protocol to external tools.
@@ -82,6 +102,8 @@ public:
 
     /// Start an authenticated, ephemeral loopback session and publish its
     /// discovery record. The session and publisher must outlive the server.
+    /// Reentrant restart from the current main-thread RPC operation is refused;
+    /// retry after that operation returns.
     bool start_authenticated(InspectorServerConfig config);
 
     /// Stop listening and disconnect all clients.
@@ -95,6 +117,20 @@ public:
 
     /// Broadcast an event to all connected clients.
     void broadcast(const InspectorMessage& event);
+
+    /// Deliver an event only to the authenticated client identity supplied by
+    /// InspectorRequestContext. The event is rejected when its capability is
+    /// unavailable for the current server generation. Lossy callers with
+    /// independently-accounted streams should supply a stable loss-owner key;
+    /// only an older event with the same key may be coalesced.
+    InspectorTargetedEventResult send_to_client(
+        std::string_view client_id,
+        const InspectorMessage& event,
+        std::string_view loss_owner = {});
+
+    /// Remove queued targeted events owned by one retired client stream.
+    std::size_t cancel_client_events(std::string_view client_id,
+                                     std::string_view loss_owner);
 
     /// Number of connected clients.
     int client_count() const;

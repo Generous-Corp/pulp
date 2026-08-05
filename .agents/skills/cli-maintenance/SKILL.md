@@ -222,6 +222,26 @@ surface as an installed-user or ordinary `pulp run` workflow. Keep
 client-description claims, including these shipped agent workflows, but does
 not prove runtime construction sites.
 
+**`pulp inspect audit ARTIFACT` is different from every live Inspector
+subcommand.** It is a read-only Phase 1 artifact preflight and must never load,
+execute, connect to, or activate the target. It reads the canonical
+`dev.pulp.control/artifact-manifest@1` sidecar and verifies its profile,
+build ID, frozen-registry digest, SHA-256 binary marker, declared capability markers, endpoint/eval boundaries,
+and known external-surface markers. JSON is `pulp.control.audit.v1`; exit 0 is
+pass, 1 is a fail-closed block, and 2 is invocation error. It remains compiled
+when `PULP_ENABLE_INSPECTOR=OFF`; live commands still report unavailable. Keep
+directory and direct-file identity checks equivalent: target and product names
+must be safe sibling basenames, and an exact-named sidecar must still match the
+artifact filename (with the supported `.exe` form) before consent is bound. Keep
+canonical sidecar stems equal to their manifest target, never use a
+marker-bearing sibling fallback for canonical evidence, and exclude
+plugin-format subtrees from standalone scanning in every traversal. Keep
+`cmd_inspect.cpp`, `cmd_inspect_unavailable.cpp`, `inspector_shipping_report.*`,
+`docs/guides/development-inspector-shipping.md`, `docs/reference/cli.md`, and
+`docs/status/cli-commands.yaml` aligned. It intentionally has no MCP tool until
+the shared Product A client and canonical control-audit namespace land; do not wrap
+the CLI as an MCP side door.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
@@ -366,10 +386,16 @@ the tool takes arguments:
   inspector method returns a real payload.
 - **The scripted-UI runtime inspector IS wired now.** `Runtime.evaluate`,
   `Runtime.getCapabilities`, `Runtime.interrupt`, and `Console.getMessages`
-  (device-log cursor poll) reach the live JS engine when a host calls
-  `DomainHandler::set_script_inspector(session.script_inspector())`. Evaluate is
+  (device-log cursor poll) reach the live JS engine when a host retains the
+  result of `make_script_runtime_evaluator(session.script_inspector())` and
+  passes its borrowed pointer through
+  `DomainHandler::handle_runtime_with_evaluator()` for the exact request.
+  Destroy the evaluator before destroying the scripted-UI session. Evaluate is
   marshaled onto the engine thread by `ScriptInspectorBridge` — single in-flight,
-  ~2 s timeout, auto-interrupt on hang. It is an honest evaluate/inspect console,
+  ~2 s timeout, auto-interrupt on hang. The standalone server uses one owned,
+  bounded asynchronous worker so the same authenticated controller connection
+  can deliver `Runtime.interrupt`, and its shutdown fence includes that worker.
+  It is an honest evaluate/inspect console,
   NOT a step debugger: mainline QuickJS has no breakpoint protocol, so
   `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
   in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
@@ -1453,6 +1479,11 @@ orders in lockstep.
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
+- `--inspect-runtime-eval` — a literal, high-risk acknowledgement for
+  `runtime.eval`, forwarded as argv and `PULP_INSPECT_RUNTIME_EVAL=1`. It
+  requires `--inspect=develop`, or a custom profile that also names
+  `runtime.eval` and `session.control`. Never infer it from a profile, an
+  all-capabilities shorthand, or persisted standalone preferences.
 - `--audio-inspector` — open the live Audio Inspector. Forwarded as
   `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
 - `--audio-probe-json <path>` — write live probe metrics JSON and exit.
@@ -2778,3 +2809,21 @@ Note `tools/cli/cli_fs_util.cpp` carries a third `path_is_within` used for
 archive-extraction containment. It is still lexical-only; its callers currently
 pass pre-canonicalized paths, but it is the same fail-open shape if that ever
 stops being true.
+
+## A new browser-capture module must be registered for `pulp upgrade`
+
+`tools/import-design/browser_capture/` is a module graph the capture imports at
+run time, and `pulp upgrade` copies it file-by-file from a hard-coded list —
+`browser_capture_runtime_files` in `tools/cli/upgrade_install.hpp`. Adding a
+`.mjs` there and not adding it to that list produces an installed runtime with
+a hole in it.
+
+The reason this is worth a note rather than being obvious: **the break does not
+surface where the mistake was made.** The source tree is complete, every test
+that runs the capture from source passes, and the install itself reports
+success. It fails later, on an upgraded machine, as a module-resolution error
+during a capture — which reads as a broken import rather than a short manifest.
+
+The array's size is a literal beside the literal list, so bump both. Two tests
+hold the line: one compares the C++ list against the on-disk manifest, the
+other resolves the installed graph.

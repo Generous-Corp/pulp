@@ -8,6 +8,7 @@
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #include <choc/text/choc_JSON.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -20,7 +21,21 @@ using namespace pulp::format;
 using namespace pulp::format::detail;
 using namespace pulp::view;
 
+static_assert(offsetof(StandaloneConfig, inspector_runtime_eval)
+              > offsetof(StandaloneConfig, enable_musical_typing_keyboard));
+
 namespace {
+
+TEST_CASE("StandaloneConfig preserves its legacy positional aggregate prefix",
+          "[standalone][config][compat]") {
+    StandaloneConfig config{
+        "audio-device", "midi-device", 48'000.0, 128, 2, 0, {}, {},
+        true, false, false, true, true, "develop", {"session.describe"},
+        "capture.png"};
+    REQUIRE(config.inspector_profile == "develop");
+    REQUIRE(config.screenshot_path == "capture.png");
+    REQUIRE_FALSE(config.inspector_runtime_eval);
+}
 
 struct ScopedEnv {
     explicit ScopedEnv(std::string name) : name_(std::move(name)) {
@@ -1301,24 +1316,30 @@ TEST_CASE("Standalone environment imports Development Inspector activation",
     ScopedEnv legacy_activation("PULP_INSPECTOR");
     ScopedEnv profile("PULP_INSPECT_PROFILE");
     ScopedEnv capabilities("PULP_INSPECT_CAPABILITIES");
+    ScopedEnv runtime_eval("PULP_INSPECT_RUNTIME_EVAL");
     legacy_activation.unset();
     profile.set("custom");
     capabilities.set("session.describe,state.read,state.write");
+    runtime_eval.set("1");
 
     auto config = standalone_config_from_environment(StandaloneConfig{});
     REQUIRE(config.inspector_profile == "custom");
     REQUIRE(config.inspector_capabilities == std::vector<std::string>{
         "session.describe", "state.read", "state.write"});
+    REQUIRE(config.inspector_runtime_eval);
 
     StandaloneConfig explicit_config;
     explicit_config.inspector_profile = "observe";
     explicit_config.inspector_capabilities = {"ui.read"};
+    explicit_config.inspector_runtime_eval = false;
     config = standalone_config_from_environment(explicit_config);
     REQUIRE(config.inspector_profile == "observe");
     REQUIRE(config.inspector_capabilities == std::vector<std::string>{"ui.read"});
+    REQUIRE(config.inspector_runtime_eval);
 
     profile.unset();
     capabilities.unset();
+    runtime_eval.unset();
     legacy_activation.set("1");
     config = standalone_config_from_environment(StandaloneConfig{});
     REQUIRE(config.inspector_profile == "local");

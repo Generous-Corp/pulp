@@ -607,6 +607,20 @@ TEST_CASE("project command shell redirection helpers use platform null devices",
 #endif
 }
 
+TEST_CASE("project command stdout redirection preserves the original stream",
+          "[project-command][shell-redirect]") {
+    {
+        ScopedStdoutRedirect disabled(false);
+        REQUIRE_FALSE(disabled.ready());
+        REQUIRE_FALSE(disabled.write_original("ignored"));
+    }
+    {
+        ScopedStdoutRedirect redirect(true);
+        REQUIRE(redirect.ready());
+        REQUIRE(redirect.write_original("shell-redirect-probe\n"));
+    }
+}
+
 TEST_CASE("cli common parses numeric arguments and normalizes strings",
           "[cli][common][issue-643]") {
     CapturedStreams capture;

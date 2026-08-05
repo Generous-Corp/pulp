@@ -171,7 +171,8 @@ BrowserHtmlImportResult import_browser_html(
         durable_capture_directory,
         lowered.reference_png,
         lowered.semantic_report,
-        std::move(workspaces)};
+        std::move(workspaces),
+        std::move(lowered.warnings)};
 }
 
 }  // namespace pulp::import_design

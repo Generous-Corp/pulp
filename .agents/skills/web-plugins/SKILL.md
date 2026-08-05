@@ -337,6 +337,31 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   both pass while every string measures at **zero width**. Probe font usability
   by drawing a glyph (`unicharToGlyph('A') != 0`), never by counting families.
 
+### The bundled-font list exists TWICE, and the web copy is the one that breaks
+
+There is no platform font manager in a browser, so embedded blobs ARE the font
+stack. Two files declare which faces get embedded:
+
+- `core/canvas/CMakeLists.txt` for desktop
+- `tools/cmake/PulpWebUi.cmake` for web / WASM
+
+`core/canvas/src/bundled_fonts.cpp` names every blob symbol directly and is
+compiled into BOTH. So adding a face to the desktop list and not the web one is
+not a missing glyph at runtime, it is a **compile error**:
+
+```
+error: no member named 'Jost_Regular_ttf' in namespace 'pulp_bundled_fonts'
+```
+
+in a lane nobody runs locally, discovered by CI on a PR about something else.
+The desktop list carries a comment telling you to keep it aligned with
+`bundled_fonts.cpp`; the web copy had no comment and no way to know it existed.
+
+Guarded now by the `bundled-font-lists-agree` ctest
+(`tools/scripts/check_bundled_font_lists.py`), which compares the two lists and
+names the file to fix. If you add a font, add it in both places and the lint
+will tell you when you have not.
+
 ## Browser-host rules
 
 - **Probe for WebGL2; a browser without it is a shipping configuration.**

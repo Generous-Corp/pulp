@@ -23,6 +23,9 @@
 #ifndef PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE
 #error "PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE must name the real standalone fixture"
 #endif
+#ifndef PULP_INSPECT_CLI_BINARY
+#error "PULP_INSPECT_CLI_BINARY must name the built inspector CLI"
+#endif
 
 namespace {
 
@@ -89,7 +92,7 @@ void configure_real_window_environment(const ScratchDir& scratch,
 
 } // namespace
 
-TEST_CASE("Explicit standalone subprocess serves its selected compositor frame",
+TEST_CASE("Explicit standalone subprocess serves its deterministic back-buffer frame",
           "[standalone][inspect][process][gpu]") {
     ScratchDir scratch("pulp-inspector-process-enabled");
     ScopedEnv runtime_dir("PULP_INSPECTOR_RUNTIME_DIR");
@@ -97,7 +100,7 @@ TEST_CASE("Explicit standalone subprocess serves its selected compositor frame",
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
-    configure_real_window_environment(scratch, "develop");
+    configure_real_window_environment(scratch, "observe");
 
     const auto exit_png = scratch.path / "exit.png";
     pulp::platform::ProcessOptions options;
@@ -127,8 +130,39 @@ TEST_CASE("Explicit standalone subprocess serves its selected compositor frame",
     REQUIRE(records.front().plugin_id
             == "com.pulp.test.inspector-process-fixture");
 
+    const auto cli_png = scratch.path / "cli-inspector.png";
+    const auto cli_capture = pulp::platform::exec(
+        PULP_INSPECT_CLI_BINARY,
+        {"inspect", "screenshot", "--out", cli_png.string(), "--json",
+         "--session", records.front().session_id,
+         "--instance", records.front().instance_id,
+         "--publication", records.front().publication_id},
+        10'000);
+    INFO("cli stdout=" << cli_capture.stdout_output);
+    INFO("cli stderr=" << cli_capture.stderr_output);
+    REQUIRE_FALSE(cli_capture.timed_out);
+    REQUIRE(cli_capture.exit_code == 0);
+    const auto cli_capture_json = choc::json::parse(cli_capture.stdout_output);
+    REQUIRE(cli_capture_json["schemaVersion"].getString()
+            == "pulp.inspect.screenshot.v1");
+    const auto cli_capture_bytes = read_bytes(cli_png);
+    REQUIRE(pulp::view::analyze_screenshot_content(cli_capture_bytes)
+                .passes_content_floor());
+
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
+    const auto capabilities = client.request(
+        std::string(pulp::inspect::methods::kSessionGetCapabilities));
+    REQUIRE_FALSE(capabilities.is_error);
+    const auto effective_position = capabilities.params_json.find("\"effective\":");
+    REQUIRE(effective_position != std::string::npos);
+    const auto effective = capabilities.params_json.substr(effective_position);
+    CHECK(effective.find("\"session.describe\"") != std::string::npos);
+    CHECK(effective.find("\"ui.read\"") != std::string::npos);
+    CHECK(effective.find("\"test.input\"") == std::string::npos);
+    CHECK(effective.find("\"state.write\"") == std::string::npos);
+    CHECK(effective.find("\"telemetry.stream\"") == std::string::npos);
+    CHECK(effective.find("\"runtime.eval\"") == std::string::npos);
     std::vector<std::uint8_t> captured_png;
     const auto capture_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(4);

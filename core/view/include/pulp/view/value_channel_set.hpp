@@ -17,8 +17,9 @@
 /// view already binds to, and a UI — native or scripted — asks for them by
 /// name.
 ///
-/// **This is in-process visualization, not observability.** The data goes from
-/// the audio thread to the UI at frame rate and never leaves the machine.
+/// The source buffers remain in-process visualization channels. An optional
+/// transport-free telemetry attachment can observe UI-consumed snapshots and a
+/// bounded producer event tap without becoming another source-buffer reader.
 ///
 /// Two properties are deliberate:
 ///
@@ -32,35 +33,24 @@
 ///   nothing, because nothing displays it.
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <pulp/view/value_source.hpp>
+#include <pulp/view/value_channel_telemetry.hpp>
 
 namespace pulp::view {
 
-/// The shape of a channel's payload.
-enum class ValueChannelShape {
-    scalar,  ///< one number per publish (gain reduction, envelope level)
-    meter,   ///< a multi-channel `MeterFrame` (peak/RMS per channel)
-    vector,  ///< a block of samples for a scope-style display
-    events,  ///< a per-block list of `ValueEvent` occurrences
-};
+class ValueChannelSet;
 
-/// What a channel is, for discovery and for a UI lint to check names against.
-struct ValueChannelInfo {
-    std::string name;   ///< verbatim lookup key
-    std::string unit;   ///< display only ("dB", "Hz"); may be empty
-    ValueChannelShape shape = ValueChannelShape::scalar;
-    /// The value a bound view falls back to when the channel goes stale — the
-    /// writer stopped, usually because transport stopped. 0 dB for gain
-    /// reduction, silence for a meter. Without it a meter freezes at its last
-    /// reading and reads as a stuck plugin. Event channels do not synthesize a
-    /// fallback occurrence, so their discovery value remains 0 and is ignored.
-    float neutral = 0.0f;
-};
+/// Runs a value-channel operation while the hosting processor guarantees that
+/// the exposed set and all of its sources remain alive. Callers must not retain
+/// either the set or a source obtained from it after the visitor returns.
+using ValueChannelVisitor = std::function<void(ValueChannelSet*)>;
+using ValueChannelAccess = std::function<void(const ValueChannelVisitor&)>;
 
 /// A processor's declared channels.
 ///
@@ -73,6 +63,13 @@ public:
     ValueChannelSet() = default;
     ValueChannelSet(const ValueChannelSet&) = delete;
     ValueChannelSet& operator=(const ValueChannelSet&) = delete;
+    ValueChannelSet(ValueChannelSet&&) = delete;
+    ValueChannelSet& operator=(ValueChannelSet&&) = delete;
+
+    /// Process-local identity assigned with the first declaration in this exact
+    /// set lifetime. Unlike its address, this does not repeat when allocator
+    /// storage is reused after a hot swap. Empty sets report zero.
+    std::uint64_t generation_identity() const noexcept;
 
     /// Why a declaration was refused. Names are a lookup key, so the rules are
     /// strict on purpose: a silently renamed or deduplicated channel is a
@@ -110,6 +107,11 @@ public:
     /// a UI lint read.
     const std::vector<ValueChannelInfo>& infos() const noexcept { return infos_; }
 
+    /// Claim the transport-free telemetry sidecars. The claim is exclusive;
+    /// callers receive an invalid attachment while another reader owns them.
+    /// Creating and destroying the attachment happens off the audio thread.
+    ValueChannelTelemetryAttachment attach_telemetry() const;
+
     bool empty() const noexcept { return infos_.empty(); }
     std::size_t size() const noexcept { return infos_.size(); }
 
@@ -120,6 +122,7 @@ private:
     /// The sources for one declared channel; exactly one is non-null, matching
     /// the shape recorded in `infos_` at the same index.
     struct Entry {
+        std::shared_ptr<detail::ValueChannelTelemetryState> telemetry;
         std::unique_ptr<ScalarSource> scalar;
         std::unique_ptr<MeterSource> meter;
         std::unique_ptr<VectorSource> vector;
@@ -138,6 +141,7 @@ private:
     /// the set's lifetime.
     std::vector<std::unique_ptr<Entry>> entries_;
     std::vector<ValueChannelInfo> infos_;
+    std::shared_ptr<detail::ValueChannelTelemetryControl> telemetry_control_;
 };
 
 }  // namespace pulp::view

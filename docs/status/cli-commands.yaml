@@ -615,6 +615,9 @@ commands:
       - name: --inspect-capability
         kind: option
         description: Add one capability id to --inspect=custom; repeatable. Mutating capabilities require session.control.
+      - name: --inspect-runtime-eval
+        kind: flag
+        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control, plus a live ScriptedUiSession with no effectful ReloadCapability grants; the stock all-capabilities editor path is refused. No profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
       - name: --audio-inspector
         kind: flag
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.
@@ -1133,7 +1136,11 @@ commands:
       - name: --output
         kind: option
         required: false
-        description: File path for the one-shot command response
+        description: File path for a legacy one-shot command response
+      - name: --out
+        kind: option
+        required: false
+        description: Screenshot subcommand output path for decoded PNG bytes
       - name: --id
         kind: option
         required: false
@@ -1181,8 +1188,19 @@ commands:
       - name: --json
         kind: flag
         required: false
-        description: Emit schemaVersion 1 JSON for profiles, list, capabilities, or doctor
+        description: Emit stable JSON for named commands, including screenshot capture or unsupported status
     subcommands:
+      - name: audit
+        summary: Read-only artifact preflight for the canonical control manifest, profile and digest markers, declared capabilities, and known external surfaces; never loads or activates the artifact.
+        args:
+          - name: artifact
+            kind: positional
+            required: true
+            description: Standalone executable or bundle to audit
+          - name: --json
+            kind: flag
+            required: false
+            description: Emit the pulp.control.audit.v1 result
       - name: profiles
         summary: List the declared off, observe, and develop profiles and capabilities
       - name: list
@@ -1191,6 +1209,8 @@ commands:
         summary: Authenticate and report available/effective capabilities for one exact publication
       - name: doctor
         summary: Report discovery runtime-directory readiness and live-session count
+      - name: screenshot
+        summary: Save the selected standalone's deterministic in-process back buffer as validated PNG bytes; unsupported hosts exit 3 without creating an output
       - name: set-parameter
         summary: Apply one typed numeric parameter mutation under state.write and a controller lease
       - name: inject-midi

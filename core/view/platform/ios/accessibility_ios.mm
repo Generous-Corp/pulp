@@ -85,20 +85,40 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
 // ── PulpAccessibilityElement ────────────────────────────────────────────
 
 /// Bridges a Pulp View to UIAccessibility.
-@interface PulpAccessibilityElement : UIAccessibilityElement
-@property (nonatomic, assign) pulp::view::View* pulpView;
+@interface PulpAccessibilityElement : UIAccessibilityElement {
+@private
+    pulp::view::ViewCapture _viewCapture;
+    pulp::view::View* _rootView;
+    std::weak_ptr<const std::uint64_t> _rootLifetime;
+}
+- (void)captureView:(pulp::view::View*)view root:(pulp::view::View*)root;
+- (pulp::view::View*)liveView;
 @end
 
 @implementation PulpAccessibilityElement
 
+- (void)captureView:(pulp::view::View*)view root:(pulp::view::View*)root {
+    _viewCapture.set(view);
+    _rootView = root;
+    _rootLifetime = root ? root->import_binding_lifetime_token()
+                         : std::weak_ptr<const std::uint64_t>{};
+}
+
+- (pulp::view::View*)liveView {
+    if (!_rootView || _rootLifetime.expired()) return nullptr;
+    return _viewCapture.live_in(*_rootView);
+}
+
 - (NSString *)accessibilityLabel {
-    if (!_pulpView) return nil;
-    auto label = _pulpView->access_label();
+    auto* view = [self liveView];
+    if (!view) return nil;
+    auto label = view->access_label();
     return label.empty() ? nil : [NSString stringWithUTF8String:label.c_str()];
 }
 
 - (NSString *)accessibilityValue {
-    if (!_pulpView) return nil;
+    auto* view = [self liveView];
+    if (!view) return nil;
     // Shared resolver (accessibility.hpp): value interface → text interface →
     // access_value slot → check/press state ("checked" / "unchecked" /
     // "mixed"). Reading only the slot left every slider / meter / text field
@@ -106,21 +126,23 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
     // toggle onto TraitButton, the state slot is the ONLY thing that makes a
     // checkbox announce more than "button" here (macOS has a native @YES/@NO
     // accessibilityValue for that; UIKit does not).
-    const std::string value = pulp::view::accessibility_value_string(*_pulpView);
+    const std::string value = pulp::view::accessibility_value_string(*view);
     return value.empty() ? nil : [NSString stringWithUTF8String:value.c_str()];
 }
 
 - (UIAccessibilityTraits)accessibilityTraits {
-    if (!_pulpView) return UIAccessibilityTraitNone;
-    return access_role_to_traits(_pulpView->access_role());
+    auto* view = [self liveView];
+    if (!view) return UIAccessibilityTraitNone;
+    return access_role_to_traits(view->access_role());
 }
 
 - (CGRect)accessibilityFrame {
-    if (!_pulpView) return CGRectZero;
-    auto bounds = _pulpView->bounds();
+    auto* view = [self liveView];
+    if (!view) return CGRectZero;
+    auto bounds = view->bounds();
     // Convert view-local bounds to screen coordinates by walking up the hierarchy
     float ox = bounds.x, oy = bounds.y;
-    auto* parent = _pulpView->parent();
+    auto* parent = view->parent();
     while (parent) {
         ox += parent->bounds().x;
         oy += parent->bounds().y;
@@ -136,19 +158,22 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
 }
 
 - (BOOL)isAccessibilityElement {
-    return _pulpView && pulp::view::is_accessibility_element(*_pulpView);
+    auto* view = [self liveView];
+    return view && pulp::view::is_accessibility_element(*view);
 }
 
 // ── Adjustable support (sliders, knobs) ─────────────────────────────────
 
 - (void)accessibilityIncrement {
-    if (!_pulpView) return;
-    _pulpView->on_accessibility_adjust(0.05f);  // +5% step
+    auto* view = [self liveView];
+    if (!view) return;
+    view->on_accessibility_adjust(0.05f);  // +5% step
 }
 
 - (void)accessibilityDecrement {
-    if (!_pulpView) return;
-    _pulpView->on_accessibility_adjust(-0.05f);  // -5% step
+    auto* view = [self liveView];
+    if (!view) return;
+    view->on_accessibility_adjust(-0.05f);  // -5% step
 }
 
 @end
@@ -182,7 +207,7 @@ NSArray<UIAccessibilityElement *>* create_accessibility_elements(
     for (auto* view : accessible) {
         PulpAccessibilityElement* element =
             [[PulpAccessibilityElement alloc] initWithAccessibilityContainer:container];
-        element.pulpView = view;
+        [element captureView:view root:&root];
         [elements addObject:element];
     }
     return elements;

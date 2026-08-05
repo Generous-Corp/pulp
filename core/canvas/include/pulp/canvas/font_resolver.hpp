@@ -136,6 +136,19 @@ struct SynthesisTrace {
 /// nullptr if `origin == NotFound`), the trace, and the generation
 /// value baked into the cache key so consumers can verify their copy
 /// hasn't gone stale.
+/// The PostScript name of the face a CSS family stack actually resolves to.
+///
+/// `actual_family` above answers "which family", which is not enough to
+/// validate a captured layout: "Jost" covers Regular, Medium and SemiBold, and
+/// those break text differently. The PostScript name identifies the instance.
+///
+/// Takes the raw CSS `font-family` value — the comma list is walked here so a
+/// caller does not need its own copy of that parsing. Returns empty when
+/// nothing resolves or the build has no Skia, and an empty answer must be read
+/// as "unknown", never as "matches".
+std::string resolved_face_identity(const std::string& css_font_family,
+                                   float weight);
+
 struct ResolvedFont {
 #ifdef PULP_HAS_SKIA
     sk_sp<SkTypeface> typeface;

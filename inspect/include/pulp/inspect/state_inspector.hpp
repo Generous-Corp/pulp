@@ -4,9 +4,11 @@
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/value_channel_telemetry.hpp>
 
 #include <chrono>
 #include <mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -30,15 +32,16 @@ public:
     /// parameter payload that would drift from the bridge's.
     StateStore& store() const noexcept { return store_; }
 
-    /// The hosting processor's declared value channels, or null when it
-    /// declares none. Non-owning and attached after construction for the same
-    /// reason the widget bridge does it that way: the inspector is built before
-    /// the adapter has resolved the processor. The set must outlive this
-    /// inspector.
-    void set_value_channels(view::ValueChannelSet* channels) noexcept {
-        value_channels_ = channels;
+    /// Snapshot the hosting processor's declared value-channel metadata. The
+    /// inspector owns its copy so a reloadable processor can retire the source
+    /// set immediately after this call without leaving a dangling catalog.
+    void set_value_channels(view::ValueChannelSet* channels);
+    void set_value_channels(std::span<const view::ValueChannelInfo> channels) {
+        value_channels_.assign(channels.begin(), channels.end());
     }
-    view::ValueChannelSet* value_channels() const noexcept { return value_channels_; }
+    std::span<const view::ValueChannelInfo> value_channels() const noexcept {
+        return value_channels_;
+    }
     ~StateInspector();
 
     StateInspector(const StateInspector&) = delete;
@@ -84,7 +87,7 @@ public:
 
 private:
     StateStore& store_;
-    view::ValueChannelSet* value_channels_ = nullptr;
+    std::vector<view::ValueChannelInfo> value_channels_;
     mutable std::mutex changes_mutex_;
     std::vector<ParamChange> changes_;
     ListenerToken listener_token_;

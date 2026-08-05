@@ -40,6 +40,7 @@
 // text_accessibility_macos.mm).
 #define PulpAccessibilityElement       PULP_VIEW_OBJC_NAME(PulpAccessibilityElement)
 #define PulpWindowAccessibilityElement PULP_VIEW_OBJC_NAME(PulpWindowAccessibilityElement)
+#define PulpAccessibilityHostLifetime  PULP_VIEW_OBJC_NAME(PulpAccessibilityHostLifetime)
 #define PulpTextAccessibilityElement   PULP_VIEW_OBJC_NAME(PulpTextAccessibilityElement)
 // Drag-and-drop source (drag_drop_mac.mm).
 #define PulpFileDragSource             PULP_VIEW_OBJC_NAME(PulpFileDragSource)

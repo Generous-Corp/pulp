@@ -6,6 +6,7 @@
 #include <pulp/view/design_ir.hpp>
 
 #include <string>
+#include <vector>
 
 namespace pulp::import_design {
 
@@ -36,8 +37,49 @@ struct PaintedTreeCounts {
     int native = 0;
     int image_asset = 0;
     int element_capture_fallback = 0;
+    /// Area, in CSS px², of the fallback nodes that reach the screen carrying
+    /// NO raster — so the renderer draws nothing where the browser drew
+    /// something. A count cannot say how bad that is in either direction:
+    /// eighteen `<svg>` icons are 0.4% of a panel, while two full-window
+    /// `<canvas>` elements are the whole panel twice over and arrive as the
+    /// same "2". The area is the number that separates them.
+    double unpainted_fallback_area = 0.0;
     int text = 0;                  ///< of the lowered, how many carry a string
     int pooled_into_fallback = 0;  ///< descendants of a captured element
+    /// Rotated elements drawn as a rectangle plus an angle instead of being
+    /// refused as unpaintable. Counted so the census can tell "this design has
+    /// no rotations" apart from "its rotations were solved" — the two produce
+    /// the same zero in `element_capture_fallback` and mean different things
+    /// about how much of the design the renderer is actually reproducing.
+    int rotation_recovered = 0;
+    /// `<svg>` elements whose whole shape tree became vector nodes.
+    int svg_lowered = 0;
+    /// `<svg>` elements that still arrive as a captured element. Each carries
+    /// `capture_fallback_reason` naming the construct that refused, so the
+    /// residual is a list rather than a total.
+    int svg_refused = 0;
+    /// Of those, the ones refused because the CAPTURE carries no SVG paint —
+    /// a stale snapshot, not a property of the design. Counted separately
+    /// because it is the only SVG refusal a caller can fix, and the fix is
+    /// "capture again", which nothing about the design tells them.
+    int svg_refused_stale_capture = 0;
+
+    /// Text runs that carry captured line boxes but no resolved FACE.
+    ///
+    /// The renderer refuses such a basis on purpose — a font family is a
+    /// request, and without the face the capture broke against there is no way
+    /// to know the cache still describes this machine's text. So every one of
+    /// these runs silently re-derives its own line breaking, and a run that
+    /// resumes mid-line after an inline `<span>` loses the horizontal offset
+    /// that placed it, printing on top of its own sibling.
+    ///
+    /// Same shape as the SVG case and the same one-line fix — capture again —
+    /// which nothing about the design tells a reader.
+    int text_line_boxes_without_face = 0;
+    /// Vector nodes emitted from those shape trees. Counted separately from
+    /// `native` so "the panel draws more nodes" cannot be read as "the panel
+    /// draws more of the design" when the extra nodes are all one icon.
+    int svg_shapes = 0;
     int skipped_empty_box = 0;     ///< zero-area layout objects
     int skipped_blank_text = 0;    ///< collapsed whitespace runs
     int skipped_non_visual = 0;    ///< the document node, doctype, comments
@@ -68,6 +110,22 @@ struct PaintedTreeCounts {
     /// disjoint boxes freely — that is unobservable — so this is the honest
     /// measure of whether nesting cost any fidelity. Zero is the claim.
     int overlapping_reorders = 0;
+    /// Which pairs inverted, as `over<under` anchor ids, in composed order.
+    /// A count says a panel can paint wrong; only the pair says where, and the
+    /// pairing has to be captured here because the audit runs after the nodes
+    /// have been moved into the emitted tree and can no longer be written to.
+    std::vector<std::string> overlapping_reorder_pairs;
+    /// Nodes whose type lengths were multiplied by the scale their box already
+    /// carried from an ancestor `transform`. Chrome scales glyphs along with
+    /// the box; the snapshot reports the box post-transform and `font-size`
+    /// pre-transform, so without this a run under `scale(.9)` draws 11% wide.
+    int type_scaled = 0;
+    /// Nodes under a transform chain that does not reduce to one positive
+    /// uniform scale — two axes, a flip, a rotation, or a `matrix3d`. Type
+    /// carries a single scalar and cannot express any of those, so the factor
+    /// is NOT applied and the node records the value that refused it. A
+    /// recorded refusal is findable; a plausible wrong number is not.
+    int type_scale_refused = 0;
 };
 
 /// Lower every painted node in the captured document into a TREE under `root`

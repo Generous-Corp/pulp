@@ -589,6 +589,12 @@ public:
             (void)ready_to_return();
     }
 
+    /// True when capture_back_buffer_png() is implemented by this host.
+    /// Kept independent from compositor capture: an SSH-safe back-buffer path
+    /// must not be inferred from the ability to capture a visible window.
+    /// Appended at the public vtable tail for downstream WindowHost ABI safety.
+    virtual bool supports_back_buffer_capture() const { return false; }
+
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently
     /// no-ops (the base-class default ran because the host did not override it).
