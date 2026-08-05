@@ -98,19 +98,60 @@ acknowledgement; custom also has to name `runtime.eval` and `session.control`.
 The acknowledgement is one-run state and is not part of standalone persisted
 preferences.
 
+## Broker identity and grant foundation
+
+The optional `pulp::inspect-control` component contains the broker-owned
+identity, registration, and grant state needed by the capability-control
+migration. It is deliberately dormant in this phase: it opens no listener, is
+not linked into ordinary plugin-format artifacts, and does not replace the
+current explicitly activated standalone inspector transport. The canonical
+per-user broker, OS IPC carrier, installed client, consent UI, and operation
+dispatcher arrive in later phases.
+
+The foundation accepts only carrier-observed `VerifiedControlPeerIdentity`
+values minted by the broker's peer verifier. Its fingerprint binds the peer
+role, UID/SID, PID, process-start generation, executable identity, and verified
+publisher. Payload claims and same-user status alone are insufficient. A
+launcher bootstrap is single-use, short-lived, bound to that exact fingerprint,
+consumed even after a wrong-peer attempt, and wiped on consumption, expiry, or
+destruction. The platform-specific code that gathers and validates OS peer
+evidence is intentionally not selected until the Phase 3 broker composition
+root.
+
+Registration is limited to Pulp-owned T0 offline jobs and T1 standalone hosts.
+It validates the complete canonical control manifest and exact artifact digest,
+derives the consent identity, and binds an opaque registration to one exact
+session, instance, publication, peer generation, and lease. Empty or
+"latest" selection is unavailable. Shared plugin hosts, including direct AUv3,
+fail with `host-unavailable` until a separately reviewed trusted-host bridge can
+attest the exact loaded slot.
+
+Grant issuance requires a live exact client and registration, a capability
+subset present in that validated manifest, bounded expiry, and approval from a
+trusted Pulp CLI, trusted host UI, or existing user policy. Plugin UI and agent
+client assertions cannot approve a grant. Interactive consent decision IDs are
+single-use; durable policy IDs may be reused within their policy scope. Broker
+restart, client disconnect, registration disappearance, expiry, or explicit
+revocation removes authority. The bounded metadata audit records identities,
+decisions, and stable reason codes, never bootstrap secrets, consent text, or
+operation payload values.
+
+A stored grant establishes only the `client_granted` term. It does not activate
+an endpoint, route an operation, or bypass the other six permission terms.
+
 ## Checked implementation matrix
 
 | Area | Present | Missing |
 |---|---|---|
 | Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for a compatible GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership |
 | Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires, and schedule startup-failure close on a later native event turn | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` with `run_event_loop_until()`, plus `supports_deferred_close()` with `request_close_deferred()`, to opt into active profiles |
-| Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
+| Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, authoring, and dormant `pulp::inspect-control` targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Install/export of the broker client and service, per-target shipped-product declaration, and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses. Reload generations rebind owned channel metadata, the sole telemetry attachment, and scripted inspector sources on the UI tick | Additional host-format ownership |
-| Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |
+| Discovery/security | The explicitly activated standalone path retains owner-private ephemeral record/token files, exact publication selection, mutual nonce/HMAC proofs, replay rejection, timeouts, teardown, and one-controller lease. Separately, the dormant broker core now models verified peer generations, identity-bound single-use bootstrap, exact T0/T1 registration, trusted-consent grants, expiry/revocation, bounds, and metadata-only audit | Canonical per-user service, OS-specific peer-evidence carrier, trusted consent surface, and migration of live operations to that path |
 | CLI | `pulp inspect profiles/list/capabilities/doctor` and typed parameter/MIDI/transport mutations provide stable JSON; every live operation uses exact session/instance/publication targeting through the shared client | Telemetry subscription lands in the next phase |
 | MCP | Installed in-process shared client exposes profiles/list/capabilities/doctor plus typed parameter, MIDI, and transport tools; success carries publication identity and failures carry structured code/message/data | Telemetry subscription lands in the next phase |
 | Capture/telemetry | Whole-window in-process capture (live host back-buffer when available, portable view rendering otherwise), owned value-channel metadata, snapshots, and bounded scalar/meter/vector/event subscriptions are attached to the standalone session; delivery is targeted by authenticated client identity and carries explicit source, stale, coalescing, overflow, and transport-loss state | Node capture, external-host compositing, and CLI/MCP watch commands |
-| Shipping | The component gate removes live inspector targets; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested | Broker-era signed publisher identity and consent proof |
+| Shipping | The component gate removes live inspector targets and the dormant control core; live CLI commands fail explicitly when disabled, while read-only `inspect audit` remains available. Ordinary-format symbol stripping, per-target declarations, canonical manifests, and manifest-versus-binary checks are continuously tested | Platform carrier verification, signed service distribution, and broker-owned consent proof |
 
 The production server binds loopback only and requires fresh, role-separated
 nonce/HMAC proofs from both client and server using an owner-private

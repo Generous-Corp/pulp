@@ -64,6 +64,26 @@ alone. A trusted host bridge must attest the verified artifact publisher and
 exact loaded slot. If a host tier cannot supply that evidence, capability
 control and collaboration are unavailable there.
 
+## Implemented foundation and current boundary
+
+The optional Phase 2 control core now represents broker identity, exact T0/T1
+registration, and client-scoped grants without opening a listener or routing an
+operation. Verified peer identity binds UID/SID, PID, process generation,
+executable identity, publisher, and role; same-UID membership and payload claims
+are not proof. Launcher bootstrap material is single-use, short-lived,
+peer-bound, and wiped. Registrations validate a canonical manifest plus the
+exact artifact digest and expose only that manifest's bounded capability set.
+Interactive trusted-consent decisions reject replay, while an existing user
+policy may be deliberately reusable. All stores have explicit capacity and
+expiry limits, and their security audit contains metadata and reason codes only.
+
+This is a state-model foundation, not a running broker. The OS-authenticated IPC
+carrier, one installed per-user service, trusted consent UI, operation
+dispatcher, receipts, and artifact ACLs are still required. Only Pulp-owned T0
+offline jobs and T1 standalone hosts are admissible at this stage. Shared-host
+slots and direct AUv3 access fail closed as `host-unavailable`; plugin-rendered
+consent and environment-delivered bootstrap credentials remain rejected.
+
 ## Threats and required controls
 
 | Threat | Required control |
@@ -120,11 +140,12 @@ Changes to this boundary require tests for unknown fields and versions,
 permission-term denial, identity forgery and reuse, replay, grant expiry and
 revocation, cancellation races, artifact ACLs, queue/rate limits, broker
 restart/update, incremental reconfiguration, path traversal, immutable artifact
-snapshot use, schema boundary values, and negative binary scans. A
-platform-sandbox review must close
-AUv3/out-of-process reachability, consent-UI ownership, format-specific legal
-completion, bootstrap-secret delivery/invalidation, and missing-attestation
-behavior before broker implementation begins.
+snapshot use, schema boundary values, and negative binary scans. The dedicated
+platform-sandbox review is accepted with binding T0/T1-only restrictions. It
+rejects direct AUv3 access, self-attested shared-host slots, plugin-rendered
+consent, and environment bootstrap credentials. Any later host tier must close
+its own reachability, trusted-consent ownership, legal completion,
+bootstrap-delivery, and missing-attestation gates before gaining authority.
 
 Security reviews and host feasibility decisions are durable planning records.
 User-facing artifact checks use `pulp inspect audit ARTIFACT`; that command is
