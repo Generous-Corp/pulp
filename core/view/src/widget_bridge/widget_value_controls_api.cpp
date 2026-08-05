@@ -140,6 +140,30 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         }
         return choc::value::Value();
     });
+
+    auto toggle_of = [&self](const std::string& id) -> ToggleButton* {
+        return dynamic_cast<ToggleButton*>(id.empty() ? &self.root_ : self.widget(id));
+    };
+
+    // A momentary action on a ToggleButton latches: press once and it acts,
+    // press again and it only un-latches, so every second press appeared to do
+    // nothing. Scripts need to be able to release it.
+    register_bridge_function(api, "setToggleOn",
+                             [toggle_of](choc::javascript::ArgumentList args) {
+        auto* t = toggle_of(args.get<std::string>(0, ""));
+        if (t) t->set_on(args.get<bool>(1, false));
+        return choc::value::Value();
+    });
+
+    // Two toggles that look mutually exclusive must BE mutually exclusive.
+    // Without a shared group both tabs could read as selected at once, and the
+    // mode became whichever was clicked last rather than what was shown.
+    register_bridge_function(api, "setRadioGroup",
+                             [toggle_of](choc::javascript::ArgumentList args) {
+        auto* t = toggle_of(args.get<std::string>(0, ""));
+        if (t) t->set_radio_group(static_cast<int>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
 }
 
 } // namespace pulp::view

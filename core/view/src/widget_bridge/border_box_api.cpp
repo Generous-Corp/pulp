@@ -161,25 +161,10 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
         if (t && !on.empty()) t->set_on_text_color(parse_bridge_css_color(on));
         return choc::value::Value();
     });
-    // Two toggles that look mutually exclusive must BE mutually exclusive.
-    // Without a shared group both tabs could read as selected at once, and the
-    // mode became whichever was clicked last rather than what was shown.
-    register_bridge_function(api, "setRadioGroup",
-                             [toggle_of](choc::javascript::ArgumentList args) {
-        auto* t = toggle_of(args.get<std::string>(0, ""));
-        if (t) t->set_radio_group(static_cast<int>(args.get<double>(1, 0)));
-        return choc::value::Value();
-    });
-
-    // A momentary action on a ToggleButton latches: press once and it acts,
-    // press again and it only un-latches, so every second press appeared to do
-    // nothing. Scripts need to be able to release it.
-    register_bridge_function(api, "setToggleOn",
-                             [toggle_of](choc::javascript::ArgumentList args) {
-        auto* t = toggle_of(args.get<std::string>(0, ""));
-        if (t) t->set_on(args.get<bool>(1, false));
-        return choc::value::Value();
-    });
+    // `setToggleOn` and `setRadioGroup` belong to the widget-value registrar,
+    // not here: they set a ToggleButton's state and its grouping rather than
+    // its box appearance. This file registers `css_style` and nothing else,
+    // which is the shape every other registrar source has.
 }
 
 } // namespace pulp::view
