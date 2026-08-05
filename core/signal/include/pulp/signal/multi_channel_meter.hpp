@@ -59,8 +59,17 @@ struct MultiChannelBallistics {
     float clip_hold_time = 3.0f;    // seconds
 
     /// Update ballistics from new meter data. Call once per UI frame.
-    void update(const MultiChannelMeterData& data, float dt) {
-        num_channels = std::clamp(data.num_channels, 0, kMaxMeterChannels);
+    ///
+    /// Returns true when a displayed value actually moved. A UI thread polls
+    /// this every frame for as long as it is bound, silence included, so the
+    /// return value is what lets a still meter ask for nothing: repaint on true,
+    /// and a settled meter costs zero composites instead of one per frame
+    /// forever. Only the fields that reach the screen count — the hold counters
+    /// tick down invisibly.
+    bool update(const MultiChannelMeterData& data, float dt) {
+        const int requested = std::clamp(data.num_channels, 0, kMaxMeterChannels);
+        bool changed = requested != num_channels;
+        num_channels = requested;
 
         float attack_coeff = 1.0f - std::exp(-dt / attack_time);
         float release_coeff = 1.0f - std::exp(-dt / release_time);
@@ -68,6 +77,10 @@ struct MultiChannelBallistics {
         for (int ch = 0; ch < num_channels; ++ch) {
             auto& b = channels[ch];
             auto& d = data.channels[ch];
+            const float prev_peak = b.display_peak;
+            const float prev_rms = b.display_rms;
+            const float prev_held = b.held_peak;
+            const bool prev_clip = b.clip_indicator;
 
             // Peak
             if (d.peak > b.display_peak)
@@ -86,7 +99,9 @@ struct MultiChannelBallistics {
                 b.held_peak = d.peak;
                 b.hold_counter = peak_hold_time;
             } else {
-                b.hold_counter -= dt;
+                // Floor the counters at zero. Left to run they decrement without
+                // bound for as long as the meter is polled, which is forever.
+                b.hold_counter = std::max(0.0f, b.hold_counter - dt);
                 if (b.hold_counter <= 0)
                     b.held_peak += (0.0f - b.held_peak) * release_coeff;
             }
@@ -96,15 +111,24 @@ struct MultiChannelBallistics {
                 b.clip_indicator = true;
                 b.clip_hold_counter = clip_hold_time;
             } else {
-                b.clip_hold_counter -= dt;
+                b.clip_hold_counter = std::max(0.0f, b.clip_hold_counter - dt);
                 if (b.clip_hold_counter <= 0)
                     b.clip_indicator = false;
             }
 
-            // Clamp noise floor
+            // Clamp noise floor. The decays are exponential, so each of these
+            // approaches zero without ever arriving: unsnapped they change by a
+            // fraction of a bit every frame FOREVER, which is invisible on
+            // screen but means the meter never reports a still frame.
             if (b.display_peak < 1e-6f) b.display_peak = 0;
             if (b.display_rms < 1e-6f) b.display_rms = 0;
+            if (b.held_peak < 1e-6f) b.held_peak = 0;
+
+            changed = changed || b.display_peak != prev_peak ||
+                      b.display_rms != prev_rms || b.held_peak != prev_held ||
+                      b.clip_indicator != prev_clip;
         }
+        return changed;
     }
 
     /// Reset all clip indicators immediately.

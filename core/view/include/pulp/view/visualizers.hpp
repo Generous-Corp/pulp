@@ -61,7 +61,15 @@ public:
     MultiMeter() { set_access_role(AccessRole::meter); }
 
     /// Update from multi-channel meter data. Call once per UI frame.
-    void update(const signal::MultiChannelMeterData& data, float dt);
+    ///
+    /// Returns true when a displayed level moved, i.e. when this frame would
+    /// differ from the last. Callers drive the repaint off that: a meter polled
+    /// through silence has nothing new to show, and asking for a composite
+    /// anyway pins the host's render loop at the display refresh rate for as
+    /// long as the app is open. `Meter::update` invalidates its own rect on the
+    /// same rule; a MultiMeter can be laid out several ways, so the caller —
+    /// which knows what the meter is part of — owns the invalidation.
+    bool update(const signal::MultiChannelMeterData& data, float dt);
 
     void set_layout(Layout l) { layout_ = l; }
     Layout layout() const { return layout_; }

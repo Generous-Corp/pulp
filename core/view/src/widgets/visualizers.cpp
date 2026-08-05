@@ -1044,8 +1044,8 @@ void MultiMeter::set_channel_count(int count) {
     ballistics_.num_channels = std::min(count, signal::kMaxMeterChannels);
 }
 
-void MultiMeter::update(const signal::MultiChannelMeterData& data, float dt) {
-    ballistics_.update(data, dt);
+bool MultiMeter::update(const signal::MultiChannelMeterData& data, float dt) {
+    return ballistics_.update(data, dt);
 }
 
 void MultiMeter::paint(canvas::Canvas& canvas) {
