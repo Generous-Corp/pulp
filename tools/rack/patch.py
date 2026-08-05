@@ -3069,9 +3069,25 @@ def claim_idiom(prompt: str, idioms: dict, say=None):
     request, which is the failure this whole layer exists to avoid.
     """
     import idiom_check
+    out = say or (lambda m: print(m, flush=True))
     intent = idiom_check.resolve_intent(prompt, idioms)
     if intent.how != "named" and intent.how != "implied":
-        (say or (lambda m: print(m, flush=True)))("  " + intent.why)
+        out("  " + intent.why)
+
+    # One idiom is one answer to a request that is usually several things.
+    # "a shimmering ambient pad" resolves to wandering-drone, correctly -- and
+    # the library also knows "shimmer", so half the request was dropped on the
+    # floor without a word said. Reported, never acted on: picking two idioms
+    # and checking both would reject patches for not being two things at once.
+    read = idiom_check.reading(prompt, idioms)
+    others = sorted({s for slugs in read["known"].values() for s in slugs}
+                    - {intent.slug})
+    if others:
+        out(f"  the request also touches: {', '.join(others[:4])}"
+            f"{' ...' if len(others) > 4 else ''} — not checked")
+    if read["unknown"]:
+        out(f"  no idiom uses these words, so nothing checks them: "
+            f"{', '.join(read['unknown'])}")
     return intent
 
 

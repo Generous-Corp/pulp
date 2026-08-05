@@ -104,7 +104,16 @@ _EMPTY = {"a", "an", "the", "and", "or", "of", "with", "for", "in", "on",
           "to", "that", "this", "it", "its", "some", "something", "make",
           "makes", "made", "me", "my", "please", "patch", "sound", "sounds",
           "simple", "basic", "nice", "good", "using", "only", "just", "very",
-          "really", "highly", "bit", "little", "more", "less"}
+          "really", "highly", "bit", "little", "more", "less",
+          # Words about the request rather than the music. "modules" stemmed
+          # to "modul" and was reported as a word the library did not know,
+          # which is true and useless -- every prompt says it.
+          "module", "modules", "modul", "rack", "build", "create", "want",
+          "need", "like", "use", "few", "get",
+          # Counts. "four bars of blorp" matched kick-drum on "four", which
+          # says nothing about what kind of patch was asked for.
+          "one", "two", "three", "four", "five", "six", "seven", "eight",
+          "nine", "ten", "sixteen", "bar", "bars", "beat", "beats"}
 
 
 def _stem(word: str) -> str:
@@ -126,6 +135,38 @@ def _words(text: str) -> set[str]:
     keep = "".join(c if c.isalnum() or c.isspace() else " " for c in text)
     return {_stem(w) for w in keep.lower().split()
             if w not in _EMPTY and len(w) > 2}
+
+
+def reading(prompt: str, idioms: dict | None = None) -> dict:
+    """What the library recognises in a request, and what it does not.
+
+    Deliberately not a classifier and deliberately not a gate. `resolve_intent`
+    already picks one idiom, which is a single answer to a request that is
+    usually several things at once -- "a shimmering ambient pad" is a texture,
+    a mood and a voice, and forcing it into one slug throws two of them away.
+
+    This throws nothing away and decides nothing. It splits the request into
+    the words that carry meaning and says, for each, which idioms use that
+    word -- and, more usefully, which words NOTHING uses.
+
+    The unknown list is the point. A word the library has never seen is the
+    part of a request we are provably not checking, and it is invisible in
+    every other output: a patch that satisfies "pad" and ignores "shimmering"
+    passes everything, because nothing ever said "shimmering" was a word we
+    do not know. Saying so costs nothing and is the difference between a
+    reading somebody can correct and an answer they have to take on trust.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    asked = _words(prompt)
+    known: dict[str, list[str]] = {}
+    for slug, idiom in idioms.items():
+        words = _words(" ".join(list(idiom.get("names", [])) +
+                                list(idiom.get("implies", []))) +
+                       " " + slug.replace("-", " "))
+        for w in asked & words:
+            known.setdefault(w, []).append(slug)
+    return {"known": {w: sorted(s) for w, s in sorted(known.items())},
+            "unknown": sorted(asked - set(known))}
 
 
 class Intent(NamedTuple):
