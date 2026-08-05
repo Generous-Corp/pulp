@@ -3248,3 +3248,76 @@ TEST_CASE("a lowered control does not repaint the box-shadow its underlay drew",
     CHECK(root->child_at(0)->box_shadows().size() == 2);
     CHECK(root->child_at(1)->box_shadows().empty());
 }
+
+TEST_CASE("a designed knob's value ring rides outside the body, not across it",
+          "[view][import][native-materializer][designed-control]") {
+    // The control box is the design's body box, so the old fixed 0.46 put the
+    // ring at 92% of the body radius — over the brushed cap the design drew.
+    // Measured on kelvin: an authored dial of radius 80 with our arc at 73.6.
+    //
+    // Assert the PAINTED radius, not the skin field: the field is private to
+    // the painter, and the radius is the thing a reviewer sees.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* arc = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
+    REQUIRE(arc != nullptr);
+
+    // Centre stays the box centre; only the radius moves.
+    REQUIRE(arc->f[0] == Catch::Approx(80.0f));
+    REQUIRE(arc->f[1] == Catch::Approx(80.0f));
+    // Half the box (80) + half the 4px ring (2) + a hairline (1) = 83.
+    REQUIRE(arc->f[2] == Catch::Approx(83.0f));
+    // The property that matters, stated independently of the arithmetic: the
+    // ring clears the body instead of crossing it.
+    REQUIRE(arc->f[2] > 80.0f);
+}
+
+TEST_CASE("a design can declare where its value ring belongs",
+          "[view][import][native-materializer][designed-control]") {
+    // design_ring_radius is the refinement, not the mechanism: a design that
+    // drew its own decorative ring can put the value exactly on it. Absent, the
+    // derivation above runs, which is why the common case needs no new data.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    // kelvin's authored tick ring: radius 98 on a 160 box.
+    knob_node.attributes["design_ring_radius"] = "0.6125";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* arc = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
+    REQUIRE(arc != nullptr);
+    REQUIRE(arc->f[2] == Catch::Approx(98.0f));
+}

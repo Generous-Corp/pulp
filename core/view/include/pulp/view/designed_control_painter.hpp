@@ -28,9 +28,16 @@ struct DesignedControlSkin {
     canvas::Color indicator{0.92f, 0.94f, 0.96f, 1.0f}; ///< the pointer / thumb
     float ring_width = 4.0f;
     float indicator_width = 2.5f;
-    /// The design's body fills the node box, so the ring rides just inside its
-    /// edge rather than at the stock radius, which was tuned for a knob that
-    /// draws its own smaller body.
+    /// Ring radius as a fraction of the shorter side of the control box.
+    ///
+    /// The control box IS the design's body box, so a value at or below 0.5
+    /// paints the ring ON the body — which is what "the design owns the body"
+    /// forbids. Callers derive this from the body edge (see
+    /// apply_designed_body_skin) so the ring rides just OUTSIDE the dial, in
+    /// the gap a decorative bezel or tick ring already occupies.
+    ///
+    /// The 0.46 here is only the struct's own default, for a caller that has no
+    /// box to measure. It is deliberately not the value the import lane uses.
     float ring_radius_scale = 0.46f;
 };
 

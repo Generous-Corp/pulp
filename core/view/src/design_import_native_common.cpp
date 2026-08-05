@@ -1730,6 +1730,33 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
         skin.track = parse_css_color(*hex);
     if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
         skin.indicator = parse_css_color(*hex);
+
+    // Where the value ring rides.
+    //
+    // The control's box IS the design's body box — it comes from the author's
+    // `[data-pulp-paint]` rect, which is the dial element itself. So ANY scale
+    // at or below 0.5 necessarily paints on top of the body, and the old fixed
+    // 0.46 put the arc at 92% of the body radius: straight across the brushed
+    // cap the design had just drawn. No constant can satisfy "the design owns
+    // the body", because the constant is a fraction of the body.
+    //
+    // Derive it from the body EDGE instead: half the box, plus half the ring's
+    // own stroke, plus a hairline. The arc then sits in the gap the design left
+    // around its dial — where a decorative bezel or tick ring already lives —
+    // rather than over the art. Nothing new has to be measured or emitted.
+    const float box = std::min(node.style.width.value_or(0.0f),
+                               node.style.height.value_or(0.0f));
+    if (box > 0.0f)
+        skin.ring_radius_scale = 0.5f + (skin.ring_width * 0.5f + 1.0f) / box;
+
+    // A design that drew its own decorative ring can say exactly where the
+    // value belongs, as a fraction of the control box, and that wins over the
+    // derivation above. Absent — which is the common case — the derivation is
+    // what runs, so this channel refines the result rather than gating it.
+    if (const auto declared = attr_float(node, "design_ring_radius");
+        declared && *declared > 0.0f)
+        skin.ring_radius_scale = *declared;
+
     apply_designed_control_skin(control, skin);
     return true;
 }

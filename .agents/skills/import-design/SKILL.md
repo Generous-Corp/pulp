@@ -1793,6 +1793,28 @@ Checks worth doing before believing a designed-control skin works:
   designed fader makes that region score WORSE against Chrome while being more
   correct. Judge it by what the widget stopped overpainting, not by the number.
 
+**The control's box IS the design's body box.** It comes from the author's
+`[data-pulp-paint]` rect (`browser_capture/semantics.mjs`, `paintBox`), which in
+practice is the dial element itself. `paint_mod_ring_knob` then takes
+`min(w, h) * radius_scale` on `local_bounds()`, so **every `radius_scale <= 0.5`
+paints on the body by construction** — a fixed 0.46 put the value arc at 92% of
+the body radius, straight across a brushed cap the design had just drawn. No
+constant can satisfy "the design owns the body", because the constant is a
+fraction of the body; `apply_designed_body_skin` therefore derives the scale from
+the body EDGE (`0.5 + (ring_width/2 + 1) / min(w,h)`) and treats a
+`design_ring_radius` attribute as an override rather than the mechanism.
+
+Two consequences when changing that radius:
+
+- A scale above 0.5 paints OUTSIDE the widget's own box. That is legal here —
+  `View` clips only on `overflow: hidden`/`scroll` — and the hit rect is
+  unchanged, so the drag target stays on the dial. It does mean neighbouring
+  controls can converge: measure the gap between the two ARCS, not between their
+  boxes, because both arcs move outward together.
+- Measure the arc radius in a band tight around the expected value. A wider band
+  silently averages in the design's own concentric decoration (kelvin's copper
+  hairline at r≈89 and tick ring at r≈98) and reports a radius a pixel high.
+
 ### Native codegen fidelity gaps
 
 The render uses `generate_native_node` in `core/view/src/design_codegen.cpp`
