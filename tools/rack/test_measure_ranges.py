@@ -3,8 +3,8 @@
 
     python3 tools/rack/test_measure_ranges.py
 
-Two things this harness got wrong produced the same symptom -- a clean run
-reporting that nothing was measured -- and neither announced itself:
+Everything this harness has got wrong produced the same symptom -- a clean run
+reporting that nothing was measured -- and none of it announced itself:
 
   * The scanner listed FIRST. CARTOG scans the rack it finds when it is added,
     and Rack adds modules in the order the patch names them, so a scanner in
@@ -15,10 +15,18 @@ reporting that nothing was measured -- and neither announced itself:
     their own plugin/model, so `.get(slug)` returns nothing for every module of
     every plugin -- indistinguishable from a scan that found none.
 
-Both are shape bugs in code with no output of its own to check, which is why
-they are tested here rather than trusted to the next full run: a full run needs
-Rack, a machine, an audio device and a minute, and it reports the same zero for
-a broken instrument as for an empty library.
+  * Rack launched from a shell with no GUI login session. It aborts inside
+    CoreMIDI long before it reaches the patch, so the map simply does not
+    change and the run looks like an empty library.
+
+  * Rack launched with our stdin. It prints "Press enter to exit." and waits on
+    that terminal forever, leaving a live Rack holding an audio device for
+    somebody else to find and force-quit.
+
+All four are invisible in code that has no output of its own to check, which is
+why they are tested here rather than trusted to the next full run: a full run
+needs Rack, a machine, an audio device and a minute, and it reports the same
+zero for a broken instrument as for an empty library.
 """
 
 import json
@@ -150,11 +158,80 @@ def test_scan_is_read_from_racks_own_log() -> int:
     return bad
 
 
+def test_launch_reaches_the_gui_session() -> int:
+    """Rack is routed into the GUI session exactly when this shell is not in one.
+
+    An SSH shell has no GUI login session, so Rack aborts in CoreMIDI before it
+    reaches the patch -- and a crash before the patch reads, from the map, as a
+    library with nothing in it.
+    """
+    bad = 0
+    keep = os.environ.pop("SECURITYSESSIONID", None)
+    try:
+        argv = mr.rack_argv("/A/Rack", "/scratch", "/p.vcv")
+        bad += check(argv[:3] == ["launchctl", "asuser", str(os.getuid())],
+                     "outside a GUI session, Rack is launched into the user's",
+                     f"got {argv[:3]}")
+        bad += check(argv[-4:] == ["-h", "-u", "/scratch", "/p.vcv"],
+                     "and its arguments survive the wrapping", f"got {argv}")
+
+        os.environ["SECURITYSESSIONID"] = "186a5"
+        argv = mr.rack_argv("/A/Rack", "/scratch", "/p.vcv")
+        bad += check(argv[0] == "/A/Rack",
+                     "inside one, it is a plain exec a person can copy and run",
+                     f"got {argv[0]}")
+    finally:
+        os.environ.pop("SECURITYSESSIONID", None)
+        if keep is not None:
+            os.environ["SECURITYSESSIONID"] = keep
+    return bad
+
+
+def test_launch_closes_stdin() -> int:
+    """Rack is launched with no stdin, or it waits on ours forever.
+
+    Headless Rack prints "Press enter to exit." and blocks on whatever
+    terminal it inherited. Every run then leaves a live Rack holding an audio
+    device until somebody force-quits it, which is a cost paid by whoever is
+    at the machine rather than by whoever ran the tool.
+    """
+    seen = {}
+
+    class FakeProc:
+        def poll(self):
+            return 0                     # "already exited", so no kill path
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kw):
+        seen.update(kw)
+        seen["argv"] = argv
+        return FakeProc()
+
+    real = mr.subprocess.Popen
+    mr.subprocess.Popen = fake_popen
+    try:
+        mr.launch_once("/A/Rack", "/p.vcv", 1.0)
+    finally:
+        mr.subprocess.Popen = real
+
+    bad = 0
+    bad += check(seen.get("stdin") is mr.subprocess.DEVNULL,
+                 "Rack is launched with stdin closed",
+                 f"stdin was {seen.get('stdin')!r}")
+    bad += check("/p.vcv" in (seen.get("argv") or []),
+                 "and it is given the patch to open", f"argv was {seen.get('argv')}")
+    return bad
+
+
 def main() -> int:
     bad = 0
     for fn in (test_scanner_is_last, test_portmap_is_a_list,
                test_shortfall_names_what_is_missing,
-               test_scan_is_read_from_racks_own_log):
+               test_scan_is_read_from_racks_own_log,
+               test_launch_reaches_the_gui_session,
+               test_launch_closes_stdin):
         print(f"{fn.__name__}:")
         bad += fn()
     print("\n" + ("all good" if bad == 0 else f"FAILED ({bad})"))

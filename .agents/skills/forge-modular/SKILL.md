@@ -317,6 +317,30 @@ so a Pro launch stays licensed. A directory Rack has never seen has no last
 session to have crashed in: 5 of 5. It also stops the scan clobbering the
 user's autosave, log and open rack.
 
+**Three ways a launch dies before it reaches the patch**, all of which look
+from the map like a library with nothing in it:
+
+- *Nobody closed stdin.* Headless Rack prints "Press enter to exit." and waits
+  on whatever terminal it inherited — forever. Every run leaves a live Rack
+  holding an audio device, and somebody has to force-quit it. Launch with
+  `stdin=DEVNULL` and kill the process yourself once the map is written.
+- *The shell has no GUI login session.* Rack initialises MIDI long before it
+  loads a patch, and `MidiInCore` cannot create a CoreMIDI client outside a GUI
+  session: RtMidi throws, the exception crosses a `noexcept` boundary, and the
+  process aborts. So an SSH-launched Rack aborts every time. Route it into the
+  user's session with `launchctl asuser $(id -u) …`, and treat an abort as
+  fatal rather than retryable — relaunching cannot conjure a session. Same root
+  cause as AU components being invisible over SSH.
+- *The crash prompt*, above.
+
+**`install_pack.sh` reporting success does not mean Rack loads what you built.**
+It places the `.vcvplugin` ARCHIVE and never touches an existing UNPACKED
+`plugins-mac-arm64/ForgeModular/` directory — and the unpacked directory is
+what Rack loads. Same version in both places is not the documented refusal
+("keeping X, which is newer"); it is a clean exit 0 with the old binary still
+live. **Verify by hash, not by exit code**, and if the directory is stale move
+it aside and unpack the archive over it.
+
 **A zero here is never evidence on its own.** A wedged launch, a scanner placed
 first, and a genuinely empty library all produce the same "measured nothing".
 So the harness reads Rack's own log for `forge: CARTOG placed alongside N` and

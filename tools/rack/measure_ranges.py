@@ -246,6 +246,40 @@ LOADING = "Loading patch"
 LOAD_WINDOW = 20.0
 ATTEMPTS = 8
 
+# Rack aborted before it ever reached a patch, from inside CoreMIDI.
+ABORTED = "MidiInCore"
+
+
+def in_gui_session() -> bool:
+    """Whether this shell can reach the window server and CoreMIDI.
+
+    An SSH shell cannot. Rack initialises MIDI long before it loads a patch,
+    and `MidiInCore` cannot create a CoreMIDI client without a GUI login
+    session -- RtMidi throws, the exception crosses a `noexcept` boundary, and
+    the process aborts. It never reaches the patch, so from the outside an
+    SSH launch is indistinguishable from a library with nothing in it, which
+    is the one failure this whole tool exists to stop reporting as a result.
+
+    (Same root cause as AU components being invisible over SSH: the registry
+    is a per-GUI-session service.)
+    """
+    return bool(os.environ.get("SECURITYSESSIONID"))
+
+
+def rack_argv(rack: str, user_dir: str, patch: str) -> list[str]:
+    """Rack's command line, routed into the GUI session when we are outside it.
+
+    `launchctl asuser <uid>` runs the process in the user's GUI login session
+    rather than the SSH one, which is what gives CoreMIDI a client to attach
+    to. It is a no-op cost when we are already in that session, so it is only
+    applied when we are not -- keeping a local run a plain exec that a person
+    can copy out of a log and run by hand.
+    """
+    argv = [rack, "-h", "-u", user_dir, patch]
+    if in_gui_session():
+        return argv
+    return ["launchctl", "asuser", str(os.getuid())] + argv
+
 
 def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
     """One headless launch. Returns (log, "" | why it did not measure).
@@ -264,7 +298,14 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
     to the library's history and never truncates it.
     """
     scratch = make_scratch()
-    proc = subprocess.Popen([rack, "-h", "-u", scratch, patch],
+    proc = subprocess.Popen(rack_argv(rack, scratch, patch),
+                            # stdin from /dev/null, or Rack's "Press enter to
+                            # exit." waits on OUR terminal forever and leaves a
+                            # live Rack behind every single run. Closed rather
+                            # than inherited: with no stdin the read returns at
+                            # once instead of blocking on a key nobody will
+                            # press. The kill below is the belt to this brace.
+                            stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     log = ""
@@ -280,7 +321,12 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
             if mine and WROTE in log:
                 break
             if proc.poll() is not None:
-                why = "Rack exited before it scanned"
+                # An abort inside CoreMIDI is not a retryable wedge and not an
+                # empty library: it is this shell having no GUI session, and
+                # relaunching it eight times only says so eight times.
+                why = ("Rack aborted in CoreMIDI — no GUI login session for "
+                       "this shell" if ABORTED in log
+                       else "Rack exited before it scanned")
                 break
             waited = time.time() - started
             if not loading and waited > LOAD_WINDOW:
@@ -324,6 +370,8 @@ def run_rack(rack: str, patch: str, scan_window: float,
         log, why = launch_once(rack, patch, scan_window)
         if not why:
             return log, ""
+        if ABORTED in log:
+            return log, why          # retrying cannot conjure a GUI session
         if attempt < attempts:
             print(f"    launch {attempt}: {why} — retrying", flush=True)
             time.sleep(2.0)
