@@ -187,6 +187,40 @@ def test_launch_reaches_the_gui_session() -> int:
     return bad
 
 
+def test_a_coremidi_abort_is_only_fatal_without_a_session() -> int:
+    """The abort is reported as seen, and blamed on a session only when absent.
+
+    A CoreMIDI abort in a shell that HAS a GUI session is a blip -- measured
+    here, one launch in ten -- and the next one succeeds. Calling every abort
+    "no GUI login session" would send a reader to debug a machine that is
+    fine, and refusing to retry would fail a whole run over it.
+    """
+    bad = 0
+    log = "[0.1] MidiInCore::getCoreMidiClientSingleton\nabort()"
+    keep = os.environ.pop("SECURITYSESSIONID", None)
+    try:
+        # Outside a session: the cause is knowable, and is named.
+        why = mr.exit_verdict(log)
+        bad += check("no GUI login session" in why,
+                     "outside a session, the abort names the missing session",
+                     f"got {why!r}")
+        bad += check(not mr.abort_is_retryable(log),
+                     "and it is fatal, because a retry cannot conjure one")
+
+        os.environ["SECURITYSESSIONID"] = "186a5"
+        why = mr.exit_verdict(log)
+        bad += check(why == "Rack aborted in CoreMIDI",
+                     "inside a session, it reports what was seen and no more",
+                     f"got {why!r}")
+        bad += check(mr.abort_is_retryable(log),
+                     "and it is retried, because it is a blip")
+    finally:
+        os.environ.pop("SECURITYSESSIONID", None)
+        if keep is not None:
+            os.environ["SECURITYSESSIONID"] = keep
+    return bad
+
+
 def test_launch_closes_stdin() -> int:
     """Rack is launched with no stdin, or it waits on ours forever.
 
@@ -231,6 +265,7 @@ def main() -> int:
                test_shortfall_names_what_is_missing,
                test_scan_is_read_from_racks_own_log,
                test_launch_reaches_the_gui_session,
+               test_a_coremidi_abort_is_only_fatal_without_a_session,
                test_launch_closes_stdin):
         print(f"{fn.__name__}:")
         bad += fn()

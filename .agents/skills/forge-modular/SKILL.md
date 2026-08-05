@@ -328,9 +328,15 @@ from the map like a library with nothing in it:
   loads a patch, and `MidiInCore` cannot create a CoreMIDI client outside a GUI
   session: RtMidi throws, the exception crosses a `noexcept` boundary, and the
   process aborts. So an SSH-launched Rack aborts every time. Route it into the
-  user's session with `launchctl asuser $(id -u) …`, and treat an abort as
-  fatal rather than retryable — relaunching cannot conjure a session. Same root
-  cause as AU components being invisible over SSH.
+  user's session with `launchctl asuser $(id -u) …`. Same root cause as AU
+  components being invisible over SSH.
+
+  But **an abort is not proof the session is missing.** About one launch in ten
+  aborts identically on a machine that plainly has one, and the next succeeds.
+  Report the abort as what was observed, name the session only where its
+  absence can be checked, and retry unless the session really is the missing
+  thing. Blaming every abort on the session sends a reader to debug a machine
+  that is fine, and refusing to retry fails a whole run over a blip.
 - *The crash prompt*, above.
 
 **`install_pack.sh` reporting success does not mean Rack loads what you built.**

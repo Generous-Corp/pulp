@@ -281,6 +281,32 @@ def rack_argv(rack: str, user_dir: str, patch: str) -> list[str]:
     return ["launchctl", "asuser", str(os.getuid())] + argv
 
 
+def exit_verdict(log: str) -> str:
+    """Why a launch that ended on its own did not measure anything.
+
+    Says what was seen, and names a cause only where one can be checked. A
+    CoreMIDI abort outside a GUI session IS that session's absence; inside one
+    it is something transient, and asserting the session was missing when it
+    demonstrably was not sends the reader to debug a machine that is fine.
+    """
+    if ABORTED in log:
+        why = "Rack aborted in CoreMIDI"
+        if not in_gui_session():
+            why += " — this shell has no GUI login session"
+        return why
+    return "Rack exited before it scanned"
+
+
+def abort_is_retryable(log: str) -> bool:
+    """Whether launching again could plausibly do better.
+
+    Measured on a machine WITH a GUI session, about one launch in ten aborts
+    in CoreMIDI and the next is fine -- so an abort is a blip to retry there,
+    and only unretryable where the session it wants is the one we cannot give.
+    """
+    return not (ABORTED in log and not in_gui_session())
+
+
 def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
     """One headless launch. Returns (log, "" | why it did not measure).
 
@@ -321,12 +347,14 @@ def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
             if mine and WROTE in log:
                 break
             if proc.poll() is not None:
-                # An abort inside CoreMIDI is not a retryable wedge and not an
-                # empty library: it is this shell having no GUI session, and
-                # relaunching it eight times only says so eight times.
-                why = ("Rack aborted in CoreMIDI — no GUI login session for "
-                       "this shell" if ABORTED in log
-                       else "Rack exited before it scanned")
+                # Say what was seen, and only name the cause we can actually
+                # check. A CoreMIDI abort OUTSIDE a GUI session is that
+                # session's absence and no number of retries will fix it;
+                # inside one it is something transient, and asserting the
+                # session was missing when it demonstrably was not would be
+                # the tool inventing a diagnosis -- which is how a reader ends
+                # up debugging the wrong machine.
+                why = exit_verdict(log)
                 break
             waited = time.time() - started
             if not loading and waited > LOAD_WINDOW:
@@ -370,7 +398,7 @@ def run_rack(rack: str, patch: str, scan_window: float,
         log, why = launch_once(rack, patch, scan_window)
         if not why:
             return log, ""
-        if ABORTED in log:
+        if not abort_is_retryable(log):
             return log, why          # retrying cannot conjure a GUI session
         if attempt < attempts:
             print(f"    launch {attempt}: {why} — retrying", flush=True)
