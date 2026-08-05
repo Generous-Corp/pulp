@@ -501,6 +501,153 @@ TEST_CASE("SkiaCanvas::text_x_for_byte reads caret x off the shaped run",
     REQUIRE(caret_after_A < av_full);
 }
 
+
+// ── Per-glyph fallback must not move the rest of the run ────────────────────
+//
+// `SkiaCanvas::fill_text` routes a string the active typeface does not fully
+// cover through `shape_with_glyph_fallback`, which partitions the string into
+// runs by covering typeface and draws each run as its own `SkTextBlob`. That
+// is the only path an uncovered codepoint takes, and it is rare: a captured
+// panel reached it exactly once — one dropdown caret, U+25BE, which the face
+// the design asked for does not carry — and that glyph rasterized a full
+// ascent below its baseline while every other label on the panel was correct.
+//
+// Two causes produce that symptom and they need different fixes, so the test
+// has to separate them:
+//
+//   * If the blob's ORIGIN is being treated as a line top rather than a
+//     baseline, the whole blob is displaced. The COVERED run then moves too,
+//     even though nothing about it changed — adding one uncovered codepoint to
+//     an otherwise-covered string displaces the text that was already there.
+//   * If instead only the substituted run were placed wrong, the covered run
+//     would stay put and only the fallback glyph would sit low.
+//
+// So draw "A" alone, then "A" followed by an uncovered codepoint, at the same
+// baseline, and require the 'A' to rasterize into the same rows both times.
+// The second check pins the substituted glyph onto that same band.
+//
+// What this cannot see from outside: whether the mixed string really took the
+// fallback path. The two conditions that route it there are asserted directly
+// (the base face lacks the probe; an installed face carries it); the remaining
+// two — no letter-spacing and no font features — are set by this test.
+TEST_CASE("a missing glyph does not move the rest of the run",
+          "[canvas][skia][text][glyph-fallback]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr) {
+        SKIP("no platform font manager on this build — per-glyph fallback has "
+             "no catalog to resolve a substitute face from");
+    }
+
+    // Inter is bundled, so the BASE face is identical on every host. U+4E2D is
+    // outside its repertoire and inside every desktop CJK face, which makes it
+    // a stable "one covered run plus one uncovered run in a single string".
+    const SkUnichar kProbe = 0x4E2D;
+    const std::string probe_utf8 = "\xE4\xB8\xAD";
+    const SkFontStyle upright{SkFontStyle::kNormal_Weight,
+                              SkFontStyle::kNormal_Width,
+                              SkFontStyle::kUpright_Slant};
+
+    auto base = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter",
+                                                     upright);
+    REQUIRE(base != nullptr);
+    if (base->unicharToGlyph(kProbe) != 0) {
+        SKIP("the bundled base face now covers the probe codepoint — choose "
+             "one it does not, or this case exercises nothing");
+    }
+    auto substitute = mgr->matchFamilyStyleCharacter("Inter", upright,
+                                                     nullptr, 0, kProbe);
+    if (!substitute || substitute->unicharToGlyph(kProbe) == 0) {
+        SKIP("no installed face carries the probe codepoint on this host — "
+             "the per-glyph fallback path cannot be exercised");
+    }
+
+    constexpr int kW = 256;
+    constexpr int kH = 64;
+    constexpr float kSize = 18.0f;
+    constexpr float kBaseline = 30.0f;
+    constexpr float kX = 8.0f;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+
+    // First and last row carrying ink within a column band; {-1,-1} for none.
+    auto ink_rows = [](const SkPixmap& pm, int x0, int x1) {
+        std::pair<int, int> band{-1, -1};
+        for (int y = 0; y < pm.height(); ++y) {
+            for (int x = std::max(0, x0); x < x1 && x < pm.width(); ++x) {
+                if (SkColorGetR(pm.getColor(x, y)) < 200) {
+                    if (band.first < 0) band.first = y;
+                    band.second = y;
+                    break;
+                }
+            }
+        }
+        return band;
+    };
+
+    // "A" alone — fully covered, so it never reaches the fallback path.
+    auto plain_surface = SkSurfaces::Raster(info);
+    REQUIRE(plain_surface != nullptr);
+    float advance_a = 0.0f;
+    {
+        auto* sk_canvas = plain_surface->getCanvas();
+        REQUIRE(sk_canvas != nullptr);
+        sk_canvas->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(sk_canvas);
+        canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                             /*letter_spacing=*/0.0f);
+        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+        advance_a = canvas.measure_text("A");
+        REQUIRE(advance_a > 0.0f);
+        canvas.fill_text("A", kX, kBaseline);
+    }
+    SkPixmap plain_pm;
+    REQUIRE(plain_surface->peekPixels(&plain_pm));
+    const int a_x0 = static_cast<int>(kX) - 2;
+    const int a_x1 = static_cast<int>(kX + advance_a) + 1;
+    const auto plain_band = ink_rows(plain_pm, a_x0, a_x1);
+    REQUIRE(plain_band.first >= 0);
+
+    // The same "A", at the same baseline, with one uncovered codepoint after
+    // it. Nothing about the 'A' changed.
+    auto mixed_surface = SkSurfaces::Raster(info);
+    REQUIRE(mixed_surface != nullptr);
+    {
+        auto* sk_canvas = mixed_surface->getCanvas();
+        REQUIRE(sk_canvas != nullptr);
+        sk_canvas->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(sk_canvas);
+        canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                             /*letter_spacing=*/0.0f);
+        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+        canvas.fill_text("A" + probe_utf8, kX, kBaseline);
+    }
+    SkPixmap mixed_pm;
+    REQUIRE(mixed_surface->peekPixels(&mixed_pm));
+    const auto mixed_a_band = ink_rows(mixed_pm, a_x0, a_x1);
+    const auto probe_band = ink_rows(mixed_pm, a_x1 + 1, kW);
+    REQUIRE(mixed_a_band.first >= 0);
+    // The substitute face has to have drawn something, or the comparison below
+    // is between one glyph and an empty band.
+    REQUIRE(probe_band.first >= 0);
+
+    INFO("'A' rows alone [" << plain_band.first << "," << plain_band.second
+         << "]  with a fallback run [" << mixed_a_band.first << ","
+         << mixed_a_band.second << "]  substituted glyph ["
+         << probe_band.first << "," << probe_band.second << "]  font size "
+         << kSize << " baseline " << kBaseline);
+
+    // THE DISCRIMINATOR: the covered run must not care that a fallback run
+    // joined the string. A displacement of roughly one ascent here means the
+    // blob's origin is a line top, not a baseline.
+    CHECK(std::abs(mixed_a_band.first - plain_band.first) <= 1);
+    CHECK(std::abs(mixed_a_band.second - plain_band.second) <= 1);
+
+    // And the substituted glyph shares that baseline rather than hanging an
+    // ascent below it.
+    CHECK(probe_band.first <= plain_band.second);
+    CHECK(probe_band.second >= plain_band.first);
+}
 // ── Variable-font weight instancing + SkParagraph bridge ────────────────────
 //
 // Root cause fixed here: imported designs register fonts via register_font,

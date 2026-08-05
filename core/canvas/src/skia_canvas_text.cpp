@@ -337,12 +337,28 @@ static void shape_with_glyph_fallback(SkCanvas* canvas,
         SkFont rf = base_font;
         rf.setTypeface(r.tf);
 
-        // The RunHandler origin MUST be {0,0}; the draw position is passed
+        // The RunHandler origin's X MUST be 0; the draw position is passed
         // exclusively to drawTextBlob() to avoid double-offset in nested
-        // save/translate/clip contexts. If the handler is seeded with {x,y}
-        // AND drawTextBlob also receives {x,y}, glyph positions are offset
-        // twice: once inside the blob and once by the draw call.
-        SkTextBlobBuilderRunHandler handler(r.text.c_str(), {0, 0});
+        // save/translate/clip contexts. If the handler is seeded with x AND
+        // drawTextBlob also receives x, glyph positions are offset twice: once
+        // inside the blob and once by the draw call.
+        //
+        // Y is the opposite, and the two are easy to conflate. The handler
+        // treats the origin it is given as the LINE TOP: it advances the pen
+        // down by the run's ascent before placing a glyph. Seeded at zero, the
+        // blob's baseline therefore sits one ascent BELOW its own origin, so
+        // drawing it at a baseline `y` puts every glyph an ascent too low.
+        // Seeding with the ascent — negative, measured upward from the
+        // baseline — cancels that, leaving the blob's baseline at its origin so
+        // `y` means what the caller means by it.
+        //
+        // Only this path is affected. A string the active typeface fully
+        // covers never reaches here, which is why it reads as one substituted
+        // glyph sitting low rather than as a text-rendering defect.
+        SkFontMetrics run_metrics;
+        rf.getMetrics(&run_metrics);
+        SkTextBlobBuilderRunHandler handler(r.text.c_str(),
+                                            {0, run_metrics.fAscent});
         shaper->shape(r.text.c_str(), r.text.size(), rf, ltr,
                       SK_ScalarInfinity, &handler);
         // NOTE: handler.endPoint().x() returns 0 on the bundled Skia build, so
