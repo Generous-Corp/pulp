@@ -45,6 +45,32 @@ that is cheaper than another run, every time.
   "its CV never rose", which sent five attempts to re-trigger an envelope that
   had been firing the whole time.
 
+## Audibility has three answers, and `sounds()` no longer exists
+
+`patch.py::audibility(patch)` returns `(AUDIBLE | SILENT | UNMEASURED, report)`.
+It was `sounds() -> (bool, str)`, and the rename is deliberate: a caller written
+against the boolean now fails loudly rather than reading a non-empty string as
+success.
+
+**UNMEASURED is the whole point.** A missing SDK, an unbuilt gate, a gate that
+died, a run that never finished, and a gate refusing its own `PATCH_GATE_SET`
+are all "this patch was never judged" — not "it passed", and not "it is
+silent". The boolean forced that choice and got it wrong: with no SDK it
+returned `True` and a run printed audibility as passed having measured nothing.
+That is the same defect as a gate that measures presence, one layer up — the
+absence of a failure reading as the presence of a pass.
+
+`generate()` keeps an UNMEASURED patch and says the doubt out loud, because a
+patch that lints clean and whose audibility is unknown is worth more than no
+patch. It used to decide that by sniffing `GATE_CRASHED` out of the report's
+wording, which covered the crash and nothing else — so the no-SDK case took the
+other branch and printed nothing. The verdict carries it now; don't reintroduce
+a string match.
+
+**Audibility and behaviour are independent layers.** `held.vcv` — a bare VCO
+into the interface — is genuinely `AUDIBLE` and genuinely fails `melodic`. Both
+are correct. Presence was never the property; it is also not nothing.
+
 ## The gate measures behaviour; it never judges it
 
 `patch-gate` runs 6 s of the real DSP and prints TWO things about every cable

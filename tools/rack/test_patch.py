@@ -850,10 +850,10 @@ def check_gate_crash_is_not_silence() -> tuple:
     else:
         print("  ok     a crash is not worded as a verdict on the patch")
 
-    # THROUGH sounds(), not only through the wording. A report nothing reaches
-    # is the same as no report: the first version of this had a correct message
-    # and a branch no test ever entered, which is the defect class that keeps
-    # producing finished features that behave like missing ones.
+    # THROUGH audibility(), not only through the wording. A report nothing
+    # reaches is the same as no report: the first version of this had a correct
+    # message and a branch no test ever entered, which is the defect class that
+    # keeps producing finished features that behave like missing ones.
     ran += 1
     import stat
     import tempfile
@@ -866,18 +866,53 @@ def check_gate_crash_is_not_silence() -> tuple:
     P.build_gate = lambda: (dead, "")
     P._plugin_dir = lambda: home
     try:
-        ok, got = P.sounds(patch)
+        verdict, got = P.audibility(patch)
     finally:
         P.build_gate, P._plugin_dir = gate, pdir
-    if ok:
+    if verdict == P.AUDIBLE:
         bad += 1
         print("  WRONG  a gate that died was read as a patch that sounds")
+    elif verdict != P.UNMEASURED:
+        bad += 1
+        print(f"  WRONG  a crashed gate reported {verdict!r}; a check that "
+              f"could not run must not return a verdict about the patch")
     elif P.GATE_CRASHED not in got:
         bad += 1
-        print(f"  WRONG  sounds() turned a crash into {got!r}, which reads as "
-              f"a silent patch and sends the next hour to the wrong place")
+        print(f"  WRONG  audibility() turned a crash into {got!r}, which reads "
+              f"as a silent patch and sends the next hour to the wrong place")
     else:
-        print("  ok     sounds() reports a dead gate as a dead gate")
+        print("  ok     audibility() reports a dead gate as unmeasured, not silent")
+
+    # AND THE CASE THAT HAS NO PROCESS TO DIE. A machine with no Rack SDK
+    # cannot build the gate, so nothing is ever measured -- and that returned
+    # True, so the run printed "audibility passed" having checked nothing. It
+    # is the same defect as a gate that measures presence, one layer up: the
+    # absence of a failure read as the presence of a pass. There is no crash
+    # here and no report to sniff, which is exactly why the verdict has to
+    # carry it rather than the wording.
+    ran += 1
+    gate, pdir = P.build_gate, P._plugin_dir
+    P.build_gate = lambda: (None, "no Rack SDK at /nowhere")
+    P._plugin_dir = lambda: home
+    try:
+        verdict, got = P.audibility(patch)
+    finally:
+        P.build_gate, P._plugin_dir = gate, pdir
+    if verdict == P.AUDIBLE:
+        bad += 1
+        print("  WRONG  with no SDK the audibility check reports the patch "
+              "AUDIBLE having measured nothing; that is a pass nobody earned")
+    elif verdict != P.UNMEASURED:
+        bad += 1
+        print(f"  WRONG  with no SDK the check reported {verdict!r} rather "
+              f"than unmeasured")
+    elif "did not run" not in got:
+        bad += 1
+        print(f"  WRONG  the unmeasured report does not say the check never "
+              f"ran: {got!r}")
+    else:
+        print("  ok     with no SDK the patch is unmeasured, never audible, "
+              "and the report says the check never ran")
     return bad, ran
 
 
@@ -1010,9 +1045,9 @@ def check_unjudged_patch_is_kept() -> tuple:
         f.write("#!/bin/sh\ncat <<'EOF'\n```json patch\n" + reply +
                 "\n```\nEOF\n")
     os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
-    saved = (P.find_claude, P.sounds, P.lint, P.reflow, P.configure_audio)
+    saved = (P.find_claude, P.audibility, P.lint, P.reflow, P.configure_audio)
     P.find_claude = lambda: stub
-    P.sounds = lambda pch: (False, P.gate_crash_report(11, pch))
+    P.audibility = lambda pch: (P.UNMEASURED, P.gate_crash_report(11, pch))
     P.lint = lambda pch, inv: []
     P.reflow = lambda pch, inv: pch
     P.configure_audio = lambda pch: None
@@ -1022,7 +1057,7 @@ def check_unjudged_patch_is_kept() -> tuple:
         got = None
         why = str(exc)
     finally:
-        (P.find_claude, P.sounds, P.lint, P.reflow,
+        (P.find_claude, P.audibility, P.lint, P.reflow,
          P.configure_audio) = saved
     if got is None:
         bad += 1

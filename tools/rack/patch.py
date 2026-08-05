@@ -2154,8 +2154,24 @@ def gate_crash_report(signal: int, patch: dict) -> str:
             f"{PLUGIN_DIRS[0] if PLUGIN_DIRS else '<plugin dir>'}")
 
 
-def sounds(patch: dict) -> tuple[bool, str]:
-    """Does this patch actually make a sound? Returns (ok, report).
+#: The three things the audibility check can say. Three, not two, because
+#: "could not run" is not a verdict and must never be spelled the same way as
+#: "ran and was fine". A boolean forced that choice and got it wrong: on a
+#: machine with no SDK the check returned True and the run read "audibility
+#: passed" having measured nothing at all -- the same shape as a gate that
+#: measures presence, one layer up.
+#:
+#: UNMEASURED is deliberately NOT falsy-or-truthy anything. `audibility()`
+#: returns it in place of the old boolean and the function was RENAMED, so a
+#: caller written against the boolean fails loudly instead of quietly reading
+#: a non-empty string as success.
+AUDIBLE = "audible"        # ran, and something reached the audio interface
+SILENT = "silent"          # ran, and nothing did
+UNMEASURED = "unmeasured"  # did not run; this is not a verdict about the patch
+
+
+def audibility(patch: dict) -> tuple[str, str]:
+    """Did this patch make a sound? Returns (AUDIBLE|SILENT|UNMEASURED, report).
 
     Structure is not audibility. A patch can name real modules, land every
     cable on a real port and reach an audio interface while producing
@@ -2163,17 +2179,21 @@ def sounds(patch: dict) -> tuple[bool, str]:
     envelope has nothing to start it. Both happened in the first spread, and
     neither is visible to anything short of running the DSP.
 
-    Skipped rather than failed when the SDK is absent, so the generator still
-    works on a machine that cannot build the harness.
+    NOT RUNNING IS ITS OWN ANSWER. A missing SDK, an unbuilt gate, a gate that
+    died, a run that never finished and a gate refused its own configuration
+    are all UNMEASURED: the patch was never judged, so nothing here is entitled
+    to say it passed OR that it is silent. The caller keeps such a patch and
+    says the doubt out loud, which is worth more than a verdict nobody made.
     """
     import subprocess
     import tempfile
     gate, why = build_gate()
     pdir = _plugin_dir()
     if not gate:
-        return True, f"(audibility not checked: {why})"
+        return UNMEASURED, f"the audibility check did not run: {why}"
     if not pdir:
-        return True, "(no unpacked plugin directory; audibility not checked)"
+        return UNMEASURED, ("the audibility check did not run: no unpacked "
+                            "plugin directory to load modules from")
     with tempfile.NamedTemporaryFile("w", suffix=".vcv", delete=False) as f:
         json.dump(patch, f)
         tmp = f.name
@@ -2193,10 +2213,22 @@ def sounds(patch: dict) -> tuple[bool, str]:
         # ended in "gave up after 3 attempts" with nothing anywhere saying a
         # process had died. Six generations were spent on that reading.
         if r.returncode < 0:
-            return False, gate_crash_report(-r.returncode, patch)
-        return r.returncode == 0, r.stdout + r.stderr
+            return UNMEASURED, gate_crash_report(-r.returncode, patch)
+        # 2 is the gate refusing its own configuration -- a bad
+        # PATCH_GATE_SET name, say. It never looked at the patch, so it has no
+        # opinion about it, and reading that as silence would reject a good
+        # patch over a typo in an environment variable.
+        if r.returncode == 2:
+            return UNMEASURED, ("the audibility check refused its own "
+                                "settings and never judged this patch:\n" +
+                                r.stdout + r.stderr)
+        return (AUDIBLE if r.returncode == 0 else SILENT), r.stdout + r.stderr
     except subprocess.TimeoutExpired:
-        return False, "the patch did not finish running within 300 s"
+        # Not silence either: a run that never finished measured nothing. It
+        # usually means the patch is pathological rather than quiet, and the
+        # caller says so rather than inventing a verdict.
+        return UNMEASURED, ("the audibility check did not finish within 300 s, "
+                            "so this patch was never judged")
     finally:
         os.unlink(tmp)
 
@@ -3214,7 +3246,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         if device:
             print(f"  audio out: {device}", flush=True)
 
-        ok, report = sounds(patch)
+        verdict, report = audibility(patch)
         # A CHECK THAT COULD NOT RUN IS NOT A VERDICT, AND NOT A REASON TO
         # THROW A PATCH AWAY. The crash was named here before it was fixed, and
         # naming it was still not enough: the retry context said "structurally
@@ -3223,16 +3255,22 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # run ended "gave up after 3 attempts" with the patch discarded. A
         # patch that lints clean and whose audibility is UNKNOWN is worth more
         # than no patch at all, so it is kept and the doubt is said out loud.
-        crashed = (not ok) and GATE_CRASHED in report
+        #
+        # Which cases those are is `audibility()`'s to decide and no longer
+        # read out of the report's wording here. Sniffing for a sentence
+        # covered the crash and nothing else, so a machine with no SDK -- where
+        # the check equally never ran -- took the OTHER branch and printed
+        # nothing at all, and the run read as though audibility had passed.
+        crashed = verdict == UNMEASURED
         if crashed:
-            keep_attempt(patch, report, attempt + 1, "gate-crashed")
+            keep_attempt(patch, report, attempt + 1, "unmeasured")
             print(f"  the audibility check could not run (attempt "
                   f"{attempt + 1}):", flush=True)
             for line in report.splitlines():
                 print(f"    {line.strip()}", flush=True)
             print("    keeping the patch anyway: it is structurally sound, "
                   "and nothing here says it is silent.", flush=True)
-        if ok or crashed:
+        if verdict == AUDIBLE or crashed:
             if claimed:
                 missing = idiom_check.check(patch, inv, idioms[claimed])
                 if missing:
