@@ -209,6 +209,10 @@ public:
         log.push_back("on_mouse_up");
         last_up = p;
     }
+    void on_mouse_cancel(Point p) override {
+        log.push_back("on_mouse_cancel");
+        last_up = p;
+    }
     std::vector<std::string> log;
     std::vector<MouseEvent> events;
     Point last_down{}, last_up{};
@@ -261,6 +265,41 @@ TEST_CASE("deliver_mouse_down fires modern press then legacy down, in order",
     CHECK_THAT(spy->last_down.y, WithinAbs(20.0f, 0.01f));  // 70 - 50
 }
 
+TEST_CASE("shared press and release preserve stylus orientation",
+          "[view][input][pointer][stylus]") {
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 100, 100});
+    root.add_child(std::move(child));
+
+    std::vector<MouseEvent> events;
+    spy->modern_callback = [&](const MouseEvent& event) {
+        events.push_back(event);
+    };
+    const PointerAttributes pencil{
+        .type = PointerType::pen,
+        .pressure = 0.75f,
+        .pointer_id = 4,
+        .altitude_angle = 0.45f,
+        .azimuth_angle = 1.25f,
+    };
+
+    REQUIRE(deliver_mouse_down(root, spy, {10, 10}, 0, 1, true,
+                               MouseButton::left, {}, pencil));
+    deliver_mouse_up(root, spy, {10, 10}, 0, 1, {}, MouseButton::left,
+                     pencil);
+
+    REQUIRE(events.size() == 2);
+    for (const auto& event : events) {
+        CHECK(event.pointer_type == PointerType::pen);
+        CHECK(event.pointer_id == 4);
+        CHECK_THAT(event.altitude_angle, WithinAbs(0.45f, 0.001f));
+        CHECK_THAT(event.azimuth_angle, WithinAbs(1.25f, 0.001f));
+    }
+}
+
 TEST_CASE("guarded mouse down stops stale channels after reentrant cancellation",
           "[view][input][press][reentrancy]") {
     View root;
@@ -305,6 +344,59 @@ TEST_CASE("guarded mouse down stops stale channels after reentrant cancellation"
     CHECK(bubbled == 0);
     CHECK(captured_target == nested_target);
     CHECK(wrapper_ptr->child_count() == 1);
+}
+
+TEST_CASE("pointerdown bubbling survives an ancestor deleting itself",
+          "[view][input][press][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    int root_bubbles = 0;
+    root.on_pointer_event = [&](const MouseEvent&) { ++root_bubbles; };
+
+    auto wrapper = std::make_unique<View>();
+    auto* wrapper_ptr = wrapper.get();
+    wrapper->set_bounds({0, 0, 200, 200});
+    wrapper->on_pointer_event = [&](const MouseEvent&) {
+        auto removed = root.remove_child(wrapper_ptr);
+        removed.reset();
+    };
+
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* target = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    wrapper->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    CHECK_FALSE(deliver_mouse_down(root, target, {20, 20}, kModNone, 1,
+                                   true));
+    CHECK(root_bubbles == 0);
+    CHECK(root.child_count() == 0);
+}
+
+TEST_CASE("pointerup bubbling stops after an ancestor deletes the target",
+          "[view][input][release][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    int root_bubbles = 0;
+    root.on_pointer_event = [&](const MouseEvent&) { ++root_bubbles; };
+
+    auto wrapper = std::make_unique<View>();
+    auto* wrapper_ptr = wrapper.get();
+    wrapper->set_bounds({0, 0, 200, 200});
+    wrapper->on_pointer_event = [&](const MouseEvent&) {
+        auto removed = root.remove_child(wrapper_ptr);
+        removed.reset();
+    };
+
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* target = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    wrapper->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    deliver_mouse_up(root, target, {20, 20}, kModNone, 1, {});
+    CHECK(root_bubbles == 0);
+    CHECK(root.child_count() == 0);
 }
 
 TEST_CASE("guarded right press suppresses stale context-menu continuation",
@@ -483,6 +575,43 @@ TEST_CASE("deliver_mouse_up is inert for a target that left the tree",
     CHECK(rec.fires == 0);
 }
 
+TEST_CASE("deliver_mouse_cancel shares terminal routing and never clicks",
+          "[view][input][release][cancel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<View>();
+    View* wrap = wrapper.get();
+    wrap->set_bounds({100, 50, 200, 200});
+    int bubbles = 0;
+    MouseEvent bubbled{};
+    wrap->on_pointer_event = [&](const MouseEvent& event) {
+        ++bubbles;
+        bubbled = event;
+    };
+
+    auto child = std::make_unique<PressSpy>();
+    PressSpy* spy = child.get();
+    spy->set_bounds({10, 10, 120, 120});
+    wrapper->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    deliver_mouse_cancel(root, spy, {130, 70}, kModShift, 1,
+                         MouseButton::left,
+                         PointerAttributes{PointerType::touch, 0.25f, 7});
+
+    REQUIRE(spy->log ==
+            std::vector<std::string>{"on_mouse_cancel", "event:release"});
+    REQUIRE(spy->events.size() == 1);
+    CHECK(spy->events.front().is_cancelled);
+    CHECK(spy->events.front().pointer_type == PointerType::touch);
+    CHECK(spy->events.front().pointer_id == 7);
+    CHECK(bubbles == 1);
+    CHECK(bubbled.is_cancelled);
+    CHECK_THAT(bubbled.position.x, WithinAbs(30.0f, 0.01f));
+    CHECK(spy->log.back() != "on_click");
+}
+
 // ── Wheel routing (deliver_mouse_wheel) ──────────────────────────────────────
 //
 // The precedence (popup → empty-pane scroll → value widget → W3C wheel bubble →
@@ -511,6 +640,25 @@ public:
     }
     int hits = 0;
     MouseEvent last{};
+};
+
+class SelfDeletingWheelScroll : public View {
+public:
+    explicit SelfDeletingWheelScroll(View& root) : root_(root) {}
+    bool wants_wheel_scroll() const override { return true; }
+    void on_mouse_event(const MouseEvent&) override {
+        auto removed = root_.remove_child(this);
+        removed.reset();
+    }
+private:
+    View& root_;
+};
+
+class EmptyBackgroundSelfDeletingWheelScroll
+    : public SelfDeletingWheelScroll {
+public:
+    using SelfDeletingWheelScroll::SelfDeletingWheelScroll;
+    View* hit_test(Point) override { return nullptr; }
 };
 
 // Registers a JS-style pointer handler; the W3C wheel bubble delivers the wheel
@@ -572,6 +720,40 @@ TEST_CASE("deliver_mouse_wheel routes to a wheel-scroll ancestor and stops",
     REQUIRE(spy->hits == 1);
     CHECK(spy->last.is_wheel);
     CHECK_THAT(spy->last.scroll_delta_y, WithinAbs(-2.0f, 0.01f));
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("wheel layout is skipped when the scrolling view deletes itself",
+          "[view][input][wheel][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto scroller = std::make_unique<SelfDeletingWheelScroll>(root);
+    scroller->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(scroller));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {10, 10}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(root.child_count() == 0);
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("empty-background wheel skips layout after its scroller deletes itself",
+          "[view][input][wheel][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_pointer_events(View::PointerEvents::box_none);
+    auto scroller =
+        std::make_unique<EmptyBackgroundSelfDeletingWheelScroll>(root);
+    scroller->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(scroller));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {10, 10}, 0.0f, 1.0f,
+                        counting_host(repaints));
+
+    CHECK(root.child_count() == 0);
     CHECK(repaints == 1);
 }
 

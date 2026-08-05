@@ -24,6 +24,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 
 using namespace pulp;
@@ -281,6 +282,66 @@ TEST_CASE("StateStore coordinates direct gestures with shared editor leases",
     REQUIRE(store.open_gesture_count() == 0);
 }
 
+TEST_CASE("StateStore defers a final editor-lease host callback until flush",
+          "[state][gesture][balance][deferred]") {
+    state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    int ends = 0;
+    store.set_gesture_callbacks(
+        [](state::ParamID) {},
+        [&](state::ParamID id) {
+            REQUIRE(id == 1);
+            ++ends;
+        });
+
+    store.acquire_gesture(1);
+    REQUIRE(store.open_gesture_count() == 1);
+    store.defer_gesture_release(1);
+    REQUIRE(store.open_gesture_count() == 0);
+    REQUIRE(ends == 0);
+
+    store.flush_deferred_gesture_releases();
+    REQUIRE(ends == 1);
+    store.flush_deferred_gesture_releases();
+    REQUIRE(ends == 1);
+}
+
+TEST_CASE("a replacement gesture cannot overtake a deferred host end",
+          "[state][gesture][balance][deferred]") {
+    state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    std::vector<std::string> callbacks;
+    store.set_gesture_callbacks(
+        [&](state::ParamID) { callbacks.emplace_back("begin"); },
+        [&](state::ParamID) { callbacks.emplace_back("end"); });
+
+    store.acquire_gesture(1);
+    store.defer_gesture_release(1);
+    REQUIRE(callbacks == std::vector<std::string>{"begin"});
+
+    // Runtime evaluation can publish a replacement realm before the next
+    // owner-thread poll. Its first press must close the retired bracket before
+    // opening a new one for the same parameter.
+    store.acquire_gesture(1);
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin"});
+
+    store.flush_deferred_gesture_releases();
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin"});
+    store.release_gesture(1);
+    REQUIRE(callbacks ==
+            std::vector<std::string>{"begin", "end", "begin", "end"});
+}
+
 TEST_CASE("end_gesture without a matching begin is a no-op toward the host",
           "[state][gesture][balance]") {
     state::StateStore store;
@@ -291,6 +352,33 @@ TEST_CASE("end_gesture without a matching begin is a no-op toward the host",
 
     store.end_gesture(7);  // never opened
     REQUIRE(ends == 0);
+    REQUIRE(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("replacing gesture callbacks discards deferred releases from the old session",
+          "[state][gesture][balance][deferred]") {
+    state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+
+    int old_ends = 0;
+    int new_ends = 0;
+    store.set_gesture_callbacks(
+        [](state::ParamID) {},
+        [&](state::ParamID) { ++old_ends; });
+    store.acquire_gesture(1);
+    store.defer_gesture_release(1);
+
+    store.set_gesture_callbacks(
+        [](state::ParamID) {},
+        [&](state::ParamID) { ++new_ends; });
+    store.flush_deferred_gesture_releases();
+
+    REQUIRE(old_ends == 0);
+    REQUIRE(new_ends == 0);
     REQUIRE(store.open_gesture_count() == 0);
 }
 

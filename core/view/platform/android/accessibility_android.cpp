@@ -14,6 +14,7 @@
 
 #include <jni.h>
 #include <string>
+#include <utility>
 #include <vector>
 #include <pulp/view/view.hpp>
 #include <pulp/view/accessibility.hpp>
@@ -30,7 +31,7 @@ using pulp::view::Point;
 namespace {
 
 struct AccessNode {
-    View* view = nullptr;
+    pulp::view::ViewCapture view;
     // static_cast<int>(View::AccessRole). This integer is the WIRE FORMAT
     // between C++ and PulpAccessibilityDelegate.kt (ROLE_* constants); the
     // AccessRole enum is therefore append-only. Locked by the "Android role
@@ -43,7 +44,10 @@ thread_local View* g_root_view = nullptr;
 
 void collect_accessible_views(View& root, std::vector<AccessNode>& out) {
     if (is_accessibility_element(root)) {
-        out.push_back({&root, static_cast<int>(root.access_role())});
+        AccessNode node;
+        node.view.set(&root);
+        node.role = static_cast<int>(root.access_role());
+        out.push_back(std::move(node));
     }
     for (size_t i = 0; i < root.child_count(); ++i) {
         if (auto* child = root.child_at(i)) {
@@ -57,6 +61,13 @@ void rebuild_cache() {
     if (g_root_view) {
         collect_accessible_views(*g_root_view, g_access_nodes);
     }
+}
+
+View* view_at(jint index) {
+    if (!g_root_view || index < 0 ||
+        index >= static_cast<jint>(g_access_nodes.size()))
+        return nullptr;
+    return g_access_nodes[static_cast<size_t>(index)].view.live_in(*g_root_view);
 }
 
 } // namespace
@@ -89,7 +100,8 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeLabel(
     JNIEnv* env, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size()))
         return env->NewStringUTF("");
-    return env->NewStringUTF(g_access_nodes[index].view->access_label().c_str());
+    View* view = view_at(index);
+    return env->NewStringUTF(view ? view->access_label().c_str() : "");
 }
 
 // The shared resolver: value interface → text interface → access_value slot →
@@ -103,8 +115,9 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeValue(
     JNIEnv* env, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size()))
         return env->NewStringUTF("");
+    View* view = view_at(index);
     return env->NewStringUTF(
-        accessibility_value_string(*g_access_nodes[index].view).c_str());
+        view ? accessibility_value_string(*view).c_str() : "");
 }
 
 JNIEXPORT jfloat JNICALL
@@ -112,7 +125,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMin(
     JNIEnv*, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size())) return 0.0f;
     auto* vi = dynamic_cast<pulp::view::AccessibilityValueInterface*>(
-        g_access_nodes[index].view);
+        view_at(index));
     return vi ? static_cast<float>(vi->get_minimum_value()) : 0.0f;
 }
 
@@ -121,7 +134,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMax(
     JNIEnv*, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size())) return 1.0f;
     auto* vi = dynamic_cast<pulp::view::AccessibilityValueInterface*>(
-        g_access_nodes[index].view);
+        view_at(index));
     return vi ? static_cast<float>(vi->get_maximum_value()) : 1.0f;
 }
 
@@ -130,7 +143,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRowCount(
     JNIEnv*, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size())) return 0;
     auto* ti = dynamic_cast<pulp::view::AccessibilityTableInterface*>(
-        g_access_nodes[index].view);
+        view_at(index));
     return ti ? ti->get_row_count() : 0;
 }
 
@@ -139,7 +152,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeColumnCount(
     JNIEnv*, jobject, jint index) {
     if (index < 0 || index >= static_cast<jint>(g_access_nodes.size())) return 0;
     auto* ti = dynamic_cast<pulp::view::AccessibilityTableInterface*>(
-        g_access_nodes[index].view);
+        view_at(index));
     return ti ? ti->get_column_count() : 0;
 }
 
@@ -149,7 +162,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
     (void)value;
     View* target = nullptr;
     if (node_index >= 0 && node_index < static_cast<jint>(g_access_nodes.size())) {
-        target = g_access_nodes[node_index].view;
+        target = view_at(node_index);
     }
     if (!target) return;
 

@@ -19,6 +19,15 @@ TEST_REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
         "PULP_ENABLE_INSPECTOR",
     ),
+    "tools/cmake/PulpInspectorShipping.cmake": (
+        "function(_pulp_cache_control_declarations target profile capabilities eval_ack)",
+        'set(PULP_${target}_CONTROL_PROFILE "${profile}" CACHE INTERNAL "" FORCE)',
+        'set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "" FORCE)',
+        '"${eval_ack}" CACHE INTERNAL "" FORCE)',
+    ),
+    "tools/cmake/PulpUtils.cmake": (
+        "_pulp_cache_control_declarations(${target}",
+    ),
 }
 
 
@@ -27,7 +36,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
         root = pathlib.Path(self.tempdir.name)
         files = {
             "inspect/include/pulp/inspect/capability_definitions.inc":
-                'PULP_INSPECT_CAPABILITY(StateRead, "state.read", Observe, 1, 1, 1, 0)\n',
+                'PULP_INSPECT_CAPABILITY(StateRead, "state.read", '
+                '"dev.pulp.state/read@1", Observe, None, HostMain, Response, '
+                '1, 1, 1, 0)\n',
             "docs/reference/development-inspector-capabilities.md":
                 "| `state.read` | yes | yes | available |\n",
             "docs/guides/coming-from-reference.md": "visual overlay only\n",
@@ -36,7 +47,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "inspect/include/pulp/inspect/discovery_publisher.hpp":
                 "class InspectorDiscoveryPublisher {};\n",
             "tools/mcp/pulp_mcp.cpp":
-                '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
+                '"name":"pulp_inspect_dom","description":"Installed in-process client"\n'
+                '"name":"pulp_motion_snapshot","description":"Experimental source-checkout client"\n',
         }
         canonical_contracts = (
             TEST_REQUIRED_CLAIMS,
@@ -46,6 +58,15 @@ class InspectorTruthCheckTests(unittest.TestCase):
             for relative, requirements in contract.items():
                 files.setdefault(relative, "")
                 files[relative] += "\n".join(requirements) + "\n"
+        fixture_digest = "a" * 64
+        files["tools/cmake/PulpInspectorShipping.cmake"] += (
+            "set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES state.read)\n"
+            "set(_PULP_CONTROL_CAPABILITIES dev.pulp.state/read@1)\n"
+            f'set(_PULP_CONTROL_REGISTRY_DIGEST_V1 "{fixture_digest}")\n'
+        )
+        files["inspect/include/pulp/inspect/control_registry_digest.inc"] = (
+            f'#define PULP_CONTROL_REGISTRY_DIGEST_V1 "{fixture_digest}"\n'
+        )
         # These blocks exercise parsed link-authority behavior rather than an
         # exact required-source contract, so they remain hand-written.
         files.setdefault("inspect/CMakeLists.txt", "")
@@ -91,6 +112,19 @@ class InspectorTruthCheckTests(unittest.TestCase):
 
     def test_accepts_truthful_fixture(self) -> None:
         self.assertEqual(self.check_root(self.make_root()), [])
+
+    def test_requires_force_refreshed_control_declarations(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "tools/cmake/PulpInspectorShipping.cmake",
+            'set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "" FORCE)',
+            'set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "")',
+        )
+        self.assertIn(
+            "CONTROL_CAPABILITIES",
+            " ".join(self.check_root(root)),
+        )
 
     def test_contract_registries_have_no_duplicate_literal_keys(self) -> None:
         checker_path = pathlib.Path(inspector_truth_check.__file__)
@@ -220,12 +254,48 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "Connect to a running plugin inspector\n", encoding="utf-8"
         )
         (root / "tools/mcp/pulp_mcp.cpp").write_text(
-            '"name":"pulp_inspect_dom","description":"Live plugin inspector"\n',
+            '"name":"pulp_inspect_dom","description":"Experimental '
+            'source-checkout client. Requires a custom host/test fixture that '
+            'explicitly constructs an inspector endpoint"\n'
+            '"name":"pulp_inspect_params","description":"Live plugin inspector"\n',
+            encoding="utf-8",
+        )
+        capability_doc = root / "docs/reference/development-inspector-capabilities.md"
+        capability_doc.write_text(
+            capability_doc.read_text(encoding="utf-8")
+            + "A normal `pulp run` constructs no network session.\n",
             encoding="utf-8",
         )
         errors = " ".join(self.check_root(root))
         self.assertIn("stale claim", errors)
+        self.assertIn("A normal `pulp run`", errors)
+        self.assertIn("Requires a custom host/test fixture", errors)
         self.assertIn("source-checkout-only", errors)
+
+    def test_requires_installed_inspector_and_source_checkout_motion_paths(
+        self,
+    ) -> None:
+        root = self.make_root()
+        (root / "tools/mcp/pulp_mcp.cpp").write_text(
+            '"name":"pulp_inspect_dom","description":"Experimental '
+            'source-checkout client"\n'
+            '"name":"pulp_inspect_params","description":"Authenticated client"\n'
+            '"name":"pulp_motion_snapshot","description":"In-process client"\n',
+            encoding="utf-8",
+        )
+        errors = " ".join(self.check_root(root))
+        self.assertIn(
+            "pulp_inspect_dom retains a source-checkout-only client path",
+            errors,
+        )
+        self.assertIn(
+            "pulp_inspect_params must disclose its installed in-process client path",
+            errors,
+        )
+        self.assertIn(
+            "pulp_motion_snapshot must disclose its source-checkout-only client path",
+            errors,
+        )
 
     def test_rejects_obsolete_unauthenticated_transport_claims(self) -> None:
         root = self.make_root()

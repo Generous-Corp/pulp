@@ -412,14 +412,14 @@ TEST_CASE("Journal checkpoint equivalence includes takes and active selection") 
     REQUIRE(renamed_lane);
     auto content_mismatch = session->journal().replay(renamed_lane->project, {});
     REQUIRE_FALSE(content_mismatch);
-    REQUIRE(content_mismatch.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(content_mismatch.error().code == ConflictCode::CheckpointMismatch);
 
     auto selected = reduce_transaction(
         seeded, transaction({1}, 3, 3, {}, {SetActiveTakeLane{{3}, {10}, {}, {31}}}));
     REQUIRE(selected);
     auto selection_mismatch = session->journal().replay(selected->project, {});
     REQUIRE_FALSE(selection_mismatch);
-    REQUIRE(selection_mismatch.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(selection_mismatch.error().code == ConflictCode::CheckpointMismatch);
 }
 
 TEST_CASE("Segment comp gates, validates, undoes, redoes, and replays exactly") {

@@ -793,22 +793,65 @@ TEST_CASE("setBackgroundGradient parses linear / radial / conic into the right k
     CHECK(kind("conic-gradient(#ff0000, #00ff00)") == 3);   // no prefix
 }
 
-TEST_CASE("setBackgroundGradient maps radial sizing keywords to a radius",
+// The box is 200x120, NOT square, and that is the point. A radial sizing
+// keyword resolves to a distance from the gradient's own centre to a side or a
+// corner, which is two different numbers per axis unless the box happens to be
+// square and the centre happens to be in the middle of it — the case under
+// which a single "fraction of the larger side" stands in for all four keywords
+// without ever being caught. On a square box every assertion below is also
+// satisfied by that wrong model.
+//
+// These resolve through View::resolve_radial, the same function the painter
+// calls; test/test_css_gradient_geometry.cpp checks its output end-to-end
+// against Chromium's render of the same strings.
+TEST_CASE("setBackgroundGradient resolves radial sizing keywords per axis",
           "[view][widget-bridge][gradient]") {
-    auto radius = [](const std::string& css) {
+    auto resolved = [](const std::string& css) {
         ScriptEngine engine;
         View root;
-        root.set_bounds({0, 0, 200, 200});
+        root.set_bounds({0, 0, 200, 120});
         root.set_theme(Theme::dark());
         StateStore store;
         WidgetBridge bridge(engine, root, store);
         bridge.load_script("setBackgroundGradient('', '" + css + "');");
-        return root.background_gradient_radius();
+        REQUIRE(root.has_background_gradient());
+        return View::resolve_radial(root.background_gradient_layers().front(),
+                                    200.0f, 120.0f);
     };
-    auto radius_near = [](float a, float b) { return std::abs(a - b) < 0.001f; };
-    CHECK(radius_near(radius("radial-gradient(circle closest-side at 50% 50%, #fff, #000)"), 0.5f));
-    CHECK(radius_near(radius("radial-gradient(farthest-corner at 50% 50%, #fff, #000)"), 0.7071f));
-    CHECK(radius_near(radius("radial-gradient(#fff, #000)"), 0.7071f));  // no keyword -> default
+    auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+
+    // A circle takes ONE radius: the nearest side on either axis, so the short
+    // axis wins. A per-axis model would give it 100.
+    const auto cs_circle =
+        resolved("radial-gradient(circle closest-side at 50% 50%, #fff, #000)");
+    CHECK(near(cs_circle.rx, 60.0f));
+    CHECK(near(cs_circle.ry, 60.0f));
+
+    // An ellipse takes the nearest side on EACH axis independently.
+    const auto cs_ellipse =
+        resolved("radial-gradient(closest-side at 50% 50%, #fff, #000)");
+    CHECK(near(cs_ellipse.rx, 100.0f));
+    CHECK(near(cs_ellipse.ry, 60.0f));
+
+    // farthest-corner keeps the farthest-side aspect and scales until it meets
+    // the corner — exactly sqrt(2) per axis, not the corner distance (116.6).
+    const auto fc = resolved("radial-gradient(farthest-corner at 50% 50%, #fff, #000)");
+    CHECK(near(fc.rx, 141.42f));
+    CHECK(near(fc.ry, 84.85f));
+
+    // No prefix at all means `farthest-corner ellipse at center`.
+    const auto bare = resolved("radial-gradient(#fff, #000)");
+    CHECK(near(bare.rx, 141.42f));
+    CHECK(near(bare.ry, 84.85f));
+
+    // An off-centre `at` changes every radius, which a box-relative constant
+    // cannot express at all: the centre sits 40px from the left and 160 from
+    // the right, 24 from the top and 96 from the bottom.
+    const auto off = resolved("radial-gradient(farthest-side at 20% 20%, #fff, #000)");
+    CHECK(near(off.cx, 40.0f));
+    CHECK(near(off.cy, 24.0f));
+    CHECK(near(off.rx, 160.0f));
+    CHECK(near(off.ry, 96.0f));
 }
 
 TEST_CASE("setTextRuns builds a styled AttributedString on the Label",

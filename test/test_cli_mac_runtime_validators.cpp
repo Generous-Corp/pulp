@@ -91,6 +91,22 @@ TEST_CASE("resolve_standalone_executable rejects non-app",
     REQUIRE(mr::resolve_standalone_executable("", env).empty());
 }
 
+TEST_CASE("resolve_standalone_executable honors CFBundleExecutable",
+          "[cli][mac-validators]") {
+    StubEnv s;
+    fs::path bundle = "/tmp/Product.app";
+    s.existing_paths.insert((bundle / "Contents" / "MacOS").string());
+    s.existing_paths.insert((bundle / "Contents" / "Info.plist").string());
+    s.existing_paths.insert(
+        (bundle / "Contents" / "MacOS" / "ActualExecutable").string());
+    s.cmd_results["CFBundleExecutable"] = {0, "ActualExecutable\n"};
+
+    const auto executable =
+        mr::resolve_standalone_executable(bundle, s.build());
+    REQUIRE(executable ==
+            bundle / "Contents" / "MacOS" / "ActualExecutable");
+}
+
 TEST_CASE("standalone validator: missing bundle fails",
           "[cli][mac-validators]") {
     StubEnv s;

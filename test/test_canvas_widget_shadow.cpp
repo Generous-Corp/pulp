@@ -235,4 +235,58 @@ TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
     REQUIRE(px.g == 255);
     REQUIRE(px.b == 255);
 }
+
+// A circular box must cast a CIRCULAR shadow at any spread.
+//
+// CSS grows each corner radius by the whole spread. Growing it by half the
+// spread leaves the silhouette's half-extent correct and its corner radius
+// short, which is a squircle: unchanged along the axes and proud at the
+// diagonals. That asymmetry is the assertion — an axis-only check passes
+// against the bug, because the axes are exactly where it does not show.
+//
+// Geometry here: half-extent 80, correct corner radius 80. The half-spread
+// value would be 72, putting the corner arc centre 8px off both axes, so the
+// diagonal reaches 8*sqrt(2) + 72 = 83.3 against the axes' 80.
+TEST_CASE("a spread box-shadow grows the corner radius by the full spread",
+          "[canvas][box-shadow]") {
+    const int kW = 256, kH = 256;
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(kW, kH));
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    const float box = 128.0f, x0 = 64.0f, y0 = 64.0f;
+    const float corner = box * 0.5f;   // radius == half the box, i.e. a circle
+    const float spread = 16.0f;
+    // No blur and no offset, so the silhouette is crisp and centred: any
+    // softness here would blur the very edge the test measures.
+    canvas.draw_box_shadow(x0, y0, box, box, 0.0f, 0.0f, 0.0f, spread,
+                           pulp::canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f),
+                           false, corner);
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+
+    const float cx = x0 + box * 0.5f, cy = y0 + box * 0.5f;
+    auto extent_along = [&](float ux, float uy) {
+        float last = 0.0f;
+        for (float t = 0.0f; t < 120.0f; t += 0.25f) {
+            int ix = static_cast<int>(std::lround(cx + ux * t));
+            int iy = static_cast<int>(std::lround(cy + uy * t));
+            if (ix < 0 || iy < 0 || ix >= kW || iy >= kH) break;
+            if (SkColorGetA(pm.getColor(ix, iy)) > 127) last = t;
+        }
+        return last;
+    };
+
+    const float kDiag = 0.70710678f;
+    const float axis = extent_along(1.0f, 0.0f);
+    const float diag = extent_along(kDiag, kDiag);
+
+    REQUIRE(axis == Catch::Approx(corner + spread).margin(1.5));
+    REQUIRE(diag == Catch::Approx(corner + spread).margin(1.5));
+    // The discriminating check: the half-spread radius puts the diagonal
+    // ~3.3px proud of the axis, so a 1.5px tolerance separates them cleanly.
+    REQUIRE(std::abs(diag - axis) < 1.5f);
+}
 #endif  // PULP_HAS_SKIA

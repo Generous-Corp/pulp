@@ -1,0 +1,37 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: #111; font-family: Helvetica, Arial, sans-serif; }
+  #panel { position:relative; width:400px; height:200px; background:#101418; }
+
+  /* A string, on both pseudo-elements of one box. */
+  #label { position:absolute; left:16px; top:16px; width:200px; height:32px;
+           background:#22303c; }
+  #label::before { content:"BEFORE"; color:#ffd166; font-size:20px;
+                   position:absolute; left:8px; top:4px; }
+  #label::after  { content:"AFT"; color:#06d6a0; font-size:20px;
+                   position:absolute; right:8px; top:4px; }
+
+  /* The decorative idiom: empty content, painted as a box. */
+  #dot { position:absolute; left:16px; top:64px; width:60px; height:32px;
+         background:#22303c; }
+  #dot::before { content:""; position:absolute; left:8px; top:8px;
+                 width:16px; height:16px; border-radius:50%; background:#ef476f; }
+
+  /* counter() and attr(), which Chrome resolves before the snapshot. */
+  #list { position:absolute; left:120px; top:64px; margin:0; padding:0;
+          list-style:none; counter-reset:n; }
+  #list li { counter-increment:n; position:relative; height:24px;
+             color:#8ecae6; font-size:16px; }
+  #list li::before { content:counter(n) ". "; color:#f4a261; }
+
+  #tag { position:absolute; left:16px; top:120px; width:200px; height:32px;
+         background:#22303c; font-size:18px; }
+  #tag::after { content:attr(data-tag); color:#a8dadc;
+                position:absolute; left:8px; top:4px; }
+</style>
+<div id="panel">
+  <div id="label"></div>
+  <div id="dot"></div>
+  <ol id="list"><li>alpha</li><li>beta</li></ol>
+  <div id="tag" data-tag="ATTR-VALUE"></div>
+</div>

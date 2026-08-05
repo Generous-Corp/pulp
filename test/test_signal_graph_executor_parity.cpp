@@ -18,6 +18,8 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -524,9 +526,10 @@ TEST_CASE("SignalGraph re-prepare while the executor path renders is race-free",
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    while (!started.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
-    }
+    // Bounded: an unbounded spin here hangs the suite if the audio thread never
+    // starts, where the CHECK below reports that as the failure it is.
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return started.load(std::memory_order_acquire); }));
     bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
         if (!g.prepare(kSr, kFrames)) {  // builds + publishes fresh snapshots
@@ -2155,7 +2158,10 @@ TEST_CASE("SignalGraph re-prepare while the parallel path renders is race-free",
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
-    while (!started.load(std::memory_order_acquire)) std::this_thread::yield();
+    // Bounded: an unbounded spin here hangs the suite if the audio thread never
+    // starts, where the CHECK below reports that as the failure it is.
+    CHECK(pulp::test::wait_for_condition(
+        [&] { return started.load(std::memory_order_acquire); }));
     bool prepared_all = true;
     for (int i = 0; i < 200; ++i) {
         if (!g.prepare(kSr, kFrames)) prepared_all = false;

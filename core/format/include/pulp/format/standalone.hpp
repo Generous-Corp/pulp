@@ -13,13 +13,17 @@
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/message_collector.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/seqlock.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/view/audio_bridge.hpp>
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,6 +72,14 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
+    // Development Inspector activation. Empty/"off" is inert, "local" owns
+    // only the in-window overlay, and agent profiles start an authenticated
+    // endpoint.
+    // Capability ids are only used with the "custom" profile. Kept as plain
+    // strings so public standalone headers remain independent of inspector SDK
+    // types when inspector support is compiled out.
+    std::string inspector_profile;
+    std::vector<std::string> inspector_capabilities;
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()
     // and writes to this path, then closes the window. Codified in the SDK
@@ -158,13 +170,23 @@ struct StandaloneConfig {
     // UI MIDI path, so they reach the processor only if it accepts MIDI input;
     // on a processor that ignores MIDI the keys are silent by construction.
     bool enable_musical_typing_keyboard = false;
+
+    // Separate high-risk acknowledgement for arbitrary evaluation in the live
+    // scripted UI realm. No profile or persisted setting implies this bit.
+    // Appended to preserve every legacy positional aggregate initializer.
+    bool inspector_runtime_eval = false;
+
 };
 
 namespace detail {
 
 inline constexpr std::size_t kStandaloneMidiInputQueueCapacity = 2048;
+inline constexpr std::size_t kStandaloneTestMidiQueueCapacity = 256;
+inline constexpr std::size_t kStandaloneTestMidiNoteCount = 16 * 128;
 inline constexpr std::size_t kStandaloneMidiBufferEventCapacity =
     kStandaloneMidiInputQueueCapacity +
+    kStandaloneTestMidiQueueCapacity +
+    kStandaloneTestMidiNoteCount +
     midi::MidiMessageCollector<>::capacity() +
     midi::MidiMessageCollector<>::pending_capacity();
 
@@ -184,6 +206,97 @@ inline std::size_t drain_standalone_midi_input(StandaloneMidiInputQueue& queue,
     return drained;
 }
 
+enum class StandaloneTestMidiKind : std::uint8_t {
+    NoteOn,
+    NoteOff,
+};
+
+struct StandaloneTestMidiNote {
+    StandaloneTestMidiKind kind = StandaloneTestMidiKind::NoteOn;
+    /// Protocol-facing MIDI channel number (1..16).
+    std::uint8_t channel = 1;
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+};
+
+struct StandaloneTestTransportUpdate {
+    std::optional<bool> playing;
+    std::optional<std::int64_t> position_samples;
+    std::optional<double> tempo_bpm;
+};
+
+struct StandaloneTestTransportState {
+    bool playing = true;
+    double tempo_bpm = 120.0;
+    std::int64_t position_samples = 0;
+};
+
+enum class StandaloneTestInputResult : std::uint8_t {
+    Applied,
+    InvalidArgument,
+    QueueFull,
+};
+
+/// Bounded control-thread to audio-thread bridge for standalone inspector test
+/// input. MIDI delivery is generation-scoped so releasing a controller drops
+/// stale note-offs, turns accepted queued note-ons into bounded one-block
+/// pulses, and schedules note-offs for every note that already reached DSP.
+/// Transport commands use a main-to-audio triple buffer; audio observations use
+/// an audio-writer sequence lock. Both directions stay coherent without making
+/// the audio callback wait for a preempted control-thread writer.
+class StandaloneTestInputHost {
+  public:
+    static constexpr double kMinimumTempoBpm = 20.0;
+    static constexpr double kMaximumTempoBpm = 400.0;
+
+    StandaloneTestInputResult inject_note(StandaloneTestMidiNote note);
+    StandaloneTestInputResult
+    update_transport(const StandaloneTestTransportUpdate& update);
+
+    /// Invalidate all queued input from the current controller. Safe from any
+    /// non-audio thread; the next audio block emits tracked note-offs first.
+    void release_test_input() noexcept;
+
+    StandaloneTestTransportState transport_snapshot() const noexcept;
+    std::uint64_t midi_overflow_count() const noexcept;
+
+    /// @internal Standalone audio-driver/test seam. Call prepare only while the
+    /// audio callback is stopped; all remaining methods are RT-safe.
+    void prepare(bool playing, double tempo_bpm) noexcept;
+    std::size_t drain_midi_into(midi::MidiBuffer& out,
+                                int block_size_samples) noexcept;
+    StandaloneTestTransportState begin_audio_block() noexcept;
+    void end_audio_block(int block_size_samples) noexcept;
+
+  private:
+    struct QueuedNote {
+        StandaloneTestMidiNote note;
+        std::uint64_t generation = 0;
+    };
+    struct TransportCommand {
+        bool playing = true;
+        double tempo_bpm = 120.0;
+        std::int64_t position_samples = 0;
+        std::uint64_t position_revision = 0;
+    };
+
+    bool release_active_notes(midi::MidiBuffer& out,
+                              int sample_offset) noexcept;
+
+    runtime::SpscQueue<QueuedNote, kStandaloneTestMidiQueueCapacity> midi_queue_;
+    std::atomic<std::uint64_t> midi_generation_{1};
+    std::uint64_t audio_midi_generation_ = 1;
+    std::array<std::array<bool, 128>, 16> active_notes_{};
+    bool note_release_pending_ = false;
+
+    TransportCommand control_transport_{};
+    runtime::TripleBuffer<TransportCommand> transport_commands_{control_transport_};
+    StandaloneTestTransportState audio_transport_{};
+    runtime::SeqLock<StandaloneTestTransportState> observed_transport_{audio_transport_};
+    std::uint64_t audio_position_revision_ = 0;
+    bool prepared_ = false;
+};
+
 }  // namespace detail
 
 class StandaloneApp {
@@ -197,6 +310,9 @@ public:
     bool start();
     void stop();
     bool is_running() const { return running_.load(); }
+    std::uint64_t audio_xrun_count() const {
+        return audio_device_ ? audio_device_->xrun_count() : 0;
+    }
     bool run_with_editor(bool use_gpu = false);
 
     /// Restart audio with a new config (stop → reconfigure → start).
@@ -234,6 +350,10 @@ public:
     // correct sample offsets. Identical thread-safety surface that
     // pulp::midi::MidiMessageCollector documents — push_now is non-blocking.
     midi::MidiMessageCollector<>& ui_midi_collector() { return ui_midi_collector_; }
+    detail::StandaloneTestInputHost& test_input_host() { return test_input_host_; }
+    const detail::StandaloneTestInputHost& test_input_host() const {
+        return test_input_host_;
+    }
 
     // Persist + restore StandaloneConfig under
     // ApplicationProperties so `pulp run` opens the user's last device,
@@ -315,15 +435,8 @@ private:
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
     midi::MidiMessageCollector<> ui_midi_collector_;
+    detail::StandaloneTestInputHost test_input_host_;
     std::atomic<bool> running_{false};
-
-    // Built-in transport state (the standalone "host").
-    // `transport_position_samples_` advances atomically on the audio
-    // thread; `transport_block_time_seconds_` is derived by the audio
-    // callback (`position_samples / sample_rate`) and is what
-    // `MidiMessageCollector::drain_into` uses to align UI MIDI events
-    // to sample offsets within the current block.
-    std::atomic<int64_t> transport_position_samples_{0};
 
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;

@@ -1,5 +1,9 @@
 #include <pulp/runtime/socket.hpp>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -7,12 +11,20 @@
 #else
 #include <cerrno>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <poll.h>
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+#include <bsm/libbsm.h>
+#include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
+#endif
 #endif
 
 #include <cstring>
@@ -21,6 +33,66 @@
 #include <limits>
 
 namespace pulp::runtime {
+
+#ifndef _WIN32
+namespace {
+
+bool has_private_local_parent(std::string_view path) {
+    if (path.empty() || path.front() != '/')
+        return false;
+    const auto separator = path.find_last_of('/');
+    if (separator == std::string_view::npos)
+        return false;
+    const auto parent = separator == 0 ? std::string{"/"}
+                                       : std::string{path.substr(0, separator)};
+    const int parent_fd =
+        ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_DIRECTORY);
+    if (parent_fd < 0)
+        return false;
+    struct stat parent_status {};
+    if (::fstat(parent_fd, &parent_status) != 0 ||
+        !S_ISDIR(parent_status.st_mode) || parent_status.st_uid != ::geteuid()) {
+        ::close(parent_fd);
+        return false;
+    }
+    if ((parent_status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        ::close(parent_fd);
+        return false;
+    }
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    errno = 0;
+    acl_t acl = ::acl_get_fd_np(parent_fd, ACL_TYPE_EXTENDED);
+    const int acl_error = errno;
+    ::close(parent_fd);
+    if (acl != nullptr) {
+        ::acl_free(acl);
+        return false;
+    }
+    return acl_error == ENOENT || acl_error == ENOATTR;
+#elif defined(__linux__)
+    errno = 0;
+    const auto acl_size =
+        ::fgetxattr(parent_fd, "system.posix_acl_access", nullptr, 0);
+    const int acl_error = errno;
+    ::close(parent_fd);
+    if (acl_size > 0)
+        return false;
+    if (acl_size == 0 || acl_error == ENODATA || acl_error == ENOTSUP ||
+        acl_error == EOPNOTSUPP) {
+        return true;
+    }
+    return false;
+#elif defined(__APPLE__)
+    ::close(parent_fd);
+    return false;
+#else
+    ::close(parent_fd);
+    return true;
+#endif
+}
+
+}  // namespace
+#endif
 
 #ifdef _WIN32
 static bool winsock_init() {
@@ -45,8 +117,16 @@ static constexpr int kInvalidSocketHandle = -1;
 
 Socket::~Socket() { close(); }
 
-Socket::Socket(Socket&& other) noexcept : fd_(other.fd_), type_(other.type_) {
+Socket::Socket(Socket&& other) noexcept
+    : fd_(other.fd_),
+      type_(other.type_),
+      bound_local_path_(std::move(other.bound_local_path_)),
+      bound_local_device_(other.bound_local_device_),
+      bound_local_inode_(other.bound_local_inode_) {
     other.fd_ = kInvalidSocketHandle;
+    other.bound_local_path_.clear();
+    other.bound_local_device_ = 0;
+    other.bound_local_inode_ = 0;
 }
 
 Socket& Socket::operator=(Socket&& other) noexcept {
@@ -54,7 +134,13 @@ Socket& Socket::operator=(Socket&& other) noexcept {
         close();
         fd_ = other.fd_;
         type_ = other.type_;
+        bound_local_path_ = std::move(other.bound_local_path_);
+        bound_local_device_ = other.bound_local_device_;
+        bound_local_inode_ = other.bound_local_inode_;
         other.fd_ = kInvalidSocketHandle;
+        other.bound_local_path_.clear();
+        other.bound_local_device_ = 0;
+        other.bound_local_inode_ = 0;
     }
     return *this;
 }
@@ -67,9 +153,18 @@ bool Socket::create(SocketType type) {
     if (!winsock_init()) return false;
 #endif
 
-    int sock_type = (type == SocketType::TCP) ? SOCK_STREAM : SOCK_DGRAM;
-    int protocol = (type == SocketType::TCP) ? IPPROTO_TCP : IPPROTO_UDP;
-    fd_ = static_cast<decltype(fd_)>(::socket(AF_INET, sock_type, protocol));
+    int family = AF_INET;
+    int sock_type = type == SocketType::UDP ? SOCK_DGRAM : SOCK_STREAM;
+    int protocol = type == SocketType::TCP ? IPPROTO_TCP
+                                           : type == SocketType::UDP ? IPPROTO_UDP : 0;
+    if (type == SocketType::Local) {
+#ifdef _WIN32
+        return false;
+#else
+        family = AF_UNIX;
+#endif
+    }
+    fd_ = static_cast<decltype(fd_)>(::socket(family, sock_type, protocol));
 #ifdef SO_NOSIGPIPE
     if (fd_ != kInvalidSocketHandle) {
         const int enabled = 1;
@@ -81,7 +176,7 @@ bool Socket::create(SocketType type) {
 }
 
 bool Socket::bind(std::string_view address, uint16_t port) {
-    if (fd_ == kInvalidSocketHandle) return false;
+    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local) return false;
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -99,6 +194,44 @@ bool Socket::bind(std::string_view address, uint16_t port) {
     return ::bind(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
 }
 
+bool Socket::bind_local(std::string_view path) {
+#ifdef _WIN32
+    (void)path;
+    return false;
+#else
+    if (fd_ == kInvalidSocketHandle || type_ != SocketType::Local ||
+        !has_private_local_parent(path)) {
+        return false;
+    }
+
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const std::string path_string(path);
+    if (path.size() >= sizeof(address.sun_path) ||
+        ::access(path_string.c_str(), F_OK) == 0) {
+        return false;
+    }
+    std::memcpy(address.sun_path, path.data(), path.size());
+    address.sun_path[path.size()] = '\0';
+    if (::bind(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+        return false;
+    if (::chmod(address.sun_path, S_IRUSR | S_IWUSR) != 0) {
+        ::unlink(address.sun_path);
+        return false;
+    }
+    struct stat endpoint_status {};
+    if (::lstat(address.sun_path, &endpoint_status) != 0 ||
+        !S_ISSOCK(endpoint_status.st_mode)) {
+        ::unlink(address.sun_path);
+        return false;
+    }
+    bound_local_path_ = std::string(path);
+    bound_local_device_ = static_cast<std::uint64_t>(endpoint_status.st_dev);
+    bound_local_inode_ = static_cast<std::uint64_t>(endpoint_status.st_ino);
+    return true;
+#endif
+}
+
 bool Socket::listen(int backlog) {
     if (fd_ == kInvalidSocketHandle) return false;
     return ::listen(NATIVE_SOCKET(fd_), backlog) == 0;
@@ -107,7 +240,7 @@ bool Socket::listen(int backlog) {
 std::optional<Socket> Socket::accept() {
     if (fd_ == kInvalidSocketHandle) return std::nullopt;
 
-    struct sockaddr_in client_addr{};
+    struct sockaddr_storage client_addr{};
     socklen_t addr_len = sizeof(client_addr);
     auto client_fd =
         ::accept(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
@@ -116,7 +249,7 @@ std::optional<Socket> Socket::accept() {
 
     Socket client;
     client.fd_ = static_cast<decltype(client.fd_)>(client_fd);
-    client.type_ = SocketType::TCP;
+    client.type_ = type_;
 #ifdef SO_NOSIGPIPE
     const int enabled = 1;
     ::setsockopt(NATIVE_SOCKET(client.fd_), SOL_SOCKET, SO_NOSIGPIPE,
@@ -127,7 +260,7 @@ std::optional<Socket> Socket::accept() {
 
 bool Socket::connect(std::string_view address, uint16_t port,
                      std::chrono::milliseconds timeout) {
-    if (fd_ == kInvalidSocketHandle) return false;
+    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local) return false;
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -164,11 +297,40 @@ bool Socket::connect(std::string_view address, uint16_t port,
             return false;
     }
 
+    return connect_address(&addr, sizeof(addr), timeout);
+}
+
+bool Socket::connect_local(std::string_view path,
+                           std::chrono::milliseconds timeout) {
+#ifdef _WIN32
+    (void)path;
+    (void)timeout;
+    return false;
+#else
+    if (fd_ == kInvalidSocketHandle || type_ != SocketType::Local ||
+        !has_private_local_parent(path)) {
+        return false;
+    }
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(address.sun_path))
+        return false;
+    std::memcpy(address.sun_path, path.data(), path.size());
+    address.sun_path[path.size()] = '\0';
+    return connect_address(&address, sizeof(address), timeout);
+#endif
+}
+
+bool Socket::connect_address(const void* address, std::size_t address_size,
+                             std::chrono::milliseconds timeout) {
+    if (fd_ == kInvalidSocketHandle || address == nullptr || address_size == 0)
+        return false;
+    auto* socket_address = const_cast<struct sockaddr*>(
+        static_cast<const struct sockaddr*>(address));
+    const auto socket_address_size = static_cast<socklen_t>(address_size);
     if (timeout <= std::chrono::milliseconds(0)) {
-        return ::connect(
-                   NATIVE_SOCKET(fd_),
-                   reinterpret_cast<struct sockaddr*>(&addr),
-                   sizeof(addr)) == 0;
+        return ::connect(NATIVE_SOCKET(fd_), socket_address,
+                         socket_address_size) == 0;
     }
 
 #ifdef _WIN32
@@ -197,9 +359,7 @@ bool Socket::connect(std::string_view address, uint16_t port,
 #endif
 
     const int result = ::connect(
-        NATIVE_SOCKET(fd_),
-        reinterpret_cast<struct sockaddr*>(&addr),
-        sizeof(addr));
+        NATIVE_SOCKET(fd_), socket_address, socket_address_size);
     if (result == 0)
         return restore_blocking();
 
@@ -316,6 +476,59 @@ int Socket::receive(uint8_t* buffer, size_t buffer_size) {
                                    static_cast<int>(buffer_size), 0));
 }
 
+std::optional<LocalPeerCredentials> Socket::local_peer_credentials() const {
+#if defined(_WIN32)
+    return std::nullopt;
+#elif defined(__APPLE__) && !TARGET_OS_IPHONE
+    if (fd_ == kInvalidSocketHandle || type_ != SocketType::Local)
+        return std::nullopt;
+    uid_t uid = 0;
+    gid_t gid = 0;
+    if (::getpeereid(fd_, &uid, &gid) != 0)
+        return std::nullopt;
+    pid_t pid = 0;
+    socklen_t pid_size = sizeof(pid);
+    if (::getsockopt(fd_, SOL_LOCAL, LOCAL_PEERPID, &pid, &pid_size) != 0 ||
+        pid <= 0) {
+        return std::nullopt;
+    }
+    audit_token_t token{};
+    socklen_t token_size = sizeof(token);
+    if (::getsockopt(fd_, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &token_size) != 0 ||
+        token_size != sizeof(token) || audit_token_to_euid(token) != uid ||
+        audit_token_to_egid(token) != gid || audit_token_to_pid(token) != pid) {
+        return std::nullopt;
+    }
+    const auto pid_version = audit_token_to_pidversion(token);
+    if (pid_version <= 0)
+        return std::nullopt;
+    return LocalPeerCredentials{static_cast<std::uint64_t>(uid),
+                                static_cast<std::uint64_t>(gid),
+                                static_cast<std::int64_t>(pid),
+                                static_cast<std::uint64_t>(pid_version)};
+#elif defined(__linux__)
+    if (fd_ == kInvalidSocketHandle || type_ != SocketType::Local)
+        return std::nullopt;
+    struct {
+        pid_t pid;
+        uid_t uid;
+        gid_t gid;
+    } credentials{};
+    socklen_t credentials_size = sizeof(credentials);
+    if (::getsockopt(fd_, SOL_SOCKET, SO_PEERCRED, &credentials,
+                     &credentials_size) != 0 || credentials.pid <= 0) {
+        return std::nullopt;
+    }
+    return LocalPeerCredentials{
+        static_cast<std::uint64_t>(credentials.uid),
+        static_cast<std::uint64_t>(credentials.gid),
+        static_cast<std::int64_t>(credentials.pid),
+        0};
+#else
+    return std::nullopt;
+#endif
+}
+
 bool Socket::set_write_timeout(std::chrono::milliseconds timeout) {
     if (fd_ == kInvalidSocketHandle) return false;
     const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
@@ -377,16 +590,32 @@ int Socket::receive_from(uint8_t* buffer, size_t buffer_size,
 
 void Socket::close() {
     if (fd_ != kInvalidSocketHandle) {
-        if (type_ == SocketType::TCP) {
+        if (type_ != SocketType::UDP) {
             (void)SOCKET_SHUTDOWN(NATIVE_SOCKET(fd_));
         }
         SOCKET_CLOSE(NATIVE_SOCKET(fd_));
         fd_ = kInvalidSocketHandle;
     }
+#ifndef _WIN32
+    if (!bound_local_path_.empty()) {
+        struct stat endpoint_status {};
+        if (::lstat(bound_local_path_.c_str(), &endpoint_status) == 0 &&
+            S_ISSOCK(endpoint_status.st_mode) &&
+            static_cast<std::uint64_t>(endpoint_status.st_dev) ==
+                bound_local_device_ &&
+            static_cast<std::uint64_t>(endpoint_status.st_ino) ==
+                bound_local_inode_) {
+            (void)::unlink(bound_local_path_.c_str());
+        }
+        bound_local_path_.clear();
+        bound_local_device_ = 0;
+        bound_local_inode_ = 0;
+    }
+#endif
 }
 
 void Socket::shutdown() {
-    if (fd_ != kInvalidSocketHandle && type_ == SocketType::TCP) {
+    if (fd_ != kInvalidSocketHandle && type_ != SocketType::UDP) {
         (void)SOCKET_SHUTDOWN(NATIVE_SOCKET(fd_));
     }
 }
@@ -396,7 +625,7 @@ bool Socket::is_open() const {
 }
 
 uint16_t Socket::local_port() const {
-    if (fd_ == kInvalidSocketHandle) return 0;
+    if (fd_ == kInvalidSocketHandle || type_ == SocketType::Local) return 0;
 
     struct sockaddr_in addr{};
     socklen_t addr_len = sizeof(addr);

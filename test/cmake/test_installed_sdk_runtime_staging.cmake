@@ -178,6 +178,30 @@ if(NOT _build_result EQUAL 0)
         "${_build_output}\n${_build_error}")
 endif()
 
+# This probe includes only installed public headers and links only the installed
+# Pulp::audio target. Run it as well as building it so the unsupported-backend
+# null contract and the archive-defined query symbol are both proven.
+set(_audio_timing_probe
+    "${_consumer_build}/PulpSDKSmokeAudioIoTimingProbe${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${_audio_timing_probe}")
+    set(_audio_timing_probe
+        "${_consumer_build}/${_config}/PulpSDKSmokeAudioIoTimingProbe${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+if(NOT EXISTS "${_audio_timing_probe}")
+    message(FATAL_ERROR
+        "Installed-SDK audio timing probe was not built: ${_audio_timing_probe}")
+endif()
+execute_process(
+    COMMAND "${_audio_timing_probe}"
+    RESULT_VARIABLE _audio_timing_result
+    OUTPUT_VARIABLE _audio_timing_output
+    ERROR_VARIABLE _audio_timing_error)
+if(NOT _audio_timing_result EQUAL 0)
+    message(FATAL_ERROR
+        "Installed-SDK audio timing probe failed (${_audio_timing_result})\n"
+        "${_audio_timing_output}\n${_audio_timing_error}")
+endif()
+
 # This probe calls the archive-defined AgentView::create() entry point with an
 # invalid snapshot and succeeds only when the installed SDK links and preserves
 # the API's fail-closed runtime contract. Check both single- and multi-config

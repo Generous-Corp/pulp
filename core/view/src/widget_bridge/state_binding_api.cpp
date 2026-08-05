@@ -22,6 +22,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -134,6 +135,16 @@ void WidgetBridge::release_all_param_gesture_routes() noexcept {
             // releasing the remaining routes and preserve noexcept teardown.
         }
     }
+}
+
+void WidgetBridge::defer_all_param_gesture_routes() {
+    for (auto& [widget_id, route] : param_gesture_routes_) {
+        (void)widget_id;
+        if (!route->active) continue;
+        store_.defer_gesture_release(route->active_param_id);
+        route->active = false;
+    }
+    param_gesture_routes_.clear();
 }
 
 // ── Transform mini-spec ──────────────────────────────────────────────────
@@ -249,35 +260,42 @@ bool WidgetBridge::value_channel_is_stale(ParamBinding& b, std::uint32_t seq) {
     return now - b.last_publish_at > kValueChannelStaleAfter;
 }
 
-bool WidgetBridge::apply_scope_binding(ParamBinding& b, View* w) {
-    if (b.value_vector == nullptr) return false;
-    const bool stale = value_channel_is_stale(b, b.value_vector->publish_seq());
-    const auto frame = b.value_vector->read();
-    const int count = stale ? 0 : frame.count;
+bool WidgetBridge::apply_scope_binding(ParamBinding& b, View* w,
+                                       const VectorFrame* value_frame,
+                                       std::uint32_t publish_seq) {
+    const bool stale = value_frame == nullptr ||
+                       value_channel_is_stale(b, publish_seq);
+    const int count = stale ? 0 : value_frame->count;
+    static constexpr std::array<float, 1> kEmptyFrame{};
+    const float* samples = value_frame ? value_frame->samples.data()
+                                       : kEmptyFrame.data();
     // A stale scope renders empty rather than holding the last block on screen,
     // which would read as a frozen display of live audio.
     if (auto* spectrum = dynamic_cast<SpectrumView*>(w)) {
-        spectrum->set_spectrum(frame.samples.data(), static_cast<size_t>(count));
+        spectrum->set_spectrum(samples, static_cast<size_t>(count));
         return true;
     }
     if (auto* wave = dynamic_cast<WaveformView*>(w)) {
-        wave->set_data(frame.samples.data(), static_cast<size_t>(count));
+        wave->set_data(samples, static_cast<size_t>(count));
         return true;
     }
     return false;
 }
 
-bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
+bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
+                                       const MeterFrame* value_frame,
+                                       std::uint32_t publish_seq) {
     if (b.derive_from_param) derive_binding_transform(b, w);
 
     // A scope pushes a whole block, so it shares none of the scalar path below.
-    if (b.target == ParamBinding::Target::scope) return apply_scope_binding(b, w);
+    if (b.target == ParamBinding::Target::scope) return false;
 
     // Staleness: a value channel that has stopped PUBLISHING decays to its
     // declared neutral, so a meter drops to rest when audio stops instead of
     // freezing on its last reading. Watching the publish sequence rather than
     // the value is what lets a genuinely static-but-live signal keep reading.
-    if (b.value_meter != nullptr && value_channel_is_stale(b, b.value_meter->publish_seq())) {
+    if (!b.value_channel.empty() &&
+        (value_frame == nullptr || value_channel_is_stale(b, publish_seq))) {
         if (b.last_applied == b.neutral) return false;
         b.last_applied = b.neutral;
         if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(b.neutral, b.neutral);
@@ -286,8 +304,8 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
     // A value channel already publishes in the domain the widget wants, so the
     // transform applies to it directly — there is no normalized/real split to
     // choose between as there is for a parameter.
-    const float src = b.value_meter != nullptr
-                          ? b.value_meter->read().rms[0]
+    const float src = !b.value_channel.empty()
+                          ? value_frame->rms[0]
                           : (b.transform.db ? store_.get_value(b.param_id)
                                             : store_.get_normalized(b.param_id));
     const float target = b.transform.apply(src);
@@ -351,10 +369,6 @@ namespace {
 // and a leading double underscore is reserved by the preamble.
 std::string param_subscription_key(std::uint32_t id) {
     return "__param__" + std::to_string(id);
-}
-
-std::string event_binding_key(std::uint32_t id) {
-    return "__value_events__" + std::to_string(id);
 }
 } // namespace
 
@@ -423,70 +437,6 @@ void WidgetBridge::service_param_subscriptions() {
     if (!in_param_dispatch_) {
         std::erase_if(param_subscriptions_, [](const auto& s) { return s.id == 0; });
     }
-}
-
-std::size_t WidgetBridge::event_binding_count() const noexcept {
-    return static_cast<std::size_t>(
-        std::count_if(event_bindings_.begin(), event_bindings_.end(),
-                      [](const EventBinding& binding) { return binding.id != 0; }));
-}
-
-void WidgetBridge::service_event_bindings() {
-    if (event_bindings_.empty()) return;
-
-    const bool reentrant = in_event_dispatch_;
-    in_event_dispatch_ = true;
-    const std::size_t count = event_bindings_.size();
-    for (std::size_t i = 0; i < count && i < event_bindings_.size(); ++i) {
-        const auto id = event_bindings_[i].id;
-        auto* source = event_bindings_[i].source;
-        if (id == 0 || source == nullptr) continue;
-
-        const auto frame = source->read();
-        if (frame.publication == event_bindings_[i].last_publication) continue;
-        event_bindings_[i].last_publication = frame.publication;
-        const int event_count =
-            std::clamp(frame.count, 0, EventFrame::kMaxEvents);
-        if (event_count == 0) continue;
-
-        auto payload = choc::value::createEmptyArray();
-        for (int event_index = 0; event_index < event_count; ++event_index) {
-            auto occurrence = choc::value::createObject("ValueEvent");
-            occurrence.addMember(
-                "frameIndex",
-                static_cast<std::int64_t>(frame.events[event_index].frame_index));
-            occurrence.addMember("value", frame.events[event_index].value);
-            payload.addArrayElement(std::move(occurrence));
-        }
-        safe_dispatch_eval(
-            callback_alive_, &engine_,
-            "__dispatch__(" + js_string_literal(event_binding_key(id)) +
-                ", 'events', " + choc::json::toString(payload, false) + ")",
-            "value event binding");
-    }
-    in_event_dispatch_ = reentrant;
-    if (!in_event_dispatch_) {
-        std::erase_if(event_bindings_,
-                      [](const EventBinding& binding) { return binding.id == 0; });
-    }
-}
-
-void WidgetBridge::service_param_bindings() {
-    if (param_bindings_.empty()) return;
-    bool any_changed = false;
-    for (auto& b : param_bindings_) {
-        View* w = widget(b.widget_id);
-        if (!w) continue;
-        // Precedence: the binding owns the widget's value EXCEPT while the user
-        // is dragging it — then the gesture wins. Invalidate last_applied so the
-        // store value re-asserts on the first frame after the drag ends.
-        if (w->is_gesture_active()) {
-            b.last_applied = std::numeric_limits<float>::quiet_NaN();
-            continue;
-        }
-        if (apply_param_binding(b, w)) any_changed = true;
-    }
-    if (any_changed) request_repaint();
 }
 
 const char* describe(BindingOutcome o) noexcept {
@@ -579,8 +529,8 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     // fallback between the two namespaces on purpose: silently resolving a
     // typo'd channel to a same-named param would bind a meter to the wrong
     // thing and look like it worked.
-    MeterSource* value_meter = nullptr;
-    VectorSource* value_vector = nullptr;
+    std::string value_channel;
+    bool value_channel_found = false;
     float neutral = 0.0f;
     state::ParamID id = 0;
     if (const auto channel = value_channel_name(param_name); !channel.empty()) {
@@ -588,17 +538,18 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         // else a meter channel. A shape mismatch is a MISS, not a coercion —
         // binding a scope to a meter would otherwise render a plausible wrong
         // picture instead of reporting that the channel is the wrong kind.
-        if (value_channels_ != nullptr) {
-            if (target == ParamBinding::Target::scope)
-                value_vector = value_channels_->vector(channel);
-            else
-                value_meter = value_channels_->meter(channel);
-            for (const auto& info : value_channels_->infos()) {
+        visit_value_channels([&](ValueChannelSet* channels) {
+            if (channels == nullptr) return;
+            value_channel_found = target == ParamBinding::Target::scope
+                                      ? channels->vector(channel) != nullptr
+                                      : channels->meter(channel) != nullptr;
+            for (const auto& info : channels->infos()) {
                 if (info.name == channel) { neutral = info.neutral; break; }
             }
-        }
-        if (value_meter == nullptr && value_vector == nullptr)
+        });
+        if (!value_channel_found)
             return fail(BindingOutcome::unknown_value_channel);
+        value_channel = std::string(channel);
     } else if (target == ParamBinding::Target::scope) {
         // A scope has no parameter equivalent — there is no store shape that
         // carries a block of samples.
@@ -610,13 +561,19 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     ParamBinding binding;
     binding.widget_id = widget_id;
     binding.param_id = id;
-    binding.value_meter = value_meter;
-    binding.value_vector = value_vector;
+    binding.value_channel = std::move(value_channel);
     binding.neutral = neutral;
-    if (value_meter) binding.last_publish_seq = value_meter->publish_seq();
-    if (value_vector) binding.last_publish_seq = value_vector->publish_seq();
-    binding.last_publish_at = std::chrono::steady_clock::now();
     binding.target = target;
+    visit_value_channels([&](ValueChannelSet* channels) {
+        if (channels == nullptr || binding.value_channel.empty()) return;
+        if (binding.target == ParamBinding::Target::scope) {
+            if (auto* source = channels->vector(binding.value_channel))
+                binding.last_publish_seq = source->publish_seq();
+        } else if (auto* source = channels->meter(binding.value_channel)) {
+            binding.last_publish_seq = source->publish_seq();
+        }
+    });
+    binding.last_publish_at = std::chrono::steady_clock::now();
     binding.transform = parse_transform(transform);
     binding.derive_from_param = transform_requests_derivation(transform);
 
@@ -730,19 +687,29 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
 
     // bindEvents("value:<name>", handler) delivers one array per newly
     // published non-empty EventFrame. The JS shim retains the function; native
-    // code retains only a channel pointer and callback id.
+    // code retains only a channel name and callback id.
     register_bridge_function(api, "__bindEvents__", [&self](choc::javascript::ArgumentList args) {
         const auto source_name = args.get<std::string>(0, "");
         const auto channel_name = value_channel_name(source_name);
-        if (channel_name.empty() || self.value_channels_ == nullptr)
-            return choc::value::createInt64(0);
-        auto* source = self.value_channels_->events(channel_name);
-        if (source == nullptr) return choc::value::createInt64(0);
+        if (channel_name.empty()) return choc::value::createInt64(0);
+        bool found = false;
+        std::uint32_t publication = 0;
+        std::uint64_t generation_identity = 0;
+        self.visit_value_channels([&](ValueChannelSet* channels) {
+            if (channels == nullptr) return;
+            if (auto* source = channels->events(channel_name)) {
+                publication = source->read().publication;
+                generation_identity = channels->generation_identity();
+                found = true;
+            }
+        });
+        if (!found) return choc::value::createInt64(0);
 
         WidgetBridge::EventBinding binding;
         binding.id = self.next_event_binding_id_++;
-        binding.source = source;
-        binding.last_publication = source->read().publication;
+        binding.channel_name = std::string(channel_name);
+        binding.last_publication = publication;
+        binding.value_generation_identity = generation_identity;
         self.event_bindings_.push_back(binding);
         return choc::value::createInt64(static_cast<std::int64_t>(binding.id));
     });
@@ -885,7 +852,11 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     register_bridge_function(api, "listValueChannels", [&self](choc::javascript::ArgumentList) {
         // Shared with the inspector's State.getValueChannels — one serializer,
         // so the two descriptions of the same channels cannot disagree.
-        return value_channels_to_value(self.value_channels_);
+        std::vector<ValueChannelInfo> infos;
+        self.visit_value_channels([&](ValueChannelSet* channels) {
+            if (channels != nullptr) infos = channels->infos();
+        });
+        return value_channels_to_value(infos);
     });
 
     // unbindWidget(widgetId) -> remove any binding(s) for that widget. Returns

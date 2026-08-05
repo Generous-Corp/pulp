@@ -12,6 +12,69 @@
 // `decl.__pulpId__`. Embed order: loaded AFTER web-compat-style-decl.js
 // (the dispatcher).
 
+// Rewrite CSS Color 4 function colours inside a gradient string to hex.
+//
+// A gradient is handed to the native side as ONE string and its stops are
+// parsed there, by a colour parser that does not know oklab / oklch / lab /
+// lch / color(). An unrecognised function name falls back to white, so a
+// translucent bloom paints as an opaque WHITE blob — and this is not an exotic
+// case: Chrome serializes every `color-mix(in oklab, ...)` to `oklab(...)`,
+// which is the idiom generated panels use for every glow, bloom and shadow.
+// Measured on one: the stop rendered (254,254,254) where the design asked for
+// #58f0ff at 48%, with G-R = 0 at every blur radius.
+//
+// parseCSSColor here already resolves all of these correctly, so the fix is to
+// use it before the string crosses over rather than to grow a second parser on
+// the other side that must be kept in step. The pattern deliberately excludes
+// nested parens: these forms take plain numeric components, and matching
+// non-greedily without recursion keeps a `calc()` inside a stop POSITION from
+// being swallowed.
+function _resolveGradientStopColors(text) {
+    if (!text || text.indexOf("(") < 0) return text;
+    return String(text).replace(
+        /\b(oklab|oklch|lab|lch|color)\(\s*[^()]*\)/gi,
+        function (match) {
+            var hex = parseCSSColor(match);
+            // Leave anything unparseable exactly as-is: the native side may
+            // still understand it, and a silent rewrite to a wrong colour is
+            // worse than passing the original through.
+            return hex ? hex : match;
+        });
+}
+
+// Split a single box-shadow into [whole, x, y, blur, spread, colour].
+//
+// CSS allows the colour on EITHER side of the offsets, and Chrome serializes it
+// FIRST: `oklab(0.97 0.008 -0.014 / 0.18) 0px 1px 0px 0px inset`. Matching
+// colour-last only meant a computed shadow did not match AT ALL and fell
+// through — leaving a card ringed by a bright halo, which reads as a rendering
+// bug rather than an unparsed declaration.
+//
+// Function colours resolve to hex before any split, because every offset match
+// here divides on whitespace and `oklab(...)` carries spaces and a slash. That
+// tears the colour apart in either ordering, so it has to happen first.
+//
+// Returns null when the text is not a single well-formed shadow. Named and
+// exported rather than inlined so it can be tested: reading `el.style.boxShadow`
+// back returns whatever string was assigned whether or not it parsed, so a
+// round-trip assertion passes against a shadow that never reached the renderer.
+function _parseBoxShadowOffsets(text) {
+    var work = _resolveGradientStopColors(String(text));
+    var OFFSETS =
+        "(-?[\\d.]+)px\\s+(-?[\\d.]+)px\\s+([\\d.]+)px(?:\\s+(-?[\\d.]+)px)?";
+    // Anchored. Unanchored, this matches INSIDE a colour-first shadow: given
+    // `#f7f3ff2e 0px 1px 3px 0px` it starts at the offsets and takes the
+    // trailing `0px` as the colour, yielding a shadow that parses "successfully"
+    // with garbage in it — worse than not matching, because the colour-first
+    // branch below never gets a chance to run.
+    var m = work.match(new RegExp("^" + OFFSETS + "\\s+(.*)$"));
+    if (m) return m;
+    var first = work.match(new RegExp("^(\\S+)\\s+" + OFFSETS + "\\s*$"));
+    // Re-ordered into the colour-last shape so callers have one layout to read.
+    if (first) return [first[0], first[2], first[3], first[4], first[5], first[1]];
+    return null;
+}
+
 function _applyPaintProp(decl, id, key, resolved, value) {
     switch (key) {
         // Colors
@@ -179,7 +242,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
                 inset = true;
                 work = work.replace(/\s+inset\s*$/i, "");
             }
-            var sm = work.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(.*)/);
+            var sm = _parseBoxShadowOffsets(work);
             if (sm) {
                 var sc = parseCSSColor(sm[5].trim());
                 setBoxShadow(id, parseFloat(sm[1]), parseFloat(sm[2]),
@@ -327,7 +390,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         case "backgroundImage":
         case "background": {
             if (resolved.indexOf("gradient") >= 0) {
-                setBackgroundGradient(id, resolved);
+                setBackgroundGradient(id, _resolveGradientStopColors(resolved));
             } else {
                 var bgc2 = parseCSSColor(resolved);
                 if (bgc2) setBackground(id, bgc2);

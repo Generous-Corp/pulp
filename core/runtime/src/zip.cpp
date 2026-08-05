@@ -2,6 +2,7 @@
 #include <miniz.h>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace pulp::runtime {
 
@@ -80,15 +81,22 @@ bool grow_bounded(std::vector<uint8_t>& result, size_t want, size_t max_output) 
     return true;
 }
 
-// Used for the gzip path (no zlib header) and as a building block.
-std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size,
-                                                size_t max_output = kDefaultMaxInflateOutput) {
+// Shared bounded inflater. Positive window bits require an RFC 1950 zlib
+// wrapper; negative bits decode the raw DEFLATE payload inside RFC 1952 gzip.
+std::optional<std::vector<uint8_t>> inflate_stream(
+        const uint8_t* data, size_t size, int window_bits,
+        size_t max_output = kDefaultMaxInflateOutput) {
     if (data == nullptr || size == 0)
         return std::nullopt;
 
+    // One sentinel byte lets inflate consume and validate a stream trailer when
+    // the legitimate output exactly fills max_output. The logical output bound
+    // remains max_output; producing the sentinel byte is an overflow failure.
+    const size_t allocation_limit = max_output == std::numeric_limits<size_t>::max()
+        ? max_output : max_output + 1;
     std::vector<uint8_t> result;
     // Heuristic initial size; grows as needed (bounded by max_output).
-    result.resize(std::min<size_t>(size > 0 ? size * 4 : 64, max_output));
+    result.resize(std::min<size_t>(size > 0 ? size * 4 : 64, allocation_limit));
 
     mz_stream stream{};
     stream.next_in = data;
@@ -96,13 +104,13 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
     stream.next_out = result.data();
     stream.avail_out = static_cast<unsigned int>(result.size());
 
-    if (mz_inflateInit2(&stream, -MZ_DEFAULT_WINDOW_BITS) != MZ_OK)
+    if (mz_inflateInit2(&stream, window_bits) != MZ_OK)
         return std::nullopt;
 
     for (int attempt = 0; attempt < 32; ++attempt) {
         int status = mz_inflate(&stream, MZ_NO_FLUSH);
         if (status == MZ_STREAM_END) {
-            if (stream.total_in != size) {
+            if (stream.total_in != size || stream.total_out > max_output) {
                 mz_inflateEnd(&stream);
                 return std::nullopt;
             }
@@ -115,7 +123,9 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
                 mz_inflateEnd(&stream);
                 return std::nullopt;
             }
-            if (!grow_bounded(result, result.size() * 2, max_output)) {
+            if (status == MZ_OK && stream.avail_out > 0)
+                continue;
+            if (!grow_bounded(result, result.size() * 2, allocation_limit)) {
                 mz_inflateEnd(&stream);  // decompression bomb — fail closed
                 return std::nullopt;
             }
@@ -130,6 +140,11 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
 
     mz_inflateEnd(&stream);
     return std::nullopt;
+}
+
+std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size,
+                                                size_t max_output = kDefaultMaxInflateOutput) {
+    return inflate_stream(data, size, -MZ_DEFAULT_WINDOW_BITS, max_output);
 }
 
 // Like inflate_raw, but for a deflate stream that may be followed by trailing
@@ -299,29 +314,7 @@ std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t 
     // Backward-compatibility zlib (RFC 1950) path — historical callers and
     // older test fixtures still pass zlib-wrapped data through this entry
     // point. Keep accepting it so existing call sites don't regress.
-    mz_ulong decomp_size = static_cast<mz_ulong>(size > 0 ? size * 4 : 64);
-    std::vector<uint8_t> result(decomp_size);
-
-    for (int attempt = 0; attempt < 8; ++attempt) {
-        mz_ulong this_size = decomp_size;
-        int status = mz_uncompress(result.data(), &this_size, data,
-                                   static_cast<mz_ulong>(size));
-        if (status == MZ_OK) {
-            result.resize(this_size);
-            return result;
-        }
-        if (status == MZ_BUF_ERROR) {
-            // Bound growth so a zlib decompression bomb fails closed instead
-            // of forcing an unbounded allocation.
-            if (decomp_size >= max_output) return std::nullopt;
-            decomp_size = std::min<mz_ulong>(decomp_size * 2,
-                                             static_cast<mz_ulong>(max_output));
-            result.resize(decomp_size);
-            continue;
-        }
-        return std::nullopt;
-    }
-    return std::nullopt;
+    return zlib_decompress(data, size, max_output);
 }
 
 std::optional<std::vector<uint8_t>> gzip_compress(std::string_view data, int level) {
@@ -392,6 +385,11 @@ std::optional<std::vector<uint8_t>> zlib_compress(const uint8_t* data, size_t si
 
     result.resize(stream.total_out);
     return result;
+}
+
+std::optional<std::vector<uint8_t>> zlib_decompress(
+        const uint8_t* data, size_t size, size_t max_output) {
+    return inflate_stream(data, size, MZ_DEFAULT_WINDOW_BITS, max_output);
 }
 
 }  // namespace pulp::runtime

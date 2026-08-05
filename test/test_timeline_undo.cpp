@@ -1,6 +1,12 @@
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/timeline/serialize.hpp>
+#include <pulp/timeline/undo.hpp>
+
+#include <array>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -506,4 +512,191 @@ TEST_CASE("Timeline gestures enforce phase ownership and coalesce at the group c
     REQUIRE(session->submit(writer, end_retry));
     REQUIRE(session->undo(writer));
     REQUIRE(velocity(*session->snapshot()) == 1000);
+}
+
+
+namespace {
+
+// A note clip dense enough that one whole-content replacement is a meaningful
+// fraction of an undo budget, and small enough to stay a fast unit test.
+constexpr std::size_t kDenseNoteCount = 200;
+constexpr std::size_t kDenseEditCount = 40;
+constexpr ItemId kDenseSequence{3};
+constexpr ItemId kDenseTrack{4};
+constexpr ItemId kDenseClip{5};
+constexpr ItemId kFirstDenseNote{10};
+constexpr std::int64_t kDenseNoteSpacing = kTicksPerQuarter / 4;
+
+/// Pitch of the last note before any edit, and after kDenseEditCount of them.
+constexpr std::uint8_t kInitialLastPitch =
+    static_cast<std::uint8_t>(36 + (kDenseNoteCount - 1) % 48);
+constexpr std::uint8_t kEditedLastPitch =
+    static_cast<std::uint8_t>(kInitialLastPitch + kDenseEditCount);
+static_assert(kEditedLastPitch < 128, "the edit sweep must stay inside the MIDI pitch domain");
+
+std::vector<NoteEvent> dense_notes() {
+    std::vector<NoteEvent> notes;
+    notes.reserve(kDenseNoteCount);
+    for (std::size_t index = 0; index < kDenseNoteCount; ++index)
+        notes.push_back(NoteEvent{{kFirstDenseNote.value + index},
+                                  {static_cast<std::int64_t>(index) * kDenseNoteSpacing},
+                                  {kTicksPerQuarter / 8},
+                                  1000,
+                                  static_cast<std::uint8_t>(36 + index % 48),
+                                  0});
+    return notes;
+}
+
+Project make_dense_note_project() {
+    const TickDuration span{static_cast<std::int64_t>(kDenseNoteCount) * kDenseNoteSpacing};
+    auto content = MidiContent::create(dense_notes());
+    REQUIRE(content);
+    auto clip = Clip::create(kDenseClip, {0}, span, std::move(content).value());
+    REQUIRE(clip);
+    auto track = Track::create(kDenseTrack, "track", {std::move(clip).value()});
+    REQUIRE(track);
+    auto sequence =
+        Sequence::create(kDenseSequence, "sequence", span, {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1},
+                                    "project",
+                                    kFirstDenseNote.value + kDenseNoteCount + 1,
+                                    kDenseSequence,
+                                    {},
+                                    {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+std::span<const NoteEvent> dense_clip_notes(const Project& project) {
+    const auto& content = project.find_sequence(kDenseSequence)
+                              ->find_track(kDenseTrack)
+                              ->find_clip(kDenseClip)
+                              ->content();
+    return std::get<MidiContent>(content).notes();
+}
+
+/// One whole-content replacement that raises the pitch of the clip's last note,
+/// chaining the optimistic gate: each call expects what the previous one wrote.
+ReplaceNoteContent raise_last_note(std::vector<NoteEvent>& current) {
+    const std::vector<NoteEvent> expected = current;
+    current.back().pitch = static_cast<std::uint8_t>(current.back().pitch + 1);
+    return ReplaceNoteContent{kDenseSequence, kDenseTrack, kDenseClip, expected, current};
+}
+
+/// What one such edit charges the undo budget: the forward command and the
+/// inverse the reducer derives, exactly as DocumentSession accounts for it.
+std::size_t dense_edit_undo_charge() {
+    auto notes = dense_notes();
+    const std::array<Command, 1> forward{Command{raise_last_note(notes)}};
+    return 2 * retained_size(std::span<const Command>{forward});
+}
+
+/// Limits that make the budget arithmetic explicit rather than inherited: the
+/// journal is set wide enough that it never decides the outcome, so the undo
+/// budget is the only ceiling either case below can reach.
+SessionLimits dense_note_limits(std::size_t undo_bytes) {
+    SessionLimits limits;
+    limits.undo.max_retained_bytes = undo_bytes;
+    limits.journal.max_retained_bytes = 256 * 1024 * 1024;
+    limits.journal.max_transactions = 4096;
+    limits.journal.max_commands = 8192;
+    return limits;
+}
+
+} // namespace
+
+// A whole-content note replacement is charged heavily, which is why a per-frame
+// drag over a large clip cannot be expressed as a stream of them. That ceiling
+// is a property of an OPEN gesture group rather than of the command: only closed
+// groups are evictable, and a Single-phase edit closes on admission. So the same
+// command that cannot carry a drag can carry any number of commit-on-release
+// edits, and the document they produce survives a save and reopen.
+//
+// This case and the one after it run the same command at the same size against
+// the same budget and must reach OPPOSITE outcomes. Either asserted alone would
+// pass against a session with no budget at all.
+TEST_CASE("Commit-on-release note edits evict closed groups and outlive the undo budget") {
+    // Four edits of headroom, so eviction is the only way past the fourth.
+    auto session = std::move(DocumentSession::create(make_dense_note_project(),
+                                                     dense_note_limits(4 * dense_edit_undo_charge())))
+                       .value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto edited = dense_notes();
+    for (std::size_t index = 0; index < kDenseEditCount; ++index) {
+        auto tx = session_transaction(writer, session->revision(), {raise_last_note(edited)});
+        tx.gesture_phase = GesturePhase::Single;
+        INFO("edit index " << index);
+        REQUIRE(session->submit(writer, std::move(tx)));
+    }
+
+    const auto snapshot = session->snapshot();
+    const auto notes = dense_clip_notes(*snapshot);
+    REQUIRE(notes.size() == kDenseNoteCount);
+    REQUIRE(notes.back().pitch == kEditedLastPitch);
+
+    // The edits must survive the boundary a user's file crosses, with the values
+    // themselves checked: a count survives a document that lost every edit.
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto written = serialize_project(*snapshot, registry.value());
+    REQUIRE(written);
+    auto reopened = deserialize_project(written->json, registry.value());
+    REQUIRE(reopened);
+
+    const auto restored = dense_clip_notes(reopened.value());
+    REQUIRE(restored.size() == kDenseNoteCount);
+    CHECK(restored.back().id == notes.back().id);
+    CHECK(restored.back().pitch == kEditedLastPitch);
+    CHECK(restored.back().start == notes.back().start);
+    CHECK(restored.back().duration == notes.back().duration);
+    CHECK(restored.back().velocity == notes.back().velocity);
+    // The edit changed one note; every other note must have crossed unchanged,
+    // which a check on the edited note alone cannot see.
+    const auto original = dense_notes();
+    for (std::size_t index = 0; index + 1 < kDenseNoteCount; ++index) {
+        INFO("note index " << index);
+        CHECK(restored[index].id == original[index].id);
+        CHECK(restored[index].pitch == original[index].pitch);
+        CHECK(restored[index].start == original[index].start);
+        CHECK(restored[index].duration == original[index].duration);
+    }
+}
+
+// The control for the case above: the same command, the same size, the same
+// budget, kept inside one open gesture group. Nothing is evictable while the
+// group stays open, so the budget is reached and the session refuses. If this
+// case ever stopped rejecting, the case above would no longer be evidence.
+TEST_CASE("The same note edits inside one open gesture exhaust the undo budget") {
+    auto session = std::move(DocumentSession::create(make_dense_note_project(),
+                                                     dense_note_limits(4 * dense_edit_undo_charge())))
+                       .value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto group = writer.allocate_undo_group_id();
+
+    auto edited = dense_notes();
+    auto begin = session_transaction(writer, session->revision(), {raise_last_note(edited)});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(session->submit(writer, std::move(begin)));
+
+    std::optional<std::size_t> rejected_at;
+    for (std::size_t index = 0; index < kDenseEditCount && !rejected_at; ++index) {
+        auto tx = session_transaction(writer, session->revision(), {raise_last_note(edited)});
+        tx.undo_group = group;
+        tx.gesture_phase = GesturePhase::Update;
+        const auto committed = session->submit(writer, std::move(tx));
+        if (!committed) {
+            CHECK(committed.error().code == ConflictCode::UndoFull);
+            rejected_at = index;
+        }
+    }
+    REQUIRE(rejected_at);
+    // Reached on budget, not on the loop running out: a rejection at the final
+    // index would be indistinguishable from the loop simply ending.
+    CHECK(*rejected_at < kDenseEditCount - 1);
+    // The refusal is atomic — the open gesture's earlier edits are still there.
+    const auto snapshot = session->snapshot();
+    CHECK(dense_clip_notes(*snapshot).back().pitch > kInitialLastPitch);
 }

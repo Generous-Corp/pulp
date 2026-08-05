@@ -46,7 +46,11 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
 
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
-Pulp's `darwin-x64` release leg is native on GitHub's `macos-15-intel` (slow, nightly-gated). For an interactive "does the Intel build still work?" check, an **Apple-Silicon host cross-compiles x86_64 and runs it under Rosetta 2** — no Intel Mac, and nothing installed on the host.
+Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
+runs under Rosetta 2**. It prefers the dedicated `pulp-build-vm-release` Tart
+pool through `PULP_RELEASE_MACOS_RUNS_ON_JSON`; the native Intel Mac Mini stays
+in the separate advisory/nightly portability lane. The same cross-build recipe
+is available interactively when you need an exact local proof.
 
 - **Golden:** `pulp-intel-build:latest`, baked from `.shipyard/vm-image.intel.toml`. `base = pulp-build-runner:latest` (inherits Xcode + cmake/ninja + baked arm64 Skia) + the Intel layer (`[toolchain].rust` + `rust_targets=["x86_64-apple-darwin"]` + `rosetta`). Do NOT re-declare Xcode in the Intel manifest — it's inherited (re-declaring triggers a multi-hour Xcode re-provision).
   ```

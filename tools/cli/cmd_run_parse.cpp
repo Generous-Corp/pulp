@@ -6,8 +6,8 @@
 
 #include "cmd_run.hpp"
 
-#include <charconv>
 #include <algorithm>
+#include <charconv>
 #include <string>
 #include <system_error>
 
@@ -124,6 +124,48 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
         }
         if (a == "--watch") {
             r.watch = true;
+            continue;
+        }
+        if (a == "--inspect") {
+            r.inspector_profile = "develop";
+            continue;
+        }
+        if (a.rfind("--inspect=", 0) == 0) {
+            r.inspector_profile = a.substr(std::string("--inspect=").size());
+            if (r.inspector_profile != "off" && r.inspector_profile != "observe"
+                && r.inspector_profile != "develop" && r.inspector_profile != "custom") {
+                r.error = "--inspect profile must be off, observe, develop, or custom";
+                return r;
+            }
+            continue;
+        }
+        if (a == "--inspect-capability") {
+            if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-') {
+                r.error = "--inspect-capability requires a capability id";
+                return r;
+            }
+            if (args[i + 1].find(',') != std::string::npos) {
+                r.error = "--inspect-capability must name exactly one capability";
+                return r;
+            }
+            r.inspector_capabilities.push_back(args[++i]);
+            continue;
+        }
+        if (a.rfind("--inspect-capability=", 0) == 0) {
+            auto capability = a.substr(std::string("--inspect-capability=").size());
+            if (capability.empty()) {
+                r.error = "--inspect-capability= requires a capability id";
+                return r;
+            }
+            if (capability.find(',') != std::string::npos) {
+                r.error = "--inspect-capability must name exactly one capability";
+                return r;
+            }
+            r.inspector_capabilities.push_back(std::move(capability));
+            continue;
+        }
+        if (a == "--inspect-runtime-eval") {
+            r.inspector_runtime_eval = true;
             continue;
         }
         if (a == "--audio-inspector") {
@@ -391,6 +433,36 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     if (audio_capture_rolling_format_option_seen && r.audio_capture_rolling_path.empty()) {
         r.error = "--audio-capture-rolling-format requires --audio-capture-rolling";
     }
+    if (!r.inspector_capabilities.empty() && r.inspector_profile != "custom") {
+        r.error = "--inspect-capability requires --inspect=custom";
+    }
+    if (r.inspector_profile == "custom" && r.inspector_capabilities.empty()) {
+        r.error = "--inspect=custom requires at least one --inspect-capability";
+    }
+    const auto has_inspector_capability = [&r](std::string_view capability) {
+        return std::find(r.inspector_capabilities.begin(),
+                         r.inspector_capabilities.end(), capability)
+            != r.inspector_capabilities.end();
+    };
+    if (r.inspector_profile == "custom"
+        && (has_inspector_capability("state.write")
+            || has_inspector_capability("authoring.tweaks")
+            || has_inspector_capability("runtime.eval"))
+        && !has_inspector_capability("session.control")) {
+        r.error = "custom inspector mutation capabilities require session.control";
+    }
+    if (r.inspector_profile == "custom"
+        && has_inspector_capability("runtime.eval")
+        && !r.inspector_runtime_eval) {
+        r.error = "runtime.eval requires the separate --inspect-runtime-eval acknowledgement";
+    }
+    if (r.inspector_runtime_eval
+        && r.inspector_profile != "develop"
+        && !(r.inspector_profile == "custom"
+             && has_inspector_capability("runtime.eval"))) {
+        r.error = "--inspect-runtime-eval requires --inspect=develop or a custom "
+                  "runtime.eval capability";
+    }
 
     return r;
 }
@@ -407,6 +479,9 @@ std::vector<std::string> assemble_launch_args(const ParseRunResult& opts) {
     if (opts.frames != 1) {
         out.push_back("--frames");
         out.push_back(std::to_string(opts.frames));
+    }
+    if (opts.inspector_runtime_eval) {
+        out.push_back("--inspect-runtime-eval");
     }
     if (opts.audio_inspector) {
         out.push_back("--audio-inspector");

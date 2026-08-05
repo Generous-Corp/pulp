@@ -2,6 +2,7 @@
 
 #include <pulp/runtime/result.hpp>
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/utf8.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -281,12 +282,6 @@ runtime::Result<std::string, PersistenceError> canonicalize_json(const JsonValue
 /// @param value Unquoted bytes to escape.
 /// @return A quoted JSON string token.
 std::string quote_json_string(std::string_view value);
-/// Validates a complete byte sequence as UTF-8.
-///
-/// @param value Bytes to validate.
-/// @return Whether the complete sequence is valid UTF-8.
-bool is_valid_utf8(std::string_view value) noexcept;
-
 /// Parses a canonical decimal unsigned integer stored as a JSON string.
 ///
 /// Leading zeroes, signs, non-digits, and overflow are rejected.

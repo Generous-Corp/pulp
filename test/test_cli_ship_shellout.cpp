@@ -160,6 +160,19 @@ fs::path make_fake_bundle(const fs::path& root,
     return bundle;
 }
 
+void make_fake_standalone_app(const fs::path& app,
+                              std::string_view executable_name) {
+    fs::create_directories(app / "Contents" / "MacOS");
+    {
+        std::ofstream plist(app / "Contents" / "Info.plist");
+        plist << "<plist><dict><key>CFBundleExecutable</key><string>"
+              << executable_name << "</string></dict></plist>\n";
+    }
+    std::ofstream executable(app / "Contents" / "MacOS"
+                             / std::string(executable_name));
+    executable << "ordinary standalone fixture\n";
+}
+
 void write_ship_config(const fs::path& home, std::string_view text) {
     fs::create_directories(home);
     std::ofstream config(home / "config.toml");
@@ -1369,9 +1382,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     // A standalone .app under build/Standalone is packaged to a .dmg by the
     // package stage; release collects THAT dmg as the distributable.
     auto app = root / "build" / "Standalone" / "PulpDemo.app";
-    fs::create_directories(app / "Contents");
-    { std::ofstream out(app / "Contents" / "Info.plist");
-      out << "<plist><dict></dict></plist>\n"; }
+    make_fake_standalone_app(app, "PulpDemo");
 
     // --skip-sign leaves the dmg unsigned. The signature guard must skip it
     // rather than submit an unsigned image to notarytool: never route an
@@ -1437,9 +1448,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("share-dry-app", true);
     auto app = root / "Cube.app";
-    fs::create_directories(app / "Contents");
-    { std::ofstream out(app / "Contents" / "Info.plist");
-      out << "<plist><dict></dict></plist>\n"; }
+    make_fake_standalone_app(app, "Cube");
 
     auto r = run_pulp_in(root,
         {"ship", "share", app.string(), "--dry-run"});
@@ -1482,9 +1491,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("share-no-identity", true);
     auto app = root / "Cube.app";
-    fs::create_directories(app / "Contents");
-    { std::ofstream out(app / "Contents" / "Info.plist");
-      out << "<plist><dict></dict></plist>\n"; }
+    make_fake_standalone_app(app, "Cube");
 
     // Real run (not --dry-run), no identity resolvable (fixture isolation).
     auto r = run_pulp_in(root, {"ship", "share", app.string()});

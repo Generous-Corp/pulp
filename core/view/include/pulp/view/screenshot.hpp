@@ -63,6 +63,16 @@ bool render_to_file(
 // The captured PNG is gated by the content floor (analyze_screenshot_content):
 // a blank / clear-only frame sets ok=false with a reason. `png` may still be
 // populated when !ok so callers can save it for debugging.
+struct CaptureRequirements {
+    View* native_overlay = nullptr;  ///< First OS-composited overlay owner, if any.
+    bool requires_gpu = false;       ///< True when any node needs a GPU host.
+};
+
+/// Inspect the tree once for requirements shared by capture routing and
+/// capability admission. Host adapters should consume this instead of growing
+/// parallel native-overlay/GPU scans that can drift from capture_view().
+CaptureRequirements inspect_capture_requirements(View& root);
+
 struct CaptureResult {
     std::vector<uint8_t> png;
     bool ok = false;
@@ -92,6 +102,23 @@ std::vector<uint8_t> render_to_png_gpu(
 // True when render_to_png_gpu can produce frames in this build (GPU backend
 // compiled in). Lets capture_view fall back honestly when GPU is unavailable.
 bool has_gpu_capture();
+
+// True when capture_view() has an in-process producer available in this build:
+// a platform-native raster backend, portable Skia/GPU capture, or a registered
+// ScreenshotProvider whose output this build can decode for the mandatory
+// blank/content floor. This is a capability probe only; an individual capture
+// can still fail (for example, an unavailable GPU device or a blank frame).
+bool has_screenshot_backend();
+
+/// True when this build can decode PNG pixels for the mandatory capture
+/// content floor. A host-provided encoded back buffer is not an honest capture
+/// capability without this validator.
+bool has_screenshot_decoder();
+
+/// Apply the same deliberately lenient "did anything paint?" floor used by
+/// capture_view(). Host back-buffer adapters should use this before accepting
+/// an encoded frame so a valid but clear-only PNG can fall back or fail closed.
+bool passes_capture_content_floor(const std::vector<uint8_t>& png);
 
 // Raw-RGBA sibling of render_to_png: render a view tree headlessly and hand
 // back the decoded pixel buffer instead of PNG bytes — for callers that want
