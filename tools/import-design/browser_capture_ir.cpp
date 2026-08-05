@@ -649,6 +649,25 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double logical_width = number_member(reference, "logical_width");
     const double logical_height = number_member(reference, "logical_height");
     const double dpr = number_member(reference, "device_scale_factor");
+    // Where the authored frame sits INSIDE the captured image, in CSS px. The
+    // capture is deliberately larger than the design -- the root carries its
+    // own padding and the harness grows the extent so drop shadows and
+    // absolutely positioned decoration survive -- so the two pictures are not
+    // in correspondence until one is cropped to this rect.
+    //
+    // The member is null on a capture that could not resolve the frame, and
+    // null is not a zero offset: object_member hands back an empty view for a
+    // null, which reads as absent, and absent must reach the consumer's refusal
+    // path rather than becoming an origin of (0,0).
+    const auto authored_frame = object_member(reference, "authored_frame");
+    const double authored_frame_width =
+        number_member(authored_frame, "width", 0.0);
+    const double authored_frame_height =
+        number_member(authored_frame, "height", 0.0);
+    const bool has_authored_frame =
+        std::isfinite(authored_frame_width) &&
+        std::isfinite(authored_frame_height) &&
+        authored_frame_width > 0.0 && authored_frame_height > 0.0;
     // The panel's own bounds, which the capture already measures. The document
     // is the VIEWPORT plus whatever room the overhang needed, so using it as
     // the root opens a plugin far larger than its design with dead space
@@ -1108,6 +1127,32 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
             number_member(semantics, "unresolved_count", 0.0)));
     ir.root.attributes["browser_device_scale_factor"] =
         std::to_string(dpr);
+    // Carry the registration rect onto the root so a consumer holding only the
+    // IR can put its render and the reference over the same pixels. Recorded in
+    // CSS px next to the DPR that scales them, so the envelope keeps one device
+    // scale and there is no second copy to drift from it.
+    //
+    // The primary surface is the same rect measured a different way, and it is
+    // what this root's own geometry was derived from just above -- so a capture
+    // that predates reference.authored_frame still registers, instead of the
+    // consumer refusing every panel captured before the field existed.
+    const auto record_authored_frame =
+        [&ir](double x, double y, double width, double height) {
+            ir.root.attributes["browser_authored_frame_x"] = std::to_string(x);
+            ir.root.attributes["browser_authored_frame_y"] = std::to_string(y);
+            ir.root.attributes["browser_authored_frame_width"] =
+                std::to_string(width);
+            ir.root.attributes["browser_authored_frame_height"] =
+                std::to_string(height);
+        };
+    if (has_authored_frame) {
+        record_authored_frame(number_member(authored_frame, "x", 0.0),
+                              number_member(authored_frame, "y", 0.0),
+                              authored_frame_width, authored_frame_height);
+    } else if (crop_to_surface) {
+        record_authored_frame(surface_left, surface_top, surface_width,
+                              surface_height);
+    }
 
     result.reference_png = *reference_png;
     result.semantic_report = *semantic_report;

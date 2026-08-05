@@ -4686,6 +4686,45 @@ Reject importer output that targets earlier SDK versions for canvas-heavy design
 
 Always pixel-sample after rendering — visual inspection misses uniform-fallback bugs. A spectrum that renders "uniform light gray" instead of "rainbow gradient" looks roughly right at thumbnail scale but is structurally broken (every color stop resolved to white by the parseColor fallback). Sample horizontal cross-sections at the expected gradient axis and assert color variance > some threshold.
 
+**A similarity number is only `1 - differing/total` when the two images are the
+same size.** `compare_screenshots` scores the top-left OVERLAP
+(`min(w) x min(h)`) and then multiplies the result by how much of the images
+that overlap covers, so unequal extents produce a percentage that contradicts
+the differing-pixel count printed beside it. A 200x120 page captured on a
+1280x800 viewport printed `Similarity: 2% (114/96000 pixels differ)` — 99.88%
+identical, scaled by 0.0234. Never quote that percentage without checking that
+the two images have the same dimensions.
+
+**The browser capture is deliberately LARGER than the design, so it must be
+registered before it is scored.** The panel's root carries its own padding and
+`capture.mjs` grows the extent so drop shadows and absolutely positioned
+decoration are not clipped; shrinking the image would clip the very shadows the
+growth exists to preserve. `capture.json` records where the design sits inside
+the image as `reference.authored_frame` (CSS px; `provenance.viewport.document.
+primary_surface` is the same box), and the importer crops to it, scaled by
+`browser_device_scale_factor`, in `resolve_reference_registration`.
+
+Three things about that rect are easy to get wrong:
+
+- **The inset is not symmetric.** kelvin's is 120 CSS px on the left and top and
+  zero on the right and bottom. A centred guess scored a visually-close panel as
+  73% different, and two phantom "renderer defects" — a caret measured nine times
+  too tall, advances measured an eighth of a pixel short per glyph — were both
+  this offset misread as pixel error.
+- **`authored_frame` can be null, and null is not a zero offset.** It means the
+  capture could not resolve its frame, so the comparison must REFUSE rather than
+  register at the origin. `object_member` yields an empty view for a null, which
+  reads as absent and reaches the refusal path.
+- **A fractional CSS height rounds independently on the two sides.** lattice's
+  frame is `1006.703125` CSS px -> 2013 device px, while its render is 2014,
+  because the root's height rounds up before it is doubled. The registration
+  snaps a one-pixel disagreement to the render and refuses anything larger.
+
+`crop_png` **CLAMPS** a rect that overruns its image — it returns a smaller
+picture with no error — so always compare the registered reference's extent
+against the render's after cropping. A silently clamped crop is the same
+misregistration wearing a correct-looking rect.
+
 ### 8. Pointer events need explicit `registerPointer(id)` AND don't bubble
 
 **Spec:** `addEventListener('pointerdown', fn)` plus React synthetic-event bubbling: a click on a child reaches the parent's handler unless `stopPropagation` is called.
