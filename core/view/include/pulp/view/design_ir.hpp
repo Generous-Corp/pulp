@@ -7,6 +7,7 @@
 /// shared by every design-import source adapter.
 
 #include <pulp/view/theme.hpp>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -261,7 +262,11 @@ enum class AudioWidgetType {
     // track with N labelled segments and exactly one lit. Not N adjacent
     // toggles — a row of independent switches can show two lit at once and
     // reads as several controls that happen to touch.
-    selector
+    selector,
+    // A count the player reads as a number — voices, octaves, retrigger. A
+    // knob can carry one, and reads badly doing it: the value that matters is
+    // the integer, and a dial asks the eye to infer it from an angle.
+    stepper
 };
 
 /// The value a segmented selector writes for segment `index` of `count`, and
@@ -276,6 +281,29 @@ inline float selector_segment_value(int index, int count) {
     if (count <= 1) return 0.0f;
     const int clamped = index < 0 ? 0 : (index >= count ? count - 1 : index);
     return static_cast<float>(clamped) / static_cast<float>(count - 1);
+}
+
+/// A stepper's plain value (voices, octaves) against the normalized parameter
+/// behind it. Stated here for the same reason the selector's mapping is: the
+/// script emitter, the bridge's host-to-widget push and every native host
+/// binder have to agree, and a stepper that reads one mapping while the store
+/// writes another shows a number nobody chose.
+inline float stepper_normalized_value(double plain, double min, double max) {
+    if (max <= min) return 0.0f;
+    const double span = max - min;
+    const double clamped = plain < min ? min : (plain > max ? max : plain);
+    return static_cast<float>((clamped - min) / span);
+}
+
+inline double stepper_plain_value(float normalized, double min, double max,
+                                  double step) {
+    if (max <= min) return min;
+    const double raw = min + static_cast<double>(normalized) * (max - min);
+    if (step <= 0.0) return raw;
+    // Snap to the step GRID measured from `min`, so a range that does not start
+    // at zero still lands on the values the author declared.
+    const double snapped = min + std::round((raw - min) / step) * step;
+    return snapped < min ? min : (snapped > max ? max : snapped);
 }
 
 inline int selector_segment_index(float value, int count) {

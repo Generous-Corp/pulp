@@ -467,6 +467,10 @@ int lower_semantic_controls(const fs::path& path,
         // suggests.
         else if (kind == "select" || kind == "tab")
             widget = pulp::view::AudioWidgetType::selector;
+        // A count the player reads as a number. A knob can carry one and reads
+        // badly doing it: the value that matters is the integer, and a dial
+        // asks the eye to infer it from an angle.
+        else if (kind == "stepper") widget = pulp::view::AudioWidgetType::stepper;
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
@@ -574,6 +578,24 @@ int lower_semantic_controls(const fs::path& path,
             const auto choices = string_member(data, "choices");
             if (choices.empty()) continue;
             control.attributes["pulpChoices"] = choices;
+        }
+        // A stepper's grid is DECLARED, because nothing about the element's
+        // geometry implies it: a voices control counting 1..8 and an octave
+        // control spanning -2..+2 are the same box. Without a declared range
+        // the widget keeps its own default and shows a number the patch never
+        // had, so an undeclared stepper stays part of the backdrop.
+        if (widget == pulp::view::AudioWidgetType::stepper) {
+            const auto min = string_member(data, "min");
+            const auto max = string_member(data, "max");
+            if (min.empty() || max.empty()) continue;
+            try {
+                control.audio_min = std::stof(min);
+                control.audio_max = std::stof(max);
+            } catch (const std::exception&) { continue; }
+            if (!(control.audio_max > control.audio_min)) continue;
+            control.has_audio_range = true;
+            const auto step = string_member(data, "step");
+            control.attributes["pulpStep"] = step.empty() ? "1" : step;
         }
         control.style.position = "absolute";
         control.style.left =

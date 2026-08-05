@@ -37,6 +37,7 @@ namespace pulp::view {
 class View;
 class Checkbox;
 class SegmentedControl;
+class Stepper;
 class Knob;
 class Fader;
 class Meter;
@@ -147,6 +148,16 @@ struct NativeImportSegmentedBindingDescriptor {
     std::string_view binding_module;
     std::string_view binding_param;
     int segment_count = 0;
+};
+
+struct NativeImportStepperBindingDescriptor {
+    std::string_view route_id;
+    std::string_view param_key;
+    std::string_view binding_module;
+    std::string_view binding_param;
+    double min = 0.0;
+    double max = 1.0;
+    double step = 1.0;
 };
 
 struct NativeImportXYPadBindingDescriptor {
@@ -267,6 +278,16 @@ public:
     virtual void bind_segmented(SegmentedControl& segmented,
                                 const NativeImportSegmentedBindingDescriptor& descriptor) {
         (void)segmented;
+        (void)descriptor;
+    }
+    /// A stepper. Its range and grid travel with the binding because the
+    /// widget reports a PLAIN value (7 voices) while the parameter behind it is
+    /// normalized. Use stepper_normalized_value() / stepper_plain_value()
+    /// (design_ir.hpp) for both directions rather than restating the
+    /// arithmetic.
+    virtual void bind_stepper(Stepper& stepper,
+                              const NativeImportStepperBindingDescriptor& descriptor) {
+        (void)stepper;
         (void)descriptor;
     }
     virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {

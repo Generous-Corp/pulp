@@ -1719,12 +1719,37 @@ in step — the factory (`factory_api.cpp`), the tag map (`web-compat-element.js
 works while the tag path builds a real, clickable control whose changes reach
 nothing; the emitted script is identical either way.
 
+The bindable vocabulary, and what is still NOT in it. Keep this list honest —
+the authoring brief is written against it, and a brief that promises more than
+this produces controls that render, drag, and move nothing:
+
+| Component | Binds | Notes |
+|---|---|---|
+| `pulp-knob` | ✅ | continuous |
+| `pulp-fader` | ✅ | continuous, drawn as a throw |
+| `pulp-switch` / `pulp-check` | ✅ | on/off; `data-pulp-value` sets the opening state |
+| `pulp-select` (segmented) | ✅ | `data-pulp-choices="A|B|C"`, pipe separated |
+| `pulp-stepper` | ✅ | a count; `data-pulp-min` / `-max` / `-step` are REQUIRED |
+| `pulp-meter` | display | shows a macro; drives nothing, and does not bind on the exported native path at all (needs `pulpMeterSource` + `pulpMeterChannel`, which nothing emits) |
+| `pulp-combo`, `pulp-tab`, `pulp-radio`, `pulp-numbox` | ❌ | recognised by the capture, dropped by the lowering — drawn faithfully, wired to nothing |
+
+Everything outside that table is DECORATION, and decoration is most of a good
+panel: a step grid, a transport readout, a patch list, LED pips, a routing
+diagram. Draw it — just never put `data-pulp-param` or `data-pulp-meter` on it.
+
 A SELECTOR is one control with a shared track, never N adjacent toggles: a row
 of independent switches can show two lit at once, and even when it does not it
 reads as several controls that happen to touch. The value a segment writes is a
 function of the segment COUNT, so both directions go through
 `selector_segment_value()` / `selector_segment_index()` (design_ir.hpp) rather
-than a restated formula — and the script emitter bakes those numbers at `%.9g`,
+than a restated formula — and a STEPPER does the same through
+`stepper_normalized_value()` / `stepper_plain_value()`, because it reports the
+PLAIN number it shows while the parameter behind it is normalized. Its declared
+range must reach the widget (`setMin`/`setMax`), or it keeps its own -24..24
+default and a voice count reads as an octave offset. Note the asymmetry that
+caught a regression: `setValue`/`getValue` on a Stepper have always meant the
+PLAIN number, and changing them to normalized breaks callers — only the
+parameter PUSH (`apply_param_binding`) converts — and the script emitter bakes those numbers at `%.9g`,
 because a truncated literal still selects the right segment and is no longer
 the value a native host would have written for it.
 

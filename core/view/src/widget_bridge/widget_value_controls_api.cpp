@@ -83,6 +83,12 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 0);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_min(static_cast<float>(v));
+        // A stepper's range is the grid its plain value lives on, and both
+        // emitters already declare it through setMin/setMax; without this the
+        // widget keeps its -24..24 default and a voice count reads as an
+        // octave offset.
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_range(v, st->maximum());
         return choc::value::Value();
     });
 
@@ -91,6 +97,8 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
         auto v = args.get<double>(1, 1);
         if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_max(static_cast<float>(v));
+        else if (auto* st = dynamic_cast<Stepper*>(self.widget(id)))
+            st->set_range(st->minimum(), v);
         return choc::value::Value();
     });
 

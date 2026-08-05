@@ -14,6 +14,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/designed_control_painter.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
@@ -249,6 +250,18 @@ bool bind_imported_view(View& view,
         ctx.bind_checkbox(*checkbox, scalar_descriptor(md));
         return true;
     }
+    if (auto* stepper = dynamic_cast<Stepper*>(&view); stepper && has_text(md.param_key)) {
+        ctx.bind_stepper(*stepper,
+                         NativeImportStepperBindingDescriptor{
+                             .route_id = text_or_empty(md.route_id),
+                             .param_key = text_or_empty(md.param_key),
+                             .binding_module = text_or_empty(md.binding_module),
+                             .binding_param = text_or_empty(md.binding_param),
+                             .min = stepper->minimum(),
+                             .max = stepper->maximum(),
+                             .step = stepper->step()});
+        return true;
+    }
     if (auto* segmented = dynamic_cast<SegmentedControl*>(&view);
         segmented && has_text(md.param_key)) {
         ctx.bind_segmented(*segmented,
@@ -348,6 +361,8 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
     if (dynamic_cast<Checkbox*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<SegmentedControl*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<Stepper*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
@@ -456,6 +471,7 @@ std::optional<NativeWidgetKind> kind_from_audio(AudioWidgetType audio_widget) {
         case AudioWidgetType::spectrum: return NativeWidgetKind::spectrum;
         case AudioWidgetType::toggle: return NativeWidgetKind::toggle_button;
         case AudioWidgetType::selector: return NativeWidgetKind::segmented;
+        case AudioWidgetType::stepper: return NativeWidgetKind::stepper;
         case AudioWidgetType::none: break;
     }
     return std::nullopt;
@@ -1982,6 +1998,15 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             checkbox->set_checked(semantics.checked);
             return checkbox;
         }
+        case NativeWidgetKind::stepper: {
+            auto stepper = std::make_unique<Stepper>();
+            stepper->set_range(node.audio_min, node.audio_max);
+            stepper->set_step(semantics.stepper_step);
+            stepper->set_value(stepper_plain_value(semantics.normalized_value,
+                                                   node.audio_min, node.audio_max,
+                                                   semantics.stepper_step));
+            return stepper;
+        }
         case NativeWidgetKind::segmented: {
             // ONE control with a shared track, not a row of adjacent toggles.
             // A row of independent switches can show two lit at once, and even
@@ -2378,6 +2403,7 @@ std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& 
 
 bool is_interactive_native_kind(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::stepper:
         case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
@@ -2405,6 +2431,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
 
 bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::stepper:
         case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
@@ -2489,6 +2516,7 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::segmented: return "segmented";
+        case NativeWidgetKind::stepper: return "stepper";
         case NativeWidgetKind::combo_box: return "combo_box";
         case NativeWidgetKind::knob: return "knob";
         case NativeWidgetKind::fader: return "fader";
@@ -2550,6 +2578,10 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
             else current.push_back(c);
         }
         out.segments.push_back(current);
+    }
+    if (const auto step = attr(node, "pulpStep"); step && !step->empty()) {
+        try { out.stepper_step = std::stod(*step); }
+        catch (const std::exception&) { /* the default grid stands */ }
     }
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");

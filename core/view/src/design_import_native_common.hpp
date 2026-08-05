@@ -18,6 +18,7 @@ enum class NativeWidgetKind {
     checkbox,
     toggle_button,
     segmented,
+    stepper,
     combo_box,
     knob,
     fader,
@@ -68,6 +69,11 @@ struct ImportedWidgetSemantics {
     // author knows which children are segments, and a scrape turns a caption
     // or a badge inside the control into a fifth choice.
     std::vector<std::string> segments;
+
+    // A stepper's grid, declared by the author. 1 is the count case (voices,
+    // octaves) and the only sensible default; a fractional grid has to be
+    // stated because nothing about the range implies it.
+    double stepper_step = 1.0;
 
     float normalized_value = 0.5f;
     float normalized_default = 0.5f;

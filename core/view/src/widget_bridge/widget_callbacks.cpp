@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include "bridge_dispatch.hpp"
 
 #include <pulp/view/ui_components.hpp>
@@ -65,6 +66,17 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
         r->on_change = [alive, engine, id](float v) {
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
+        };
+    } else if (auto* st = dynamic_cast<Stepper*>(w)) {
+        // Mirror createStepper's inline `change` wiring, and bracket the edit
+        // with a gesture: a stepper nudge is instantaneous, so without one the
+        // declarative binding re-asserts the store value over the click on the
+        // next frame. The payload is the PLAIN value the widget shows.
+        wire_parameter_gestures(id, w);
+        st->on_change = [this, alive, engine, id](double v) {
+            begin_param_gesture(id);
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
+            end_param_gesture(id);
         };
     } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
         // Mirror createSegmented's inline wiring so a `<segmented>` tag routed

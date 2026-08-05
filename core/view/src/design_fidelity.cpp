@@ -109,6 +109,8 @@ std::optional<FidelityIssue> check_widget_intrinsic_size(const FidelityContext& 
             case AudioWidgetType::toggle:   return {36.0f, 20.0f};
             // A track wide enough for two readable segments.
             case AudioWidgetType::selector: return {120.0f, 24.0f};
+            // Room for the value plus its two nudge zones.
+            case AudioWidgetType::stepper:  return {64.0f, 24.0f};
             default:                        return {0.0f, 0.0f};
         }
     };

@@ -44,6 +44,7 @@ AudioWidgetType audio_widget_kind_from_manifest_id(const std::string& id) {
     if (lower == "toggle" || lower == "switch") return AudioWidgetType::toggle;
     if (lower == "selector" || lower == "select" || lower == "segmented")
         return AudioWidgetType::selector;
+    if (lower == "stepper") return AudioWidgetType::stepper;
     return AudioWidgetType::none;
 }
 
@@ -57,6 +58,7 @@ const char* audio_widget_kind_to_manifest_id(AudioWidgetType kind) {
         case AudioWidgetType::spectrum: return "spectrum";
         case AudioWidgetType::toggle:   return "toggle";
         case AudioWidgetType::selector: return "selector";
+        case AudioWidgetType::stepper:  return "stepper";
         case AudioWidgetType::none:     return "none";
     }
     return "none";

@@ -616,6 +616,7 @@ AudioWidgetType audio_widget_from_id(const std::string& id) {
     if (lower == "toggle" || lower == "switch") return AudioWidgetType::toggle;
     if (lower == "selector" || lower == "select" || lower == "segmented")
         return AudioWidgetType::selector;
+    if (lower == "stepper") return AudioWidgetType::stepper;
     return AudioWidgetType::none;
 }
 

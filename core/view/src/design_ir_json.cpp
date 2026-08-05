@@ -1868,6 +1868,7 @@ static const char* audio_widget_id(AudioWidgetType type) {
         case AudioWidgetType::spectrum: return "spectrum";
         case AudioWidgetType::toggle:   return "toggle";
         case AudioWidgetType::selector: return "selector";
+        case AudioWidgetType::stepper:  return "stepper";
     }
     return "none";
 }

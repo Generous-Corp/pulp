@@ -129,6 +129,7 @@ static const char* audio_widget_web_tag(AudioWidgetType t) {
         case AudioWidgetType::spectrum: return "spectrum";
         case AudioWidgetType::toggle:   return "toggle";
         case AudioWidgetType::selector: return "segmented";
+        case AudioWidgetType::stepper:  return "stepper";
         default: return nullptr;
     }
 }
@@ -143,6 +144,7 @@ static const char* audio_widget_type_name(AudioWidgetType t) {
         case AudioWidgetType::spectrum: return "SpectrumView";
         case AudioWidgetType::toggle:   return "Toggle";
         case AudioWidgetType::selector: return "SegmentedControl";
+        case AudioWidgetType::stepper:  return "Stepper";
         default: return nullptr;
     }
 }
@@ -290,6 +292,15 @@ static void emit_js_param_binding(std::ostringstream& ss, const std::string& ind
             ss << ind << "bindWidgetToParam(" << id_expr << ", '" << escaped << "');\n";
             ss << ind << "on(" << id_expr << ", 'toggle', function (v) { setParam('"
                << escaped << "', v ? 1 : 0); });\n";
+            return;
+        case AudioWidgetType::stepper:
+            // A stepper reports the PLAIN number it shows, so the write back
+            // normalizes it against the range the panel declared. Emitting the
+            // raw value would write 7 into a 0..1 parameter and pin it.
+            ss << ind << "bindWidgetToParam(" << id_expr << ", '" << escaped << "');\n";
+            ss << ind << "on(" << id_expr << ", 'change', function (v) { setParam('"
+               << escaped << "', (v - (" << node.audio_min << ")) / ("
+               << (node.audio_max - node.audio_min) << ")); });\n";
             return;
         case AudioWidgetType::selector: {
             // A selector reports `select` with the segment INDEX, so the write
@@ -1696,7 +1707,27 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << id << "', 'width', " << sz << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << sz << ");\n";
     }
-    else if (wtype == AudioWidgetType::selector) {
+    else if (wtype == AudioWidgetType::stepper) {
+        const float w = std::max(node.style.width.value_or(72.0f), 64.0f);
+        const float h = std::max(node.style.height.value_or(28.0f), 24.0f);
+        ss << ind << "setFlex('" << col_id << "', 'height', " << (h + 20) << ");\n";
+        fid_w = w; fid_h = h;  // emitted widget dims (fidelity)
+        ss << ind << "createStepper('" << id << "', '" << col_id << "');\n";
+        ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+        ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+        ss << ind << "setMin('" << id << "', " << node.audio_min << ");\n";
+        ss << ind << "setMax('" << id << "', " << node.audio_max << ");\n";
+        if (!label_text.empty()) {
+            const std::string lbl_id = id + "_lbl";
+            ss << ind << "createLabel('" << lbl_id << "', '"
+               << js_single_quote_escape(label_text) << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << lbl_id << "', 'height', " << kMinLabelHeight << ");\n";
+            ss << ind << "setFontSize('" << lbl_id << "', 11);\n";
+            ss << ind << "setTextColor('" << lbl_id << "', '#a6adc8');\n";
+            ss << ind << "setTextAlign('" << lbl_id << "', 'center');\n";
+        }
+    }
+        else if (wtype == AudioWidgetType::selector) {
         const auto labels = selector_segments(node);
         const float w = std::max(node.style.width.value_or(160.0f), 80.0f);
         const float h = std::max(node.style.height.value_or(28.0f), 20.0f);

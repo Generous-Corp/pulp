@@ -71,6 +71,7 @@ var __widgetTagFactory__ = {
     fader:    function(id) { createFader(id, "vertical", ""); },
     toggle:   function(id) { createToggle(id, ""); },
     segmented: function(id) { createSegmented(id, ""); },
+    stepper:  function(id) { createStepper(id, ""); },
     combo:    function(id) { createCombo(id, ""); },
     checkbox: function(id) { createCheckbox(id, ""); },
     spectrum: function(id) { createSpectrum(id, ""); },

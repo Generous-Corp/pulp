@@ -18,6 +18,7 @@
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
@@ -98,6 +99,17 @@ T* find_widget(View& view) {
 class StoreBindingContext final : public NativeImportBindingContext {
 public:
     explicit StoreBindingContext(pulp::state::StateStore& store) : store_(store) {}
+
+    void bind_stepper(Stepper& stepper,
+                      const NativeImportStepperBindingDescriptor& d) override {
+        const auto id = id_for(d.param_key);
+        if (id == 0) return;
+        const double min = d.min, max = d.max, step = d.step;
+        stepper.set_value(stepper_plain_value(store_.get_value(id), min, max, step));
+        stepper.on_change = [this, id, min, max](double plain) {
+            store_.set_value(id, stepper_normalized_value(plain, min, max));
+        };
+    }
 
     void bind_segmented(SegmentedControl& segmented,
                         const NativeImportSegmentedBindingDescriptor& d) override {
@@ -341,5 +353,94 @@ TEST_CASE("a selector drives its parameter through both script emitters",
         INFO("after segment 1: " << store.get_value(1));
         CHECK(store.get_value(1) == selector_segment_value(1, 4));
         CHECK(segmented->selected() == 1);
+    }
+}
+
+namespace {
+
+/// A voice-count stepper: 1..8 on a grid of 1, which is the control the
+/// original request asked for and the one a knob reads worst.
+DesignIR panel_with_a_stepper(const std::string& param) {
+    auto ir = panel_with_one_control(AudioWidgetType::stepper, param);
+    auto& control = ir.root.children.front();
+    control.style.width = 80.0f;
+    control.style.height = 28.0f;
+    control.audio_min = 1.0f;
+    control.audio_max = 8.0f;
+    control.has_audio_range = true;
+    control.attributes["pulpStep"] = "1";
+    return ir;
+}
+
+}  // namespace
+
+TEST_CASE("a stepper writes the parameter behind the number it shows",
+          "[view][import][native-materializer][binding][stepper]") {
+    const auto ir = panel_with_a_stepper("sync");
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, 240.0f, 120.0f});
+    root->layout_children();
+
+    auto* stepper = find_widget<Stepper>(*root);
+    REQUIRE(stepper != nullptr);
+    REQUIRE(stepper->minimum() == 1.0);
+    REQUIRE(stepper->maximum() == 8.0);
+
+    pulp::state::StateStore store;
+    add_sync_param(store);
+    StoreBindingContext ctx{store};
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) INFO(d.code << ": " << d.message);
+    CHECK(diagnostics.empty());
+
+    // The widget shows a COUNT and the parameter behind it is normalized, so
+    // the assertion is on the mapping, not merely on movement: 8 voices is the
+    // top of the range, 1 voice is the bottom.
+    stepper->set_value(8.0);
+    CHECK(store.get_value(1) == 1.0f);
+    stepper->set_value(1.0);
+    CHECK(store.get_value(1) == 0.0f);
+    stepper->set_value(5.0);
+    CHECK(store.get_value(1) == stepper_normalized_value(5.0, 1.0, 8.0));
+}
+
+TEST_CASE("a stepper drives its parameter through both script emitters",
+          "[view][import][codegen][binding][stepper]") {
+    const auto ir = panel_with_a_stepper("sync");
+
+    for (const auto mode : {CodeGenMode::web_compat, CodeGenMode::bridge_native_js}) {
+        CodeGenOptions options;
+        options.mode = mode;
+        options.include_comments = false;
+        const auto js = generate_pulp_js(ir, options);
+
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0.0f, 0.0f, 240.0f, 120.0f});
+        root.set_theme(Theme::dark());
+        pulp::state::StateStore store;
+        add_sync_param(store);
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script(js);
+        root.layout_children();
+
+        INFO("mode=" << (mode == CodeGenMode::web_compat ? "web_compat"
+                                                         : "bridge_native_js"));
+        INFO("emitted script:\n" << js);
+        auto* stepper = find_widget<Stepper>(root);
+        REQUIRE(stepper != nullptr);
+        // The declared range has to reach the widget, or the number it shows is
+        // off its own default grid rather than the patch's.
+        REQUIRE(stepper->minimum() == 1.0);
+        REQUIRE(stepper->maximum() == 8.0);
+
+        stepper->set_value(8.0);
+        INFO("after 8 voices: " << store.get_value(1));
+        CHECK(store.get_value(1) == 1.0f);
+        stepper->set_value(5.0);
+        CHECK(store.get_value(1) == stepper_normalized_value(5.0, 1.0, 8.0));
     }
 }

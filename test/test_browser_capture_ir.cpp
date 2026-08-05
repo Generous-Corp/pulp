@@ -2188,3 +2188,59 @@ TEST_CASE("a bound selector lowers with the segments its author declared",
     REQUIRE(direction.attributes.at("pulpParamKey") == "shape");
     REQUIRE(direction.stable_anchor_id);
 }
+
+TEST_CASE("a bound stepper lowers with the grid its author declared",
+          "[import][browser-capture][semantics][stepper]") {
+    // A count is the control the original request asked for ("voice number
+    // parameter") and the one a knob reads worst. Its range is DECLARED
+    // because nothing about the element implies it: a voices control counting
+    // 1..8 and an octave control spanning -2..+2 are the same box.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"stepper","binding_status":"bound","name":"voices",
+         "bounds":{"left":24,"top":40,"width":80,"height":28},
+         "data_pulp":{"param":"voices","min":"1","max":"8","step":"1"}},
+        {"kind":"stepper","binding_status":"bound","name":"ungridded",
+         "bounds":{"left":24,"top":90,"width":80,"height":28},
+         "data_pulp":{"param":"nothing"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> steppers;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::stepper)
+                steppers.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    // The second declared no range, so it would show a number off the widget's
+    // own default grid rather than the patch's; it stays part of the backdrop.
+    REQUIRE(steppers.size() == 1);
+    const auto& voices = *steppers.front();
+    REQUIRE(voices.audio_min == 1.0f);
+    REQUIRE(voices.audio_max == 8.0f);
+    REQUIRE(voices.attributes.at("pulpStep") == "1");
+    REQUIRE(voices.attributes.at("pulpParamKey") == "voices");
+}

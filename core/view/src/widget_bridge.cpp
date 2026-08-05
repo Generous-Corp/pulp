@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"
 #include "widget_bridge/bridge_dispatch.hpp"
@@ -781,6 +782,8 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<Toggle>();
     } else if (tag == "segmented") {
         w = std::make_unique<SegmentedControl>();
+    } else if (tag == "stepper") {
+        w = std::make_unique<Stepper>();
     } else if (tag == "combo" || tag == "select") {
         w = std::make_unique<ComboBox>();
     } else if (tag == "checkbox") {

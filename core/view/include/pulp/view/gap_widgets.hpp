@@ -99,6 +99,12 @@ public:
     double value() const { return value_; }
     void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
     void set_step(double s) { step_ = s; }
+    // Readable because a binder has to convert between this widget's PLAIN
+    // value and the normalized parameter behind it, and the grid it was
+    // configured with is the only honest source for that conversion.
+    double minimum() const { return min_; }
+    double maximum() const { return max_; }
+    double step() const { return step_; }
     void set_suffix(std::string s) { suffix_ = std::move(s); }
     bool is_editing() const { return editing_; }
     /// Which −/+ zone is currently hovered / pressed (0 = minus, 1 = plus,
