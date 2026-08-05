@@ -1401,7 +1401,8 @@ tools/scripts/clean_build_cov.sh          # dry-run: list + total reclaimable
 tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flight build)
 ```
 
-It only ever removes dirs literally named `build-cov` / `build-coverage` (never
+It only ever removes dirs named `build-cov` / `build-coverage` or their
+hyphen-suffixed variants such as `build-cov-phase6-gpu` (never
 a source tree or the primary `build/`), scans sibling worktrees by default
 (override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.

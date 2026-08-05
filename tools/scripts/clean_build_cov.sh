@@ -10,7 +10,8 @@
 # not). This script reclaims them.
 #
 # Safe by construction:
-#   - Only ever removes directories literally named `build-cov` / `build-coverage`
+#   - Only ever removes `build-cov` / `build-coverage` or a hyphen-suffixed
+#     variant (for example `build-cov-phase6-gpu`).
 #     (coverage scratch; never a source tree or the primary `build/`).
 #   - Idle-gated: skips a directory whose worktree has an active build process
 #     (cmake / ctest / ninja / a clang compile) so an in-flight coverage run is
@@ -83,7 +84,10 @@ while IFS= read -r dir; do
     else
         echo "  would remove ${human}	${dir}"
     fi
-done < <(find "${ROOT}" -maxdepth 2 \( -name build-cov -o -name build-coverage \) -type d -prune 2>/dev/null)
+done < <(find "${ROOT}" -maxdepth 2 \( \
+    -name build-cov -o -name 'build-cov-*' -o \
+    -name build-coverage -o -name 'build-coverage-*' \
+\) -type d -prune 2>/dev/null)
 
 total_gb="$(awk -v kb="${total_kb}" 'BEGIN{printf "%.1f", kb/1024/1024}')"
 echo

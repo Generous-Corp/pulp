@@ -6,6 +6,7 @@
 #   ./setup.sh              # Interactive setup
 #   ./setup.sh --ci         # Non-interactive (CI/automation)
 #   ./setup.sh --deps-only  # Bootstrap dependencies without configuring/building
+#   ./setup.sh --non-interactive # Never prompt or install system packages
 #   ./setup.sh --dry-run    # Show what would be done without doing it
 
 set -e
@@ -16,6 +17,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=false
 CI_MODE=false
 DEPS_ONLY=false
+NON_INTERACTIVE=false
 ERRORS=0
 
 for arg in "$@"; do
@@ -23,12 +25,14 @@ for arg in "$@"; do
         --dry-run) DRY_RUN=true ;;
         --ci)      CI_MODE=true ;;
         --deps-only) DEPS_ONLY=true ;;
+        --non-interactive) NON_INTERACTIVE=true ;;
         --help|-h)
-            echo "Usage: ./setup.sh [--ci] [--deps-only] [--dry-run]"
+            echo "Usage: ./setup.sh [--ci] [--deps-only] [--non-interactive] [--dry-run]"
             echo ""
             echo "Options:"
-            echo "  --ci        Non-interactive mode for CI/automation"
+            echo "  --ci        Non-interactive CI mode; validates host tools and provisions Skia/LFS"
             echo "  --deps-only Bootstrap external dependencies and stop before configure/build"
+            echo "  --non-interactive Never prompt or install missing system packages"
             echo "  --dry-run   Show what would be done without doing it"
             exit 0
             ;;
@@ -95,6 +99,7 @@ prepend_path_if_dir() {
 }
 
 prompt_yn() {
+    if $NON_INTERACTIVE; then return 1; fi
     if $CI_MODE; then return 0; fi
     local prompt="$1 [Y/n] "
     read -r -p "$prompt" response
@@ -102,6 +107,20 @@ prompt_yn() {
         [nN]*) return 1 ;;
         *) return 0 ;;
     esac
+}
+
+dependency_bootstrap_error_count() {
+    echo $((ERRORS - DEPENDENCY_ERRORS_START))
+}
+
+dependency_bootstrap_exit_error_count() {
+    if $CI_MODE; then
+        # CI uses --deps-only as both dependency materialization and host
+        # admission, so compiler/CMake/LFS failures must remain fatal.
+        echo "$ERRORS"
+    else
+        dependency_bootstrap_error_count
+    fi
 }
 
 skia_has_lfs_pointer() {
@@ -491,7 +510,18 @@ ensure_shared_git_source_with_retry() {
             # Scrub any partial target so the next attempt sees a clean
             # state. Mirrors retry_git_clone's per-attempt cleanup.
             if [ -e "$target" ]; then
-                rm -rf "$target"
+                # Never remove a checkout that has reached the requested
+                # commit: another worktree may already compile through it.
+                # A failed submodule/network update is retried in place. A
+                # checkout is discarded only when its own tracked files are
+                # incomplete; a complete cache may already be in active use.
+                if [ -d "$target/.git" ] \
+                    && git -C "$target" cat-file -e "${ref}^{commit}" 2>/dev/null \
+                    && git_worktree_is_complete "$target"; then
+                    warn "$label cache reached $ref; retaining it for other worktrees during retry"
+                else
+                    rm -rf "$target"
+                fi
             fi
             # Best-effort lock release in case the inner subshell exited
             # before its EXIT trap fired (e.g. SIGKILL / 127).
@@ -533,7 +563,11 @@ git_partial_clone_filter() {
 # the `submodule update` below runs, so a re-pin legitimately leaves them
 # reported as modified. Only the repo's own blobs are in question here.
 git_worktree_is_complete() {
-    [ -z "$(git -C "$1" status --porcelain --ignore-submodules=all 2>/dev/null)" ]
+    # Completeness means every tracked file exists. Do not equate it with a
+    # clean tree: an older live worktree may still have modified or untracked
+    # files in a legacy shared cache, and retry cleanup must never delete that
+    # cache merely because it is dirty.
+    [ -z "$(git -C "$1" ls-files --deleted 2>/dev/null)" ]
 }
 
 ensure_shared_git_source() {
@@ -681,6 +715,14 @@ if [ "$PLATFORM" = "Linux" ]; then
     # path before dependency checks so direct setup.sh and doctor agree.
     prepend_path_if_dir "$HOME/.local/bin"
 fi
+
+# `pulp build` uses --deps-only as a narrow, non-interactive source-cache
+# bootstrap. Compiler, CMake, LFS, and hook audits belong to full setup and can
+# require unrelated tools or network access, so do not run them in that mode.
+# CI's existing `--ci --deps-only` contract is intentionally broader: host
+# admission and validation lanes depend on these checks and on Skia/LFS
+# materialization before they register or configure a fresh checkout.
+if ! $DEPS_ONLY || $CI_MODE; then
 
 # ── Check: C++20 compiler ───────────────────────────────────────────────────
 
@@ -849,15 +891,22 @@ if [ -x "$REPO_ROOT/tools/scripts/install-githooks.sh" ]; then
     }
 fi
 
+fi # full environment audit (full setup, or CI --deps-only host admission)
+
 # ── Check: External SDKs ───────────────────────────────────────────────────
 
 step "Setting up external SDKs"
 
+# `--deps-only` is consumed by `pulp build`, so unrelated environment audit
+# findings (for example missing lcov or git-lfs when the checkout has no LFS
+# pointers) must not turn a successful dependency provision into a build
+# failure. Track only errors raised by the provisioning block below.
+DEPENDENCY_ERRORS_START=$ERRORS
 FETCHCONTENT_CACHE_ROOT="$(fetchcontent_cache_root)"
 info "Shared FetchContent source cache: $FETCHCONTENT_CACHE_ROOT"
 
-ensure_shared_git_source_with_retry "CHOC" "https://github.com/Tracktion/choc.git" \
-    "f0f5cdf5a938b8b779fea6c083571cce5ccab925" "$(fetchcontent_cache_dir_name "choc" "f0f5cdf5a938b8b779fea6c083571cce5ccab925")"
+ensure_shared_git_source_with_retry "CHOC" "https://github.com/danielraffel/choc.git" \
+    "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60" "$(fetchcontent_cache_dir_name "choc" "df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60")"
 
 ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
     "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"
@@ -875,7 +924,7 @@ ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.gi
     "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
 
 ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
-    "1.2.2" "$(fetchcontent_cache_dir_name "clap" "1.2.2")"
+    "1.2.9" "$(fetchcontent_cache_dir_name "clap" "1.2.9")"
 
 ensure_shared_git_source_with_retry "LV2" "https://github.com/lv2/lv2.git" \
     "v1.18.10" "$(fetchcontent_cache_dir_name "lv2" "v1.18.10")"
@@ -924,6 +973,24 @@ if [ "$PLATFORM" = "macOS" ]; then
         "$AU_SDK_REF" "$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
     AU_DIR="$REPO_ROOT/external/AudioUnitSDK"
     reuse_shared_git_source "AudioUnitSDK" "$AU_SHARED_DIR" "$AU_DIR" "include/AudioUnitSDK/AUBase.h"
+fi
+
+if $DEPS_ONLY; then
+    DEPENDENCY_ERRORS="$(dependency_bootstrap_exit_error_count)"
+    if [ "$DEPENDENCY_ERRORS" -gt 0 ]; then
+        echo ""
+        echo "Dependency bootstrap found $DEPENDENCY_ERRORS issue(s)."
+        exit 1
+    fi
+    if $DRY_RUN; then
+        echo ""
+        echo "Dependency bootstrap dry run complete. No changes were made."
+        exit 0
+    fi
+    step "Dependency bootstrap complete"
+    echo ""
+    echo "  Dependencies are ready. Skipping configure/build because --deps-only was requested."
+    exit 0
 fi
 
 # Linux: check ALSA dev headers
@@ -989,13 +1056,6 @@ if $DRY_RUN; then
     echo ""
     echo "Dry run complete. No changes were made."
     echo "Run ./setup.sh without --dry-run to execute."
-    exit 0
-fi
-
-if $DEPS_ONLY; then
-    step "Dependency bootstrap complete"
-    echo ""
-    echo "  Dependencies are ready. Skipping configure/build because --deps-only was requested."
     exit 0
 fi
 

@@ -104,6 +104,16 @@ option(PULP_REQUIRE_GPU_FOR_SDK
         Set ON in .github/workflows/release-cli.yml to prevent silently \
         shipping CG-only SDKs."
        OFF)
+# Source-checkout safety net. `pulp build` enables this after provisioning the
+# checkout's pinned shared dependencies. It prevents a cold first configure
+# from silently disabling plug-in formats when the shared-cache symlinks have
+# not been created yet. Direct CMake consumers remain opt-in; as with any CMake
+# option, direct CMake consumers can explicitly select a reduced checkout with
+# `-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF`; `pulp build` always enables the
+# safety gate for source checkouts.
+option(PULP_REQUIRE_CHECKOUT_DEPENDENCIES
+       "Fail configure when source-checkout VST3 or platform AudioUnit SDK dependencies are missing."
+       OFF)
 # Tier-0 Intel canary. When ON, a sub-second static lint runs at configure
 # time and FAILS the configure on any of five cross-arch (x86_64) portability
 # regressions (raw NEON outside a guard, ARM-gated SIMD with no x86 fallback,

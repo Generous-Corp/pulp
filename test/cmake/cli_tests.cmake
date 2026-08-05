@@ -275,6 +275,28 @@ target_link_libraries(pulp-test-cli-shell-quote PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-shell-quote)
 
+add_executable(pulp-test-cli-checkout-dependencies
+    test_cli_checkout_dependencies.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
+target_include_directories(pulp-test-cli-checkout-dependencies PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-checkout-dependencies PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-checkout-dependencies)
+
 add_executable(pulp-test-cli-tartci-lease
     test_cli_tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp

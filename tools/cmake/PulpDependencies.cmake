@@ -29,6 +29,9 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 #     GIT_TAG        <upstream merge commit>   (was f0f5cdf5a938b8b779fea6c083571cce5ccab925)
 # and update tools/deps/manifest.json + DEPENDENCIES.md back to Tracktion/choc.
 pulp_register_fetchcontent_source(choc REF df148a41a6bc9cbd67727532c4d5c9d8aa6d5d60)
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake" _pulp_choc_patch_key)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "${_pulp_choc_patch_key}")
+unset(_pulp_choc_patch_key)
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/danielraffel/choc.git
@@ -784,4 +787,37 @@ if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
 else()
     set(PULP_HAS_AUSDK FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
+endif()
+
+# `pulp build` sets this for source-tree configures after running the checkout
+# dependency bootstrap. Keep the enforcement next to the feature detection so
+# a successful configure is proof that the expected formats are present, not
+# merely proof that CMake tolerated a missing symlink.
+if(PULP_MACOS)
+    set(_pulp_checkout_requires_ausdk TRUE)
+else()
+    set(_pulp_checkout_requires_ausdk FALSE)
+endif()
+set(PULP_CHECKOUT_REQUIRES_AUSDK ${_pulp_checkout_requires_ausdk} CACHE INTERNAL
+    "Whether this configured target requires AudioUnitSDK checkout dependencies" FORCE)
+unset(_pulp_checkout_requires_ausdk)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tools/deps/shared-source-contract.txt"
+    _pulp_checkout_dependency_contract)
+string(STRIP "${_pulp_checkout_dependency_contract}" _pulp_checkout_dependency_contract)
+set(PULP_CHECKOUT_DEPENDENCY_CONTRACT "${_pulp_checkout_dependency_contract}" CACHE INTERNAL
+    "Pinned shared-source contract used for this configure" FORCE)
+unset(_pulp_checkout_dependency_contract)
+if(PULP_REQUIRE_CHECKOUT_DEPENDENCIES)
+    if(NOT PULP_HAS_VST3)
+        message(FATAL_ERROR
+            "PULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON but the pinned VST3 SDK was not found at "
+            "${VST3_SDK_DIR}. Run ./setup.sh --deps-only and reconfigure. An intentional reduced "
+            "direct-CMake build (not pulp build) may explicitly set PULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF.")
+    endif()
+    if(PULP_MACOS AND NOT PULP_HAS_AUSDK)
+        message(FATAL_ERROR
+            "PULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON but the pinned AudioUnitSDK was not found at "
+            "${AUSDK_DIR}. Run ./setup.sh --deps-only and reconfigure. An intentional reduced "
+            "direct-CMake build (not pulp build) may explicitly set PULP_REQUIRE_CHECKOUT_DEPENDENCIES=OFF.")
+    endif()
 endif()
