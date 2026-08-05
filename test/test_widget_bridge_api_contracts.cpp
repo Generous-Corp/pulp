@@ -102,43 +102,71 @@ const std::set<std::string>& allowed_kinds() {
     return kinds;
 }
 
-std::vector<ManifestEntry> read_manifest(const std::filesystem::path& path) {
+/// A parsed manifest, plus whether its header was where it belongs.
+///
+/// `header_ok` is REPORTED rather than asserted inside the parser, and that is
+/// the whole point. This check used to be a fatal `REQUIRE` here, so a manifest
+/// whose header had moved ended the entire TEST_CASE at its first assertion:
+/// the category allowlist, the duplicate-name scan and the registrar
+/// cross-check below never ran, and stayed silent rather than red. That is not
+/// hypothetical — sorting the manifest alphabetically swept the header row out
+/// of line 4, and five rows carrying a category that is not in the allowlist
+/// shipped behind the mask.
+///
+/// So a displaced header is now one loud, local failure, and every row is still
+/// parsed and still checked.
+struct Manifest {
+    std::vector<ManifestEntry> entries;
+    bool header_ok = false;
+    int first_row_line = 0;
+};
+
+Manifest read_manifest(const std::filesystem::path& path) {
     INFO("Reading manifest: " << path);
     std::ifstream in(path);
     REQUIRE(in.good());
 
-    std::vector<ManifestEntry> out;
+    Manifest result;
     std::string line;
     int line_number = 0;
-    bool saw_header = false;
+    bool examined_first_row = false;
     while (std::getline(in, line)) {
         ++line_number;
         const auto cleaned = trim(line);
         if (cleaned.empty() || starts_with(cleaned, "#"))
             continue;
 
-        const auto fields = split_fields(cleaned);
-        if (!saw_header) {
+        auto fields = split_fields(cleaned);
+        if (!examined_first_row) {
             // The `jsx` column (5th) is optional per-row but declared in the
-            // header so the schema is self-documenting (pulp #3656 follow-up).
-            const std::vector<std::string> expected_header =
+            // header so the schema is self-documenting.
+            static const std::vector<std::string> expected_header =
                 {"name", "category", "kind", "source", "jsx"};
-            INFO("Invalid WidgetBridge API manifest header at line " << line_number);
-            REQUIRE(fields == expected_header);
-            saw_header = true;
-            continue;
+            examined_first_row = true;
+            result.first_row_line = line_number;
+            if (fields == expected_header) {
+                result.header_ok = true;
+                continue;               // consume the header row
+            }
+            // Not the header. Fall through and treat it as data, so the rest of
+            // the file is still checked; the caller reports the missing header.
         }
 
+        // 4 fields = no jsx tag; 5 = with the optional @pulp/react tag. Checked
+        // per row, and non-fatally for the same reason as the header: one bad
+        // row should not cancel the checks covering every other row.
         INFO("Invalid WidgetBridge API manifest row at line " << line_number << ": " << line);
-        // 4 fields = no jsx tag; 5 = with the optional @pulp/react tag.
-        REQUIRE((fields.size() == 4 || fields.size() == 5));
-        out.push_back({fields[0], fields[1], fields[2], fields[3],
-                       fields.size() == 5 ? fields[4] : std::string{}, line_number});
+        CHECK((fields.size() == 4 || fields.size() == 5));
+        if (fields.size() != 4 && fields.size() != 5) {
+            result.entries.push_back({cleaned, "", "", "", "", line_number});
+            continue;
+        }
+        result.entries.push_back({fields[0], fields[1], fields[2], fields[3],
+                                  fields.size() == 5 ? fields[4] : std::string{}, line_number});
     }
 
-    REQUIRE(saw_header);
-    REQUIRE_FALSE(out.empty());
-    return out;
+    REQUIRE_FALSE(result.entries.empty());
+    return result;
 }
 
 std::string relative_source_path(const std::filesystem::path& repo_root,
@@ -224,7 +252,13 @@ TEST_CASE("WidgetBridge JS native API manifest matches registrar sources",
     const auto repo_root = std::filesystem::path(PULP_REPO_ROOT);
     const auto manifest_path = repo_root / "core/view/src/widget_bridge_api_manifest.tsv";
 
-    const auto manifest = read_manifest(manifest_path);
+    const auto parsed = read_manifest(manifest_path);
+    // Non-fatal on purpose: a displaced header must not cancel the checks below.
+    INFO("The manifest's `name category kind source jsx` header must be the first "
+         "non-comment line; found something else at line " << parsed.first_row_line);
+    CHECK(parsed.header_ok);
+    const auto& manifest = parsed.entries;
+
     const auto source_paths = bridge_registrar_sources(repo_root);
 
     std::set<std::string> scanned_sources;
@@ -343,4 +377,85 @@ TEST_CASE("WidgetBridge JS native API manifest matches registrar sources",
 
     INFO("WidgetBridge API manifest mismatches:\n" << manifest_mismatches.str());
     REQUIRE(manifest_mismatches.str().empty());
+}
+
+// A displaced header must fail LOUDLY and LOCALLY, without cancelling the
+// checks behind it.
+//
+// The regression this pins is not "the header moved" — it is that the header
+// check used to be a fatal assertion inside the parser, so moving the header
+// ended the whole test case at its first check. Every later check, including
+// the category allowlist, then passed by never running, and a category that is
+// not in the allowlist reached main behind that mask.
+//
+// So the property under test is the one that was actually missing: when the
+// header is wrong, the parser still returns EVERY row, so the allowlist still
+// has something to judge.
+TEST_CASE("WidgetBridge manifest parsing survives a displaced header",
+          "[view][widget-bridge][api-contract]") {
+    const auto dir = std::filesystem::temp_directory_path()
+                   / "pulp-widget-bridge-manifest-contract";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "displaced_header.tsv";
+
+    // The exact shape of the real defect: sorted alphabetically, so the header
+    // is no longer the first non-comment line but is still present, and a row
+    // carrying a bogus category sits behind it.
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "# WidgetBridge native JS API manifest.\n"
+            << "__cancelFrame__\truntime\tfunction\tcore/view/src/widget_bridge/runtime_api.cpp\n"
+            << "name\tcategory\tkind\tsource\tjsx\n"
+            << "setToggleOn\tnot_a_real_category\tfunction\tcore/view/src/widget_bridge/x.cpp\n";
+    }
+
+    const auto parsed = read_manifest(path);
+
+    CHECK_FALSE(parsed.header_ok);
+    CHECK(parsed.first_row_line == 2);
+
+    // The point of the fix: parsing did not stop, so every row still reaches
+    // the allowlist. Three rows, because the displaced header is now read as
+    // data too — which is itself detectable, rather than silently fatal.
+    REQUIRE(parsed.entries.size() == 3);
+    const auto has = [&parsed](std::string_view name) {
+        return std::any_of(parsed.entries.begin(), parsed.entries.end(),
+                           [name](const ManifestEntry& e) { return e.name == name; });
+    };
+    CHECK(has("__cancelFrame__"));
+    CHECK(has("setToggleOn"));
+    CHECK(has("name"));
+
+    // And the bogus category is visible to a caller rather than masked.
+    const auto bad = std::find_if(parsed.entries.begin(), parsed.entries.end(),
+                                  [](const ManifestEntry& e) { return e.name == "setToggleOn"; });
+    REQUIRE(bad != parsed.entries.end());
+    CHECK(bad->category == "not_a_real_category");
+    CHECK_FALSE(allowed_categories().count(bad->category) > 0);
+
+    std::filesystem::remove_all(dir);
+}
+
+// A well-formed header still reads as one, and is still consumed rather than
+// returned as a row.
+TEST_CASE("WidgetBridge manifest parsing accepts a well-formed header",
+          "[view][widget-bridge][api-contract]") {
+    const auto dir = std::filesystem::temp_directory_path()
+                   / "pulp-widget-bridge-manifest-contract-ok";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "good_header.tsv";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "# comment\n"
+            << "name\tcategory\tkind\tsource\tjsx\n"
+            << "setValue\twidget_value\tfunction\tcore/view/src/widget_bridge/y.cpp\n";
+    }
+
+    const auto parsed = read_manifest(path);
+
+    CHECK(parsed.header_ok);
+    REQUIRE(parsed.entries.size() == 1);
+    CHECK(parsed.entries.front().name == "setValue");
+
+    std::filesystem::remove_all(dir);
 }
