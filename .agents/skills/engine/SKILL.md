@@ -626,3 +626,51 @@ When `WidgetBridge` evaluates user JS via `eval_or_throw`, the catch chain re-th
 ### The web-compat preludes are engine-agnostic — a green V8/macOS test does NOT prove the JSC/iOS path
 
 The `web-compat-*.js` mocks (`web-compat-document-gpu-mock.js` etc.) are loaded identically under QuickJS, JSC, and V8 — so a *logic* bug in a mock behaves the same on every engine, but the surrounding native path may not. A WebGPU-mock `writeBuffer` bug (treating a TypedArray `dataOffset`/`size` as bytes instead of element counts) can pass the macOS V8 headless smoke because that lane does a one-shot Skia **pixel readback**, while the live iOS AUv3 path depends on the presentable swapchain. Two lessons: (1) when you change a `web-compat-*.js` mock, add a focused assertion of the exact code path you touched (the smoke's whole-array `writeBuffer` masked the explicit five-arg element-count form); (2) "green on the V8 headless lane" is necessary but not sufficient for the JSC/iOS live present path — that path must be verified on a device/simulator screenshot, never inferred from the readback test.
+
+### A colour crosses the JS/native boundary as a STRING — resolve CSS Color 4 on the JS side
+
+`web-compat-style-decl-paint.js` hands a gradient to the native side as ONE
+string and the stops are parsed *there*, by a colour parser that does not know
+`oklab()` / `oklch()` / `lab()` / `lch()` / `color()`. An unrecognised function
+name falls back to **white**, so a translucent bloom paints as an opaque white
+blob rather than failing visibly.
+
+This is not an exotic case. Chrome serializes every `color-mix(in oklab, …)` to
+`oklab(…)`, which is the idiom generated panels use for glows, blooms and
+shadows — so the modern-colour path is the *common* path, not the edge. Measured
+on one stop: it rendered `(254,254,254)` where the design asked for `#58f0ff` at
+48%, with `G - R = 0` at every blur radius (a flat grey/white tell, since the
+requested colour is strongly cyan).
+
+`parseCSSColor` on the JS side already resolves all of these correctly, so
+resolve to hex *before* the string crosses over. Do NOT grow a second colour
+parser on the native side: two parsers for one syntax must then be kept in step
+forever, and the failure mode when they drift is a silently wrong colour rather
+than an error.
+
+Two traps worth keeping when writing the rewrite pattern:
+
+* **Exclude nested parens.** These colour forms take plain numeric components,
+  so matching non-greedily without recursion keeps a `calc()` inside a stop
+  *position* from being swallowed by the colour match.
+* **Leave anything unparseable exactly as-is.** The native side may still
+  understand a form the JS parser does not, and a silent rewrite to a wrong
+  colour is worse than passing the original through untouched.
+
+The same boundary explains why `box-shadow` needed a colour-**first** branch:
+CSS allows the colour on either side of the offsets and Chrome serializes it
+first (`oklab(0.97 0.008 -0.014 / 0.18) 0px 1px 0px 0px inset`). Resolve
+function colours to hex *before* any offset split — every offset match divides on
+whitespace, and `oklab(…)` carries both spaces and a slash, which tears the
+colour apart in either ordering.
+
+**Anchor the offsets regex.** Unanchored, it matches *inside* a colour-first
+shadow: given `#f7f3ff2e 0px 1px 3px 0px` it starts at the offsets and takes the
+trailing `0px` as the colour, yielding a shadow that parses "successfully" with
+garbage in it — strictly worse than not matching, because the colour-first branch
+then never runs.
+
+**Do not test this with a round-trip assertion.** Reading `el.style.boxShadow`
+back returns whatever string was assigned whether or not it ever parsed, so a
+round-trip passes against a shadow that never reached the renderer. Export the
+parse helper and assert its decomposition directly.

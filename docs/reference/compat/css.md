@@ -38,6 +38,63 @@ mapping, evidence, and caveat text.
 
 ## Recently changed
 
+- **`backdropFilter` is a filter CHAIN at paint time, not blur-only** —
+  the catalog entry moves from `parses blur(Npx) → setBackdropFilter(id,
+  blur_px)` to `css_filter_chain → View::set_backdrop_filter_chain →
+  Canvas::save_backdrop_filter_chain`. The colour functions
+  (`brightness` / `contrast` / `grayscale` / `hue-rotate` / `invert` /
+  `opacity` / `saturate` / `sepia`) now apply on the Skia backend: the
+  list composes into one `SkImageFilter` installed as the layer's
+  backdrop, cropped to the element's own rect, applied in source order.
+  Blur alone additionally sets `View::set_backdrop_blur`, so the scalar
+  slot keeps working.
+
+  Two limits remain and they are **different in kind**, which is why
+  they are listed separately in `unsupportedValues`:
+  * `drop-shadow(...)` is dropped by the parser — its colour argument
+    needs the full colour parser, and a shadow in the wrong colour is
+    worse than an absent one. `url(#filter)` needs an SVG filter graph.
+  * The **JS/web-compat bridge slot is still scalar**
+    (`setBackdropFilter(id, blur_px)`), so a design that reaches paint
+    through the shim rather than through the native import lane still
+    gets blur only. The lane decides what you get — check which one a
+    panel uses before filing a bug against this row.
+
+  A backend that does not advertise
+  `CanvasCapability::backdrop_filter_chain` keeps the blur, drops the
+  colour half, and says so once through the capability-fallback warning.
+
+- **`content` — `wontfix` is now scoped to THIS lane, not to Pulp** —
+  the row stays `wontfix` and the reason is unchanged for Pulp's own CSS
+  shim: there is no pseudo-element model, so no `::before` / `::after`
+  box is ever created and `content` has nothing to fill.
+
+  The correction is that the row was reading as a blanket statement. A
+  design arriving through the **browser-capture importer is a different
+  lane and is not covered by this row**: Chrome creates the
+  pseudo-element and resolves `content` (including `counter()` and
+  `attr()`) into ordinary text runs before the snapshot, and lowering
+  reads those runs. So generated content *does* survive that path.
+  `url()` content still does not — it is an image, and the snapshot
+  carries no text for it.
+
+- **CSS Color 4 colours resolve on the JS side before crossing to
+  native** — no catalog status changed, but the paint shim
+  (`web-compat-style-decl-paint.js`) now rewrites `oklab()` / `oklch()` /
+  `lab()` / `lch()` / `color()` inside gradient strings to hex before the
+  string is handed over. The native stop parser does not know those
+  function names and falls back to **white**, so a translucent bloom
+  painted as an opaque white blob. Chrome serializes every
+  `color-mix(in oklab, …)` to `oklab(…)`, so this is the common path for
+  generated panels rather than an edge case.
+
+  `box-shadow` gained a colour-**first** branch in the same change: CSS
+  allows the colour on either side of the offsets and Chrome emits it
+  first, so a computed shadow previously did not match at all and fell
+  through, leaving a card ringed by a bright halo. Full rationale and the
+  two regex traps (anchor the offsets; a round-trip assertion cannot test
+  this) are in the `engine` skill.
+
 - **`resolveCSSLength` everywhere** —
   `core/view/js/web-compat-style-decl.js` swept: 58 `parseCSSLength(...)`
   call sites swapped to `resolveCSSLength(...)`. The new helper is a
