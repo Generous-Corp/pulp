@@ -322,13 +322,14 @@ setTextColor("workflow-status", "#ffffff");
     }
 
     std::atomic<bool> controller_failed{false};
+    std::atomic<bool> controller_stop_requested{false};
     std::optional<pulp::inspect::InspectorDiscoveryRecord> published_record;
-    std::jthread controller([&](std::stop_token stop) {
+    std::thread controller([&] {
         const auto discovery_deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(30);
         pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
         std::vector<pulp::inspect::InspectorDiscoveryRecord> records;
-        while (!stop.stop_requested()
+        while (!controller_stop_requested.load(std::memory_order_acquire)
                && std::chrono::steady_clock::now() < discovery_deadline) {
             records = reader.list();
             std::erase_if(records, [](const auto& record) {
@@ -337,7 +338,7 @@ setTextColor("workflow-status", "#ffffff");
             if (records.size() == 1) break;
             wait_for_external_state_change_poll();
         }
-        if (stop.stop_requested()) return;
+        if (controller_stop_requested.load(std::memory_order_acquire)) return;
         if (records.size() != 1
             || !write_ready_file(ready_path, records.front(), runtime_path)) {
             controller_failed.store(true, std::memory_order_release);
@@ -353,7 +354,7 @@ setTextColor("workflow-status", "#ffffff");
         const auto stop_deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(30);
         bool reload_consumed = false;
-        while (!stop.stop_requested()
+        while (!controller_stop_requested.load(std::memory_order_acquire)
                && (wait_until_stop
                    || std::chrono::steady_clock::now() < stop_deadline)
                && !std::filesystem::exists(stop_path)) {
@@ -373,7 +374,7 @@ setTextColor("workflow-status", "#ffffff");
                 return;
             }
         }
-        if (stop.stop_requested()) return;
+        if (controller_stop_requested.load(std::memory_order_acquire)) return;
         if (!std::filesystem::exists(stop_path))
             controller_failed.store(true, std::memory_order_release);
         request_native_quit();
@@ -399,7 +400,7 @@ setTextColor("workflow-status", "#ffffff");
     app.set_config(config);
 
     const bool ran = app.run_with_editor(/*use_gpu=*/true);
-    controller.request_stop();
+    controller_stop_requested.store(true, std::memory_order_release);
     controller.join();
 
     if (!published_record || !teardown_is_complete(runtime_path, *published_record))

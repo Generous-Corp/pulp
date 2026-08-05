@@ -66,9 +66,11 @@ function(_authoring_case name body expect_success)
     file(WRITE "${_script}"
         "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake\")\n${body}\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -P "${_script}"
-        RESULT_VARIABLE _result OUTPUT_QUIET ERROR_QUIET)
+        RESULT_VARIABLE _result
+        OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
     if(expect_success AND NOT _result EQUAL 0)
-        message(FATAL_ERROR "${name}: valid control authoring was rejected")
+        message(FATAL_ERROR
+            "${name}: valid control authoring was rejected: ${_output}${_error}")
     elseif(NOT expect_success AND _result EQUAL 0)
         message(FATAL_ERROR "${name}: invalid control authoring was accepted")
     endif()

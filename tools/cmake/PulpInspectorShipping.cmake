@@ -1,6 +1,12 @@
 # Declared shipping boundary for the standalone Development Inspector.
 # Availability of optional SDK components never opts a product target in.
 
+# Functions retain the policy state in effect when they are defined. Set the
+# policy used by IN_LIST explicitly so this installed helper also behaves when
+# loaded from cmake -P, where callers may not establish project policies.
+cmake_policy(PUSH)
+cmake_policy(SET CMP0057 NEW)
+
 set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     session.describe
     session.control
@@ -251,3 +257,5 @@ function(_pulp_attach_inspector_shipping target artifact_target)
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_inspector_shipping_artifact.cmake"
         VERBATIM)
 endfunction()
+
+cmake_policy(POP)
