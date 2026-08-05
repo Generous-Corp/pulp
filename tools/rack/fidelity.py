@@ -58,6 +58,11 @@ PROBE_PLUGIN = "ForgeProbe"
 PROBE_MODEL = "PROBE"
 PROBE_INPUTS = 4
 
+# How well a window has to correlate with itself a period later before the
+# reading is called a pitch. Measured on real oscillator output, a held note
+# reaches 0.95 and noise stays under 0.5; two thirds sits clear of both.
+CONFIDENCE = 0.66
+
 # Rack's pitch convention: 0 V is middle C, and a volt is an octave.
 C4_HZ = 261.6255653
 
@@ -298,6 +303,45 @@ def step_values(patch: dict, source_id: int, names: dict
         return [], (f"the patch wrote no step values on {key[0]}/{key[1]}, so "
                     f"there is no written sequence to hold the run against")
     return out, ""
+
+
+def param_ranges(portmap: dict) -> dict:
+    """(plugin, model, index) -> (min, max, name) for every mapped knob."""
+    out = {}
+    for e in (portmap.get("modules") or []):
+        for p in (e.get("params") or []):
+            if "minValue" in p and "maxValue" in p:
+                out[(e.get("plugin"), e.get("model"), p.get("index"))] = (
+                    p["minValue"], p["maxValue"], p.get("name") or "")
+    return out
+
+
+def will_be_clamped(patch: dict, ranges: dict) -> list[str]:
+    """Values the patch writes that the module's own bounds will not accept.
+
+    Reading only, and it needs no Rack: a knob declares its range, and a value
+    outside it is one Rack replaces with the nearest bound as it loads. Nothing
+    reports that -- the patch keeps the number it was written with, the module
+    quietly holds a different one, and the difference only shows up as the
+    patch not doing what it says.
+
+    Cheap enough to run before a launch, so a defect that a run would find in
+    ten seconds is named in none.
+    """
+    out = []
+    for m in (patch.get("modules") or []):
+        for prm in (m.get("params") or []):
+            key = (m.get("plugin"), m.get("model"), prm.get("id"))
+            if key not in ranges:
+                continue
+            lo, hi, name = ranges[key]
+            v = float(prm.get("value", 0.0))
+            if v < lo or v > hi:
+                out.append(f"module {m.get('id')} ({m.get('model')}) "
+                           f"param {prm.get('id')} {name!r}: the patch writes "
+                           f"{v:g}, which the knob's range [{lo:g}, {hi:g}] "
+                           f"will clamp on load")
+    return out
 
 
 def choose_taps(patch: dict, names: dict) -> list[tuple[int, int, str]]:
@@ -571,23 +615,42 @@ def hz_to_volts(hz: float) -> float:
 
 
 def estimate_f0(samples: list[float], rate: float,
-                lo_hz: float = 30.0, hi_hz: float = 4000.0) -> float | None:
+                lo_hz: float = 40.0, hi_hz: float = 3000.0) -> float | None:
     """The fundamental of one window, by autocorrelation. None when unpitched.
 
     Decimated first, because the lag search is the expensive part and pitch
-    does not need audio bandwidth: at 8 kHz the whole range above fits in
+    does not need audio bandwidth: at 8 kHz the whole musical range fits in
     lags a plain loop can walk.
 
-    Returns None rather than a number when the window is silent or the best
-    lag is not convincing. A pitch detector that always answers turns silence
-    into a note and makes a broken patch look like a playing one -- and that
-    is exactly the failure this whole exercise exists to catch.
+    The search starts AFTER the correlation first goes negative, which is the
+    part that has to be right. Autocorrelation is near 1 at a lag of nothing
+    and falls away from there, so the largest value in the whole curve is
+    usually the smallest lag rather than the period -- and the smallest lag
+    the search can see is the top of its frequency range. That produced a
+    confident 8.9 kHz on two unrelated patches, identical to four decimals,
+    which is the shape of a number that came from the instrument. Skipping the
+    initial descent leaves only real peaks to choose between.
+
+    Among those, the EARLIEST peak within a hair of the best one wins, not the
+    tallest. A waveform correlates with itself at two periods as well as at
+    one, and picking the taller of the two reports an octave down.
+
+    Returns None rather than a number when the window is silent or no peak is
+    convincing. A pitch detector that always answers turns silence into a note
+    and makes a broken patch look like a playing one -- which is exactly the
+    failure this whole exercise exists to catch.
     """
     if not samples or rate <= 0:
         return None
-    target = 8000.0
-    step = max(1, int(rate / target))
-    x = samples[::step]
+    # Averaged down, not sampled down. Taking every fifth sample of a
+    # sawtooth folds everything above the new Nyquist back into the range the
+    # search covers, and the folded copy of a 1 kHz saw correlates better an
+    # octave below it than at its own period -- a plain decimation reported
+    # 1046 Hz as 521. A box average is the cheapest filter that stops it.
+    step = max(1, int(rate / 8000.0))
+    x = ([sum(samples[i:i + step]) / step
+          for i in range(0, len(samples) - step + 1, step)]
+         if step > 1 else list(samples))
     r = rate / step
     n = len(x)
     if n < 64:
@@ -595,39 +658,46 @@ def estimate_f0(samples: list[float], rate: float,
     mean = sum(x) / n
     x = [v - mean for v in x]
     energy = sum(v * v for v in x)
-    # Rack runs at ±5 V; a window whose RMS is under a millivolt is silence,
+    # Rack runs at +-5 V; a window whose RMS is under a millivolt is silence,
     # not a quiet note.
     if math.sqrt(energy / n) < 1e-3:
         return None
 
     min_lag = max(2, int(r / min(hi_hz, r / 2.0)))
-    max_lag = min(n - 2, int(r / lo_hz))
-    if max_lag <= min_lag:
+    max_lag = min(n // 2, int(r / lo_hz))
+    if max_lag <= min_lag + 2:
         return None
-    best_lag, best = 0, 0.0
-    for lag in range(min_lag, max_lag + 1):
-        acc = 0.0
-        for i in range(n - lag):
-            acc += x[i] * x[i + lag]
-        norm = acc / energy
-        if norm > best:
-            best, best_lag = norm, lag
-    if best_lag == 0 or best < 0.5:
+    corr = [sum(x[i] * x[i + lag] for i in range(n - lag)) / energy
+            for lag in range(0, max_lag + 1)]
+
+    first = next((lag for lag in range(min_lag, max_lag + 1)
+                  if corr[lag] < 0.0), None)
+    if first is None:
+        return None                      # never turns over: no period in reach
+    peak = max(range(first, max_lag + 1), key=lambda lag: corr[lag])
+    if corr[peak] < CONFIDENCE:
         return None
+    best = next(lag for lag in range(first, peak + 1)
+                if corr[lag] >= corr[peak] * 0.9
+                and corr[lag] >= corr[lag - 1]
+                and (lag == max_lag or corr[lag] >= corr[lag + 1]))
+
     # Parabolic interpolation around the peak, so a pitch between two integer
     # lags is not reported a quarter-tone out.
-    def corr(lag: int) -> float:
-        if lag < 1 or lag >= n:
-            return 0.0
-        return sum(x[i] * x[i + lag] for i in range(n - lag)) / energy
-    y0, y1, y2 = corr(best_lag - 1), best, corr(best_lag + 1)
+    y0, y1, y2 = corr[best - 1], corr[best], corr[min(best + 1, max_lag)]
     denom = y0 - 2 * y1 + y2
     shift = 0.5 * (y0 - y2) / denom if abs(denom) > 1e-12 else 0.0
-    return r / (best_lag + max(-1.0, min(1.0, shift)))
+    return r / (best + max(-1.0, min(1.0, shift)))
+
+
+# How much signal one reading covers. Small enough that a note half a second
+# long is read many times over, large enough to hold two cycles of anything
+# down to a low bass note.
+WINDOW = 0.06
 
 
 def segment_pitches(samples: list[float], rate: float,
-                    window: float = 0.06) -> list[float | None]:
+                    window: float = WINDOW) -> list[float | None]:
     """The fundamental of each fixed window, in order. None where unpitched."""
     n = max(1, int(window * rate))
     return [estimate_f0(samples[i:i + n], rate)
@@ -668,14 +738,15 @@ def _same(a: float | None, b: float | None, tol: float) -> bool:
     return abs(a - b) <= tol
 
 
-# A reading has to hold for at least this many windows to be called a note.
-# Below it, the reading is a boundary artefact or a mistracked window; above
-# it, dropping a real note would need the note to be shorter than the window
-# grid can resolve, which `heard_notes` reports rather than hides.
+# A reading BETWEEN two other readings has to hold this many windows to be a
+# note rather than the boundary between them. A reading with silence on either
+# side is kept however brief it is: that is a plucked note, and requiring it to
+# hold made an envelope-gated patch -- one that plainly sounds -- read as
+# playing nothing at all, which is the worst answer this harness can give.
 MIN_NOTE_WINDOWS = 2
 
 
-def heard_notes(samples: list[float], rate: float, window: float = 0.06
+def heard_notes(samples: list[float], rate: float, window: float = WINDOW
                 ) -> tuple[list[float], int]:
     """(semitones from middle C, one per note heard; windows discarded).
 
@@ -687,16 +758,20 @@ def heard_notes(samples: list[float], rate: float, window: float = 0.06
     pitched = segment_pitches(samples, rate, window)
     semis = [volts_to_semitones(hz_to_volts(f)) if f else None
              for f in pitched]
+    grouped = runs(semis)
     notes, dropped = [], 0
-    for value, n in runs(semis):
-        if value is not None and n >= MIN_NOTE_WINDOWS:
+    for i, (value, n) in enumerate(grouped):
+        before = grouped[i - 1][0] if i else None
+        after = grouped[i + 1][0] if i + 1 < len(grouped) else None
+        straddle = before is not None and after is not None
+        if value is not None and (n >= MIN_NOTE_WINDOWS or not straddle):
             notes.append(round(value, 2))
         else:
             dropped += n
     return notes, dropped
 
 
-def held_voltages(samples: list[float], rate: float, window: float = 0.06,
+def held_voltages(samples: list[float], rate: float, window: float = WINDOW,
                   tol: float = 0.02) -> list[float]:
     """The voltages a control signal settled on, one per hold, in order.
 
@@ -709,6 +784,21 @@ def held_voltages(samples: list[float], rate: float, window: float = 0.06,
            for i in range(0, max(0, len(samples) - n + 1), n)]
     return [round(v, 4) for v, count in runs(per, tol)
             if v is not None and count >= MIN_NOTE_WINDOWS]
+
+
+# Below this, in volts RMS, a recording is silence rather than a quiet signal.
+# Rack runs at +-5 V, so this is some eighty decibels down.
+SILENCE = 5e-4
+
+
+def rms(samples: list[float]) -> float:
+    if not samples:
+        return 0.0
+    return math.sqrt(sum(v * v for v in samples) / len(samples))
+
+
+def rms_label(level: float) -> str:
+    return "silent" if level < SILENCE else f"{level:.3f} V RMS"
 
 
 def distinct(values: list[float], tol: float = 0.4) -> list[float]:
@@ -734,6 +824,14 @@ def tracking(notes: list[float], volts: list[float]) -> tuple[float | None, str]
     if not notes or not volts:
         return None, ("one of the two taps recorded nothing, so heard pitch "
                       "and asked-for pitch cannot be compared")
+    if len(distinct(volts, STEP_TOLERANCE)) < 2:
+        # A held note tracks any tuning perfectly, because there is no
+        # interval to get wrong. Reporting zero error for it would let a
+        # drone -- the commonest way a melodic patch fails -- pass the one
+        # check that was supposed to catch it.
+        return None, ("the pitch CV never changed, so the oscillator was "
+                      "never asked to move and nothing about its tracking "
+                      "was tested")
     if len(notes) != len(volts):
         return None, (f"the audio tap heard {len(notes)} notes and the CV tap "
                       f"held {len(volts)} values; they do not line up")
@@ -766,6 +864,7 @@ class Verdict:
         self.audible_why = ""                 # why the audible claim is unproven
         self.played_why = ""                  # why the written steps are unproven
         self.dropped = 0
+        self.level = 0.0                      # RMS of the signal that was heard
         self.lines: list[str] = []
 
     @property
@@ -782,8 +881,9 @@ TRACKING_TOLERANCE = 0.25
 
 
 # How far an emitted voltage may sit from the step value that was written.
-# A tenth of a volt is well over a semitone, so this is generous about
-# measurement and still nowhere near letting a defaulted or clamped knob pass.
+# A hundredth of a volt is an eighth of a semitone -- wide enough for a DC
+# reading averaged over a window, and nowhere near wide enough to let a knob
+# sitting at its default pass for one the patch set.
 STEP_TOLERANCE = 0.01
 
 
@@ -820,20 +920,30 @@ def judge(given: dict, got: Run, taps: list[tuple],
     v.lines.append(f"  captured {frames} frames at {rate:g} Hz "
                    f"({frames / rate:.2f}s)")
 
+    # Every tap is reported; the FIRST of each kind is the one judged. A
+    # stereo pair is two taps carrying one melody, and reading the second over
+    # the first would make the verdict depend on which channel was listed last.
     for ch, (src_mod, src_out, kind) in enumerate(taps):
         where = f"  tap {ch} ({kind}, module {src_mod} output {src_out}):"
         if kind == "audio":
-            v.notes, v.dropped = heard_notes(got.frames[ch], rate)
-            v.distinct = distinct(v.notes)
-            v.lines.append(f"{where} {len(v.notes)} notes, "
-                           f"{len(v.distinct)} distinct — {v.distinct} "
-                           f"semitones from middle C "
-                           f"({v.dropped} windows unresolved)")
+            notes, dropped = heard_notes(got.frames[ch], rate)
+            level = rms(got.frames[ch])
+            if not v.notes:
+                v.notes, v.dropped, v.distinct = notes, dropped, distinct(notes)
+                v.level = level
+            v.distinct = v.distinct or distinct(notes)
+            v.lines.append(f"{where} {rms_label(level)}, {len(notes)} notes, "
+                           f"{len(distinct(notes))} distinct — "
+                           f"{distinct(notes)} semitones from middle C "
+                           f"({dropped} windows unresolved)")
         else:
-            v.volts = held_voltages(got.frames[ch], rate)
-            v.lines.append(f"{where} {len(v.volts)} held values — "
-                           f"{distinct(v.volts, 0.01)} V")
-            v.written, v.played_why = step_values(given, src_mod, names or {})
+            volts = held_voltages(got.frames[ch], rate)
+            v.lines.append(f"{where} {len(volts)} held values — "
+                           f"{distinct(volts, STEP_TOLERANCE)} V")
+            if not v.volts:
+                v.volts = volts
+                v.written, v.played_why = step_values(given, src_mod,
+                                                      names or {})
 
     heard = distinct(v.volts, STEP_TOLERANCE)
     want = distinct(v.written, STEP_TOLERANCE)
@@ -856,8 +966,18 @@ def judge(given: dict, got: Run, taps: list[tuple],
         v.lines.append("  " + v.played_why)
 
     if not v.notes:
-        v.audible_why = ("nothing pitched came out of the audio tap, so no "
-                         "note was heard")
+        # SILENT and UNREADABLE are different findings, and the level tells
+        # them apart. Reported as one message they are indistinguishable, and
+        # a patch that plainly sounds reads as one that makes nothing.
+        if v.level < SILENCE:
+            v.audible_why = ("the audio tap is silent — nothing at all came "
+                             "out of the patch")
+        else:
+            v.audible_why = (
+                f"the audio tap carries signal at {v.level:.3f} V RMS but no "
+                f"window settled on a pitch, so what it makes is not a note "
+                f"this can read — noise, a click, or something faster than "
+                f"the {WINDOW * 1000:.0f} ms it reads at")
     elif not v.volts:
         v.audible_why = ("no pitch CV was tapped, so the notes heard cannot "
                          "be held against what the patch asked for")
@@ -899,6 +1019,8 @@ def check(patch_path: str, seconds: float = 4.0,
         with open(run_patch, "w") as f:
             json.dump(given, f)
 
+        for line in will_be_clamped(original, param_ranges(portmap)):
+            print(f"  {line}", flush=True)
         print(f"  running {os.path.basename(patch_path)} headless for "
               f"{seconds:g}s — every audio interface was removed first, so "
               f"this makes no sound", flush=True)

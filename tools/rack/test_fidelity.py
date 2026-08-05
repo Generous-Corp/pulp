@@ -182,6 +182,27 @@ def test_written_steps_are_read_off_the_patch() -> int:
                  "the four written step pitches are found", f"{vals} {why}")
 
 
+def test_a_value_outside_a_knobs_range_is_named_before_launching() -> int:
+    """The one structural break found on a real generated patch, made cheap.
+
+    A knob with a floor of a thousandth, written zero, loads as a thousandth.
+    Nothing says so: the file keeps the zero and the module holds something
+    else. Predicting it from the declared range costs no Rack at all.
+    """
+    ranges = {("Fundamental", "SEQ3", 4): (-10.0, 10.0, "CV 1 step 1"),
+              ("Fundamental", "VCO", 2): (-54.0, 54.0, "Frequency")}
+    bad = check(F.will_be_clamped(fixture(), ranges) == [],
+                "a patch inside every range predicts no clamp")
+    over = fixture()
+    over["modules"][SEQ]["params"][1]["value"] = 42.0
+    out = F.will_be_clamped(over, ranges)
+    bad += check(len(out) == 1 and "42" in out[0] and "clamp" in out[0],
+                 "a value past a knob's ceiling is named", str(out))
+    bad += check(F.will_be_clamped(over, {}) == [],
+                 "a knob with no mapped range is not guessed at")
+    return bad
+
+
 # ── Hearing ──────────────────────────────────────────────────────────────────
 
 def _tone(hz: float, seconds: float, rate: float) -> list[float]:
@@ -201,12 +222,88 @@ def test_a_known_tone_reads_as_its_own_pitch() -> int:
     return bad
 
 
+def _band_limited_saw(hz: float, seconds: float, rate: float) -> list[float]:
+    """A sawtooth with no energy above Nyquist, as an oscillator makes it."""
+    n = int(seconds * rate)
+    harmonics = max(1, int(rate / 2 / hz))
+    out = []
+    for i in range(n):
+        t = i / rate
+        v = sum(math.sin(2 * math.pi * h * hz * t) / h
+                for h in range(1, harmonics + 1))
+        out.append(5 * 2 / math.pi * v)
+    return out
+
+
+def test_the_reader_is_accurate_across_the_range_it_claims() -> int:
+    """Where the pitch reader can be trusted, pinned rather than assumed.
+
+    Every note below is checked against the frequency it was built from, so
+    this fails if the reader drifts -- including the way it used to fail,
+    which was to report a confident number from the end of its own search
+    rather than from the signal.
+    """
+    rate = 44100.0
+    bad = 0
+    for hz in (55.0, 110.0, 220.0, F.C4_HZ, 440.0, 880.0, 1046.5):
+        for name, wave in (("sine", _tone),
+                           ("saw", _band_limited_saw)):
+            got = F.estimate_f0(wave(hz, F.WINDOW, rate), rate)
+            err = abs(12 * math.log2(got / hz)) if got else None
+            bad += check(err is not None and err < 0.2,
+                         f"a {name} at {hz:g} Hz reads within a fifth of a "
+                         f"semitone", f"read {got}")
+    return bad
+
+
+def test_nothing_periodic_is_not_a_pitch() -> int:
+    """Noise and DC are where a detector invents notes. It must not."""
+    import random
+    rate = 44100.0
+    n = int(F.WINDOW * rate)
+    random.seed(1)
+    bad = check(F.estimate_f0([random.uniform(-5, 5) for _ in range(n)],
+                              rate) is None,
+                "noise is not given a pitch")
+    bad += check(F.estimate_f0([3.0] * n, rate) is None,
+                 "a steady voltage is not given a pitch")
+    return bad
+
+
 def test_silence_is_not_a_note() -> int:
     rate = 44100.0
     notes, dropped = F.heard_notes([0.0] * int(rate), rate)
-    return check(notes == [] and dropped > 0,
-                 "a silent recording yields no notes and says how much it "
-                 "could not resolve", str(notes))
+    bad = check(notes == [] and dropped > 0,
+                "a silent recording yields no notes and says how much it "
+                "could not resolve", str(notes))
+    bad += check(F.rms_label(F.rms([0.0] * 100)) == "silent",
+                 "a silent recording is called silent")
+    bad += check(F.rms_label(F.rms(_tone(F.C4_HZ, 0.1, rate))) != "silent",
+                 "a recording with signal in it is not")
+    return bad
+
+
+def test_a_plucked_note_is_not_thrown_away() -> int:
+    """A note short enough to read once, with silence either side, is a note.
+
+    Requiring every note to hold two windows made a real envelope-gated patch
+    -- one whose recording plainly carries signal, and whose middle C the
+    reader finds -- report as playing nothing at all. Silence around a reading
+    is what tells a brief note from the boundary between two long ones.
+    """
+    plucked = [None, None, 0.0, None, None, 12.0, None]
+    kept = [v for v, n in F.runs(plucked)]
+    bad = check(kept.count(0.0) == 1, "the grouping keeps the reading")
+    rate = 44100.0
+    sig = ([0.0] * int(0.12 * rate) + _tone(F.C4_HZ, 0.07, rate)
+           + [0.0] * int(0.12 * rate) + _tone(F.C4_HZ * 2, 0.07, rate)
+           + [0.0] * int(0.12 * rate))
+    notes, _ = F.heard_notes(sig, rate)
+    bad += check(len(notes) == 2 and abs(notes[0]) < 0.3
+                 and abs(notes[1] - 12) < 0.3,
+                 "two plucks separated by silence read as two notes",
+                 str(notes))
+    return bad
 
 
 def test_a_sequence_of_tones_reads_as_that_sequence() -> int:
@@ -376,8 +473,12 @@ def main(argv: list[str]) -> int:
                test_pitch_inputs_are_recognised_by_name,
                test_unmapped_modules_say_so_rather_than_report_no_steps,
                test_written_steps_are_read_off_the_patch,
+               test_a_value_outside_a_knobs_range_is_named_before_launching,
                test_a_known_tone_reads_as_its_own_pitch,
+               test_the_reader_is_accurate_across_the_range_it_claims,
+               test_nothing_periodic_is_not_a_pitch,
                test_silence_is_not_a_note,
+               test_a_plucked_note_is_not_thrown_away,
                test_a_sequence_of_tones_reads_as_that_sequence,
                test_one_stray_window_is_not_a_note,
                test_a_run_is_reported_by_its_middle_not_its_edge,
