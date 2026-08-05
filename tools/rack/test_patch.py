@@ -2593,37 +2593,67 @@ def check_behaviour_is_measured() -> tuple:
     import subprocess
     bad, ran = 0, 1
     here = os.path.dirname(os.path.abspath(__file__))
-    root = os.path.normpath(os.path.join(here, "..", ".."))
     src = os.path.join(here, "test_patch_behaviour.cpp")
-    include = os.path.join(root, "core", "signal", "include")
 
-    if not os.path.isdir(include):
-        print("  --     Pulp's signal headers are not in this copy, so the "
-              "measurement cannot be built")
+    # NO SDK, NO RACK, NO PULP TARGET -- and no skip either. The measurement is
+    # standard-library only precisely so this half needs nothing but a compiler,
+    # which is what lets it be gated on any machine while the capture half waits
+    # on a 40 MB developer-supplied SDK. If this ever needs an -I or a -framework
+    # to build, that property is gone and this check is the place it shows.
+    binary = os.path.join(tempfile.gettempdir(), "pulp-test-patch-behaviour")
+    build = subprocess.run(
+        ["clang++", "-std=c++20", "-O1", "-o", binary, src, f"-I{here}"],
+        capture_output=True, text=True)
+    if build.returncode != 0:
+        bad += 1
+        print("  WRONG  the behaviour measurement does not compile against the "
+              "standard library alone, so it can only be tested where the "
+              f"Rack SDK is:\n{build.stderr.strip()[:2000]}")
     else:
-        binary = os.path.join(tempfile.gettempdir(), "pulp-test-patch-behaviour")
-        build = subprocess.run(
-            ["clang++", "-std=c++20", "-O1", "-o", binary, src,
-             f"-I{here}", f"-I{include}", "-framework", "Accelerate"],
-            capture_output=True, text=True)
-        if build.returncode != 0:
+        run = subprocess.run([binary, "--prove"], capture_output=True,
+                             text=True, timeout=600)
+        if run.returncode != 0:
             bad += 1
-            print("  WRONG  the behaviour measurement does not compile:\n"
-                  f"{build.stderr.strip()[:2000]}")
+            wrong = [ln for ln in run.stdout.splitlines()
+                     if "WRONG" in ln or "WEAK" in ln]
+            print("  WRONG  the behaviour measurement cannot tell the "
+                  "synthesised signals apart:\n         " +
+                  "\n         ".join(wrong[:12]))
         else:
-            run = subprocess.run([binary, "--prove"], capture_output=True,
-                                 text=True, timeout=600)
-            if run.returncode != 0:
-                bad += 1
-                wrong = [ln for ln in run.stdout.splitlines()
-                         if "WRONG" in ln or "WEAK" in ln]
-                print("  WRONG  the behaviour measurement cannot tell the "
-                      "synthesised signals apart:\n         " +
-                      "\n         ".join(wrong[:12]))
-            else:
-                print("  ok     a held tone, a melody, a pulse train and a "
-                      "filter sweep each measure as themselves and as nothing "
-                      "else")
+            print("  ok     a held tone, a melody, a pulse train and a "
+                  "filter sweep each measure as themselves and as nothing "
+                  "else, with no SDK anywhere")
+
+    # A HEADER EDIT MUST REBUILD THE GATE. The staleness check compared the
+    # binary's mtime against patch_gate.cpp alone, so once the measurement moved
+    # into headers beside it, editing one changed nothing a rebuild could see:
+    # the next run would silently test the previous binary while the change
+    # appeared to do nothing at all. Asserted against the real decision rather
+    # than by reading the source, so a later rewrite of it cannot pass by
+    # keeping the shape.
+    ran += 1
+    stale = []
+    for header in P.GATE_HEADERS:
+        if not os.path.exists(header):
+            stale.append(f"{os.path.basename(header)} does not exist")
+            continue
+        # A binary newer than every source, then a header touched past it.
+        newest = max(os.path.getmtime(p) for p in [P.GATE_SRC] + P.GATE_HEADERS)
+        os.makedirs(os.path.dirname(P.GATE_BIN), exist_ok=True)
+        with open(P.GATE_BIN, "a"):
+            os.utime(P.GATE_BIN, (newest + 10, newest + 10))
+        os.utime(header, (newest + 20, newest + 20))
+        if P.build_gate()[0] == P.GATE_BIN and \
+                os.path.getmtime(P.GATE_BIN) < os.path.getmtime(header):
+            stale.append(f"touching {os.path.basename(header)} reused the "
+                         f"binary built before it")
+    if stale:
+        bad += 1
+        print(f"  WRONG  the gate does not rebuild when its own sources change, "
+              f"so an edited measurement is silently never run: {stale}")
+    else:
+        print(f"  ok     touching any of the gate's {len(P.GATE_HEADERS)} "
+              f"headers rebuilds it")
 
     # Every field a threshold names must be one the gate writes. A typo here
     # costs nothing at import and everything at run time: the field reads back

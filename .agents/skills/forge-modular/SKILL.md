@@ -72,11 +72,28 @@ what was ASKED for, and the request is not in that process.
   detection function is flat to within arithmetic noise, and flat noise
   autocorrelates at 0.99 — so a drone used to announce a confident pulse at a
   meaningless lag.
-- The measurement reuses `pulp::signal::YinTrackerT` and `FftT` from
-  `core/signal/include`, which the app bundle already ships and module
-  generation already requires. The gate therefore builds with
-  `-I<root>/core/signal/include -framework Accelerate`; without those headers
-  `build_gate()` returns the reason rather than a bare `None`.
+- **`patch_behaviour.hpp` is standard-library only, and that is load-bearing.**
+  The gate stays a one-file `clang++` compile against the Rack SDK and nothing
+  else, which keeps the SDK the ONLY thing standing between it and a machine
+  that can build it. It also detaches the analysis from the capture: the f0
+  estimator (cumulative mean normalized difference) and the radix-2 FFT are
+  written out here rather than pulled from `pulp/signal`, so
+  `test_patch_behaviour.cpp` builds with `clang++ -I tools/rack` and no SDK,
+  no Rack and no Pulp target. That half is gateable anywhere today. **Do not
+  add an include path to this header** — a `-I` or a `-framework` in either
+  build line means the property is gone, and `check_behaviour_is_measured`
+  fails when it happens.
+  (Linking `pulp/signal` in was tried and reverted; both estimators produced
+  numbers identical to Pulp's `YinTrackerT` and `FftT` on all eight synthetic
+  signals and both real patches, so nothing was traded for it. The Rack SDK is
+  GPLv3 — see `tools/cmake/PulpRack.cmake` — and while the shipped `.vcvplugin`
+  deliberately does combine MIT `pulp/signal` with it under Rack's plugin
+  exception, this binary has no reason to need the boundary considered at all.)
+- **The gate rebuilds on a header edit, not just a `.cpp` edit.** `GATE_HEADERS`
+  feeds the staleness check; without it, editing `patch_behaviour.hpp` silently
+  reran the previous binary and the change appeared to do nothing.
+- `build_gate()` returns `(binary, reason)`. A compile failure used to reach
+  the user as "no SDK", which sent the diagnosis to the wrong place.
 - `PATCH_GATE_SERIES=1` adds the per-window tracks (semitones, RMS, centroid,
   onset times) to the JSON. They are the whole diagnosis when a number reads
   wrong and dead weight when it does not, so they are off by default.

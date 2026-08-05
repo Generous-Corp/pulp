@@ -19,18 +19,27 @@
 // emitted in the report — so tuning them is a data edit with an audit trail
 // rather than a source change. Treat a number here as a hypothesis.
 //
-// The estimators are Pulp's own, which ship in the same bundle as this file:
-// `pulp::signal::YinTrackerT` for f0 (cumulative mean normalized difference
-// with parabolic refinement and a median across hops, which is a great deal
-// better than the bare autocorrelation this would otherwise hand-roll) and
-// `pulp::signal::FftT` for the spectrum. Both are header-only and both are
-// already required inputs for module generation, so depending on them here
-// adds no new thing a machine has to have.
+// SELF-CONTAINED ON PURPOSE. Everything here is standard library, and that is a
+// deliberate constraint rather than an accident of scope.
+//
+// `patch_gate.cpp` is a single-file `clang++` compile against a
+// developer-supplied Rack SDK, and Pulp keeps the Rack-including translation
+// units behind a boundary (`tools/cmake/PulpRack.cmake`) because the SDK is
+// GPLv3 and Pulp ships MIT. Keeping the analysis free of Pulp's own libraries
+// buys two things: the gate stays a one-file build with nothing but the SDK on
+// its include path, and the ANALYSIS half detaches completely from the capture
+// half -- `test_patch_behaviour.cpp` compiles this header with no Rack, no SDK
+// and no Pulp target, so the measurement can be proven on any machine while
+// only the capture path waits on a 40 MB SDK download.
+//
+// The two estimators that would otherwise be a dependency are written out here:
+// the cumulative mean normalized difference (the same family as a plain
+// autocorrelation, with the normalisation and the parabolic refinement that
+// stop it reporting octaves) and a radix-2 real FFT for the spectrum. Both are
+// small, both are textbook, and both are checked against synthesised signals
+// whose answers are known in advance.
 
 #pragma once
-
-#include <pulp/signal/fft.hpp>
-#include <pulp/signal/yin_tracker.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -77,6 +86,17 @@ struct Settings {
     /// inventing an octave. The ceiling is above the top of a piano.
     double f0_min_hz = 55.0;
     double f0_max_hz = 1500.0;
+
+    /// How often a fundamental is estimated. Several per pitch window, so the
+    /// median across them can absorb an octave flip; the analysis itself reads
+    /// a longer stretch than this, so consecutive estimates overlap.
+    double pitch_hop_ms = 5.0;
+
+    /// The cumulative-mean-normalized-difference value under which a lag counts
+    /// as a period. **Published**: de Cheveigné & Kawahara 2002 §III.D uses
+    /// 0.10, and 0.05 .. 0.20 is that paper's own sensitivity range, not a free
+    /// knob. Raising it calls more noise a pitch; lowering it drops quiet notes.
+    double pitch_threshold = 0.10;
 
     /// A window counts as voiced when at least this fraction of the tracker's
     /// estimates inside it were confident. One confident estimate in nine is
@@ -298,17 +318,127 @@ inline int semitone_of(double hz) {
     return static_cast<int>(std::lround(69.0 + 12.0 * std::log2(hz / 440.0)));
 }
 
+/// One fundamental-frequency estimate over `window` samples starting at `at`.
+/// Returns 0 when the window carried no stable period.
+///
+/// The plain difference function `sum (x[j] - x[j+tau])^2` has a minimum at the
+/// true period AND at every multiple of it, and its smallest value is usually
+/// tau=0 -- which is why a bare autocorrelation reports octaves down and
+/// sub-octaves. Dividing by the running mean of all shorter lags (the
+/// cumulative mean normalized difference) removes the trend that causes that,
+/// and taking the FIRST lag under an absolute threshold rather than the global
+/// minimum prefers the fundamental over its multiples. The parabolic step then
+/// recovers the fraction of a sample between bins, without which the reported
+/// pitch quantises to whatever the sample rate allows and a semitone at the top
+/// of the range is not resolvable at all.
+///
+/// [1] de Cheveigné & Kawahara 2002, steps 1-5. Step 6 (best local estimate) is
+/// not implemented; the caller takes a median across the estimates inside each
+/// analysis window instead, which serves the same purpose here because this
+/// runs offline over a whole recording rather than one hop at a time.
+inline double estimate_f0(const std::vector<float>& x, std::size_t at, int window,
+                          int tau_min, int tau_max, double sample_rate,
+                          double threshold, std::vector<double>& diff,
+                          std::vector<double>& cmnd) {
+    if (at + static_cast<std::size_t>(window) > x.size()) return 0.0;
+    // Reading x[j + tau] for j < integration and tau <= tau_max must stay
+    // inside the window, so the integration length is what is left after the
+    // longest lag -- not the whole window, which would read past its end.
+    const int integration = window - tau_max;
+    if (integration <= 0 || tau_max <= tau_min) return 0.0;
+    diff.assign(static_cast<std::size_t>(tau_max) + 1, 0.0);
+    cmnd.assign(static_cast<std::size_t>(tau_max) + 1, 1.0);
+
+    const float* w = x.data() + at;
+    for (int tau = 1; tau <= tau_max; ++tau) {
+        double sum = 0.0;
+        for (int j = 0; j < integration; ++j) {
+            const double d = static_cast<double>(w[j]) - static_cast<double>(w[j + tau]);
+            sum += d * d;
+        }
+        diff[static_cast<std::size_t>(tau)] = sum;
+    }
+    // The running mean is taken from tau=1, not from tau_min: starting later
+    // normalises against a truncated sum and shifts every value.
+    double running = 0.0;
+    for (int tau = 1; tau <= tau_max; ++tau) {
+        running += diff[static_cast<std::size_t>(tau)];
+        const double mean = running / tau;
+        cmnd[static_cast<std::size_t>(tau)] =
+            mean > 0.0 ? diff[static_cast<std::size_t>(tau)] / mean : 1.0;
+    }
+
+    int best = -1;
+    for (int tau = tau_min; tau <= tau_max; ++tau) {
+        if (cmnd[static_cast<std::size_t>(tau)] >= threshold) continue;
+        // Walk to the bottom of this dip rather than taking its first sample.
+        while (tau + 1 <= tau_max &&
+               cmnd[static_cast<std::size_t>(tau + 1)] < cmnd[static_cast<std::size_t>(tau)])
+            ++tau;
+        best = tau;
+        break;
+    }
+    if (best < 0) return 0.0;   // nothing periodic enough to call a pitch
+
+    double period = best;
+    if (best > tau_min && best < tau_max) {
+        const double a = cmnd[static_cast<std::size_t>(best - 1)];
+        const double b = cmnd[static_cast<std::size_t>(best)];
+        const double c = cmnd[static_cast<std::size_t>(best + 1)];
+        const double denom = 2.0 * (2.0 * b - a - c);
+        if (std::fabs(denom) > 1e-12) period += (c - a) / denom;
+    }
+    if (!(period > 0.0)) return 0.0;
+    return sample_rate / period;
+}
+
+/// In-place radix-2 decimation-in-time FFT. `size` must be a power of two.
+///
+/// Written out rather than pulled in so this header stays standard-library
+/// only. The spectrum is wanted once per 50 ms window over a six-second
+/// recording -- about 120 transforms -- so the fastest available transform buys
+/// nothing measurable here and costs the single-file property that makes the
+/// analysis testable without an SDK.
+inline void fft_in_place(std::vector<std::complex<double>>& a) {
+    const std::size_t n = a.size();
+    if (n < 2) return;
+    for (std::size_t i = 1, j = 0; i < n; ++i) {
+        std::size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(a[i], a[j]);
+    }
+    for (std::size_t len = 2; len <= n; len <<= 1) {
+        const double angle = -2.0 * M_PI / static_cast<double>(len);
+        const std::complex<double> step(std::cos(angle), std::sin(angle));
+        for (std::size_t i = 0; i < n; i += len) {
+            std::complex<double> w(1.0, 0.0);
+            for (std::size_t k = 0; k < len / 2; ++k) {
+                const std::complex<double> u = a[i + k];
+                const std::complex<double> v = a[i + k + len / 2] * w;
+                a[i + k] = u + v;
+                a[i + k + len / 2] = u - v;
+                w *= step;
+            }
+        }
+    }
+}
+
 }  // namespace detail
 
 // ── the measurement ─────────────────────────────────────────────────────────
 
 /// Per-window fundamental, as MIDI note numbers with -1 for unvoiced.
 ///
-/// The tracker reports one estimate per hop and its estimate for a hop
-/// describes the window ENDING there, so each estimate is credited to the
-/// window containing its centre — `hop_index - latency/2`. Skipping that shift
-/// puts a note's pitch one window late, which at 50 ms is enough to smear every
-/// transition in a fast line into a spurious extra note.
+/// Several estimates are taken inside each window and reduced by median. One
+/// estimate per window would be cheaper and would let a single octave flip --
+/// the dominant failure of every period estimator -- become a whole spurious
+/// note. The median is what makes that flip cost nothing.
+///
+/// Each estimate is credited to the window containing the CENTRE of the samples
+/// it read, not the position it started from. Crediting the start puts a note's
+/// pitch most of an analysis window early, which at these lengths is enough to
+/// smear every transition in a fast line into an extra note that is not there.
 inline PitchMeasure measure_pitch(const std::vector<float>& x, const Settings& s) {
     PitchMeasure out;
     const long win = std::max(1L, std::lround(s.window_ms * s.sample_rate / 1000.0));
@@ -316,21 +446,27 @@ inline PitchMeasure measure_pitch(const std::vector<float>& x, const Settings& s
     if (windows == 0) return out;
     out.windows = static_cast<int>(windows);
 
-    pulp::signal::YinTrackerT<float> yin;
-    yin.set_f0_range(s.f0_min_hz, s.f0_max_hz);
-    yin.prepare(s.sample_rate);
-    const long half_latency = yin.latency_samples() / 2;
+    // The analysis window is two of the longest periods looked for, which is
+    // the shortest window in which that period can be observed twice.
+    const int tau_min = std::max(2, static_cast<int>(std::ceil(s.sample_rate / s.f0_max_hz)));
+    const int tau_max = std::max(tau_min + 1,
+                                 static_cast<int>(std::ceil(s.sample_rate / s.f0_min_hz)));
+    const int analysis = 2 * tau_max;
+    const long hop = std::max(1L, std::lround(s.pitch_hop_ms * s.sample_rate / 1000.0));
 
     std::vector<std::vector<double>> voiced(windows);
     std::vector<int> estimates(windows, 0);
-    for (std::size_t i = 0; i < x.size(); ++i) {
-        if (!yin.process(x[i])) continue;
-        const long centre = static_cast<long>(i) - half_latency;
-        if (centre < 0) continue;
-        const std::size_t w = static_cast<std::size_t>(centre / win);
-        if (w >= windows) continue;
+    std::vector<double> diff, cmnd;
+    for (std::size_t at = 0; at + static_cast<std::size_t>(analysis) <= x.size();
+         at += static_cast<std::size_t>(hop)) {
+        const std::size_t centre = at + static_cast<std::size_t>(analysis) / 2;
+        const std::size_t w = centre / static_cast<std::size_t>(win);
+        if (w >= windows) break;
         ++estimates[w];
-        if (yin.voiced()) voiced[w].push_back(yin.f0_hz());
+        const double hz = detail::estimate_f0(x, at, analysis, tau_min, tau_max,
+                                              s.sample_rate, s.pitch_threshold,
+                                              diff, cmnd);
+        if (hz >= s.f0_min_hz && hz <= s.f0_max_hz) voiced[w].push_back(hz);
     }
 
     std::vector<double> all_voiced;
@@ -544,13 +680,11 @@ inline SpectrumMeasure measure_spectrum(const std::vector<float>& x, const Setti
     while (n > 0 && static_cast<long>(n) > win) n /= 2;
     if (windows == 0 || n < 16) return out;
 
-    pulp::signal::FftT<float> fft(n);
-    std::vector<float> frame(static_cast<std::size_t>(n));
-    std::vector<std::complex<float>> spec(static_cast<std::size_t>(n));
-    std::vector<float> window_fn(static_cast<std::size_t>(n));
+    std::vector<std::complex<double>> spec(static_cast<std::size_t>(n));
+    std::vector<double> window_fn(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i)
-        window_fn[static_cast<std::size_t>(i)] = static_cast<float>(
-            0.5 - 0.5 * std::cos(2.0 * M_PI * i / (n - 1)));
+        window_fn[static_cast<std::size_t>(i)] =
+            0.5 - 0.5 * std::cos(2.0 * M_PI * i / (n - 1));
 
     // The same floor the dynamics use, from the same helper, so "active" means
     // one thing in the whole report rather than two things that nearly agree.
@@ -562,10 +696,12 @@ inline SpectrumMeasure measure_spectrum(const std::vector<float>& x, const Setti
     for (std::size_t w = 0; w < windows; ++w) {
         if (rms[w] <= floor_v) continue;
         for (int i = 0; i < n; ++i)
-            frame[static_cast<std::size_t>(i)] =
-                x[w * static_cast<std::size_t>(win) + static_cast<std::size_t>(i)] *
-                window_fn[static_cast<std::size_t>(i)];
-        fft.forward_real(frame.data(), spec.data());
+            spec[static_cast<std::size_t>(i)] = {
+                static_cast<double>(x[w * static_cast<std::size_t>(win) +
+                                      static_cast<std::size_t>(i)]) *
+                    window_fn[static_cast<std::size_t>(i)],
+                0.0};
+        detail::fft_in_place(spec);
         double num = 0.0, den = 0.0;
         for (int b = 1; b <= n / 2; ++b) {
             const double mag = std::abs(spec[static_cast<std::size_t>(b)]);

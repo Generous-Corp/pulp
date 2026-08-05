@@ -1938,12 +1938,6 @@ GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
 #: measurement running as its predecessor until something else touched the .cpp.
 GATE_HEADERS = [os.path.join(HERE, n) for n in
                 ("patch_behaviour.hpp", "patch_behaviour_json.hpp")]
-#: Pulp's own header-only estimators, which the behaviour measurement uses
-#: rather than hand-rolling f0 and an FFT. ROOT is the checkout in a source
-#: tree and Contents/Resources in the app, and core/signal/include ships in
-#: both -- module generation already refuses to run without it.
-GATE_INCLUDE = os.path.join(os.path.normpath(os.path.join(HERE, "..", "..")),
-                            "core", "signal", "include")
 # Resolved by the one resolver every component shares (fetch_sdk.py), never
 # by a private path -- patch.py once looked only at ~/SDKs/Rack-SDK, so an
 # SDK fetch_sdk.py had installed was an SDK this gate could not see. Patch
@@ -1994,16 +1988,14 @@ def build_gate() -> tuple[str | None, str]:
         return GATE_BIN, ""
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
         return None, f"no Rack SDK at {SDK}"
-    if not os.path.isdir(GATE_INCLUDE):
-        return None, (f"Pulp's signal headers are not at {GATE_INCLUDE}; "
-                      "the behaviour measurement needs them (reinstall the "
-                      "toolchain)")
     os.makedirs(CACHE_DIR, exist_ok=True)
+    # Still one file against the SDK and nothing else. The behaviour headers sit
+    # beside this one, which is what -I{HERE} finds; they pull in no library, so
+    # the gate keeps the property that the ONLY thing standing between it and a
+    # machine that can build it is the Rack SDK.
     r = subprocess.run(
         ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
-         f"-I{HERE}", f"-I{GATE_INCLUDE}",
-         f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
-         "-framework", "Accelerate",
+         f"-I{HERE}", f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
          os.path.join(SDK, "libRack.dylib")],
         capture_output=True, text=True)
     if r.returncode == 0:

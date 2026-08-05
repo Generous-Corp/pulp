@@ -12,10 +12,9 @@
 // Nothing here needs Rack, an SDK, or an audio device — the signals are
 // synthesised, so the answers are known in advance rather than eyeballed.
 //
-// Build:
+// Build -- nothing but a compiler. No SDK, no Rack, no Pulp target:
 //   clang++ -std=c++20 -O1 -o /tmp/test-patch-behaviour \
-//       tools/rack/test_patch_behaviour.cpp -I core/signal/include \
-//       -framework Accelerate
+//       tools/rack/test_patch_behaviour.cpp -I tools/rack
 
 #include "patch_behaviour.hpp"
 #include "patch_behaviour_json.hpp"
