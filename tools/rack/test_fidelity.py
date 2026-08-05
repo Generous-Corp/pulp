@@ -149,10 +149,15 @@ def test_the_caller_patch_is_not_edited() -> int:
 
 def test_step_knobs_are_told_from_their_trigger_buttons() -> int:
     bad = check(F.is_step_param("CV 1 step 3"), "a step's pitch knob matches")
+    # Our own sequencer names its knobs this way, and requiring "CV" too made
+    # the check unprovable on the module it matters most for.
+    bad += check(F.is_step_param("Step 3"), "so does a bare numbered step")
     bad += check(not F.is_step_param("Step 3 trigger"),
                  "the trigger button beside it does not")
     bad += check(not F.is_step_param("Steps"),
                  "the knob for how many steps there are does not")
+    bad += check(not F.is_step_param("Step gate"),
+                 "nor an unnumbered gate knob")
     return bad
 
 
@@ -359,6 +364,33 @@ def test_tracking_is_blind_to_tuning_but_not_to_intervals() -> int:
     return bad
 
 
+def test_scatter_is_not_reported_as_mistuning() -> int:
+    """The same step read three times, differently, is the reader — not the patch.
+
+    A note an envelope plucks is loud enough to read for a window or two, so
+    one step reads 5.06, 5.33 and 5.39 across three passes. Taking the worst
+    of those called a correct generated patch a third of a semitone out of
+    tune. An oscillator that is actually mistuned is wrong the SAME way every
+    time, so the average over repeats tells them apart.
+    """
+    notes = [3.09, 6.91, 5.33, -0.25, 3.11, 7.01, 5.39, 0.14, 3.10, 7.05, 5.06]
+    volts = [0.25, 0.583, 0.417, 0.0, 0.25, 0.583, 0.417, 0.0,
+             0.25, 0.583, 0.417]
+    err, why = F.tracking(notes, volts)
+    bad = check(err is not None and err < F.TRACKING_TOLERANCE and not why,
+                "scatter around the right pitch is not called mistuning",
+                f"{err} {why}")
+    bad += check(F.spread(notes, volts) > err,
+                 "and the reading says how much it varied", str(F.spread(notes, volts)))
+    # An oscillator half a semitone sharp on every step, consistently.
+    off = [0.0, 3.5, 7.5, 0.0, 3.5, 7.5]
+    same = [0.0, 0.25, 0.583, 0.0, 0.25, 0.583]
+    err, _ = F.tracking(off, same)
+    bad += check(err is not None and err > F.TRACKING_TOLERANCE,
+                 "a consistent offset is still caught", str(err))
+    return bad
+
+
 def test_a_capture_is_read_back_channel_by_channel() -> int:
     import struct
     import tempfile
@@ -484,6 +516,7 @@ def main(argv: list[str]) -> int:
                test_a_run_is_reported_by_its_middle_not_its_edge,
                test_tracking_needs_both_taps,
                test_tracking_is_blind_to_tuning_but_not_to_intervals,
+               test_scatter_is_not_reported_as_mistuning,
                test_a_capture_is_read_back_channel_by_channel):
         print(f"{fn.__name__}:")
         bad += fn()

@@ -256,7 +256,16 @@ def tracking(notes: list[float], volts: list[float]) -> tuple[float | None, str]
     particular pair of modules: whatever the patch is, a volt has to move the
     pitch an octave.
 
-    Returns (worst error in semitones, why it could not be compared).
+    The error reported is SYSTEMATIC -- the mean per CV level -- and not the
+    worst single reading. A note plucked by an envelope is only loud enough to
+    read for a window or two, and the same step then reads 5.06, 5.33 and 5.39
+    on three passes: a spread of a third of a semitone around the right
+    answer. A mistuned oscillator is wrong the SAME way every time, so an
+    average over repeats separates the two, where a maximum reports the
+    reader's own scatter as the patch being out of tune. `spread` is that
+    scatter, kept so a reading too noisy to conclude from can say so.
+
+    Returns (systematic error in semitones, why it could not be compared).
     """
     if not notes or not volts:
         return None, ("one of the two taps recorded nothing, so heard pitch "
@@ -272,10 +281,27 @@ def tracking(notes: list[float], volts: list[float]) -> tuple[float | None, str]
     if len(notes) != len(volts):
         return None, (f"the audio tap heard {len(notes)} notes and the CV tap "
                       f"held {len(volts)} values; they do not line up")
-    worst = 0.0
+    by_level: dict[float, list[float]] = {}
     for note, volt in zip(notes, volts):
         want = volts_to_semitones(volt - volts[0])
-        worst = max(worst, abs((note - notes[0]) - want))
+        key = round(volt, 3)
+        by_level.setdefault(key, []).append((note - notes[0]) - want)
+    worst = 0.0
+    for errs in by_level.values():
+        worst = max(worst, abs(sum(errs) / len(errs)))
     return worst, ""
+
+
+def spread(notes: list[float], volts: list[float]) -> float:
+    """How much the SAME step varied between passes, in semitones.
+
+    The reader's own precision on this recording, measured from the recording
+    rather than assumed. A step heard once tells you nothing about it.
+    """
+    by_level: dict[float, list[float]] = {}
+    for note, volt in zip(notes, volts):
+        by_level.setdefault(round(volt, 3), []).append(note)
+    widths = [max(v) - min(v) for v in by_level.values() if len(v) > 1]
+    return max(widths) if widths else 0.0
 
 

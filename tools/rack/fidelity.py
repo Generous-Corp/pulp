@@ -73,7 +73,7 @@ PROBE_INPUTS = 4
 from fidelity_signal import (                                   # noqa: E402,F401
     C4_HZ, CONFIDENCE, MIN_NOTE_WINDOWS, SILENCE, STEP_TOLERANCE, WINDOW,
     distinct, estimate_f0, heard_notes, held_voltages, hz_to_volts, rms,
-    rms_label, runs, segment_pitches, tracking, volts_to_semitones)
+    rms_label, runs, segment_pitches, spread, tracking, volts_to_semitones)
 
 
 # ── Building the probe ───────────────────────────────────────────────────────
@@ -259,16 +259,23 @@ def pitch_sources(patch: dict, names: dict) -> list[tuple[int, int]]:
 def is_step_param(name: str) -> bool:
     """Whether a knob called `name` holds one step's pitch.
 
-    Whole words again, and both halves required: "step" alone also names the
-    trigger buttons beside the pitch knobs on the same panel, and a check that
-    counted those would expect twice as many notes as any patch plays. "Steps"
-    -- how many steps the sequence has -- is a different word and does not
-    match, which is the point of comparing words rather than substrings.
+    A step's pitch knob is "STEP" and WHICH step -- "Step 3", "CV 1 step 3".
+    The number is what separates it from "Steps", the knob for how many steps
+    a sequence has, which is a different word and a different thing.
+
+    Trigger and gate words disqualify, because "Step 3 trigger" names the
+    button beside the pitch knob on the same panel and counting those would
+    expect twice as many notes as any patch plays.
+
+    Requiring the word "CV" as well was too strict and made the check silently
+    unprovable on the sequencer it matters most for: ForgeModular's own SEQ
+    names its knobs "Step 1" through "Step 8", so a patch that demonstrably
+    played four pitches reported having written no steps at all.
     """
     w = _words(name)
     if w & {"TRIGGER", "TRIG", "GATE"}:
         return False
-    return "STEP" in w and bool(w & {"CV", "PITCH", "VALUE", "NOTE"})
+    return "STEP" in w and any(x.isdigit() for x in w)
 
 
 def param_names(portmap: dict) -> dict:
@@ -750,11 +757,17 @@ def judge(given: dict, got: Run, taps: list[tuple],
         if why:
             v.audible_why = why
         elif v.error > TRACKING_TOLERANCE:
-            v.audible_why = (f"the pitches heard are up to {v.error:.2f} "
-                             f"semitones from the pitches the CV asked for")
+            v.audible_why = (f"each step is consistently {v.error:.2f} "
+                             f"semitones from the pitch its CV asked for, "
+                             f"which is more than the {spread(v.notes, v.volts):.2f} "
+                             f"this reading varies by")
         else:
-            v.lines.append(f"  every note is within {v.error:.2f} semitones "
-                           f"of the pitch its CV asked for")
+            # The reader's own precision beside the verdict, so a pass on a
+            # plucked patch is not read as a tighter result than it is.
+            v.lines.append(f"  every step is within {v.error:.2f} semitones "
+                           f"of the pitch its CV asked for "
+                           f"(the same step varied {spread(v.notes, v.volts):.2f} "
+                           f"between passes, which is what this can resolve)")
     if v.audible_why:
         v.lines.append("  " + v.audible_why)
     return v
