@@ -413,18 +413,54 @@ def key(plugin: str, model: str) -> str:
     return f"{plugin}/{model}"
 
 
-def is_current(record: dict, plugin_version: str, prompt: str) -> bool:
+def evidence_hash(entry: dict) -> str:
+    """A fingerprint of everything the classifier actually READ.
+
+    Version and prompt are not enough. A classification is an answer about a
+    module's description, tags and parameter names -- and a vendor can edit a
+    description, or the library index can be refetched with better text,
+    WITHOUT the plugin version changing. The cached answer then describes
+    words that no longer exist, and nothing notices.
+
+    That matters most for classifications we SHIP: a seed entry travels to
+    machines whose library index we have never seen. Keying on the evidence
+    means a shipped answer is used only where the evidence still matches, and
+    is silently re-earned everywhere else.
+    """
+    h = hashlib.sha256()
+    h.update((entry.get("description") or "").encode())
+    h.update(b"\x00")
+    h.update(json.dumps(sorted(entry.get("tags") or []),
+                        sort_keys=True).encode())
+    h.update(b"\x00")
+    h.update(json.dumps([p.get("name") for p in (entry.get("params") or [])],
+                        sort_keys=True).encode())
+    return h.hexdigest()[:16]
+
+
+def is_current(record: dict, plugin_version: str, prompt: str,
+               entry: dict | None = None) -> bool:
     """Whether a cached classification still answers today's question.
 
-    Two keys, both necessary. The module version, because a vendor update can
-    add, remove or rename params. The prompt hash, because an improvement to
-    the classifier that never reaches the modules already cached is an
-    improvement nobody receives.
+    Three keys now. The module version, because a vendor update can add,
+    remove or rename params. The prompt hash, because an improvement to the
+    classifier that never reaches the modules already cached is an improvement
+    nobody receives. And the evidence hash, because the first two can both be
+    unchanged while the text the answer was derived from has been rewritten.
+
+    A record predating the evidence key has no `evidence` field. It is treated
+    as current on the other two keys rather than thrown away -- re-earning
+    every cached answer to introduce a check is a worse trade than accepting
+    that older entries carry the weaker guarantee.
     """
     if not isinstance(record, dict):
         return False
-    return (record.get("plugin_version") == plugin_version
-            and record.get("prompt") == prompt)
+    if (record.get("plugin_version") != plugin_version
+            or record.get("prompt") != prompt):
+        return False
+    if entry is not None and record.get("evidence"):
+        return record["evidence"] == evidence_hash(entry)
+    return True
 
 
 def pending(inv: dict, cache: dict, plugin: str | None = None) -> list:
@@ -443,7 +479,7 @@ def pending(inv: dict, cache: dict, plugin: str | None = None) -> list:
             if not (m.get("params") or []):
                 continue
             record = (cache.get("modules") or {}).get(key(pslug, mslug))
-            if is_current(record, str(p.get("version") or ""), now):
+            if is_current(record, str(p.get("version") or ""), now, m):
                 continue
             out.append((pslug, mslug))
     return out
@@ -608,6 +644,7 @@ def classify(inv: dict, claude: str | None = None, limit: int = 0,
             continue
         record["plugin_version"] = str(p.get("version") or "")
         record["prompt"] = now
+        record["evidence"] = evidence_hash(entry)
         cache.setdefault("modules", {})[key(pslug, mslug)] = record
         save(cache, cache_path)            # each answer survives an interrupt
         done += 1
