@@ -247,7 +247,7 @@
       ],
       "is": "A modulation source passed through an attenuverter so its depth — and direction — can be set before it reaches its destination.",
       "sounds_right_when": "the modulation is present but clearly bounded.",
-      "source": "Standard practice; the reason attenuverters exist",
+      "source": "Patch & Tweak (Bjørn & Meyer), on attenuverters in utility mixers",
       "axis": {
         "family": "voltage-conditioning",
         "position": "scaled, and inverted through zero",
@@ -290,7 +290,11 @@
           "message": "the attenuverter has no input"
         }
       ],
-      "provenance": "canon"
+      "provenance": "read",
+      "anchor": {
+        "doc": "patch-tweak-reading-order.txt",
+        "quote": "Most utility mixers use attenuverters to optionally invert the incoming voltage."
+      }
     },
     {
       "slug": "cross-modulation",

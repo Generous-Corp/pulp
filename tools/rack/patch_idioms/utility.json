@@ -219,7 +219,7 @@
       ],
       "is": "A clocked switch sending successive events to different destinations, so one source feeds several voices in turn.",
       "sounds_right_when": "successive events clearly come from different places.",
-      "source": "Standard practice; the poor man's polyphony",
+      "source": "Patch & Tweak (Bjørn & Meyer), on sequential switches",
       "at_least": {
         "switch": 1
       },
@@ -258,7 +258,11 @@
           "message": "the switch routes to nothing"
         }
       ],
-      "provenance": "canon"
+      "provenance": "read",
+      "anchor": {
+        "doc": "patch-tweak-reading-order.txt",
+        "quote": "some examples of sequential switches that provide different ways of stepping through their inputs"
+      }
     },
     {
       "slug": "offset-and-scale",

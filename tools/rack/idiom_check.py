@@ -78,7 +78,13 @@ SLOTS = ("pitch", "timbre", "level", "timing", "space", "control")
 #   read      the text is in `.corpus/` and the record quotes it in `anchor`.
 #             provenance_check.py verifies the quote and demotes anything that
 #             fails, so this tier is the only one that can be trusted without
-#             taking somebody's word.
+#             taking somebody's word. It covers two honest routes: a record
+#             written FROM the passage, and a record written from general
+#             knowledge and later CHECKED AGAINST the passage, which is what a
+#             promotion is. Both mean the same thing to a reader -- somebody
+#             opened the book and this claim survived it. What neither may be
+#             is a citation added because the technique surely appears
+#             somewhere in a work nobody opened.
 #   canon     standard technique written from general knowledge of the
 #             practice. The honest label for most of a library like this, and
 #             not a lesser one — a technique being canon is what makes it worth

@@ -752,6 +752,86 @@ def check_provenance() -> int:
     return bad
 
 
+def check_notice() -> int:
+    """The published page says what the data says, and quotes nobody.
+
+    Three ways an acknowledgements page goes wrong, all of them quiet: it
+    drifts from the library it describes, it lists a work under "derived from"
+    that nothing verified, or it reproduces the source text it is thanking
+    somebody for.
+    """
+    import notice                                        # noqa: PLC0415
+    idioms = idiom_check.load_idioms()
+    bad = 0
+
+    if notice.main(["notice.py", "--check"]) != 0:
+        print("  WRONG  SOURCES.md has drifted from the library")
+        bad += 1
+    else:
+        print("  ok     SOURCES.md matches the library")
+
+    page = notice.render(idioms)
+
+    # No source text. The anchors exist so a citation can be falsified against
+    # a local corpus, and every one of them is somebody else's copyrighted
+    # prose; an acknowledgements page that reproduced them would be the one
+    # place this library republished what it promised not to.
+    # Only idioms that HAVE a quote can leak one. Testing them all made the
+    # needle an empty string for every canon record, and `"" in page` is true,
+    # so the check reported all 83 of them and could never have reported
+    # anything else.
+    quotes = {i["slug"]: (i.get("anchor") or {}).get("quote", "")
+              for i in idioms.values()}
+    quotes = {s: q for s, q in quotes.items() if len(q) >= 24}
+    leaked = [s for s, q in quotes.items() if q[:40] in page]
+    if not quotes:
+        print("  WRONG  no anchored idiom to test the leak check against")
+        bad += 1
+    elif leaked:
+        print(f"  WRONG  the notice reproduces source text from {leaked}")
+        bad += 1
+    else:
+        print(f"  ok     the notice quotes none of the {len(quotes)} passages "
+              f"it cites")
+
+    # And the leak check can see a leak. A page with one quote pasted into it
+    # must be caught, or the clean result above means nothing.
+    planted = page + "\n" + next(iter(quotes.values()))
+    if not [s for s, q in quotes.items() if q[:40] in planted]:
+        print("  WRONG  a notice with source text pasted into it passed the "
+              "leak check")
+        bad += 1
+    else:
+        print("  ok     a notice with source text in it is caught")
+
+    # Only verified citations may appear under "derived from". The control is
+    # a library where the one `read` record fails its anchor: it must move.
+    import copy                                          # noqa: PLC0415
+    faked = copy.deepcopy(idioms)
+    for slug, idiom in faked.items():
+        idiom["provenance"] = "canon"
+        idiom.pop("anchor", None)
+    faked_page = notice.render(faked)
+    derived = faked_page.split("## Derived from")[1].split("##")[0]
+    if "nothing yet" not in derived:
+        print("  WRONG  a library with no verified citation still lists works "
+              "as derived from")
+        bad += 1
+    else:
+        print("  ok     with nothing verified, 'derived from' is empty")
+
+    # And the counts are counted, not written. If they were prose they would
+    # be the first thing to go stale, and the most trusted.
+    n = len(idioms)
+    if f"**{n}** idioms" not in page:
+        print(f"  WRONG  the notice does not state the real total ({n})")
+        bad += 1
+    else:
+        read = sum(1 for i in idioms.values() if i.get("provenance") == "read")
+        print(f"  ok     the notice publishes its own ratio ({read} of {n})")
+    return bad
+
+
 def main() -> int:
     if "--capture-vendor" in sys.argv:
         return capture_vendor()
@@ -792,6 +872,9 @@ def main() -> int:
 
     print("\ncitations can be caught:")
     bad += check_provenance()
+
+    print("\nthe notice tells the truth:")
+    bad += check_notice()
 
     print("\nfragments compose:")
     bad += check_fragments()

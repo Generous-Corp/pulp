@@ -326,7 +326,7 @@
       ],
       "is": "Two audio signals multiplied, producing sums and differences that rarely belong to either — inharmonic by construction.",
       "sounds_right_when": "the result is bell-like or clangorous rather than a chord.",
-      "source": "Strange on ring modulation",
+      "source": "Patch & Tweak (Bjørn & Meyer), on ring modulation as a source of metallic timbre",
       "listen_for": {
         "sounds_like": "clangorous and unresolved, the two source pitches replaced by tones that belong to neither — move either source and the result moves in a direction that feels wrong",
         "confusable_with": "amplitude modulation, where the original note survives underneath; if you can still hear the carrier, the multiplier is not balanced"
@@ -377,7 +377,11 @@
           "message": "no carrier passes through"
         }
       ],
-      "provenance": "canon"
+      "provenance": "read",
+      "anchor": {
+        "doc": "patch-tweak-reading-order.txt",
+        "quote": "through a ring modulator, as shown here, messes with the shell tone, turning wooden con- gas into metal timbales"
+      }
     },
     {
       "slug": "wavefolded-texture",

@@ -96,7 +96,7 @@
    ],
    "is": "A wavefolded oscillator through a low-pass gate, where one control opens both loudness and brightness together — the west-coast alternative to filter-plus-VCA.",
    "sounds_right_when": "notes are percussive and get duller as they decay, rather than simply quieter.",
-   "source": "Buchla's low-pass gate practice; Make Noise's account of the same idea",
+   "source": "Patch & Tweak (Bjørn & Meyer), on the low-pass gate",
    "at_least": {
     "waveshaper": 1
    },
@@ -143,7 +143,11 @@
      "message": "nothing opens the gate, so the voice sustains instead of plucking"
     }
    ],
-   "provenance": "canon"
+   "provenance": "read",
+   "anchor": {
+    "doc": "patch-tweak-reading-order.txt",
+    "quote": "a low-pass gate: the combination of a low-pass filter and a VCA"
+   }
   },
   {
    "slug": "sequenced-voice",
@@ -350,7 +354,7 @@
    ],
    "is": "A pitch source passed through a quantizer before the oscillator, so whatever voltage arrives lands on a note of the chosen scale.",
    "sounds_right_when": "every note belongs to the scale, however random the source is.",
-   "source": "Standard practice wherever a random or continuous source drives pitch",
+   "source": "Patch & Tweak (Bjørn & Meyer), on quantizer modules",
    "at_least": {
     "quantizer": 1
    },
@@ -387,7 +391,11 @@
      "message": "the quantizer has no input"
     }
    ],
-   "provenance": "canon"
+   "provenance": "read",
+   "anchor": {
+    "doc": "patch-tweak-reading-order.txt",
+    "quote": "Quantizer modules auto-correct incoming volt- ages to the nearest1/12volt."
+   }
   },
   {
    "slug": "keyboard-voice",

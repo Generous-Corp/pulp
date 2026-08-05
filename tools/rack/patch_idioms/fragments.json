@@ -204,7 +204,7 @@
       ],
       "is": "The pitch voltage passed through a lag before it reaches the oscillator, so a step between notes is travelled rather than jumped.",
       "sounds_right_when": "you hear the journey between two notes, and the destination still arrives cleanly.",
-      "source": "Strange on lag processing applied to a control voltage",
+      "source": "Welsh's Synthesizer Cookbook, on glide",
       "at_least": {
         "slew": 1,
         "audio_oscillator": 1
@@ -246,7 +246,11 @@
           "message": "the lag has no pitch voltage to smooth"
         }
       ],
-      "provenance": "canon"
+      "provenance": "read",
+      "anchor": {
+        "doc": "welshs-synthesizer-cookbook-by-fred-welsh-z-lib.txt",
+        "quote": "glide, will cause the pitch to change gradually between two consecutively struck keys"
+      }
     },
     {
       "slug": "voltage-controlled-depth",
