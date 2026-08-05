@@ -88,6 +88,78 @@ coefficient design retains the rounded Q used by existing renders, while
 - Processing: `process(input)` returns `Frame{bands, count, healthy}`.
 - Inspection: `supports_configuration()`, `minimum_transition_samples()`, `maximum_downward_log_slew_nepers_per_second()`, `band_count()`, `cutoff_count()`, `cutoff()`, `sample_rate()`, `transitioning()`, `healthy()`, `fault_count()`, `latency_samples()`, `band_response()`, `reconstruction_response()`.
 
+## Routing and gain laws
+
+### Orthonormal mid/side and stereo width
+
+`mid_side_encode()` and `mid_side_decode()` use the self-inverse
+`1/sqrt(2) * [[1, 1], [1, -1]]` transform. They preserve stereo-vector energy,
+map identical L/R input to exactly zero SIDE, and accept exact input/output
+aliasing as long as the two output ranges are distinct; partial input/output or
+output/output overlaps are rejected before mutation. `stereo_width()` applies a
+side gain in `[0, 2]`; a non-finite width selects unity. Audio non-finites
+propagate rather than being silently rewritten.
+
+### `AudioMatrixMixerT`
+
+The fixed-capacity signed matrix supports up to 16 inputs and 16 outputs by
+default. `prepare(max_block_size)` allocates the bounded input scratch used to
+make arbitrary input/output aliasing safe; output buffers may not overlap each
+other. Allocation failure leaves the previous prepared storage, block bound,
+and ramp state intact. `set_dimensions()` chooses the active rectangle.
+`set_gain()` changes a cell immediately, while
+`set_gain_ramped(..., ramp_samples)` emits the old value on the next sample and
+leaves the internal state at its target after the requested frames, independent
+of block partitioning. The target is therefore emitted on the following frame.
+The legal signed-gain domain is `[-64, 64]`:
+out-of-range finite values are rejected without changing the cell and increment
+`out_of_range_gain_count()`. Non-finite gains become zero and increment
+`nonfinite_gain_count()`. This bound keeps row normalization and ramp arithmetic
+finite for every realizable fixed-capacity instance. Changing the active
+dimensions is a control-thread topology operation and clears every matrix cell,
+preventing a later expansion from reviving stale routes.
+
+`MatrixHeadroomPolicy::Raw` applies the exact signed matrix and never clips or
+normalizes. `NormalizePeak` divides each output row by
+`max(1, sum(abs(gain)))`, which bounds peak output for full-scale correlated
+inputs without changing rows already at or below unity worst-case gain. Changing
+policy is a stopped/control-thread topology choice because it can change level at
+a block boundary. `reset()` and re-`prepare()` settle active ramps at their
+targets while preserving the matrix and policy.
+
+### N-way crossfade and switching
+
+`nway_constant_power_gains(position, gains)` selects the adjacent pair around a
+path-space position in `[0, N-1]` and uses the shared cosine/sine law, so the sum
+of squared gains is one. Empty spans fail; non-finite positions select path zero.
+
+`ClickFreePathSwitcherT` is fixed-capacity (16 paths by default). `configure()`
+sets the path count, initial path, and fade length; `request_path()` may run on
+the audio thread. Retargeting an in-flight fade begins from its current N-way
+weight vector. `next_gains()` advances one shared audio frame, which is the form
+to use for multichannel paths; the mono `process()` convenience requires every
+source range to be disjoint from its destination range. A fade of N >= 2 frames
+emits the old vector on its first frame and the target exactly on its Nth; zero-
+or one-frame requests are immediate. Smoothstep interpolation plus L2
+normalization preserves endpoint slope and constant-power weights. `reset()`
+snaps to the most recently requested path.
+
+### `PathLatencyAlignerT`
+
+`prepare(paths, channels, max_latency_samples, max_block_size)` allocates bounded
+path-major ring storage for up to 16 paths and eight channels by default.
+Invalid arguments, capacity overflow, or allocation failure leave the prior
+prepared topology, latency declarations, and delay history intact.
+`configure_latencies()` is an atomic control-thread configuration operation: it
+rejects an invalid set without mutation, reports the largest intrinsic path
+latency through `reported_latency_samples()`, and hard-resets history after a
+valid latency change. Each path receives `reported - intrinsic` samples of
+compensation. Corresponding input/output buffers may alias; cross-path aliasing
+is rejected by byte range, as is partially overlapping corresponding storage;
+only an exact corresponding in-place pair is supported. Capacity arithmetic is
+checked before allocation. `reset()` clears history without changing latency
+declarations.
+
 ## Dynamics
 
 ### Shared dynamics contract
