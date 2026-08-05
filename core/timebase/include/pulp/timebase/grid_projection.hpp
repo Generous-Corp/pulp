@@ -184,8 +184,11 @@ inline bool host_mapped_grid_output_offset(const GridProjectionRange& range,
         static_cast<long double>(range.host_anchor.frame) +
         (source_tick - range.host_anchor.source_tick) / range.host_anchor.ticks_per_frame;
     const auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
-    const auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
-    if (projected < minimum || projected > maximum)
+    // Use an exclusive, exactly representable 2^63 upper bound. On platforms
+    // where long double aliases double, converting INT64_MAX to long double can
+    // itself round to 2^63 and make an inclusive comparison unsafe.
+    const auto maximum_exclusive = -minimum;
+    if (projected < minimum || !(projected < maximum_exclusive))
         return false;
     auto absolute_frame = static_cast<std::int64_t>(std::floor(projected));
     std::int64_t absolute_frame_end = 0;
