@@ -249,7 +249,14 @@ enum class AudioWidgetType {
     meter,
     xy_pad,
     waveform,
-    spectrum
+    spectrum,
+    // An on/off. It is a member of THIS enum rather than a node type because
+    // this enum is what both consumers of a lowered control key off: the native
+    // materializer reaches its widget kind through kind_from_audio(), and the
+    // script emitter reaches its factory and its parameter binding through
+    // widget_type_name(). A toggle expressed any other way binds on one path
+    // and renders inert on the other.
+    toggle
 };
 
 struct IRNode;

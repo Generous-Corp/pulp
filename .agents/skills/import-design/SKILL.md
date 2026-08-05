@@ -1652,6 +1652,57 @@ promoting it paints Pulp's built-in silver knob over the design. The contract
   `explicit audio_widget 'none' suppresses name-based widget detection` case in
   `test_design_import_sources.cpp` (with a promoted control sibling).
 
+### `AudioWidgetType` is the vocabulary BOTH consumers key off
+
+A lowered control reaches a running plugin down two independent paths, and both
+of them dispatch on `AudioWidgetType` — not on the node type, not on a class
+name:
+
+- **native**: `kind_from_audio()` in `core/view/src/design_import_native_common.cpp`
+  → `NativeWidgetKind` → `make_widget()` → the `bind_*` callback
+- **script**: `audio_widget_web_tag()` / `audio_widget_type_name()` in
+  `core/view/src/design_codegen.cpp` → the bridge factory + the binding emission
+
+So a new bindable affordance is an `AudioWidgetType` member. Expressing one as a
+node type instead binds on the native path and renders inert in the emitted
+script — the control materializes, hit-tests and animates, and the parameter
+never moves. Adding the member makes every non-defaulted switch a compile error,
+which is how the sites that need it announce themselves.
+
+The producer end is one line in `lower_semantic_controls`
+(`tools/import-design/browser_capture_ir.cpp`): its `else continue` drops any
+capture kind it does not name, and a dropped control is still DRAWN by the
+painted-tree lowering. That is why an unsupported affordance looks like a
+working one — the shape a player reaches for is on screen, wired to nothing.
+`browser_capture/semantics.mjs` already classifies far more than the lowering
+admits (`pulp-switch`/`pulp-check` → `toggle`, `pulp-stepper` → `stepper`,
+`pulp-combo`/`pulp-select` → `select`, `pulp-radio`, `pulp-tab`, `pulp-numbox`);
+recognition has never been the ceiling.
+
+Three traps when adding one, each of which compiles and runs:
+
+- **The event name is per widget.** `Knob` and `Fader` dispatch `change` with a
+  position; `Toggle` dispatches `toggle` with 1/0; `Checkbox` dispatches
+  `change` with 1/0. Wiring the wrong one registers a listener that never fires.
+  The table is `core/view/src/widget_bridge/widget_callbacks.cpp`.
+- **Boolean state is read from an attribute, not the numeric default.**
+  `imported_widget_semantics` takes a toggle's opening state from `checked` /
+  `value` via `attr_bool`, so a lowering that writes only `audio_default` opens
+  every switch OFF — including the ones the design drew lit.
+- **A control over a designed body owns none of its own pixels.** Knob and
+  fader call `apply_designed_body_skin`; anything else must suppress its stock
+  body itself when `body_is_painted_beneath(node)` is true, or it paints an
+  opaque widget over the art the import exists to reveal.
+
+Note that `CodeGenMode::bridge_native_js` — the DEFAULT emitter — installs no
+parameter binding for ANY audio widget; both `bindWidgetToParam` emission sites
+in `design_codegen.cpp` are in the `web_compat` branch. Parity with a knob on
+that lane means "creates the widget", not "binds it".
+
+Pinned by `test_design_import_toggle_binding.cpp`, which proves the same thing
+on both paths the only way that distinguishes a wired control from a convincing
+one: click it and assert the STORE moved.
+
 ### KEY-based recognition + the recognition-resolver merge module
 
 NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition

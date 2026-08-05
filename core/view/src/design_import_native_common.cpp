@@ -440,6 +440,7 @@ std::optional<NativeWidgetKind> kind_from_audio(AudioWidgetType audio_widget) {
         case AudioWidgetType::xy_pad: return NativeWidgetKind::xy_pad;
         case AudioWidgetType::waveform: return NativeWidgetKind::waveform;
         case AudioWidgetType::spectrum: return NativeWidgetKind::spectrum;
+        case AudioWidgetType::toggle: return NativeWidgetKind::toggle_button;
         case AudioWidgetType::none: break;
     }
     return std::nullopt;
@@ -1992,6 +1993,31 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 button->set_corner_radius(*semantics.toggle_corner_radius);
             if (semantics.toggle_font_size)
                 button->set_font_size(*semantics.toggle_font_size);
+            // Same contract the knob and fader take below: a switch whose body
+            // is drawn by the layer beneath it owns none of its own pixels, so
+            // the widget contributes only the ON state. Without this the stock
+            // pill — an opaque fill, a border and a centred label — paints over
+            // the switch the design drew and over the caption beside it, and it
+            // does so convincingly enough to read as the intended appearance.
+            //
+            // The ON wash is the design's own accent rather than a theme
+            // default, for the reason the value ring is: a panel that chose its
+            // palette should not light up in whatever colour the surrounding
+            // app happens to use.
+            if (body_is_painted_beneath(node)) {
+                const auto clear = canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
+                button->set_label({});
+                button->set_off_background_color(clear);
+                button->set_off_border_color(clear);
+                button->set_on_border_color(clear);
+                button->set_off_text_color(clear);
+                button->set_on_text_color(clear);
+                auto lit = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
+                if (const auto hex = attr(node, "design_accent"); hex && !hex->empty())
+                    lit = parse_css_color(*hex);
+                lit.a *= 0.45f;
+                button->set_on_background_color(lit);
+            }
             return button;
         }
         case NativeWidgetKind::knob: {

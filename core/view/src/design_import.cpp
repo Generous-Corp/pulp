@@ -613,6 +613,7 @@ AudioWidgetType audio_widget_from_id(const std::string& id) {
     if (lower == "xy_pad" || lower == "xypad" || lower == "xy-pad") return AudioWidgetType::xy_pad;
     if (lower == "waveform") return AudioWidgetType::waveform;
     if (lower == "spectrum") return AudioWidgetType::spectrum;
+    if (lower == "toggle" || lower == "switch") return AudioWidgetType::toggle;
     return AudioWidgetType::none;
 }
 

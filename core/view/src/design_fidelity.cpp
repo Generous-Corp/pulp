@@ -105,6 +105,8 @@ std::optional<FidelityIssue> check_widget_intrinsic_size(const FidelityContext& 
             case AudioWidgetType::xy_pad:   return {80.0f, 80.0f};
             case AudioWidgetType::waveform: return {200.0f, 80.0f};
             case AudioWidgetType::spectrum: return {200.0f, 80.0f};
+            // A switch pill: wide enough for a travel, tall enough to hit.
+            case AudioWidgetType::toggle:   return {36.0f, 20.0f};
             default:                        return {0.0f, 0.0f};
         }
     };

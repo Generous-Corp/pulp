@@ -127,6 +127,7 @@ static const char* audio_widget_web_tag(AudioWidgetType t) {
         case AudioWidgetType::xy_pad:   return "xypad";
         case AudioWidgetType::waveform: return "waveform";
         case AudioWidgetType::spectrum: return "spectrum";
+        case AudioWidgetType::toggle:   return "toggle";
         default: return nullptr;
     }
 }
@@ -139,6 +140,7 @@ static const char* audio_widget_type_name(AudioWidgetType t) {
         case AudioWidgetType::xy_pad:   return "XYPad";
         case AudioWidgetType::waveform: return "WaveformView";
         case AudioWidgetType::spectrum: return "SpectrumView";
+        case AudioWidgetType::toggle:   return "Toggle";
         default: return nullptr;
     }
 }
@@ -415,6 +417,17 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "on(" << var
                        << "._id, 'change', function (v) { setParam('"
                        << escaped << "', v); });\n";
+                } else if (node.audio_widget == AudioWidgetType::toggle) {
+                    // A Toggle reports its edit as `toggle`, not `change`, and
+                    // the payload is 1/0 rather than a normalized position.
+                    // Listening for `change` here compiles, runs, and silently
+                    // never fires -- a switch that flips on screen and writes
+                    // no parameter.
+                    ss << ind << "bindWidgetToParam(" << var << "._id, '"
+                       << escaped << "');\n";
+                    ss << ind << "on(" << var
+                       << "._id, 'toggle', function (v) { setParam('"
+                       << escaped << "', v ? 1 : 0); });\n";
                 }
             }
 
@@ -1602,6 +1615,29 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "createXYPad('" << id << "', '" << col_id << "');\n";
         ss << ind << "setFlex('" << id << "', 'width', " << sz << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << sz << ");\n";
+    }
+    else if (wtype == AudioWidgetType::toggle) {
+        // Without a branch here the switch falls off the end of this chain: the
+        // wrapper column and the anchor are emitted and the widget never is, so
+        // the panel loads with a labelled gap where the control should be.
+        const float w = std::max(node.style.width.value_or(48.0f), 36.0f);
+        const float h = std::max(node.style.height.value_or(24.0f), 20.0f);
+        ss << ind << "setFlex('" << col_id << "', 'height', " << (h + 20) << ");\n";
+        fid_w = w; fid_h = h;  // emitted widget dims (fidelity)
+        ss << ind << "createToggle('" << id << "', '" << col_id << "');\n";
+        ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+        ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+        ss << ind << "setValue('" << id << "', "
+           << (node.audio_default >= 0.5f ? 1 : 0) << ");\n";
+        if (!label_text.empty()) {
+            const std::string lbl_id = id + "_lbl";
+            ss << ind << "createLabel('" << lbl_id << "', '"
+               << js_single_quote_escape(label_text) << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << lbl_id << "', 'height', " << kMinLabelHeight << ");\n";
+            ss << ind << "setFontSize('" << lbl_id << "', 11);\n";
+            ss << ind << "setTextColor('" << lbl_id << "', '#a6adc8');\n";
+            ss << ind << "setTextAlign('" << lbl_id << "', 'center');\n";
+        }
     }
     else if (wtype == AudioWidgetType::waveform || wtype == AudioWidgetType::spectrum) {
         float w = node.style.width.value_or(200.0f);

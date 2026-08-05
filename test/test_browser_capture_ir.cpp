@@ -2073,3 +2073,62 @@ TEST_CASE("an unregistered comparison scores identical pixels as a near-miss",
     CHECK(registered.similarity == Catch::Approx(1.0));
     CHECK(registered.passes());
 }
+
+TEST_CASE("a bound switch lowers to a control rather than staying backdrop",
+          "[import][browser-capture][semantics][toggle]") {
+    // The semantics pass has always named a `pulp-switch` correctly; what it
+    // named was then dropped, because only knob/fader/meter produced a node.
+    // The panel still DREW the switch, so the failure was invisible: a shape
+    // that reads as something to flip, wired to nothing.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"toggle","binding_status":"bound","name":"sync",
+         "bounds":{"left":24,"top":40,"width":56,"height":28},
+         "data_pulp":{"param":"sync","value":"1"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> toggles;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::toggle)
+                toggles.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    REQUIRE(toggles.size() == 1);
+    const auto& sync = *toggles.front();
+    // Both spellings, for the same reason a knob carries both: the script
+    // emitter reads `binding` and the native binding metadata reads
+    // `pulpParamKey`, and a control carrying one is half-wired.
+    REQUIRE(sync.attributes.at("binding") == "sync");
+    REQUIRE(sync.attributes.at("pulpParamKey") == "sync");
+    REQUIRE(sync.attributes.count("pulpRouteId") == 1);
+    REQUIRE(sync.stable_anchor_id);
+    REQUIRE_FALSE(sync.stable_anchor_id->empty());
+    // The opening state is read as a boolean by the native materializer, so a
+    // switch the design drew lit has to arrive lit rather than snapping off
+    // the moment the panel loads.
+    REQUIRE(sync.attributes.at("checked") == "1");
+}

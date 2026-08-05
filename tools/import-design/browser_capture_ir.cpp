@@ -455,6 +455,12 @@ int lower_semantic_controls(const fs::path& path,
         if (kind == "knob") widget = pulp::view::AudioWidgetType::knob;
         else if (kind == "fader") widget = pulp::view::AudioWidgetType::fader;
         else if (kind == "meter") widget = pulp::view::AudioWidgetType::meter;
+        // A switch, a checkbox, or anything the semantics pass called a
+        // toggle. The recognisers upstream have named these correctly all
+        // along; this branch is what turns that recognition into a control
+        // instead of leaving the element as part of the backdrop -- a shape
+        // that reads to a player as something to flip and moves nothing.
+        else if (kind == "toggle") widget = pulp::view::AudioWidgetType::toggle;
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
@@ -545,6 +551,13 @@ int lower_semantic_controls(const fs::path& path,
                 // A malformed value must not take the control down with it;
                 // the default stands and the design still renders.
             }
+            // A toggle's opening state is read as a BOOLEAN attribute rather
+            // than from the numeric default, because that is where the native
+            // materializer looks for it. Writing only the float left every
+            // imported switch opening OFF, including the ones the design drew
+            // lit -- the panel changed the moment it loaded.
+            if (widget == pulp::view::AudioWidgetType::toggle)
+                control.attributes["checked"] = declared_value;
         }
         control.style.position = "absolute";
         control.style.left =
