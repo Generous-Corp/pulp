@@ -3444,6 +3444,48 @@ TEST_CASE("a design's declared pointer overrides the derived tick",
     CHECK(radius_of(line->f[2], line->f[3]) == Catch::Approx(92.0f).margin(0.5f));
 }
 
+TEST_CASE("a lowered control sits above the decoration it was drawn over",
+          "[view][import][native-materializer][stacking]") {
+    // The other half of the same failure, and the half that reached real
+    // panels: a design need not say anything at all for its controls to become
+    // unusable.
+    //
+    // Lowering assigns every composed node a z-index from Chrome's paint order.
+    // The synthesized controls were appended AFTERWARDS with no z-index, so
+    // they defaulted to `auto` and sat beneath the decoration. Appending them
+    // last does not help — z-index beats document order — so the topmost
+    // decorative band answered every press meant for a control.
+    //
+    // This asserts the ORDERING, not a magic number: the control must outrank
+    // the decoration, whatever the decoration happens to be numbered.
+    DesignIR ir;
+    ir.root = frame("panel", 200.0f, 200.0f, LayoutDirection::column);
+
+    auto decoration = frame("html", 200.0f, 200.0f, LayoutDirection::column);
+    decoration.style.z_index = 0;
+    ir.root.children.push_back(std::move(decoration));
+
+    auto knob_node = frame("cutoff", 100.0f, 100.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.style.position = "absolute";
+    knob_node.style.left = 50.0f;
+    knob_node.style.top = 50.0f;
+    knob_node.style.z_index = 1;   // what the importer now assigns
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 200.0f, 200.0f});
+    root->layout_children();
+
+    // Press the knob's centre — the point the operability gate drags.
+    View* hit = root->hit_test({100.0f, 100.0f});
+    REQUIRE(hit != nullptr);
+    INFO("press at the knob centre landed on "
+         << (dynamic_cast<Knob*>(hit) != nullptr ? "the knob" : "the decoration"));
+    CHECK(dynamic_cast<Knob*>(hit) != nullptr);
+}
+
 TEST_CASE("a decorative layer that opts out of hit-testing stops eating presses",
           "[view][import][native-materializer][pointer-events]") {
     // The shape of a real failure: a generated panel rendered correctly and

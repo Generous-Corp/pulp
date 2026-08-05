@@ -453,6 +453,27 @@ int lower_semantic_controls(const fs::path& path,
             }
         }
 
+        // Sit above the lowered decoration, explicitly.
+        //
+        // Lowering assigns every composed node a z-index from Chrome's paint
+        // order, and these synthesized controls are appended afterwards without
+        // one — so they defaulted to `auto` and sat BENEATH any decoration
+        // carrying an explicit z-index. Hit-testing follows paint order, so a
+        // glow or gradient band drawn over a knob answered the press meant for
+        // it: the panel rendered correctly and responded to nothing. Appending
+        // last does not save them, because z-index beats document order.
+        //
+        // Root children are siblings in one stacking context, so a z-index above
+        // every root sibling puts the control above those siblings' whole
+        // subtrees — which is where the covering bands live. Computed from the
+        // tree rather than a constant: a fixed number silently stops working the
+        // day a design nests one level deeper than it did today.
+        int max_sibling_z = 0;
+        for (const auto& sibling : root.children)
+            if (sibling.style.z_index)
+                max_sibling_z = std::max(max_sibling_z, *sibling.style.z_index);
+        control.style.z_index = max_sibling_z + 1;
+
         root.children.push_back(std::move(control));
         ++lowered;
     }
