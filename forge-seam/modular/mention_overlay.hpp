@@ -227,6 +227,11 @@ private:
     /// True only while choose() is rewriting the field, so the change that
     /// rewrite provokes is not mistaken for the user typing.
     bool inserting_ = false;
+    /// The token that reached across a space, matched nothing, and was given
+    /// back to the prose. Anything it grows into cannot match either — the
+    /// search is monotone — so this bounds the cost of an '@' left behind in
+    /// a long prompt without bounding how long a maker's name may be.
+    std::string abandoned_;
 };
 
 }  // namespace forge_modular

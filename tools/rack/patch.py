@@ -2395,6 +2395,24 @@ def brand_directory(cat: dict) -> dict:
     return out
 
 
+def brand_phrase_span(directory: dict) -> int:
+    """How many words the longest maker name in this library actually has.
+
+    READ FROM THE LIBRARY, NOT GUESSED. The scan below tries the longest phrase
+    first and this is where it starts, and it was the literal 3 -- which is
+    right for "CV funk" and "Audible Instruments" and wrong for six of the 375
+    makers in the real index: "Studio Six Plus One", "The All Electric Smart
+    Grid", "Path Set x Omri Cohen", "Mathematics and Music Lab (MML)",
+    "Jasmine & Olive Trees" and "Autodafe - REDs FREE". Naming any of them in
+    a prompt, or picking one from the @ list, resolved to nothing at all, so
+    the maker silently did not reach the model.
+
+    The same number is not hard-coded on the app's side either: the mention
+    list stopped capping the span rather than agreeing on a second guess.
+    """
+    return max((len(e["brand"].split()) for e in directory.values()), default=1)
+
+
 def brand_mentions(prompt: str, cat: dict) -> dict:
     """Which makers this prompt names, and how hard.
 
@@ -2415,16 +2433,29 @@ def brand_mentions(prompt: str, cat: dict) -> dict:
     # Module mentions are modules. "@CVfunk/Sphinx" names one module, and
     # reading it as naming the maker is exactly the 43-module dump this whole
     # distinction exists to prevent.
-    tokens = [w for w in raw if "/" not in w]
+    #
+    # UNLESS THE SLASH IS PART OF THE MAKER'S NAME. Two of the 375 makers in the
+    # library have one -- "Catro/Blanco" (8 modules) and "p.s.F/X" (7) -- and
+    # dropping every token with a slash in it made both of them unnameable, by
+    # any spelling, from prose and from the @ list alike. Checked against the
+    # directory rather than guessed, so it exempts a name that really is one and
+    # nothing else.
+    tokens = [w for w in raw
+              if "/" not in w or
+              fold_name(w.strip("@,.;:()[]\"'!?")) in directory]
     stripped = [w.strip("@,.;:()[]\"'!?") for w in tokens]
     folded = [fold_name(w) for w in stripped]
+
+    # Longest phrase first, and how long that is is read from the library
+    # rather than assumed -- see brand_phrase_span.
+    span = brand_phrase_span(directory)
 
     found: dict = {}
     cue = False
     i = 0
     while i < len(tokens):
         hit = None
-        for n in (3, 2, 1):
+        for n in range(span, 0, -1):
             if i + n > len(tokens):
                 continue
             phrase = " ".join(stripped[i:i + n])

@@ -1231,10 +1231,269 @@ TEST_CASE("a mention survives a space while it still matches", "[mention]") {
     overlay.handle_text("@VCO and then", 13);
     CHECK_FALSE(overlay.is_open());
 
-    // Bounded, so a mention cannot swallow a sentence: past the cap the words
-    // are prose whatever they say.
+    // A mention still cannot swallow a sentence, and what stops it is the
+    // matching rather than a count of words: these words name no maker and no
+    // module, so they go back to being prose.
     overlay.handle_text("@CV funk and more", 17);
     CHECK_FALSE(overlay.is_open());
+}
+
+namespace {
+
+/// Two makers whose names are longer than any guess at how long a name is.
+/// Both are real, and neither could be typed after an '@'.
+const std::vector<forge_modular::ModuleEntry>& long_name_library() {
+    static const std::vector<forge_modular::ModuleEntry> lib = {
+        {"The All Electric Smart Grid", "Transformer",
+         "TheAllElectricSmartGrid/Transformer", false},
+        {"Studio Six Plus One", "Nozori", "StudioSixPlusOne/Nozori", false},
+        {"Fundamental", "VCO", "Fundamental/VCO", true},
+    };
+    return lib;
+}
+
+}  // namespace
+
+TEST_CASE("a maker's name is as long as its maker made it", "[mention]") {
+    // A space no longer ended a mention, but only two of them were allowed --
+    // which is a guess at how many words a maker's name has, and it is wrong
+    // for six of the 375 makers in the real library: "Studio Six Plus One",
+    // "The All Electric Smart Grid", "Path Set x Omri Cohen", "Mathematics and
+    // Music Lab (MML)", "Jasmine & Olive Trees" and "Autodafe - REDs FREE".
+    // No spelling of any of them could be typed after an '@', so the maker
+    // rows the list exists to offer were unreachable for all six.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source([](const std::string& q) {
+        return forge_modular::search_entries(long_name_library(), q);
+    });
+
+    // Typed a keystroke at a time, because the list has to survive every
+    // intermediate state. Asserting only the finished string would pass over a
+    // list that had closed at the third space and reopened at the end.
+    for (const auto* whole : {"@The All Electric Smart Grid",
+                              "@Studio Six Plus One"}) {
+        const std::string typed = whole;
+        for (std::size_t n = 1; n <= typed.size(); ++n) {
+            overlay.handle_text(typed.substr(0, n), n);
+            INFO("after: " << typed.substr(0, n));
+            CHECK(overlay.is_open());
+        }
+        REQUIRE_FALSE(overlay.candidates().empty());
+        CHECK(overlay.candidates()[0].kind ==
+              forge_modular::MentionCandidate::Kind::brand);
+        CHECK(overlay.candidates()[0].brand == typed.substr(1));
+    }
+
+    // And the other half of the rule is unchanged: what ends a mention is that
+    // it stopped matching, not how many words it has. A five-word maker
+    // followed by prose is prose.
+    overlay.handle_text("@The All Electric Smart Grid into a filter", 41);
+    CHECK_FALSE(overlay.is_open());
+    // Once abandoned it stays abandoned, however much more is typed after it.
+    overlay.handle_text("@The All Electric Smart Grid into a filter and out", 49);
+    CHECK_FALSE(overlay.is_open());
+}
+
+TEST_CASE("a maker's punctuation is not something anybody has to type",
+          "[mention][catalog]") {
+    // fold() removed a space, a hyphen and an underscore, and nothing else --
+    // so two real makers whose names carry a slash, "Catro/Blanco" (8 modules)
+    // and "p.s.F/X" (7), could be reached only by typing that punctuation
+    // exactly. "@Catro Blanco" and "@psfx" are what somebody actually types,
+    // and both found nothing.
+    //
+    // patch.py's fold_name already dropped every separator; this is the two
+    // sides of the seam agreeing, which is the whole premise of a maker being
+    // named the same way in a prompt and in the list.
+    using Kind = forge_modular::MentionCandidate::Kind;
+    const std::vector<forge_modular::ModuleEntry> lib = {
+        {"Catro/Blanco", "Rounds", "CatroBlanco/Rounds", false},
+        {"p.s.F/X", "Shifty", "alto777_LFSR/Shifty", false},
+        {"Instruō", "Tānz", "Instruo/Tanz", false},
+        {"Fundamental", "VCO", "Fundamental/VCO", true},
+    };
+    for (const auto* typed : {"Catro/Blanco", "Catro Blanco", "catroblanco",
+                              "Catro-Blanco"}) {
+        const auto hits = forge_modular::search_entries(lib, typed);
+        INFO("typed: " << typed);
+        REQUIRE_FALSE(hits.empty());
+        CHECK(hits[0].kind == Kind::brand);
+        CHECK(hits[0].brand == "Catro/Blanco");
+    }
+    for (const auto* typed : {"p.s.F/X", "psfx", "p s f x"}) {
+        const auto hits = forge_modular::search_entries(lib, typed);
+        INFO("typed: " << typed);
+        REQUIRE_FALSE(hits.empty());
+        CHECK(hits[0].kind == Kind::brand);
+        CHECK(hits[0].brand == "p.s.F/X");
+    }
+
+    // A NON-ASCII NAME IS NOT SHORTENED BY THE FOLD. Asking libc whether a
+    // UTF-8 continuation byte is alphanumeric answers no, which would drop it
+    // and leave "Instruō" comparing as "instru" -- and then "Instrument" and
+    // "Instruō" become the same maker.
+    const auto instruo = forge_modular::search_entries(lib, "Instruō");
+    REQUIRE_FALSE(instruo.empty());
+    CHECK(instruo[0].brand == "Instruō");
+    CHECK(forge_modular::search_entries(lib, "Instrumentation").empty());
+}
+
+TEST_CASE("an uninstalled alias still outranks a partial maker name",
+          "[mention][catalog]") {
+    // "@br" means Braids, and the tier that says so was protected only for
+    // modules ALREADY INSTALLED: the front of the list was "installed, or an
+    // exact name", so on a machine without Audible Instruments any maker whose
+    // name merely starts with those two letters took the row instead.
+    //
+    // Being uninstalled is precisely the state a mention exists to remedy, so
+    // it cannot be the thing that decides which row leads. The test that
+    // covered this rule installed Audible Instruments first, which is why the
+    // hole stayed open.
+    using Kind = forge_modular::MentionCandidate::Kind;
+    std::vector<forge_modular::ModuleEntry> lib = space_library();
+    // Stated, because the whole point of this case is the machine that does
+    // NOT have Braids: a fixture that quietly installed it would pass without
+    // covering anything.
+    REQUIRE(std::none_of(lib.begin(), lib.end(), [](const auto& e) {
+        return e.brand == "Audible Instruments" && e.installed;
+    }));
+    lib.push_back({"Bruer", "Klok", "Bruer/Klok", false});
+    lib.push_back({"Bruer", "Metron", "Bruer/Metron", false});
+    // A module that merely BEGINS with the query, which is the tier that must
+    // not be promoted alongside the alias — see below.
+    lib.push_back({"Count Modula", "Breakout", "CountModula/Breakout", false});
+
+    const auto br = forge_modular::search_entries(lib, "br");
+    REQUIRE_FALSE(br.empty());
+    CHECK(br[0].name == "Macro Oscillator");
+    CHECK(br[0].alias == "Braids");
+    CHECK(br[0].kind == Kind::module_);
+
+    // Said as an ordering as well as a first place: the row that matters is
+    // the one the maker would otherwise have taken.
+    const auto names = names_of(br);
+    const auto braids = std::find(names.begin(), names.end(), "Macro Oscillator");
+    const auto maker = std::find(names.begin(), names.end(), "2 modules");
+    REQUIRE(braids != names.end());
+    REQUIRE(maker != names.end());
+    CHECK(braids < maker);
+
+    // AND THE NAME-PREFIX TIER STAYS OUT OF THE FRONT. Promoting it alongside
+    // the alias was tried and measured against the real 4,735-module index:
+    // "@br" then answers with thirty modules that merely begin with those two
+    // letters -- Breakout, Branes, Broadcast -- and Braids AND every maker row
+    // fall out of the six visible rows. A prefix is too weak and too common to
+    // lead; a module's own name is not.
+    const auto breakout = std::find(names.begin(), names.end(), "Breakout");
+    REQUIRE(breakout != names.end());
+    CHECK(maker < breakout);
+    CHECK(braids < breakout);
+
+    // A maker named IN FULL is a different claim and still leads: "@Bruer" is
+    // unambiguous where "@br" is two letters.
+    const auto bruer = forge_modular::search_entries(lib, "Bruer");
+    REQUIRE_FALSE(bruer.empty());
+    CHECK(bruer[0].kind == Kind::brand);
+    CHECK(bruer[0].brand == "Bruer");
+}
+
+TEST_CASE("an alias leads a partial maker name, and that is the rule",
+          "[mention][catalog]") {
+    // The other side of the same tier, stated rather than left to be
+    // discovered. A partial maker name is weak evidence -- two or three
+    // letters -- so a module whose own slug begins with the query leads it.
+    //
+    // Measured on the real index this is visible at "@CV": the modules whose
+    // slugs begin CV (Core/CV-Gate, shown as "Gate to MIDI";
+    // Autinn/CVConverter, shown as "Conv") now sit above the "CV funk, 43
+    // modules" row. That is this rule working, not a fault in it, and it is
+    // the behaviour a human should look at first if the ordering is ever
+    // reconsidered.
+    using Kind = forge_modular::MentionCandidate::Kind;
+    const std::vector<forge_modular::ModuleEntry> lib = {
+        {"CV funk", "Steps", "CVfunk/Steps", false},
+        {"CV funk", "Ouros", "CVfunk/Ouros", false},
+        {"VCV", "Gate to MIDI", "Core/CV-Gate", false},
+        {"Autinn", "Conv", "Autinn/CVConverter", false},
+    };
+    const auto cv = forge_modular::search_entries(lib, "CV");
+    REQUIRE(cv.size() >= 3);
+    CHECK(cv[0].kind == Kind::module_);
+    CHECK(cv[0].alias == "CV-Gate");            // and the row says why
+    CHECK(cv[1].kind == Kind::module_);
+    CHECK(cv[2].kind == Kind::brand);
+    CHECK(cv[2].brand == "CV funk");
+
+    // A maker named IN FULL is not weak evidence and still leads.
+    const auto full = forge_modular::search_entries(lib, "CV funk");
+    REQUIRE_FALSE(full.empty());
+    CHECK(full[0].kind == Kind::brand);
+}
+
+namespace {
+
+/// The same maker, later: more modules, under plugin slugs that did not exist
+/// when the token was inserted.
+const std::vector<forge_modular::ModuleEntry>& rebuilt_library() {
+    static const std::vector<forge_modular::ModuleEntry> lib = {
+        {"CV funk", "Steps", "CVfunk/Steps", false},
+        {"CV funk", "Ouros", "CVfunk/Ouros", false},
+        {"CV funk", "Nona", "CVfunkSands/Nona", false},
+        {"CV funk", "Dunes", "CVfunkSands/Dunes", false},
+        {"CV funk", "Hammer", "CVfunkPercussion/Hammer", false},
+        {"Fundamental", "VCO", "Fundamental/VCO", true},
+    };
+    return lib;
+}
+
+}  // namespace
+
+TEST_CASE("a brand token still names its maker after a reload",
+          "[mention][catalog]") {
+    // A project stores the PROMPT, so whatever the list inserts has to go on
+    // meaning the same thing next week -- against a library index that has
+    // been rebuilt, with plugins split, renamed or added underneath it.
+    //
+    // Structurally that holds because what is inserted is the maker's own
+    // name and nothing else, and it is resolved again from scratch each time.
+    // Nothing asserted either half.
+    using Kind = forge_modular::MentionCandidate::Kind;
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(space_source);
+
+    std::string inserted;
+    overlay.on_choose = [&](const std::string& s) { inserted = s; };
+    overlay.handle_text("@CV", 3);
+    REQUIRE_FALSE(overlay.candidates().empty());
+    REQUIRE(overlay.candidates()[0].kind == Kind::brand);
+    overlay.choose(0);
+
+    // The maker's own display name, and nothing that is a handle into the
+    // library that produced it: no plugin slug, no id, no count, no syntax we
+    // invented. That is the entire reason it survives a rebuild.
+    CHECK(inserted == "CV funk");
+    CHECK(inserted.find('/') == std::string::npos);
+    CHECK(inserted.find(':') == std::string::npos);
+
+    // A LATER LIBRARY. The maker now publishes five modules across three
+    // plugins, two of which did not exist before, and the token still selects
+    // them -- recounted from the new index rather than from what was stored.
+    const auto after = forge_modular::search_entries(rebuilt_library(), inserted);
+    REQUIRE_FALSE(after.empty());
+    CHECK(after[0].kind == Kind::brand);
+    CHECK(after[0].brand == "CV funk");
+    CHECK(after[0].name == "5 modules");
+    CHECK(after[0].slug == inserted);          // and it re-inserts identically
+
+    // The honest negative: a maker gone from the library resolves to nothing
+    // rather than to something plausible. A stored token is a name, and a name
+    // for something nobody publishes any more names nothing.
+    const std::vector<forge_modular::ModuleEntry> without = {
+        {"Fundamental", "VCO", "Fundamental/VCO", true},
+    };
+    CHECK(forge_modular::search_entries(without, inserted).empty());
 }
 
 namespace {

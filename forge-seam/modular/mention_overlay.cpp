@@ -57,34 +57,31 @@ constexpr int kKeyEscape = 53;
 constexpr int kKeyDown = 125;
 constexpr int kKeyUp = 126;
 
-/// How many spaces a mention may span. Nearly every two-word brand is two
-/// words ("CV funk", "Count Modula", "Frozen Wasteland"); three covers
-/// "Audible Instruments Macro Oscillator" and stops well short of swallowing a
-/// sentence.
-constexpr int kMaxTokenSpaces = 2;
-
 /// The word being typed after the most recent unclosed '@', or no value.
 ///
 /// Scanning back from the caret rather than forward from the start: a prompt can
 /// contain several mentions, and only the one under the caret is being edited.
 ///
-/// A SPACE DOES NOT END IT. It used to, unconditionally, which meant "@CV funk"
-/// could never be typed — and with it went Audible Instruments, Count Modula,
-/// Frozen Wasteland, Impromptu Modular and every other brand whose name has a
-/// space in it. So the query is extended across a space and the caller decides:
-/// the list stays open while the longer query still matches something, and the
-/// moment it matches nothing the text goes back to being ordinary text.
+/// A SPACE DOES NOT END IT, AND NEITHER DOES A COUNT OF THEM. A space used to
+/// end a mention unconditionally, which meant "@CV funk" could never be typed;
+/// the replacement allowed two of them, which is a guess at how long a maker's
+/// name is. It is wrong for six of the 375 makers in the real library —
+/// "Studio Six Plus One", "The All Electric Smart Grid", "Path Set x Omri
+/// Cohen", "Mathematics and Music Lab (MML)", "Jasmine & Olive Trees",
+/// "Autodafe - REDs FREE" — and no spelling of any of them could be typed
+/// after an '@'.
+///
+/// So the span is not capped at all. Only a newline stops it, because nobody
+/// types a name across two lines. What a mention is is decided by whether it
+/// still matches, which the caller already asks and which is the better
+/// question: it is right for "@The All Electric Smart Grid" and right for
+/// "@vco into a filter", where a word count is only ever right by luck.
 std::optional<std::string> active_token(const std::string& text, std::size_t caret) {
     if (caret > text.size()) caret = text.size();
-    int spaces = 0;
     for (std::size_t i = caret; i-- > 0;) {
         const char c = text[i];
         if (c == '@') return text.substr(i + 1, caret - i - 1);
-        // A newline is a hard boundary — nobody types a module name across
-        // two lines — and so is the third space, which is where "a mention
-        // with a space in it" becomes "a sentence after an email address".
         if (c == '\n') return std::nullopt;
-        if (c == ' ' && ++spaces > kMaxTokenSpaces) return std::nullopt;
     }
     return std::nullopt;
 }
@@ -379,16 +376,33 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     if (!notice_text_.empty()) show_notice({});
     const auto token = active_token(text, caret);
     if (!token) {
+        abandoned_.clear();
         if (open_) close();
         return false;
     }
+    // A mention that has already been abandoned stays abandoned, and the
+    // library is not asked again.
+    //
+    // MATCHING IS MONOTONE: a query matches an entry when its folded form is a
+    // substring of that entry's folded name, slug or maker, and every longer
+    // query contains the shorter one — so a token that matches nothing cannot
+    // grow into one that matches something. That is a proof rather than a
+    // heuristic, and it is what pays for the span above being uncapped: once
+    // "@vco into" has died, the rest of the sentence costs one string compare
+    // per keystroke instead of a search of 4,700 modules.
+    if (!abandoned_.empty() && token->rfind(abandoned_, 0) == 0) {
+        if (open_) close();
+        return false;
+    }
+    abandoned_.clear();
     refresh(*token);
-    // A query that reaches across a space is a GUESS that a two-word brand is
+    // A query that reaches across a space is a GUESS that a maker's name is
     // being typed. It is right for "@CV funk" and wrong for "@vco into a
     // filter", and the two are indistinguishable until the matches are in: no
     // matches means the space really did end the mention, so the list closes
     // and the words go back to being ordinary text.
     if (candidates_.empty() && spans_a_space(*token)) {
+        abandoned_ = *token;
         if (open_) close();
         return false;
     }
