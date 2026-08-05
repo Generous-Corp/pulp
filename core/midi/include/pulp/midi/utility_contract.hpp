@@ -113,11 +113,14 @@ inline bool is_channel_voice(const UmpPacket& packet) noexcept {
            packet.message_type() == UmpMessageType::Midi2ChannelVoice;
 }
 
-inline bool is_note(const UmpPacket& packet) noexcept {
+inline bool is_note_addressed(const UmpPacket& packet) noexcept {
     if (!is_channel_voice(packet))
         return false;
     const auto status = static_cast<std::uint8_t>(packet.status() & 0xf0);
-    return status == 0x80 || status == 0x90;
+    if (packet.message_type() == UmpMessageType::Midi1ChannelVoice)
+        return status == 0x80 || status == 0x90 || status == 0xa0;
+    return status == 0x00 || status == 0x10 || status == 0x60 || status == 0x80 || status == 0x90 ||
+           status == 0xa0 || status == 0xf0;
 }
 
 inline UmpPacket with_channel(UmpPacket packet, std::uint8_t channel) noexcept {
@@ -142,6 +145,13 @@ inline MidiEvent with_channel(const MidiEvent& event, std::uint8_t channel) noex
 
 inline bool is_channel_voice(const MidiEvent& event) noexcept {
     return event.size() != 0 && event.data()[0] >= 0x80 && event.data()[0] < 0xf0;
+}
+
+inline bool is_note_addressed(const MidiEvent& event) noexcept {
+    if (!is_channel_voice(event))
+        return false;
+    const auto status = static_cast<std::uint8_t>(event.data()[0] & 0xf0);
+    return status == 0x80 || status == 0x90 || status == 0xa0;
 }
 
 inline int nearest_scale_note(int note, const music::Scale& scale) noexcept {

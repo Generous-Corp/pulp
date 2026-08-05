@@ -209,7 +209,9 @@ the voice index; the adapter records note/MPE values for that slot and never
 allocates or steals a voice. Putting this bridge in `core/midi` would reverse
 the established `audio -> midi` dependency and create a cycle. Pass the same
 nonzero `note_id` generation to note-on, expression, and note-off calls; stale
-identity updates are rejected. Prepare the destination for at least four lanes
+identity updates are rejected. `release_voice()` also requires the matching
+nonzero generation; use `flush()` or `reset()` only for an intentional
+identity-free lifecycle clear. Prepare the destination for at least four lanes
 before `write_voice()` so the adapter can publish its block atomically.
 
 ## Reference material
