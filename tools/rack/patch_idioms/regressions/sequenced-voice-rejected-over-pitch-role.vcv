@@ -1,0 +1,238 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "Fundamental",
+   "model": "LFO",
+   "pos": [
+    0,
+    0
+   ],
+   "params": [
+    {
+     "id": 2,
+     "value": 2.0
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "plugin": "ForgeModular",
+   "model": "SEQ",
+   "pos": [
+    9,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.0
+    },
+    {
+     "id": 1,
+     "value": 0.417
+    },
+    {
+     "id": 2,
+     "value": 0.583
+    },
+    {
+     "id": 3,
+     "value": 0.25
+    },
+    {
+     "id": 4,
+     "value": 0.0
+    },
+    {
+     "id": 5,
+     "value": 0.417
+    },
+    {
+     "id": 6,
+     "value": 0.583
+    },
+    {
+     "id": 7,
+     "value": 0.25
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "plugin": "ForgeModular",
+   "model": "VCO",
+   "pos": [
+    21,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.0
+    },
+    {
+     "id": 1,
+     "value": 0.0
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "plugin": "ForgeModular",
+   "model": "VCF",
+   "pos": [
+    29,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.5
+    },
+    {
+     "id": 1,
+     "value": 0.35
+    },
+    {
+     "id": 2,
+     "value": 0.6
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "plugin": "ForgeModular",
+   "model": "ENV",
+   "pos": [
+    37,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.005
+    },
+    {
+     "id": 1,
+     "value": 0.18
+    },
+    {
+     "id": 2,
+     "value": 0.35
+    },
+    {
+     "id": 3,
+     "value": 0.25
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "plugin": "ForgeModular",
+   "model": "VCA",
+   "pos": [
+    43,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.9
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "plugin": "Core",
+   "model": "AudioInterface2",
+   "pos": [
+    46,
+    0
+   ],
+   "params": [
+    {
+     "id": 0,
+     "value": 0.6
+    }
+   ],
+   "data": {
+    "audio": {
+     "driver": 5,
+     "deviceName": "Mac Studio Speakers",
+     "sampleRate": 44100,
+     "blockSize": 256,
+     "inputOffset": 0,
+     "outputOffset": 0
+    }
+   }
+  }
+ ],
+ "cables": [
+  {
+   "id": 1,
+   "outputModuleId": 1,
+   "outputId": 3,
+   "inputModuleId": 2,
+   "inputId": 0,
+   "color": "#ffb437"
+  },
+  {
+   "id": 2,
+   "outputModuleId": 2,
+   "outputId": 0,
+   "inputModuleId": 3,
+   "inputId": 0,
+   "color": "#3695ef"
+  },
+  {
+   "id": 3,
+   "outputModuleId": 2,
+   "outputId": 1,
+   "inputModuleId": 5,
+   "inputId": 0,
+   "color": "#3695ef"
+  },
+  {
+   "id": 4,
+   "outputModuleId": 3,
+   "outputId": 0,
+   "inputModuleId": 4,
+   "inputId": 1,
+   "color": "#00b56e"
+  },
+  {
+   "id": 5,
+   "outputModuleId": 4,
+   "outputId": 0,
+   "inputModuleId": 6,
+   "inputId": 1,
+   "color": "#00b56e"
+  },
+  {
+   "id": 6,
+   "outputModuleId": 5,
+   "outputId": 0,
+   "inputModuleId": 6,
+   "inputId": 0,
+   "color": "#8b4ade"
+  },
+  {
+   "id": 7,
+   "outputModuleId": 6,
+   "outputId": 0,
+   "inputModuleId": 7,
+   "inputId": 0,
+   "color": "#00b56e"
+  },
+  {
+   "id": 8,
+   "outputModuleId": 6,
+   "outputId": 0,
+   "inputModuleId": 7,
+   "inputId": 1,
+   "color": "#00b56e"
+  }
+ ]
+}
