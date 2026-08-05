@@ -282,7 +282,7 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         // made them: without this, a module measured before controls were
         // recorded at all reports a matching plugin version and reads as
         // faithful. Keep in step with PortMap::kScanVersion.
-        out += "      \"scan\": 3,\n";
+        out += "      \"scan\": 4,\n";
         // Panel size lets a preview lay modules out at true width without
         // parsing anyone's artwork.
         out += "      \"size\": [" +

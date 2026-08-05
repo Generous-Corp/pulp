@@ -98,7 +98,8 @@ public:
     ///   1  jacks only
     ///   2  controls, with their kind, size and label
     ///   3  lights and displays
-    static constexpr int kScanVersion = 3;
+    ///   4  parameter ranges: minValue, maxValue, defaultValue
+    static constexpr int kScanVersion = 4;
 
     /// The first scanner that recorded controls at all.
     ///
