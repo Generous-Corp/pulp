@@ -174,6 +174,25 @@ else
     say_bad "the shipped DSP vocabulary extracts $vocab lines — the model would be given none"
 fi
 
+# Measured parameter bounds, counted rather than merely present. An empty or
+# range-less seed is the failure that looks like success: it ships, it parses,
+# and every module still reaches the model with no bounds, which is the state
+# the seed exists to end.
+ranges=$(/usr/bin/python3 -c '
+import json, sys
+try:
+    mods = json.load(open(sys.argv[1]))["modules"]
+except Exception:
+    print(0); raise SystemExit
+print(sum(1 for m in mods for p in m.get("params") or [] if "minValue" in p))
+' "$ROOT/Contents/Resources/tools/rack/portmap-seed.json" 2>/dev/null)
+if [[ "${ranges:-0}" -ge 500 ]]; then
+    say_ok "the shipped ranges cover $ranges parameters"
+else
+    say_bad "the shipped ranges cover $ranges parameters — a fresh install would
+         reach the model with no bounds and invent values"
+fi
+
 # ── the Rack pack, by content ────────────────────────────────────────────────
 PACK="$(find "$ROOT/Contents/Resources/rack" -maxdepth 1 -name '*.vcvplugin' \
         2>/dev/null | sort | tail -1)"
