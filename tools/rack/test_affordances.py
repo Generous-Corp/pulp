@@ -123,15 +123,37 @@ def check_affordances_are_classified() -> tuple:
         # Models fence JSON without being asked. A reader that only accepts a
         # bare object throws away a perfectly good answer and spends the call
         # again on the next pass, forever.
-        fenced, _ = A.parse_reply(
-            "Here you go:\n\n```json\n" + good + "\n```\n", entry)
-        if fenced != record:
+        # Every shape a real reply has arrived in. The worked-example case is
+        # not hypothetical: it is how ForgeModular/EUCLID failed the only
+        # time a 79-module classification run failed at all, reported as
+        # "Extra data" because a first-brace-to-last-brace slice covered two
+        # objects. Trailing prose and fences were never the problem -- the
+        # slice already survived those -- and a reader that only accepted a
+        # bare object would have failed MORE shapes, not fewer.
+        shapes = {
+            "fenced": "Here you go:\n\n```json\n" + good + "\n```\n",
+            "trailing prose": good + "\n\nHope that helps!",
+            "prose containing a brace": "Note {like this} then:\n" + good,
+            "a worked example first":
+                'For example:\n{"params": {"0": {"affords": "pitch"}}}\n\n'
+                "My answer:\n" + good,
+            "a COMPLETE example first":
+                '{"module": ["pitch"], "params": {'
+                '"0": {"affords": "pitch", "confidence": "guessed"}, '
+                '"1": {"affords": "pitch", "confidence": "guessed"}}}\n'
+                "Actually:\n" + good,
+        }
+        lost = [what for what, reply in shapes.items()
+                if A.parse_reply(reply, entry)[0] != record]
+        if lost:
             bad += 1
-            print("  WRONG  a fenced answer is not read, so a model that "
-                  "formats its reply loses it")
+            print(f"  WRONG  a reply is thrown away when it arrives as "
+                  f"{lost[0]!r} — a wasted model call, and the answer is "
+                  f"there to be read")
         else:
-            print("  ok     a well-formed classification is read back, fenced "
-                  "or bare")
+            print(f"  ok     an answer is read back through all "
+                  f"{len(shapes) + 1} shapes a reply has arrived in, "
+                  f"including a worked example before it")
 
     # Every one of these is a reply ABOUT SOMETHING ELSE, and a cache entry
     # outlives the run that wrote it — so none of it is trusted, rather than

@@ -233,21 +233,60 @@ def parse_reply(text: str, entry: dict) -> tuple[dict | None, str]:
     have, means the reply was about something else and none of it is trusted.
     """
     raw = (text or "").strip()
-    # The outermost braces, which is also how a fenced block reads: ```json
-    # and ``` sit outside them. A separate fence-stripping pass was written
-    # first and deleted -- it was a second way to find the same object, and
-    # two readers of one reply that can disagree is a bug waiting for the
-    # first answer that carries a stray brace in its prose.
-    start, end = raw.find("{"), raw.rfind("}")
-    if start < 0 or end <= start:
+    candidates = _objects(raw)
+    if not candidates:
         return None, "the reply contained no JSON object"
-    try:
-        doc = json.loads(raw[start:end + 1])
-    except ValueError as exc:
-        return None, f"the reply was not valid JSON: {exc}"
-    if not isinstance(doc, dict):
-        return None, "the reply was JSON but not an object"
+    # THE LAST ONE THAT VALIDATES, not the first, and not the span between
+    # the outermost braces.
+    #
+    # Slicing first-brace-to-last-brace survives prose and a ```json fence,
+    # and it breaks on the one reply shape that actually happened: a model
+    # showing a worked example and THEN answering. The slice covers both
+    # objects, and `json.loads` refuses the whole thing with "Extra data" --
+    # which is how ForgeModular/EUCLID failed the only time a 79-module run
+    # failed at all. It succeeded on retry, so the cost was a wasted call and
+    # a lesson that nearly went unlearned.
+    #
+    # Last rather than first because a model's answer follows its worked
+    # example, and validating rather than guessing because the example is
+    # usually partial -- it demonstrates the shape on one param and this
+    # rejects any reply that does not account for every one. So an example
+    # that IS complete and valid still loses to the real answer after it.
+    why = "the reply contained no JSON object"
+    for doc in reversed(candidates):
+        record, why = _validated(doc, entry)
+        if record is not None:
+            return record, ""
+    return None, why
 
+
+def _objects(raw: str) -> list:
+    """Every complete top-level JSON object in a reply, in order.
+
+    `raw_decode` parses one object and says where it ended, which is what
+    lets several be found in one reply. A brace that starts nothing parsable
+    (one inside prose, or inside a string) costs one character of scanning
+    and is skipped.
+    """
+    decoder = json.JSONDecoder()
+    out: list = []
+    at = 0
+    while True:
+        at = raw.find("{", at)
+        if at < 0:
+            return out
+        try:
+            obj, end = decoder.raw_decode(raw, at)
+        except ValueError:
+            at += 1
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+        at = max(end, at + 1)
+
+
+def _validated(doc: dict, entry: dict) -> tuple[dict | None, str]:
+    """One candidate object, checked against the module it claims to describe."""
     have = {int(q["id"]) for q in (entry.get("params") or [])
             if isinstance(q, dict) and isinstance(q.get("id"), int)}
     said = doc.get("params")
