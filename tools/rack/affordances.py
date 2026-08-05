@@ -339,8 +339,22 @@ def _validated(doc: dict, entry: dict) -> tuple[dict | None, str]:
 # the cache
 
 
-def load(path: str | None = None) -> dict:
-    path = path or CACHE_PATH
+# Classifications that SHIP, so a fresh machine is not blank.
+#
+# Every classification costs a model call, and the library is 4,299 modules --
+# eighteen hours of calls to earn on each machine, which means nobody ever
+# earns them and the feature is only ever real on the machine that happened to
+# run it. What one machine measures, every machine should start with.
+#
+# The seed is checked in beside this file and merged UNDER the local cache, so
+# a machine that has classified a module for itself keeps its own answer. Every
+# record still carries its plugin version and prompt hash, so a seed entry that
+# has gone stale is ignored by `is_current` exactly like a local one -- shipping
+# them cannot ship a wrong answer, only an old one that gets re-earned.
+SEED_PATH = os.path.join(HERE, "affordances-seed.json")
+
+
+def _read(path: str) -> dict:
     if not os.path.exists(path):
         return {"version": CACHE_VERSION, "modules": {}}
     try:
@@ -356,12 +370,42 @@ def load(path: str | None = None) -> dict:
     return doc
 
 
-def save(cache: dict, path: str | None = None) -> None:
+def load(path: str | None = None, seed: str | None = None) -> dict:
+    """The local cache over the shipped seed.
+
+    Local wins per module, never per file: a machine that has classified one
+    module itself keeps that one answer and still inherits every other.
+    """
+    doc = _read(path or CACHE_PATH)
+    shipped = _read(seed if seed is not None else SEED_PATH)
+    if shipped["modules"]:
+        merged = dict(shipped["modules"])
+        merged.update(doc["modules"])
+        doc["modules"] = merged
+    return doc
+
+
+def save(cache: dict, path: str | None = None,
+         seed: str | None = None) -> None:
+    """Write only what this machine earned. The seed is not copied back.
+
+    `load` merges the shipped seed under the local cache, so writing that
+    merge straight back would absorb the seed into every machine's local file
+    -- and since local wins per module, a LATER seed could then never reach a
+    machine that had ever run the classifier. The update mechanism would look
+    correct and silently do nothing.
+
+    So an entry identical to the shipped one is not written. What remains on
+    disk is exactly what this machine measured for itself.
+    """
     path = path or CACHE_PATH
+    shipped = _read(seed if seed is not None else SEED_PATH)["modules"]
+    mine = {k: v for k, v in cache.get("modules", {}).items()
+            if shipped.get(k) != v}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(cache, f, indent=1, sort_keys=True)
+        json.dump({**cache, "modules": mine}, f, indent=1, sort_keys=True)
     os.replace(tmp, path)                  # never a half-written cache
 
 
@@ -611,6 +655,22 @@ def main(argv) -> int:
         done, failed = classify(inv, limit=limit, plugin=plugin)
         print(f"{done} classified, {failed} failed")
         return 1 if failed and not done else 0
+
+    if cmd == "export-seed":
+        # Promote what this machine earned into the file that ships.
+        #
+        # Run on a machine with a broad library after a classification pass,
+        # and commit the result: the next install starts with these answers
+        # instead of eighteen hours of model calls it will never make.
+        local = _read(CACHE_PATH)["modules"]
+        shipped = _read(SEED_PATH)["modules"]
+        merged = {**shipped, **local}
+        with open(SEED_PATH, "w") as f:
+            json.dump({"version": CACHE_VERSION, "modules": merged},
+                      f, indent=1, sort_keys=True)
+        print(f"seed now carries {len(merged)} modules "
+              f"({len(merged) - len(shipped)} added from this machine)")
+        return 0
 
     if cmd == "status":
         inv = patch.inventory()

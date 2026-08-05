@@ -1,0 +1,2433 @@
+{
+ "modules": {
+  "Ambivalent-Instruments/AutoPanTremolo": {
+   "advice": "Feed a stereo signal in, set Mode to pan or tremolo, dial Freq (or patch Clock to sync it) and raise Amount until the movement is as wide or as pumping as you want, then use Shape/Waveform Morph to go from a gentle sine sway to a hard chop.",
+   "module": [
+    "space",
+    "level",
+    "motion"
+   ],
+   "params": {
+    "1": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "space",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Cheby": {
+   "advice": "Feed it a sine or a clean tone, push H2-H8 up a little at a time to grow harmonics onto it, then use Dry/Wet to blend the shaped tone back against the original.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Crackl": {
+   "advice": "Set the three Freq knobs to different pitches, bring up Gain A/B/C to taste, then use Harmonics and Noise Mod on each voice to move it between clean tone and grit, with Drive, Modulo and Sample rate as the overall texture stage before Out.",
+   "module": [
+    "timbre",
+    "level",
+    "motion",
+    "pitch"
+   ],
+   "params": {
+    "0": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "10": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "11": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "12": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "13": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "14": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "15": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "9": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Delay": {
+   "advice": "Feed a rhythmic source into Audio L and set Time to a musical subdivision, then raise Feedback until the repeats sustain without swamping the dry signal, roll Tone back so each repeat darkens, and add a little Modulation for movement -- switch Mode to Ping-pong for width or Repitch for tape-style pitch smears when you sweep Time.",
+   "module": [
+    "space",
+    "time",
+    "timbre",
+    "motion",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "space",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/DelayExpander": {
+   "advice": "Tap the Tap button in time with your music and turn Sync On so the Clock output drives the companion Delay module at the tapped tempo, using Sync/Reset to lock it to the rest of the patch.",
+   "module": [
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "time",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/EQ8": {
+   "advice": "Patch stereo audio through Left/Right and cut or boost the fixed bands to reshape the tone, then set Master Gain to make up the level you changed.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "timbre",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/FeedbackEQ8": {
+   "advice": "Run a stereo signal in and carve with the eight band knobs first, then ease the global Feedback up until the boosted bands start to ring \u2014 small feedback moves are where the resonant, near-self-oscillating character lives.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "timbre",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Grainer": {
+   "advice": "Feed it a sustained source, set short grains with high density, then dial Position Random and Pitch Random up a little so the cloud drifts rather than repeats, and use Dry/Wet plus Reverb Amount to place it behind the dry signal.",
+   "module": [
+    "timbre",
+    "space",
+    "chance",
+    "time",
+    "pitch",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "chance",
+     "confidence": "guessed"
+    },
+    "10": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "11": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "12": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "13": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "chance",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "structure",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "chance",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "space",
+     "confidence": "known"
+    },
+    "9": {
+     "affords": "space",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/GroupDelay": {
+   "advice": "Send a percussive or transient-rich source in and turn Amount up while sweeping Frequency \u2014 the cascaded all-passes smear the attack in time without changing pitch, and Pinch narrows how sharply that dispersion is focused around the centre frequency.",
+   "module": [
+    "timbre",
+    "shape",
+    "space"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Gurgling": {
+   "advice": "Patch the two outputs to a stereo pair and set Density low with Clarity high for sparse, distinct bubbles, then slowly modulate Density and Freq with a slow LFO so the gurgle breathes instead of sitting still.",
+   "module": [
+    "timbre",
+    "chance",
+    "space",
+    "pitch"
+   ],
+   "params": {
+    "0": {
+     "affords": "chance",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "space",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Modulo": {
+   "advice": "Send audio in and sweep the Modulo Value to fold the waveform into buzzy digital harmonics, then use Dry/Wet Mix to blend that distortion back under the clean signal and Output Gain to tame the level.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/NOISE_ERR": {
+   "advice": "Patch V/Oct to Freq for a pitched noise voice, then sweep Filter Cutoff and Q while pushing Wavefold and Drive to travel from calm tone to agitated dissonance, using the CV trims to let modulation do that traveling for you.",
+   "module": [
+    "timbre",
+    "pitch",
+    "level",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "10": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "11": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "12": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "9": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Rain": {
+   "advice": "Set Density for the intensity of the downpour and open the filter for a bright squall or close it for distant drizzle, then use Reverb and Width to place the storm near or far.",
+   "module": [
+    "timbre",
+    "space",
+    "chance"
+   ],
+   "params": {
+    "0": {
+     "affords": "chance",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "space",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "space",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/Seq8": {
+   "advice": "Patch CV into an oscillator's 1V/oct and Gate into an envelope, then dial the eight step knobs to the notes you want and set Tempo (or feed the Clock input) for the pace.",
+   "module": [
+    "structure",
+    "time",
+    "pitch"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Ambivalent-Instruments/XFMN01": {
+   "advice": "Set the two operator frequencies to a rough interval, then drive the sound almost entirely from the index depths and ratios while the filter tames the result and the delay gives it room.",
+   "module": [
+    "timbre",
+    "motion",
+    "space",
+    "pitch",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "space",
+     "confidence": "guessed"
+    },
+    "10": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "11": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "12": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "13": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    },
+    "14": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "8": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "9": {
+     "affords": "pitch",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.8",
+   "prompt": "a4017ef5b989"
+  },
+  "Core/AudioInterface2": {
+   "advice": "Patch your final mix into the two device outputs and use Level to set how loud it reaches your speakers, keeping it low until you know the patch is not screaming.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/ATT": {
+   "advice": "Turn Amount down (or negative to flip the signal upside down) and use Offset to slide the result into the voltage range the destination wants.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/ATTEN": {
+   "advice": "Patch a CV or audio signal in and turn Amount down to taste, or leave the input unpatched and use it as a manual voltage source sweeping 0 to 10 V.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/CARTOG": {
+   "advice": "It makes no sound; run the scan so a patching tool knows every module's ports, then patch with something that actually generates or shapes signal.",
+   "module": [],
+   "params": {},
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/DIV": {
+   "advice": "Feed it a master clock and take the divided output to run a slower part of the patch, sweeping Division CV to shift the pulse against the source.",
+   "module": [
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/DIVIDELY": {
+   "advice": "Send a steady clock in and take the four outputs as related gates \u2014 /2, /4, /8, /16 give you a hi-hat, a snare, a bass note and a chord change all locked to the same pulse; hit Reset to line them all back up.",
+   "module": [
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/DUALAD": {
+   "advice": "Patch a trigger into A_TRIG and A_ENV into a VCA or filter cutoff, then set a short attack and a long decay and bend the curve knob until the swell feels right; turn loop on to convert either channel into a free-running LFO whose rate follows its attack and decay times.",
+   "module": [
+    "shape",
+    "motion",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "shape",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/DUALATN": {
+   "advice": "Set a channel's attenuversion to zero and dial the offset to hand a static control voltage to another module, or patch an LFO in and use attenuversion to scale (and invert) how much it moves the destination while offset places it in the right voltage range.",
+   "module": [
+    "level",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/ENV": {
+   "advice": "Patch a gate into Gate and the Envelope output into a VCA or filter cutoff, then set a short Attack and a longer Decay/Release so each gate carves a plucked swell rather than a flat block of sound.",
+   "module": [
+    "shape",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "shape",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/EUCLID": {
+   "advice": "Feed it a steady clock and set Pulses against Steps (4 of 16, or 5 of 8) to get the Euclidean spacing, then use Rotation to slide where the downbeat lands against the rest of your patch.",
+   "module": [
+    "structure",
+    "time",
+    "chance"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "structure",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/FOLD": {
+   "advice": "Feed it a plain sine or triangle and turn Drive up until the fold edges appear, then offset Symmetry (or wiggle it with an LFO through the Symmetry CV) to bring in even harmonics and keep the tone moving, trimming Output level to taste.",
+   "module": [
+    "timbre",
+    "motion",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/FOLDR": {
+   "advice": "Send a steady sine or simple oscillator into Audio in and raise Drive until the triangle folding starts adding harmonics, then nudge Symmetry off center to bring in even-order harmonics and patch an LFO to Fold CV with a small CV amount for a moving, breathing tone.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/FOURPOLE": {
+   "advice": "Patch audio in, set Cutoff around the middle with Resonance up a little, then send an envelope or LFO to Cutoff FM and open the attenuverter until the filter sweeps with the note.",
+   "module": [
+    "timbre",
+    "motion",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/KICK": {
+   "advice": "Fire a trigger in, set Tune for the fundamental and Decay for how long the body rings, then add Click and Pitch sweep for the attack snap.",
+   "module": [
+    "pitch",
+    "shape",
+    "timbre"
+   ],
+   "params": {
+    "0": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/LFO": {
+   "advice": "Patch one of the three outputs into a filter cutoff or oscillator pitch and set Rate slowly (near 0) so the destination sweeps rather than buzzes.",
+   "module": [
+    "motion",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/LPGATE": {
+   "advice": "Feed audio in and a trigger into Strike, raise Level so the gate has something to open, then set Colour toward the filter end and shorten Decay for plucky, damped notes that dull as they fade.",
+   "module": [
+    "timbre",
+    "level",
+    "shape"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/MIX": {
+   "advice": "Run four voices into the channel inputs, set each slider for balance and the master to taste, then send envelopes or LFOs into the level CV jacks to turn the mixer into four VCAs.",
+   "module": [
+    "level",
+    "space"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/MORPHLFO": {
+   "advice": "Set Rate for the speed you want, then dial Shape morph between sine and square to change the contour of the modulation, and patch the bipolar out into whatever parameter you want moving.",
+   "module": [
+    "motion",
+    "time",
+    "shape"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/OFFSETLY": {
+   "advice": "Patch a slow LFO into the signal input, set Gain around -0.4 and Offset to +2 so the wandering voltage sits in the positive range, then send the output to a filter cutoff or VCA; with nothing patched in, the 10 V normal turns Gain and Offset into a bare voltage source you can tune anywhere between -15 V and +15 V.",
+   "module": [
+    "level",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/SANDH": {
+   "advice": "Clock it from your sequencer and take Held out into a pitch or filter input for stepped random voltages, then raise Slew to glide between steps instead of jumping.",
+   "module": [
+    "chance",
+    "structure",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/SEQ": {
+   "advice": "Feed it a clock, patch Pitch CV into an oscillator's 1V/oct and Gate into an envelope, then dial the eight step knobs to the notes you want \u2014 they are the melody.",
+   "module": [
+    "structure",
+    "pitch",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "structure",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/SIXMIX": {
+   "advice": "Turn the six channel knobs to balance whatever mono sources you patch in, then send an envelope or LFO into the master level CV to fade or shape the whole mix.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/SLEWRF": {
+   "advice": "Patch a stepped or gate signal in and open the rise and fall times until the jumps become audible glides, then use the end-of-rise gate to trigger something else when the climb finishes.",
+   "module": [
+    "shape",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/STEPS": {
+   "advice": "Clock it, dial a few of the eight step knobs to the voltages you want as notes, and take Step CV to an oscillator's pitch input with Gate to an envelope.",
+   "module": [
+    "structure",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "10": {
+     "affords": "structure",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "9": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/STRANGE": {
+   "advice": "Patch Chaos A into a filter cutoff or pitch input, set Rate slow, then raise Character until the wandering stops repeating and use Glide to decide whether it steps or drifts.",
+   "module": [
+    "chance",
+    "motion",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "chance",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "space",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/TANGLE": {
+   "advice": "Set Rate low and Chaos high, patch Z into a filter cutoff or oscillator pitch for slow evolving drift and X into a sample-and-hold-style destination for stepped surprises, then use Spread to decide how far apart the three outputs wander.",
+   "module": [
+    "chance",
+    "motion",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "chance",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "shape",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/TURBID": {
+   "advice": "Set Rate slow and patch Chaos A into a filter cutoff or pitch while Chaos B goes somewhere else \u2014 the two outputs drift apart on their own, and the Step trigger fires events that follow the same wander.",
+   "module": [
+    "motion",
+    "chance",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "chance",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "space",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/VCA": {
+   "advice": "Patch an audio source into Audio and an envelope into Level CV, then set Level as the overall output gain so the envelope shapes the sound rather than a constant tone.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/VCF": {
+   "advice": "Patch audio in, sweep Cutoff around 0 with Resonance near the top of its range for a vocal peak, then send an envelope or LFO into Cutoff CV and open the CV amount to hear the filter move.",
+   "module": [
+    "timbre",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "motion",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "ForgeModular/VCO": {
+   "advice": "Patch a 1V/oct sequence into the pitch input and take the sawtooth or pulse out into a filter, then set Frequency in octaves and trim Fine tune before adding any FM amount.",
+   "module": [
+    "pitch",
+    "timbre",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.0.0",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/8vert": {
+   "advice": "Patch a signal into a row and turn that row's knob to scale it \u2014 full clockwise passes it, centre kills it, counter-clockwise inverts it; leave a row's input unpatched and its knob becomes a constant offset voltage you can send anywhere.",
+   "module": [
+    "level",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/ADSR": {
+   "advice": "Patch Gate from a sequencer or MIDI gate and send Envelope to a VCA or filter CV \u2014 short Attack and Decay with low Sustain gives a plucked hit, long Attack and Release gives a slow swell.",
+   "module": [
+    "shape",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "shape",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "shape",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/CVMix": {
+   "advice": "Patch two or three modulation sources in and turn each attenuverter to blend and invert them into one combined CV, then send Mix to a destination like a filter cutoff or pitch input.",
+   "module": [
+    "motion",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Compare": {
+   "advice": "Feed a signal into A and use the B offset knob to set a threshold, then take Clip or Limit for a hard ceiling and the gate outputs to fire events whenever the signal crosses it.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Delay": {
+   "advice": "Patch audio in, set Time to the echo spacing you want (or feed Clock to lock it to the patch), then raise Feedback for more repeats and pull Tone down so each repeat gets darker; Mix sets how much of the echo you hear.",
+   "module": [
+    "time",
+    "space",
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "space",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Fade": {
+   "advice": "Patch two signals into Ch 1 and Ch 2 and sweep the Crossfade knob (or feed it CV) to blend smoothly from one to the other.",
+   "module": [
+    "level",
+    "space"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Gates": {
+   "advice": "Feed a clock or gate into Gate and take the rising-edge trigger, the flip/flop, or the delayed gate to turn one stream of gates into several differently-timed ones, using Gate length to set how long the output gate stays open.",
+   "module": [
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/LFO": {
+   "advice": "Set Frequency to the sweep rate you want, patch Triangle or Sine into another module's modulation input, and use that destination's own attenuator to decide how far it wanders.",
+   "module": [
+    "motion",
+    "time"
+   ],
+   "params": {
+    "2": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/LFO2": {
+   "advice": "Set Frequency slow, patch Wavetable out to a filter cutoff or VCA, and sweep Wavetable position (by hand or CV) to change the shape of the sweep from a ramp to something stranger.",
+   "module": [
+    "motion",
+    "time",
+    "shape"
+   ],
+   "params": {
+    "2": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Logic": {
+   "advice": "Feed A and B with gates from clocks or sequencers and take the AND/XOR outputs as new rhythms \u2014 the B knob is only a manual gate for when nothing is patched into B.",
+   "module": [],
+   "params": {},
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/MidSide": {
+   "advice": "Feed a stereo pair into the encoder's left and right and turn Encoder width up to widen the image, or run mid and side back through the decoder with Decoder width to collapse or exaggerate the stereo field before it hits the output.",
+   "module": [
+    "space",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "space",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "space",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Mixer": {
+   "advice": "Patch up to six sources into the channel inputs and use the single Level knob to set how loud the summed mix comes out.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Mutes": {
+   "advice": "Patch each signal through a row and use the buttons to drop parts in and out of the mix by hand or under a performance gate.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "8": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "9": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Octave": {
+   "advice": "Feed a sequencer's 1V/oct into the pitch input and turn Shift to transpose the whole line up or down in whole octaves, or send it a stepped CV to jump registers in time.",
+   "module": [
+    "pitch"
+   ],
+   "params": {
+    "0": {
+     "affords": "pitch",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Process": {
+   "advice": "Feed a wandering CV into Voltage and clock the Gate input, then take Sample & hold for stepped random voltages or Slew/Glide for a smoothed, portamento-style version of the same signal.",
+   "module": [
+    "motion",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Pulses": {
+   "advice": "Patch a row's trigger or gate output into whatever you want to fire by hand \u2014 an envelope, a sequencer reset, a drum voice \u2014 and press that row's button to make it happen live.",
+   "module": [
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "8": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "9": {
+     "affords": "time",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Push": {
+   "advice": "Patch the Trigger output into a drum or envelope trigger input and press the button; flip Hold if you want the Gate to latch on instead of following the press.",
+   "module": [],
+   "params": {},
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Quantizer": {
+   "advice": "Feed a raw CV or oscillator pitch into the 1V/octave input, pick a scale on the note buttons, and take the Pitch output to force any wandering voltage into notes that belong together.",
+   "module": [
+    "structure",
+    "pitch"
+   ],
+   "params": {
+    "0": {
+     "affords": "pitch",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Random": {
+   "advice": "Set the internal trigger rate to how often you want things to change, then patch Smooth or Stepped into a destination like filter cutoff or pitch and use Random spread to decide how far each new value wanders.",
+   "module": [
+    "chance",
+    "motion",
+    "time",
+    "shape"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "shape",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "chance",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "7": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "8": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "9": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/RandomValues": {
+   "advice": "Trigger it from a clock or gate and patch the seven outputs into pitch, level and timbre inputs elsewhere so each trigger reshuffles the whole patch at once.",
+   "module": [
+    "chance",
+    "structure"
+   ],
+   "params": {
+    "0": {
+     "affords": "chance",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Rescale": {
+   "advice": "Send an LFO or envelope through it and use Gain to set how far it swings, Offset to place it where the destination wants it, then Minimum and Maximum to clamp it so the modulation never overshoots.",
+   "module": [
+    "level",
+    "motion"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/SEQ3": {
+   "advice": "Dial the eight CV knobs of a row into the notes you want, patch that row's CV out to an oscillator's 1V/oct and the Trigger or a Step output to an envelope, then set Tempo and Steps to decide how fast and how long the pattern runs.",
+   "module": [
+    "structure",
+    "time"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "known"
+    },
+    "10": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "11": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "12": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "13": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "14": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "15": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "16": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "17": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "18": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "19": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "20": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "21": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "22": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "23": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "24": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "25": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "26": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "27": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "28": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "29": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "30": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "31": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "32": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "33": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "34": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "35": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "36": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "37": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "38": {
+     "affords": "time",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "7": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "8": {
+     "affords": "structure",
+     "confidence": "known"
+    },
+    "9": {
+     "affords": "structure",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/SHASR": {
+   "advice": "Feed one noise or LFO source into Sample 1 and clock all eight triggers from the same steady clock, then take the eight outputs as a cascading stepped melody, using Randomize to reseed the pattern and Clear to wipe it.",
+   "module": [
+    "structure",
+    "chance"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "structure",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "structure",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Scope": {
+   "advice": "Patch any signal you want to understand into Ch 1 or Ch 2 and take the pass-through outputs onward \u2014 this module shows you the waveform rather than making one, so use it to see what a nearby oscillator, envelope or LFO is really doing.",
+   "module": [],
+   "params": {},
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/SequentialSwitch1": {
+   "advice": "Feed a clock into Clock and a signal into Main, then set Steps to how many of the four outputs the input should cycle through before wrapping.",
+   "module": [
+    "time",
+    "structure"
+   ],
+   "params": {
+    "0": {
+     "affords": "structure",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/SequentialSwitch2": {
+   "advice": "Feed four different pitches or textures into the channel inputs and clock it, so a steady clock turns four static sources into one changing part.",
+   "module": [
+    "time",
+    "structure"
+   ],
+   "params": {
+    "0": {
+     "affords": "time",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Sum": {
+   "advice": "Feed it a polyphonic cable and it collapses every voice into one monophonic signal \u2014 use the Level knob to keep the summed result from clipping the next module.",
+   "module": [],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/Unity": {
+   "advice": "Feed up to six signals into either channel's inputs and take the mix output for a unity-gain sum, or the inverse output for a phase-flipped copy you can null against.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "guessed"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCA": {
+   "advice": "Patch an audio signal into Channel 1 and an envelope into its exponential CV input, then set the level knob as the ceiling the envelope opens up to.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCA-1": {
+   "advice": "Patch a signal into Channel, an envelope or LFO into CV, and turn Level up to set how much of that CV-shaped signal gets through.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCF": {
+   "advice": "Patch an oscillator into Audio, take the Lowpass output, and sweep Cutoff frequency with Resonance up around a third for a singing filter \u2014 Drive adds harmonics as it pushes the input harder.",
+   "module": [
+    "timbre",
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "4": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    },
+    "6": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCMixer": {
+   "advice": "Patch sources into Channels 1-4 and take Mix out, then send an envelope or LFO into a Channel CV input to let that knob set the VCA's depth rather than a static volume.",
+   "module": [
+    "level"
+   ],
+   "params": {
+    "0": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "1": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "2": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "level",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "level",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCO": {
+   "advice": "Patch a 1V/oct sequencer into the pitch input, set Frequency for the base register, take the Sawtooth or Square output into a filter, and use Pulse width (plus a slow LFO into the PWM input with the PWM knob up) to keep the square moving.",
+   "module": [
+    "pitch",
+    "timbre",
+    "motion"
+   ],
+   "params": {
+    "2": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "6": {
+     "affords": "motion",
+     "confidence": "known"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  },
+  "Fundamental/VCO2": {
+   "advice": "Set Frequency to the note you want, then sweep Wavetable position (by hand or with a slow LFO into its CV input, opened up with the position CV knob) so the tone morphs while the pitch stays put.",
+   "module": [
+    "pitch",
+    "timbre",
+    "motion"
+   ],
+   "params": {
+    "1": {
+     "affords": "timbre",
+     "confidence": "guessed"
+    },
+    "2": {
+     "affords": "pitch",
+     "confidence": "known"
+    },
+    "3": {
+     "affords": "timbre",
+     "confidence": "known"
+    },
+    "4": {
+     "affords": "motion",
+     "confidence": "known"
+    },
+    "5": {
+     "affords": "motion",
+     "confidence": "guessed"
+    }
+   },
+   "plugin_version": "2.6.4",
+   "prompt": "a4017ef5b989"
+  }
+ },
+ "version": 1
+}

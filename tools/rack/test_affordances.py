@@ -713,11 +713,63 @@ def check_registered_before_the_skip() -> tuple:
     return bad, 1
 
 
+def check_the_seed_reaches_a_fresh_machine():
+    """Classifications ship, and a later seed can still reach a used machine.
+
+    Every classification costs a model call and the library is 4,299 modules,
+    so a cache only one machine can earn is a feature only one machine has.
+    The seed ships them.
+
+    The half that is easy to get wrong is the second assertion. `load` merges
+    the seed under the local cache, so writing that merge back would absorb
+    the seed into every machine's own file -- and because local wins per
+    module, a LATER seed could then never reach a machine that had ever run
+    the classifier. The update path would look correct and do nothing.
+    """
+    import json
+    import tempfile
+    import affordances as A
+    bad = 0
+    fresh = os.path.join(tempfile.mkdtemp(), "affordances.json")
+
+    inherited = A.load(fresh)["modules"]
+    if not inherited:
+        bad += 1
+        print("  WRONG  a machine with no cache inherits nothing; the seed "
+              "does not ship, so every machine starts blank")
+    else:
+        print(f"  ok     a fresh machine inherits {len(inherited)} "
+              f"classifications it never paid for")
+
+    if inherited:
+        k = sorted(inherited)[0]
+        mine = dict(inherited)
+        mine[k] = {**mine[k], "advice": "earned here"}
+        A.save({"version": A.CACHE_VERSION, "modules": mine}, fresh)
+        on_disk = json.load(open(fresh))["modules"]
+        if len(on_disk) != 1 or k not in on_disk:
+            bad += 1
+            print(f"  WRONG  the local cache absorbed the seed ({len(on_disk)} "
+                  f"entries written, expected 1); a later seed can never "
+                  f"reach this machine again")
+        else:
+            print("  ok     only what this machine earned is written back")
+        back = A.load(fresh)["modules"]
+        if back[k].get("advice") != "earned here" or len(back) != len(inherited):
+            bad += 1
+            print("  WRONG  local does not win per module, or inheriting the "
+                  f"rest broke: {len(back)} of {len(inherited)}")
+        else:
+            print("  ok     local wins for that module and inherits the rest")
+    return bad, 3
+
+
 def main():
     bad = 0
     ran = 0
     for check in (check_affordances_are_classified,
                   check_behaviour_drives_the_check,
+                  check_the_seed_reaches_a_fresh_machine,
                   check_registered_before_the_skip):
         b, r = check()
         bad += b
