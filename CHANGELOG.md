@@ -8,6 +8,38 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07840"></a>
+## [0.784.0] - 2026-08-05
+
+- release/version bump ([#7151](https://github.com/Generous-Corp/pulp/pull/7151))
+- phase/capability control broker client 20260805 ([#7148](https://github.com/Generous-Corp/pulp/pull/7148))
+
+<a id="v07830"></a>
+## [0.783.0] - 2026-08-05
+
+- release/version bump ([#7147](https://github.com/Generous-Corp/pulp/pull/7147))
+- phase/capability control identity grants 20260804 ([#7145](https://github.com/Generous-Corp/pulp/pull/7145))
+
+<a id="v07820"></a>
+## [0.782.0] - 2026-08-05
+
+- release/version bump ([#7143](https://github.com/Generous-Corp/pulp/pull/7143))
+- phase/plugin capability control platform 20260804 ([#7142](https://github.com/Generous-Corp/pulp/pull/7142))
+- docs/phase9 collaboration no go 20260801 ([#7141](https://github.com/Generous-Corp/pulp/pull/7141))
+- feature/inspector phase8 followup 20260804 ([#7140](https://github.com/Generous-Corp/pulp/pull/7140))
+- release/version bump ([#7138](https://github.com/Generous-Corp/pulp/pull/7138))
+- feature/inspector phase8 real workflows 20260804 ([#7137](https://github.com/Generous-Corp/pulp/pull/7137))
+
+<a id="v07810"></a>
+## [0.781.0] - 2026-08-04
+
+- release/version bump ([#7135](https://github.com/Generous-Corp/pulp/pull/7135))
+- feature/inspector phase7 shipping evidence 20260803 ([#7134](https://github.com/Generous-Corp/pulp/pull/7134))
+- release/version bump ([#7133](https://github.com/Generous-Corp/pulp/pull/7133))
+- feature/inspector phase6 runtime eval 20260803 ([#7131](https://github.com/Generous-Corp/pulp/pull/7131))
+- release/post tag sync v0.780.0 9dd9ee979ab4 ([#7130](https://github.com/Generous-Corp/pulp/pull/7130))
+- release/version bump ([#7129](https://github.com/Generous-Corp/pulp/pull/7129))
+
 <a id="v07800"></a>
 ## [0.780.0] - 2026-08-03
 
@@ -7404,6 +7436,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.784.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.784.0
+[0.783.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.783.0
+[0.782.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.782.0
+[0.781.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.781.0
 [0.780.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.780.0
 [0.779.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.779.0
 [0.778.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.778.1
