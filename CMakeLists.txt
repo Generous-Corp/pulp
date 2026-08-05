@@ -236,7 +236,14 @@ set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SD
 # '-Wall' without emitting errors"). The `$<COMPILE_LANGUAGE:...>` genex
 # scopes warnings to languages that actually understand them.
 if(MSVC)
+    # clang-cl follows the MSVC command-line contract but, unlike cl.exe,
+    # rejects native try/catch unless exception semantics are enabled
+    # explicitly. Pulp's native libraries deliberately contain exception
+    # boundaries, so make that default consistent for both compilers. Targets
+    # that intentionally ship without an exception runtime add `/EHs-c-`
+    # target-locally after this directory option and remain exception-free.
     add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:/EHsc>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:/W4>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:/wd4100>")
 else()

@@ -385,17 +385,22 @@ flags:
   # section "Multi-OS coverage" for the rationale on Codecov-flag unions vs
   # llvm-profdata merge.
   os-linux:
-    carryforward: true
+    # OS upload flags describe a particular run, not a stable path slice.
+    # Never substitute an older run when the current native lane is broken.
+    carryforward: false
   os-macos:
-    carryforward: true
+    carryforward: false
   os-windows:
-    carryforward: true
+    carryforward: false
+  python-tools:
+    # Produced independently from the Linux native report so a C++ compiler
+    # regression cannot discard fresh tools/scripts coverage.
+    carryforward: false
 
-# carryforward: true on every flag - when a PR doesn't touch
-# a given subsystem, carry over the last known coverage for that
-# flag from main so the dashboard doesn't report a false 0%. Standard
-# Codecov practice for multi-job uploads (we have one job per OS
-# starting in Phase 1 PR 4).
+# Path-scoped subsystem flags carry forward when a change cannot affect them.
+# Upload-axis flags do not: substituting an older OS/language report after a
+# failed lane is precisely the stale-dashboard failure the receipt watchdog is
+# intended to expose.
 
 # Components are Codecov's canonical mechanism for path-based coverage
 # slicing driven by a single upload. Flags (above) are ultimately keyed
