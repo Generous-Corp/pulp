@@ -255,7 +255,12 @@ cat > "$STAGE/distribution.xml" <<XML
 </installer-gui-script>
 XML
 PKG="$OUT/$NAME-$VERSION.pkg"
-productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" "${LICENSE_ARGS[@]}" --sign "$INST_ID" "$PKG" >/dev/null
+# `${LICENSE_ARGS[@]+...}` rather than a bare `"${LICENSE_ARGS[@]}"`: macOS ships
+# bash 3.2, where expanding an EMPTY array under `set -u` is an unbound-variable
+# error, not an empty list. Every install without a license file -- the default --
+# died here before productbuild ran, so the script exited 1 having produced no
+# package at all. It only ever worked on a machine that set PKG_LICENSE_FILE.
+productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" ${LICENSE_ARGS[@]+"${LICENSE_ARGS[@]}"} --sign "$INST_ID" "$PKG" >/dev/null
 if [[ "$NOTARIZE" == 1 ]]; then
   if [[ -x "$CLI" ]]; then
     # In-tree / top-level builds: the C++ CLI is built and drives notarize+staple.
