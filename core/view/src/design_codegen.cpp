@@ -9,6 +9,7 @@
 //
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
 
+#include <pulp/view/css_effect_parse.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/design_fidelity.hpp>
@@ -890,13 +891,15 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
     // renderer default (center); the decoder already compensated left/top for
     // that pivot, so no setTransformOrigin is emitted here (a CSS-lane
     // rotate() also rotates about center, so this stays correct there too).
-    if (st.transform && !st.transform->empty()) {
-        const auto rp = st.transform->find("rotate(");
-        if (rp != std::string::npos) {
-            const float deg = std::strtof(st.transform->c_str() + rp + 7, nullptr);
-            if (deg != 0.0f)
-                ss << ind << "setRotation('" << target_id << "', " << deg << ");\n";
-        }
+    //
+    // Read through the SHARED parser the native materializer uses, so the two
+    // lanes cannot disagree about which transforms are honored — a design that
+    // rotates has to look the same whether it renders through the script bridge
+    // or through the native tree.
+    if (st.transform) {
+        if (const auto deg = css_transform_rotation(*st.transform);
+            deg && *deg != 0.0f)
+            ss << ind << "setRotation('" << target_id << "', " << *deg << ");\n";
     }
     // A shadow is a visual override like any other here, and it belongs on
     // EVERY kind of node — not just frames. Before this lived here, a shadow

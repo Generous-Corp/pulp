@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <string_view>
 #include <unordered_map>
 
 namespace pulp::view {
@@ -123,6 +124,39 @@ std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keywo
     const auto it = kModes.find(keyword);
     return it == kModes.end() ? std::nullopt
                               : std::optional<BlendMode>(it->second);
+}
+
+std::optional<float> css_transform_rotation(const std::string& transform) {
+    if (transform.empty()) return std::nullopt;
+    constexpr std::string_view kRotate = "rotate(";
+    const auto open = transform.find(kRotate);
+    if (open == std::string::npos) return std::nullopt;
+    const auto argument = open + kRotate.size();
+    const auto close = transform.find(')', argument);
+    if (close == std::string::npos) return std::nullopt;
+    // A transform LIST is refused whole. `rotate(30deg) scale(2)` would apply
+    // the rotation to a box that already carries the scale, which is the
+    // double-application this parser's whole contract is about avoiding — and
+    // an element at the right angle and twice the size is harder to recognize
+    // as a transform bug than one that simply did not rotate.
+    const auto rest = transform.find_first_not_of(" \t", close + 1);
+    if (rest != std::string::npos) return std::nullopt;
+    if (transform.find_first_not_of(" \t") != open) return std::nullopt;
+
+    const char* begin = transform.c_str() + argument;
+    char* end = nullptr;
+    const float degrees = std::strtof(begin, &end);
+    if (end == begin) return std::nullopt;
+    // Computed style always serializes degrees, and both importers write
+    // `deg`. A `rad` / `turn` / `grad` authored value is refused rather than
+    // read as degrees, which would be off by a factor of 57.
+    std::string unit(static_cast<const char*>(end), transform.c_str() + close);
+    unit.erase(0, unit.find_first_not_of(" \t"));
+    while (!unit.empty() &&
+           std::isspace(static_cast<unsigned char>(unit.back())) != 0)
+        unit.pop_back();
+    if (!unit.empty() && unit != "deg") return std::nullopt;
+    return degrees;
 }
 
 }  // namespace pulp::view

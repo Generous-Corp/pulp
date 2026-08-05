@@ -4,6 +4,7 @@
 #include "svg_shape_lowering.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -229,6 +230,16 @@ struct LoweredNode {
     int node_index = -1;
     int paint_order = -1;
     CapturedBox box;              ///< absolute page coordinates, verbatim
+    /// Where the node's ink actually lands on the page. The same rectangle as
+    /// `box` for everything that is not rotated; for a recovered rotation
+    /// `box` is the element's own pre-rotation rectangle and this is the
+    /// bounding box Chrome reported. Anything reasoning in PAGE space — what a
+    /// clip cuts, what overlaps what — has to read this one.
+    CapturedBox page_box;
+    /// Whether `box` is expressed in a frame the node's own `rotate()` turns.
+    /// A page-space rectangle has no equivalent in that frame, so a clip
+    /// cannot be written onto such a node at all.
+    bool rotated = false;
     int parent_slot = -1;         ///< -1 means "child of the IR root"
     int dom_parent_slot = -1;     ///< where DOM parentage alone would put it
     /// The slot that OWNS this one when DOM parentage cannot say so: a
@@ -243,22 +254,12 @@ struct LoweredNode {
     bool paints_ink = false;
 };
 
-/// Whether a computed `transform` leaves the element's painted shape equal to
-/// the box the snapshot reports for it.
-///
-/// DOMSnapshot bounds ARE post-transform, but for anything that rotates or
-/// skews, that box is the axis-aligned BOUNDING box rather than the shape: a
-/// 100×20 bar at 45° is reported as an 85×85 square, and painting the box fills
-/// roughly 3.7× the ink in the wrong outline. A scale is safe precisely because
-/// its bounding box IS its shape, which is why the assumption reads as true
-/// until something rotates.
-bool is_axis_preserving_transform(const std::string& value) {
-    if (value.empty() || value == "none") return true;
-    // Chrome serializes computed `transform` as a matrix, so the numbers are
-    // the whole answer. Any other spelling is treated as non-preserving rather
-    // than assumed harmless — including `matrix3d`, whose out-of-plane terms
-    // this two-dimensional test cannot speak to.
-    if (value.rfind("matrix(", 0) != 0 || value.back() != ')') return false;
+/// The six components of a computed `matrix(a, b, c, d, e, f)`, or nothing for
+/// any other spelling — including `matrix3d`, whose out-of-plane terms the
+/// two-dimensional readers below cannot speak to.
+std::optional<std::array<double, 6>> parse_transform_matrix(
+    const std::string& value) {
+    if (value.rfind("matrix(", 0) != 0 || value.back() != ')') return std::nullopt;
     std::vector<double> numbers;
     const std::string body = value.substr(7, value.size() - 8);
     size_t start = 0;
@@ -270,18 +271,110 @@ bool is_axis_preserving_transform(const std::string& value) {
         try {
             numbers.push_back(std::stod(piece));
         } catch (const std::exception&) {
-            return false;
+            return std::nullopt;
         }
         if (comma == std::string::npos) break;
         start = comma + 1;
     }
-    if (numbers.size() != 6) return false;
+    if (numbers.size() != 6) return std::nullopt;
+    return std::array<double, 6>{numbers[0], numbers[1], numbers[2],
+                                 numbers[3], numbers[4], numbers[5]};
+}
+
+/// Whether a computed `transform` leaves the element's painted shape equal to
+/// the box the snapshot reports for it.
+///
+/// DOMSnapshot bounds ARE post-transform, but for anything that rotates or
+/// skews, that box is the axis-aligned BOUNDING box rather than the shape: a
+/// 100×20 bar at 45° is reported as an 85×85 square, and painting the box fills
+/// roughly 3.7× the ink in the wrong outline. A scale is safe precisely because
+/// its bounding box IS its shape, which is why the assumption reads as true
+/// until something rotates.
+///
+/// A false answer is not the end of it: `recover_rotation` below solves the
+/// shape back out for the rotations where the box still determines it, and only
+/// what it refuses becomes a captured element.
+bool is_axis_preserving_transform(const std::string& value) {
+    if (value.empty() || value == "none") return true;
+    // Chrome serializes computed `transform` as a matrix, so the numbers are
+    // the whole answer.
+    const auto matrix = parse_transform_matrix(value);
+    if (!matrix) return false;
     constexpr double kFlat = 1e-6;
     // b and c zero is a translation, a scale, or a flip. a and d zero is a
     // quarter turn, whose bounding box is still the shape. Anything else has
     // put the element's outline off the axes.
-    return (std::abs(numbers[1]) < kFlat && std::abs(numbers[2]) < kFlat) ||
-           (std::abs(numbers[0]) < kFlat && std::abs(numbers[3]) < kFlat);
+    return (std::abs((*matrix)[1]) < kFlat && std::abs((*matrix)[2]) < kFlat) ||
+           (std::abs((*matrix)[0]) < kFlat && std::abs((*matrix)[3]) < kFlat);
+}
+
+/// The rectangle and angle a rotation was applied to, solved back out of the
+/// bounding box the snapshot reports for it.
+struct RecoveredRotation {
+    double width = 0.0;      ///< the painted rectangle, in its own frame
+    double height = 0.0;
+    double angle_deg = 0.0;  ///< clockwise, matching CSS `rotate()`
+};
+
+/// Bound to the reference a text run reads: a run carries no computed
+/// `transform` of its own, so it never asks the memo and still names one
+/// answer unconditionally.
+const std::optional<RecoveredRotation> kNoRotation{};
+
+/// Recover a rotated element's own rectangle from its axis-aligned bounding
+/// box, so it can be drawn as the shape it is rather than refused as a hole.
+///
+/// A rotation is rigid, so it loses nothing: for an angle whose absolute sine
+/// and cosine are `s0` and `c0`,
+///
+///     aabb_w = W·c0 + H·s0
+///     aabb_h = W·s0 + H·c0
+///
+/// is two equations in the two unknowns, and the rotated rectangle's centroid
+/// IS the centre of the bounding box, so `transform-origin` need not be
+/// recovered at all — wherever the element pivoted, it ends up centred on the
+/// box Chrome reported.
+///
+/// Refused, rather than approximated, when:
+///   - the matrix is not a rotation (a skew or a non-uniform scale changes the
+///     shape, not just its orientation, and a flip is not a rotation);
+///   - the angle is near a multiple of 45° off the axes, where `c0 == s0` makes
+///     the two equations the same one: a 100×20 bar and a 20×100 bar have the
+///     SAME bounding box at 45°, so the width is genuinely unrecoverable and a
+///     guess would be a fabricated shape rather than a missing one;
+///   - the solution is not a positive rectangle, which means the box did not
+///     come from this rotation.
+std::optional<RecoveredRotation> recover_rotation(const std::string& value,
+                                                  double aabb_w,
+                                                  double aabb_h) {
+    if (value.empty() || value == "none") return std::nullopt;
+    const auto matrix = parse_transform_matrix(value);
+    if (!matrix) return std::nullopt;
+    const double a = (*matrix)[0], b = (*matrix)[1];
+    const double c = (*matrix)[2], d = (*matrix)[3];
+    const double scale = std::hypot(a, b);
+    if (scale <= 0.0) return std::nullopt;
+    // A rotation, possibly with a uniform positive scale, is exactly
+    // `a == d` and `b == -c`. The scale divides out below, so the recovered
+    // rectangle is the one that was PAINTED, not the pre-scale layout box.
+    constexpr double kSquare = 1e-4;
+    if (std::abs(a - d) > kSquare * scale) return std::nullopt;
+    if (std::abs(b + c) > kSquare * scale) return std::nullopt;
+
+    const double c0 = std::abs(a) / scale;
+    const double s0 = std::abs(b) / scale;
+    const double det = c0 * c0 - s0 * s0;   // |cos 2θ|
+    // 0.05 keeps the solve away from the singularity without narrowing the
+    // useful range: it excludes about 1.4° either side of each 45° diagonal.
+    if (std::abs(det) < 0.05) return std::nullopt;
+
+    RecoveredRotation out;
+    out.width = (aabb_w * c0 - aabb_h * s0) / det;
+    out.height = (aabb_h * c0 - aabb_w * s0) / det;
+    if (!(out.width > 0.0) || !(out.height > 0.0)) return std::nullopt;
+    constexpr double kPi = 3.14159265358979323846;
+    out.angle_deg = std::atan2(b, a) * 180.0 / kPi;
+    return out;
 }
 
 /// The computed facts about one element that decide what clips what.
@@ -631,10 +724,65 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     const auto painted = index.painted_nodes();
     counts.painted = static_cast<int>(painted.size());
 
-    // Which layout row carries each painted node's computed style. Ancestry
-    // questions have to reach a node's declarations, not only its tag.
+    // Which layout row carries each painted node's computed style, and the box
+    // Chrome reported for it. Ancestry questions have to reach a node's
+    // declarations, not only its tag — and a rotation is answered from its box.
     std::unordered_map<int, int> layout_of;
-    for (const auto& node : painted) layout_of[node.node_index] = node.layout_index;
+    std::unordered_map<int, CapturedBox> box_of;
+    for (const auto& node : painted) {
+        layout_of[node.node_index] = node.layout_index;
+        box_of[node.node_index] = node.bounds;
+    }
+
+    // The document's child lists, built once and shared. Both the rotation
+    // recovery below and the `<svg>` resolution further down ask the same
+    // question — "what hangs off this node?" — and building it twice would put
+    // the answer in two places that can drift.
+    std::optional<std::vector<std::vector<int>>> child_index;
+    const auto children_of = [&](int node_index) -> const std::vector<int>& {
+        static const std::vector<int> kNone;
+        if (!child_index) child_index = build_child_index(index);
+        if (node_index < 0 ||
+            static_cast<size_t>(node_index) >= child_index->size())
+            return kNone;
+        return (*child_index)[static_cast<size_t>(node_index)];
+    };
+
+    // A rotation the element's own rectangle can be solved back out of, for a
+    // node whose whole subtree is itself. Both conditions matter:
+    //
+    //   - the SOLVE has to succeed, and it is refused near the diagonals where
+    //     the bounding box stops determining the rectangle (see
+    //     `recover_rotation`);
+    //   - the element must have no children, because un-refusing it also
+    //     un-pools them, and a child's own box is a bounding box in the ROTATED
+    //     frame that nothing here re-derives. A childless bar is the shape this
+    //     recovery is for; anything richer stays an honest hole.
+    std::unordered_map<int, std::optional<RecoveredRotation>> rotation_memo;
+    const auto recovered_rotation_of =
+        [&](int node_index) -> const std::optional<RecoveredRotation>& {
+        const auto seen = rotation_memo.find(node_index);
+        if (seen != rotation_memo.end()) return seen->second;
+        std::optional<RecoveredRotation> answer;
+        const auto layout = layout_of.find(node_index);
+        const auto box = box_of.find(node_index);
+        if (layout != layout_of.end() && box != box_of.end() &&
+            children_of(node_index).empty()) {
+            const auto computed = index.styles_for_layout(layout->second);
+            const auto transform = computed.find("transform");
+            // Only a transform that took the outline OFF the axes needs
+            // recovering. A scale, a flip and a quarter turn all have the
+            // property that their bounding box is their shape, so solving them
+            // would rewrite a correct box and hang a `rotate(0deg)` off every
+            // scaled node — a counter that ticks on designs with no rotation
+            // in them at all.
+            if (transform != computed.end() &&
+                !is_axis_preserving_transform(transform->second))
+                answer = recover_rotation(transform->second, box->second.width,
+                                          box->second.height);
+        }
+        return rotation_memo.emplace(node_index, answer).first->second;
+    };
 
     // "Does this element own every pixel under it?" Two separate reasons say
     // yes: the tag is one drawing (an `<svg>`) or draws from outside CSS (a
@@ -652,7 +800,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 const auto computed = index.styles_for_layout(layout->second);
                 const auto transform = computed.find("transform");
                 answer = transform != computed.end() &&
-                         !is_axis_preserving_transform(transform->second);
+                         !is_axis_preserving_transform(transform->second) &&
+                         // A recoverable rotation is drawn, not captured, so it
+                         // keeps its subtree in play. This is the ONE place the
+                         // two agree; deciding it again at lowering time would
+                         // let a node draw its own shape while its children
+                         // stayed pooled into a capture that no longer exists.
+                         !recovered_rotation_of(node_index).has_value();
             }
         }
         capture_only_memo[node_index] = answer;
@@ -707,7 +861,6 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     std::unordered_map<int, SvgSubtree> svg_subtrees;
     std::unordered_set<int> vector_shapes;
     {
-        std::optional<std::vector<std::vector<int>>> child_index;
         for (const auto& node : painted) {
             if (node.node_type != kElementNode || node.tag_name != "svg")
                 continue;
@@ -715,7 +868,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             // as an unsupported element. Lowering it too would draw its shapes
             // on top of that capture.
             if (under_capture_only(node.node_index)) continue;
-            if (!child_index) child_index = build_child_index(index);
+            children_of(node.node_index);   // materializes the shared index
             auto subtree =
                 lower_svg_subtree(index, *child_index, node.node_index);
             for (const auto& shape : subtree.shapes)
@@ -774,6 +927,24 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         CapturedBox box = node.bounds;
         const auto computed = index.styles_for_layout(node.layout_index);
 
+        // A rotation solved back into a rectangle plus an angle. The reported
+        // box is replaced by the recovered one, CENTRED on it — a rotation is
+        // rigid, so the two share a centroid whatever the element pivoted
+        // about. Everything below then reads the rectangle the element really
+        // is: percentage lengths resolve against it, the clip audit measures
+        // it, and `place()` writes it out as the node's left/top/width/height.
+        const auto& rotation =
+            node.node_type == kElementNode
+                ? recovered_rotation_of(node.node_index)
+                : kNoRotation;
+        if (rotation) {
+            box.left += (box.width - rotation->width) * 0.5;
+            box.top += (box.height - rotation->height) * 0.5;
+            box.width = rotation->width;
+            box.height = rotation->height;
+            ++counts.rotation_recovered;
+        }
+
         // `transform` is deliberately not carried into the IR, because the box
         // this node is placed by is ALREADY the transformed rectangle. That is
         // true of the box and false of everything inside it: Chrome scales the
@@ -793,6 +964,13 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text,
                               type_scale.ok() ? type_scale.scale : 1.0);
+        // Written after the computed styles, which deliberately drop
+        // `transform` — the box they were handed is post-transform, so the only
+        // node entitled to an angle is one whose box was rewritten back to the
+        // pre-rotation rectangle above.
+        if (rotation)
+            lowered.style.transform =
+                "rotate(" + format_number(rotation->angle_deg) + "deg)";
 
         // A run whose FIRST line box starts to the right of its own block is
         // continuing a line an earlier inline sibling began — an inline `<span>`
@@ -832,19 +1010,55 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             lowered.attributes["capture_fallback_reason"] = reason;
             if (!detail.empty())
                 lowered.attributes["capture_fallback_detail"] = detail;
-            // Nothing attaches a raster to a fallback node, so the frame emitted
-            // paints only whatever background the element's own styles carry —
-            // for a `<canvas>` or an `<svg>`, nothing at all. Saying so on the
-            // node is the difference between a hole a consumer can find and a
-            // classification that reads as "handled by a capture".
+            // Nothing attaches a raster to a fallback node, and the box it
+            // would draw into is the element's BOUNDING box rather than its
+            // shape — so every fill, border and shadow the styles carry is
+            // stripped here, and the frame emitted really does paint nothing.
             //
+            // Leaving them on is not a smaller version of the same hole, it is
+            // a different and louder defect: an ADSR envelope built from 3px
+            // bars rotated into diagonals painted as three solid rounded
+            // blocks, each filling its whole bounding box, while the census
+            // beside them called the area unpainted. A `<canvas>` hid this,
+            // because a canvas has no fill of its own to leak.
+            //
+            // Stripping runs for BOTH kinds of fallback, including the ones
+            // whose box really is their shape. It costs a `<canvas>` or an
+            // `<svg>` the CSS background it could have kept, and buys one
+            // invariant worth more than that background: the area recorded
+            // below is exactly what the renderer leaves blank, so ranking
+            // holes by it is arithmetic rather than an estimate.
+            //
+            // What stays is what makes the hole FINDABLE: the geometry, the
+            // paint order, and the attributes above. Modulation-only
+            // properties (opacity, blend mode, filters) stay too — they have
+            // nothing left to modulate once the ink is gone, and dropping them
+            // would lose the record of what the element was.
+            lowered.attributes["unpainted"] = "true";
+            lowered.style.background_color.reset();
+            lowered.style.background_gradient.reset();
+            lowered.style.background_image.reset();
+            lowered.style.background_repeat.reset();
+            lowered.style.background_size.reset();
+            lowered.style.box_shadow.clear();
+            lowered.style.border.reset();
+            lowered.style.border_width.reset();
+            lowered.style.border_color.reset();
+            lowered.style.border_style.reset();
+            lowered.style.border_top_width.reset();
+            lowered.style.border_right_width.reset();
+            lowered.style.border_bottom_width.reset();
+            lowered.style.border_left_width.reset();
+            lowered.style.border_top_color.reset();
+            lowered.style.border_right_color.reset();
+            lowered.style.border_bottom_color.reset();
+            lowered.style.border_left_color.reset();
             // The AREA is what ranks these, and it belongs here for the same
             // reason the rest of this lambda does: it is true of both kinds of
             // fallback. Accumulating it in only one branch leaves the tally
             // disagreeing with the `element_capture_fallback` count beside it —
             // which is exactly what happened, and read as eighteen icons
             // covering no area at all.
-            lowered.attributes["unpainted"] = "true";
             counts.unpainted_fallback_area +=
                 node.bounds.width * node.bounds.height;
         };
@@ -993,6 +1207,8 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         slot.node_index = node.node_index;
         slot.paint_order = node.paint_order;
         slot.box = box;
+        slot.page_box = node.bounds;
+        slot.rotated = rotation.has_value();
         slots.push_back(std::move(slot));
 
         // One vector node per shape, immediately after the `<svg>` that owns
@@ -1050,6 +1266,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             shape_slot.node_index = shape.node_index;
             shape_slot.paint_order = node.paint_order;
             shape_slot.box = box;
+            shape_slot.page_box = box;
             slots.push_back(std::move(shape_slot));
         }
     }
@@ -1119,7 +1336,11 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     for (size_t i = 0; i < slots.size(); ++i) {
         css_clip[i] = css_chain.resolve(slots[i].node_index);
         if (!css_clip[i].clipped) continue;
-        const auto& box = slots[i].box;
+        // The PAGE footprint, which for a recovered rotation is not the box the
+        // node carries. A clip is a page-space rectangle; comparing it against
+        // a rectangle written in the node's own turned frame compares two
+        // different spaces and gets both the skip and the geometry wrong.
+        const auto& box = slots[i].page_box;
         // A clip that already holds everything the node draws is a rectangle
         // the renderer would install once a frame to change nothing. Skipped —
         // but only for a node whose ink IS its box: a shadow or a blur paints
@@ -1133,6 +1354,14 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         if (!draws_outside_box && contains(css_clip[i].rect, rect_of(box)) &&
             !intrudes_on_rounded_corner(css_clip[i].rect, rect_of(box)))
             continue;
+        // A rotated node's clip is UNWRITABLE, not merely awkward. The renderer
+        // applies `clip_rect` inside the node's own transform, so a rectangle
+        // stored on a node that rotates gets rotated too — and a clip meant to
+        // trim a bar's shadow at the panel edge instead cuts the bar itself off
+        // partway along its length, which looks like a line that stops early.
+        // Leaving it off keeps the shape; `place()` books the loss below, in
+        // the one branch that already owns "this clip could not be written".
+        if (slots[i].rotated) continue;
         pulp::view::IRStyle::ClipRect rect{};
         rect.x = static_cast<float>(css_clip[i].rect.left - box.left);
         rect.y = static_cast<float>(css_clip[i].rect.top - box.top);
@@ -1250,16 +1479,22 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                   entry.box.top + own->y + own->height});
         }
         const auto& css = css_clip[static_cast<size_t>(slot)];
-        if (css.inexpressible) {
-            // A shape clip the rectangle model cannot carry, so the node keeps
-            // ink the browser cuts away. Named as the reason rather than folded
-            // into the geometric verdict, which would report it as an ordinary
-            // missing rectangle someone could go "fix".
+        // Two shapes of clip the rectangle model cannot carry, so the node
+        // keeps ink the browser cuts away. Named by the reason rather than
+        // folded into the geometric verdict, which would report either as an
+        // ordinary missing rectangle someone could go "fix": a `clip-path` is
+        // not a rectangle at all, and a rotated node has no frame in which a
+        // page-space rectangle stays one.
+        const bool rotated_clip = entry.rotated && css.clipped;
+        if (css.inexpressible || rotated_clip) {
             ++counts.clip_lost;
             entry.node.attributes["clip_lost"] = "1";
-            entry.node.attributes["clip_inexpressible"] = "clip-path";
+            entry.node.attributes["clip_inexpressible"] =
+                css.inexpressible ? "clip-path" : "rotate";
         } else {
-            const auto box = rect_of(entry.box);
+            // The PAGE footprint on both sides: `entry.box` is the node's own
+            // rectangle, which a rotation has turned out of page space.
+            const auto box = rect_of(entry.page_box);
             // The panel frame is on BOTH sides of the comparison. A frame is a
             // window onto the page and the crop is its definition, so a node
             // the frame cuts is not a node the tree got wrong — counting it
@@ -1337,7 +1572,9 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
         for (size_t b = a + 1; b < composed_order.size(); ++b) {
             const auto& second = slots[static_cast<size_t>(composed_order[b])];
             if (first.paint_order <= second.paint_order) continue;
-            if (!boxes_overlap(first.box, second.box)) continue;
+            // Page footprints: an overlap is a fact about where ink lands, and
+            // a rotated node's own rectangle is not written in that space.
+            if (!boxes_overlap(first.page_box, second.page_box)) continue;
             ++counts.overlapping_reorders;
             // Anchor first, name second, paint order last: an anchor that is
             // absent OR empty still has to name something a reader can find.

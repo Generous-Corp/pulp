@@ -219,6 +219,8 @@ struct SnapshotSpec {
 ///   50 visible   51 hidden   52 static   53 relative   54 absolute
 ///   55 0px       56 1px      57 circle(50%)
 ///   58 rgba(0, 0, 0, 0.5) 0px 0px 30px 0px
+///   59 12px      60 "12px 12px 0px 0px"
+///   61 matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)          — 30° rotation
 /// so a style row of [11,14] is `background-image: none; display: block`.
 constexpr std::string_view kSnapshotStrings =
     R"J("#document","HTML","BODY","DIV","svg","path","CANVAS","IMG",)J"
@@ -237,7 +239,8 @@ constexpr std::string_view kSnapshotStrings =
     R"J("matrix(2, 0, 0, 2, 0, 0)","SPAN",)J"
     R"J("visible","hidden","static","relative","absolute",)J"
     R"J("0px","1px","circle(50%)","rgba(0, 0, 0, 0.5) 0px 0px 30px 0px",)J"
-    R"J("12px","12px 12px 0px 0px")J";
+    R"J("12px","12px 12px 0px 0px",)J"
+    R"J("matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)")J";
 
 /// The property list the clip cases are parallel to. `overflow` decides what
 /// clips; `position` and `transform` decide what a clip applies TO; the border
@@ -1802,6 +1805,11 @@ TEST_CASE("a rotated element is not reported as drawn",
     //
     // nodes: 0 #document, 1 HTML, 2 BODY, 3 DIV rotated 45°,
     //        4 SPAN inside it, 5 DIV scaled 2×
+    //
+    // The rotated DIV carries a solid background and a shadow, because that is
+    // the case the classification exists for: an element whose OWN styles would
+    // paint the bounding box. A rotated `<canvas>` proves nothing here — it has
+    // no fill to leak.
     const auto lowered = lower_snapshot(
         {
             .node_names = "[0,1,2,3,49,3]",
@@ -1809,13 +1817,15 @@ TEST_CASE("a rotated element is not reported as drawn",
             .parents = "[-1,0,1,2,3,2]",
             .attributes = "[[],[],[],[],[],[]]",
             .layout_nodes = "[0,1,2,3,4,5]",
-            .styles = "[[14,11],[14,11],[14,11],[14,47],[14,11],[14,48]]",
+            .styles = "[[14,11,11,11],[14,11,11,11],[14,11,11,11],"
+                      "[14,47,31,33],[14,11,11,11],[14,48,11,11]]",
             .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
                       "[157.5625,157.5625,84.875,84.875],"
                       "[163.21875,161.8125,27.84375,27.828125],"
                       "[95,35,100,100]]",
             .paint_orders = "[0,1,1,2,3,4]",
-            .computed_names = R"(["display","transform"])",
+            .computed_names =
+                R"(["display","transform","background-color","box-shadow"])",
         },
         "rotated");
     const auto& root = lowered.root;
@@ -1832,6 +1842,19 @@ TEST_CASE("a rotated element is not reported as drawn",
     REQUIRE(rotated != nullptr);
     CHECK(attribute(*rotated, "capture_fallback_reason") == "transform");
 
+    // `unpainted` is a claim about pixels, so the node has to be stripped of
+    // the paint the claim denies. Carrying the fill and the shadow through
+    // leaves a consumer painting them into the bounding box — the exact
+    // 3.7×-the-ink outline this classification exists to refuse — while the
+    // census reports the area as a hole nothing drew.
+    CHECK(attribute(*rotated, "unpainted") == "true");
+    CHECK_FALSE(rotated->style.background_color.has_value());
+    CHECK(rotated->style.box_shadow.empty());
+    // The hole stays findable: geometry and ordering are what let a consumer
+    // rank it and a human locate it.
+    CHECK(rotated->style.width.has_value());
+    CHECK(rotated->style.height.has_value());
+
     // A 2× scale stays native, because ITS bounding box really is its shape.
     // This is why the assumption reads as true until something rotates, so it
     // is pinned rather than left to be rediscovered.
@@ -1841,6 +1864,76 @@ TEST_CASE("a rotated element is not reported as drawn",
                node.style.width && *node.style.width == 100.0f;
     });
     REQUIRE(scaled != nullptr);
+    // This DIV stays a fallback for TWO independent reasons — 45° is the angle
+    // whose bounding box does not determine its rectangle, and the SPAN inside
+    // it would have to be un-pooled. The case below separates them.
+    CHECK(lowered.counts.rotation_recovered == 0);
+}
+
+TEST_CASE("a pure rotation recovers its own box and angle",
+          "[browser-capture][native-lowering]") {
+    // A rotation is rigid, so the bounding box has not destroyed the shape:
+    // `aabb_w = W·cos + H·sin` and `aabb_h = W·sin + H·cos` solve for the
+    // rectangle, and the rotated rectangle's centroid IS the box's centre
+    // whatever the element pivoted about. Drawing it is strictly better than
+    // refusing it — the alternative is a hole where the design has a line.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV 100×20 rotated 30°, childless — recovered
+    //        4 DIV rotated 45°, childless      — refused, ambiguous angle
+    //        5 DIV rotated 30° with a child    — refused, subtree in the way
+    //        6 SPAN inside 5
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,49]",
+            .node_types = "[9,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2,5]",
+            .attributes = "[[],[],[],[],[],[],[]]",
+            .layout_nodes = "[0,1,2,3,4,5,6]",
+            .styles = "[[14,11],[14,11],[14,11],[14,61],[14,47],[14,61],"
+                      "[14,11]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[100,50,96.6025,67.32051],"
+                      "[200,200,84.875,84.875],"
+                      "[10,300,96.6025,67.32051],"
+                      "[20,310,30,20]]",
+            .paint_orders = "[0,1,1,2,3,4,5]",
+            .computed_names = R"(["display","transform"])",
+        },
+        "recovered-rotation");
+    const auto& root = lowered.root;
+
+    CHECK(lowered.counts.rotation_recovered == 1);
+    const auto* bar = find_node(root, [](const IRNode& node) {
+        return node.style.transform.has_value();
+    });
+    REQUIRE(bar != nullptr);
+    CHECK(attribute(*bar, "paint_class") == "native");
+    CHECK(bar->attributes.count("unpainted") == 0);
+    // The authored rectangle, back out of an 96.6×67.3 bounding box.
+    REQUIRE(bar->style.width.has_value());
+    REQUIRE(bar->style.height.has_value());
+    CHECK_THAT(*bar->style.width, Catch::Matchers::WithinAbs(100.0, 0.05));
+    CHECK_THAT(*bar->style.height, Catch::Matchers::WithinAbs(20.0, 0.05));
+    REQUIRE(bar->style.transform.has_value());
+    CHECK(bar->style.transform->rfind("rotate(30", 0) == 0);
+    // Centred on the box Chrome reported, which is what makes `transform-origin`
+    // something this recovery never has to know.
+    REQUIRE(bar->style.left.has_value());
+    REQUIRE(bar->style.top.has_value());
+    CHECK_THAT(*bar->style.left + *bar->style.width * 0.5f,
+               Catch::Matchers::WithinAbs(100.0 + 96.6025 / 2.0, 0.05));
+    CHECK_THAT(*bar->style.top + *bar->style.height * 0.5f,
+               Catch::Matchers::WithinAbs(50.0 + 67.32051 / 2.0, 0.05));
+
+    // Both refusals, each for its own reason. At 45° a 100×20 bar and a 20×100
+    // bar have the SAME bounding box, so the width is not recoverable and a
+    // guess would be a fabricated shape rather than a missing one. And a
+    // rotated element with a subtree cannot be un-refused without un-pooling
+    // children whose own boxes are bounding boxes in the rotated frame.
+    CHECK(lowered.counts.element_capture_fallback == 2);
+    CHECK(lowered.counts.pooled_into_fallback == 1);
+    CHECK(lowered.counts.native == 3);   // html, body, and the recovered bar
 }
 
 TEST_CASE("a parentIndex cycle terminates instead of hanging the importer",
@@ -2208,6 +2301,53 @@ TEST_CASE("a shape clip the rectangle cannot carry is counted as lost",
     REQUIRE(inner != nullptr);
     CHECK(attribute(*inner, "clip_lost") == "1");
     CHECK(attribute(*inner, "clip_inexpressible") == "clip-path");
+}
+
+TEST_CASE("a rotated node carries no clip rectangle",
+          "[browser-capture][native-lowering][clip-model]") {
+    // The renderer applies a node's clip INSIDE that node's own transform, so a
+    // rectangle written onto a node that rotates gets rotated with it. A clip
+    // meant to trim the bar where it meets the panel edge then cuts across the
+    // bar's length instead, and an envelope's attack ramp stops partway with a
+    // clean diagonal end — a shape defect, not a clipping one, which is why the
+    // rectangle is withheld and the loss is booked by name.
+    //
+    // nodes: 0 #document, 1 HTML, 2 BODY,
+    //        3 DIV.wrap (overflow: hidden, 100×100 at 10,10)
+    //        4 DIV.leaf, a 100×20 bar rotated 30° whose bounding box runs past
+    //          the wrap's right edge, so CSS really does cut it
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3]",
+            .node_types = "[9,1,1,1,1]",
+            .parents = "[-1,0,1,2,3]",
+            .attributes = "[[],[],[],[23,24],[23,26]]",
+            .layout_nodes = "[0,1,2,3,4]",
+            .styles = "[[50,52,11,11,55,55,55,55],[50,52,11,11,55,55,55,55],"
+                      "[50,52,11,11,55,55,55,55],[51,52,11,11,55,55,55,55],"
+                      "[50,52,61,11,55,55,55,55]]",
+            .bounds = "[[0,0,400,400],[0,0,400,400],[0,0,400,400],"
+                      "[10,10,100,100],[60,30,96.6025,67.32051]]",
+            .paint_orders = "[0,1,1,2,3]",
+            .computed_names = std::string(kClipProperties),
+        },
+        "clip-rotated");
+
+    CHECK(lowered.counts.rotation_recovered == 1);
+    const auto* bar = find_named(lowered.root, "div.leaf");
+    REQUIRE(bar != nullptr);
+    REQUIRE(bar->style.transform.has_value());
+    CHECK(bar->style.transform->rfind("rotate(30", 0) == 0);
+    CHECK_THAT(*bar->style.width, Catch::Matchers::WithinAbs(100.0, 0.05));
+    CHECK_FALSE(bar->style.clip_rect.has_value());
+
+    // Said out loud rather than left as a silent omission: the node keeps ink
+    // the browser cut, and the reason is the rotation, not a missing rectangle
+    // someone could go add.
+    CHECK(lowered.counts.clip_lost == 1);
+    CHECK(lowered.counts.clip_over_applied == 0);
+    CHECK(attribute(*bar, "clip_lost") == "1");
+    CHECK(attribute(*bar, "clip_inexpressible") == "rotate");
 }
 
 TEST_CASE("the panel frame's crop is not counted as a clip disagreement",

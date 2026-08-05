@@ -931,11 +931,14 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
     if (!is_absent(overflow) && overflow != "visible")
         style.overflow = overflow;
 
-    // `transform` is deliberately NOT carried. The paint box this node is
-    // placed by is already the transformed rectangle, so re-applying the
-    // matrix would rotate or scale the control a second time — off its own
-    // artwork. Recovering an authored rotation means separating the untransformed
-    // box from the painted one, which the capture does not report today.
+    // `transform` is deliberately NOT carried from computed style. The paint
+    // box this node is placed by is already the transformed rectangle, so
+    // re-applying the matrix would rotate or scale the control a second time —
+    // off its own artwork. A rotation is the one case where the two CAN be
+    // separated, and the tree lowering does that on its own terms: it solves
+    // the element's rectangle back out of the bounding box and writes both the
+    // box and a `rotate()` onto the node. Doing it here instead would set the
+    // angle without shrinking the box, which is the double-application above.
 }
 
 }  // namespace pulp::import_design

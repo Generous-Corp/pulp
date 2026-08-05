@@ -625,7 +625,13 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     // outlives its gap is that the real ones stop being read.
     add("filter", node.style.filter);
     add("backdropFilter", node.style.backdrop_filter);
-    add("transform", node.style.transform);
+    // A lone `rotate()` IS represented now (see apply_visual_style), so only
+    // the transforms still dropped are worth a warning — a list, a translate,
+    // a scale, a raw matrix. Warning about the honored one would train a
+    // reader to skip this list, which costs the real entries their audience.
+    if (!node.style.transform ||
+        !css_transform_rotation(*node.style.transform).has_value())
+        add("transform", node.style.transform);
 
     if (node.style.position &&
         (*node.style.position == "fixed" || *node.style.position == "sticky")) {
@@ -1431,6 +1437,20 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.mix_blend_mode) {
         if (const auto mode = css_blend_mode(*style.mix_blend_mode))
             view.set_mix_blend_mode(*mode);
+    }
+    // A rotation, about the view's centre — the same reading and the same
+    // pivot the JS lane's setRotation uses, so a design that rotates renders
+    // the same through both. An importer only sets this once it has put the
+    // node's box in the PRE-rotation frame; a box that still includes the
+    // rotation would be transformed twice, which is why the shared parser
+    // refuses everything but a lone `rotate()`.
+    //
+    // Without it a 3px bar rotated into a diagonal — the shape every ADSR
+    // envelope and every knob pointer is made of — drew as a flat horizontal
+    // stub.
+    if (style.transform) {
+        if (const auto degrees = css_transform_rotation(*style.transform))
+            view.set_rotation(*degrees);
     }
     if (style.clip_path) {
         // `set_clip_path` takes SVG path data, but CSS gives a shape function.

@@ -987,6 +987,11 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         record_if("native_nodes_skipped_blank_text", tree.skipped_blank_text);
         record_if("native_nodes_skipped_non_visual", tree.skipped_non_visual);
         record_if("native_nodes_hoisted", tree.hoisted_escapes);
+        // Rotations solved back into a rectangle plus an angle. Reported
+        // because "no fallbacks" reads the same whether a design has no
+        // rotations or its rotations were recovered, and only one of those is
+        // evidence the recovery ran.
+        record_if("native_nodes_rotation_recovered", tree.rotation_recovered);
         record_if("native_nodes_overlapping_reorders",
                   tree.overlapping_reorders);
         // The count says a panel can paint wrong; the pairs say where. Without

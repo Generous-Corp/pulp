@@ -46,4 +46,18 @@ std::vector<canvas::Canvas::FilterChainEntry> css_filter_chain(
 /// falling back to `normal`, so a mode we cannot honor is visible as absent.
 std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keyword);
 
+/// The angle out of a `rotate(<deg>deg)` in a CSS transform, in degrees.
+///
+/// This is the ONE transform component both render lanes honor, because it is
+/// the one whose box the importers have already put in the pre-rotation frame:
+/// the `.fig` decoder compensates left/top for the pivot, and the browser
+/// capture solves the rectangle back out of its bounding box. Anything else in
+/// the value — a translate, a scale, a matrix — returns nothing, because
+/// applying it on top of a box that already includes it transforms the element
+/// twice.
+///
+/// Rotation is about the view's CENTRE, which is the renderer default and what
+/// both importers assume.
+std::optional<float> css_transform_rotation(const std::string& transform);
+
 }  // namespace pulp::view

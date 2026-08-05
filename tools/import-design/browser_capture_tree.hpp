@@ -46,6 +46,12 @@ struct PaintedTreeCounts {
     double unpainted_fallback_area = 0.0;
     int text = 0;                  ///< of the lowered, how many carry a string
     int pooled_into_fallback = 0;  ///< descendants of a captured element
+    /// Rotated elements drawn as a rectangle plus an angle instead of being
+    /// refused as unpaintable. Counted so the census can tell "this design has
+    /// no rotations" apart from "its rotations were solved" — the two produce
+    /// the same zero in `element_capture_fallback` and mean different things
+    /// about how much of the design the renderer is actually reproducing.
+    int rotation_recovered = 0;
     /// `<svg>` elements whose whole shape tree became vector nodes.
     int svg_lowered = 0;
     /// `<svg>` elements that still arrive as a captured element. Each carries
