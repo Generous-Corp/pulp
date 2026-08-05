@@ -1694,10 +1694,19 @@ Three traps when adding one, each of which compiles and runs:
   body itself when `body_is_painted_beneath(node)` is true, or it paints an
   opaque widget over the art the import exists to reveal.
 
-Note that `CodeGenMode::bridge_native_js` — the DEFAULT emitter — installs no
-parameter binding for ANY audio widget; both `bindWidgetToParam` emission sites
-in `design_codegen.cpp` are in the `web_compat` branch. Parity with a knob on
-that lane means "creates the widget", not "binds it".
+`generate_pulp_js()` has TWO arms and they are not interchangeable. The
+native-bridge arm (`CodeGenMode::bridge_native_js`, the DEFAULT, and what
+`pulp import-design --emit js` produces without `--web-compat`) emits through
+`emit_js_*`; the web-compat arm emits through `generate_node()`. For a long
+time only the second one bound anything: the native arm created the widget,
+sized it, and printed the control's binding name in its grey sub-stack, so a
+knob imported through the documented default rendered, turned under the mouse,
+and moved no parameter — with the parameter's own name captioned underneath it.
+
+Both arms now call one `emit_js_param_binding()`. The two address a widget
+differently (`el._id` versus a string-literal id), which is what made the
+emission get duplicated and then maintained on one side only, so the helper
+takes the id EXPRESSION. Add a binder there, not in an arm.
 
 Pinned by `test_design_import_toggle_binding.cpp`, which proves the same thing
 on both paths the only way that distinguishes a wired control from a convincing

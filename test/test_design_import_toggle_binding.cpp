@@ -11,6 +11,7 @@
 // Neither case asserts that a widget was constructed or that a binding was
 // registered. Both of those are true of a switch that moves nothing.
 
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/state/store.hpp>
@@ -24,17 +25,18 @@
 #include <pulp/view/widgets.hpp>
 
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::view;
 
 namespace {
 
-/// One lowered switch on a panel, shaped exactly as the browser capture emits
+/// One lowered control on a panel, shaped exactly as the browser capture emits
 /// it: an absolutely positioned frame carrying the audio widget kind, the
 /// parameter under `pulpParamKey`, and the route id plus stable anchor the
 /// native binder resolves the widget by.
-DesignIR panel_with_one_switch(const std::string& param) {
+DesignIR panel_with_one_control(AudioWidgetType kind, const std::string& param) {
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "Panel";
@@ -44,7 +46,7 @@ DesignIR panel_with_one_switch(const std::string& param) {
     IRNode control;
     control.type = "frame";
     control.name = "Sync";
-    control.audio_widget = AudioWidgetType::toggle;
+    control.audio_widget = kind;
     control.audio_min = 0.0f;
     control.audio_max = 1.0f;
     control.audio_default = 0.0f;
@@ -61,6 +63,24 @@ DesignIR panel_with_one_switch(const std::string& param) {
     control.attributes["designed_body"] = "underlay";
     ir.root.children.push_back(std::move(control));
     return ir;
+}
+
+/// The gesture each kind answers to. A Knob and a Fader take a drag along their
+/// travel; a Toggle takes a press. Driving all three the same way would prove
+/// nothing about two of them.
+void drive(Knob& knob) {
+    const auto box = knob.bounds();
+    knob.simulate_drag({box.width * 0.5f, box.height - 4.0f},
+                       {box.width * 0.5f, 4.0f});
+}
+void drive(Fader& fader) {
+    const auto box = fader.bounds();
+    fader.simulate_drag({box.width * 0.5f, box.height - 4.0f},
+                        {box.width * 0.5f, 4.0f});
+}
+void drive(Toggle& toggle) {
+    const auto box = toggle.bounds();
+    toggle.on_mouse_down({box.width * 0.5f, box.height * 0.5f});
 }
 
 template <typename T>
@@ -106,7 +126,7 @@ void add_sync_param(pulp::state::StateStore& store) {
 
 TEST_CASE("a lowered switch moves its parameter through the native materializer",
           "[view][import][native-materializer][binding][toggle]") {
-    const auto ir = panel_with_one_switch("sync");
+    const auto ir = panel_with_one_control(AudioWidgetType::toggle, "sync");
 
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
@@ -133,7 +153,7 @@ TEST_CASE("a lowered switch moves its parameter through the native materializer"
 
 TEST_CASE("a lowered switch moves its parameter through the emitted script",
           "[view][import][codegen][binding][toggle]") {
-    const auto ir = panel_with_one_switch("sync");
+    const auto ir = panel_with_one_control(AudioWidgetType::toggle, "sync");
 
     // web_compat is the emitter that installs parameter bindings; the
     // bridge_native_js lane prints a control's binding as a caption and wires
@@ -164,6 +184,51 @@ TEST_CASE("a lowered switch moves its parameter through the emitted script",
     const float before = store.get_value(1);
     const auto box = toggle->bounds();
     toggle->on_mouse_down({box.width * 0.5f, box.height * 0.5f});
+    INFO("sync " << before << " -> " << store.get_value(1));
+    CHECK(store.get_value(1) != before);
+}
+
+// The DEFAULT script emitter, which is the one `pulp import-design --emit js`
+// produces without `--web-compat`.
+//
+// Both `bindWidgetToParam` emission sites live in generate_node(), which only
+// the web-compat arm of generate_pulp_js() reaches. The native-bridge arm
+// creates the widget, sizes it, labels it, and prints the control's binding
+// name as a grey caption underneath — so a knob imported through the
+// documented default renders, turns under the mouse, and moves no parameter.
+// It is the fader defect and the toggle defect again at the scale of an
+// entire emitter, and nothing downstream can see it: the script is well
+// formed, the widget is real, and the caption even says which parameter it is
+// supposed to be driving.
+TEMPLATE_TEST_CASE("every drivable kind moves its parameter through the default "
+                   "script emitter",
+                   "[view][import][codegen][binding]", Knob, Fader, Toggle) {
+    const auto kind = std::is_same_v<TestType, Knob>    ? AudioWidgetType::knob
+                      : std::is_same_v<TestType, Fader> ? AudioWidgetType::fader
+                                                        : AudioWidgetType::toggle;
+    const auto ir = panel_with_one_control(kind, "sync");
+
+    CodeGenOptions options;
+    options.mode = CodeGenMode::bridge_native_js;  // the CLI default
+    options.include_comments = false;
+    const auto js = generate_pulp_js(ir, options);
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0.0f, 0.0f, 240.0f, 160.0f});
+    root.set_theme(Theme::dark());
+    pulp::state::StateStore store;
+    add_sync_param(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(js);
+    root.layout_children();
+
+    auto* control = find_widget<TestType>(root);
+    INFO("emitted script:\n" << js);
+    REQUIRE(control != nullptr);
+
+    const float before = store.get_value(1);
+    drive(*control);
     INFO("sync " << before << " -> " << store.get_value(1));
     CHECK(store.get_value(1) != before);
 }

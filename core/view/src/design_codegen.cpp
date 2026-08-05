@@ -229,6 +229,60 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
     append_plain(cursor, n);  // trailing base-styled text
 }
 
+// How a lowered control reaches its parameter, stated once for BOTH script
+// emitters.
+//
+// generate_pulp_js() has two arms, and the binding used to live only inside the
+// web-compat one. The native-bridge arm — which is the DEFAULT, and what
+// `pulp import-design --emit js` produces without `--web-compat` — created the
+// widget, sized it, and printed the control's binding name as a grey caption
+// underneath it. A knob imported that way renders, turns under the mouse, and
+// moves no parameter, and nothing about the emitted script looks wrong.
+//
+// The two arms address a widget differently (`el._id` against a string literal
+// id), which is the whole reason the emission was duplicated in the first
+// place and then only maintained on one side. Passing the id EXPRESSION is what
+// lets one statement serve both, so a binder added for one arm cannot go
+// missing from the other.
+//
+// `bindWidgetToParam` is host→widget only: it keeps automation and restored
+// state visible and never turns a gesture into a parameter write. The change
+// listener beside it is the return path, and the event name is per widget kind
+// — a Knob and a Fader report `change` with a position, a Toggle reports
+// `toggle` with 1/0. Listening for the wrong one registers a handler that never
+// fires, which is indistinguishable from a working control until someone drags
+// it.
+static void emit_js_param_binding(std::ostringstream& ss, const std::string& ind,
+                                  const std::string& id_expr, const IRNode& node) {
+    const auto binding = node.attributes.find("binding");
+    if (binding == node.attributes.end() || binding->second.empty()) return;
+    const std::string escaped = js_single_quote_escape(binding->second);
+
+    switch (node.audio_widget) {
+        case AudioWidgetType::meter:
+            ss << ind << "bindMeter(" << id_expr << ", '" << escaped << "');\n";
+            return;
+        case AudioWidgetType::knob:
+        case AudioWidgetType::fader:
+            ss << ind << "bindWidgetToParam(" << id_expr << ", '" << escaped << "');\n";
+            ss << ind << "on(" << id_expr << ", 'change', function (v) { setParam('"
+               << escaped << "', v); });\n";
+            return;
+        case AudioWidgetType::toggle:
+            ss << ind << "bindWidgetToParam(" << id_expr << ", '" << escaped << "');\n";
+            ss << ind << "on(" << id_expr << ", 'toggle', function (v) { setParam('"
+               << escaped << "', v ? 1 : 0); });\n";
+            return;
+        // A pad writes two parameters and a scope reads a whole block, so
+        // neither is a scalar binding; both are left to their own routes.
+        case AudioWidgetType::xy_pad:
+        case AudioWidgetType::waveform:
+        case AudioWidgetType::spectrum:
+        case AudioWidgetType::none:
+            return;
+    }
+}
+
 static void generate_node(std::ostringstream& ss, const IRNode& node,
                            const CodeGenOptions& opts, int depth,
                            int& var_counter, const std::string& parent_var) {
@@ -403,33 +457,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << "setAccentColor(" << var << "._id, '"
                    << js_single_quote_escape(accent->second) << "');\n";
             }
-            if (const auto binding = node.attributes.find("binding");
-                binding != node.attributes.end() && !binding->second.empty()) {
-                const std::string escaped =
-                    js_single_quote_escape(binding->second);
-                if (node.audio_widget == AudioWidgetType::meter) {
-                    ss << ind << "bindMeter(" << var << "._id, '"
-                       << escaped << "');\n";
-                } else if (node.audio_widget == AudioWidgetType::knob ||
-                           node.audio_widget == AudioWidgetType::fader) {
-                    ss << ind << "bindWidgetToParam(" << var << "._id, '"
-                       << escaped << "');\n";
-                    ss << ind << "on(" << var
-                       << "._id, 'change', function (v) { setParam('"
-                       << escaped << "', v); });\n";
-                } else if (node.audio_widget == AudioWidgetType::toggle) {
-                    // A Toggle reports its edit as `toggle`, not `change`, and
-                    // the payload is 1/0 rather than a normalized position.
-                    // Listening for `change` here compiles, runs, and silently
-                    // never fires -- a switch that flips on screen and writes
-                    // no parameter.
-                    ss << ind << "bindWidgetToParam(" << var << "._id, '"
-                       << escaped << "');\n";
-                    ss << ind << "on(" << var
-                       << "._id, 'toggle', function (v) { setParam('"
-                       << escaped << "', v ? 1 : 0); });\n";
-                }
-            }
+            emit_js_param_binding(ss, ind, var + "._id", node);
 
             // Same anchor contract as every non-widget node below: the
             // inspector and any tweaks layer key off stable_anchor_id, so an
@@ -1656,6 +1684,10 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     // read as disabled came out indistinguishable from a live one.
     if (!needs_label_wrapper) emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
+    // The binding is the reason an audio widget exists, and this arm did not
+    // emit one. It printed the parameter's name in the grey sub-stack above
+    // instead, which reads as wiring and is a caption.
+    emit_js_param_binding(ss, ind, "'" + id + "'", node);
 
     // Reference-free fidelity self-checks for this widget (see design_fidelity).
     if (opts.fidelity_report)
