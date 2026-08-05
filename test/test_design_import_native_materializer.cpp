@@ -3,6 +3,7 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/control_painters.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -22,6 +23,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -3320,4 +3322,124 @@ TEST_CASE("a design can declare where its value ring belongs",
         if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_arc) { arc = &cmd; break; }
     REQUIRE(arc != nullptr);
     REQUIRE(arc->f[2] == Catch::Approx(98.0f));
+}
+
+TEST_CASE("a designed knob's pointer starts at the body edge, not the centre",
+          "[view][import][native-materializer][designed-control]") {
+    // The other half of the same contract. Giving the RING a design-derived
+    // radius stopped the arc crossing the cap and left the pointer running from
+    // the box centre — so the spoke that used to end on the cap now crosses the
+    // cap AND the gap. Whatever a reviewer calls it, a black line across a
+    // brushed dial is the design's body being painted over by the widget.
+    //
+    // Asserted on the PAINTED endpoints, because the endpoints are what a
+    // reviewer sees and the skin fields are private to the painter.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+
+    // kelvin's dial: a 160px box, so the body edge is at radius 80.
+    const float cx = 80.0f, cy = 80.0f;
+    const auto radius_of = [&](float x, float y) {
+        return std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+    };
+    const float r_in = radius_of(line->f[0], line->f[1]);
+    const float r_out = radius_of(line->f[2], line->f[3]);
+    INFO("pointer runs from r=" << r_in << " to r=" << r_out);
+    // The whole point: it does not start at the centre, and it starts OUTSIDE
+    // the body rather than on it.
+    CHECK(r_in > 80.0f);
+    // And it still points outward, ending on the ring's outer edge.
+    CHECK(r_out > r_in);
+    CHECK(r_out == Catch::Approx(85.0f).margin(0.5f));
+}
+
+TEST_CASE("a stock knob's pointer still starts at the centre",
+          "[view][control-painters]") {
+    // The control this change could break. `paint_mod_ring_knob` is shared with
+    // every un-designed knob in Pulp, whose box IS its own body and whose
+    // pointer is meant to be a spoke. The new scales default to zero precisely
+    // so those callers are untouched, and that default is worth pinning: a
+    // regression here is invisible in the design fixtures and visible in every
+    // stock UI.
+    pulp::canvas::RecordingCanvas canvas;
+    painters::paint_mod_ring_knob(canvas, Rect{0.0f, 0.0f, 100.0f, 100.0f}, 0.5f);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+    CHECK(line->f[0] == Catch::Approx(50.0f));
+    CHECK(line->f[1] == Catch::Approx(50.0f));
+}
+
+TEST_CASE("a design's declared pointer overrides the derived tick",
+          "[view][import][native-materializer][designed-control]") {
+    // The captured-indicator path, reached from the browser-capture lane.
+    //
+    // The consumer half already existed for the Figma lane
+    // (hoist_captured_art_knobs -> knob_ind_*), but it hung off an ASSET-backed
+    // disc, so a CSS-designed knob could never reach it: apply_captured_art_
+    // knob_skin returns immediately without an asset_path. The browser-capture
+    // lane's knobs are pure CSS, so a design that drew its own pointer had it
+    // ignored and got our derived tick instead.
+    //
+    // knob_ind_* are fractions of the disc HALF-extent. On a 160px box the
+    // half-extent is 80, so r_out 1.15 is radius 92 and r_in 0.80 is radius 64.
+    DesignIR ir;
+    ir.root = frame("designed-root", 320.0f, 320.0f, LayoutDirection::row);
+
+    auto knob_node = frame("cutoff", 160.0f, 160.0f, LayoutDirection::column);
+    knob_node.audio_widget = AudioWidgetType::knob;
+    knob_node.attributes["designed_body"] = "underlay";
+    knob_node.attributes["design_accent"] = "#C4622A";
+    knob_node.attributes["knob_ind_r_in"] = "0.80";
+    knob_node.attributes["knob_ind_r_out"] = "1.15";
+    knob_node.attributes["knob_ind_w"] = "0.05";
+    ir.root.children.push_back(std::move(knob_node));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+    REQUIRE(knob != nullptr);
+    knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    const pulp::canvas::DrawCommand* line = nullptr;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) line = &cmd;
+    REQUIRE(line != nullptr);
+
+    const float cx = 80.0f, cy = 80.0f;
+    const auto radius_of = [&](float x, float y) {
+        return std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+    };
+    INFO("pointer runs from r=" << radius_of(line->f[0], line->f[1])
+                                << " to r=" << radius_of(line->f[2], line->f[3]));
+    // The declared geometry, not the derived 81..85. A units slip here (using
+    // the fraction as-is instead of halving it) doubles both radii, so the
+    // margins are tight enough to catch it.
+    CHECK(radius_of(line->f[0], line->f[1]) == Catch::Approx(64.0f).margin(0.5f));
+    CHECK(radius_of(line->f[2], line->f[3]) == Catch::Approx(92.0f).margin(0.5f));
 }

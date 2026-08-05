@@ -405,6 +405,54 @@ int lower_semantic_controls(const fs::path& path,
         if (const auto ind = token("css/text-strong"); !ind.empty())
             control.attributes["design_indicator"] = ind;
 
+        // The design's OWN pointer, when it declared one.
+        //
+        // Recorded in the SAME vocabulary the Figma lane already emits
+        // (`hoist_captured_art_knobs` -> knob_ind_r_in / _r_out / _w /
+        // _color), as fractions of the paint box's HALF-extent, so the
+        // consumer needs no second set of names and no second code path. A
+        // design that declares nothing keeps the widget's derived tick, which
+        // is the common case and not a failure.
+        const auto ind_box = object_member(candidate, "indicator_bounds");
+        if (ind_box.isObject()) {
+            const double bw = number_member(box, "width", 0.0);
+            const double bh = number_member(box, "height", 0.0);
+            const double half = std::min(bw, bh) * 0.5;
+            const double cx = number_member(box, "left", 0.0) + bw * 0.5;
+            const double cy = number_member(box, "top", 0.0) + bh * 0.5;
+            const double iw = number_member(ind_box, "width", 0.0);
+            const double ih = number_member(ind_box, "height", 0.0);
+            const double il = number_member(ind_box, "left", 0.0);
+            const double it = number_member(ind_box, "top", 0.0);
+            // The pointer runs along its LONG axis, so its two ends are the
+            // extremes of its box along that axis. Measuring both and keeping
+            // the near/far pair is what makes this work for a pointer drawn
+            // from the rim inward as well as from the hub outward.
+            const double mid_x = il + iw * 0.5;
+            const double mid_y = it + ih * 0.5;
+            const auto radius = [&](double ex, double ey) {
+                const double ddx = ex - cx, ddy = ey - cy;
+                return std::sqrt(ddx * ddx + ddy * ddy);
+            };
+            const double r_a = ih >= iw ? radius(mid_x, it) : radius(il, mid_y);
+            const double r_b = ih >= iw ? radius(mid_x, it + ih)
+                                        : radius(il + iw, mid_y);
+            const double r_out = std::max(r_a, r_b);
+            const double r_in = std::min(r_a, r_b);
+            if (half > 0.0 && r_out > r_in) {
+                control.attributes["knob_ind_r_in"] =
+                    std::to_string(r_in / half);
+                control.attributes["knob_ind_r_out"] =
+                    std::to_string(r_out / half);
+                control.attributes["knob_ind_w"] =
+                    std::to_string(std::min(iw, ih) / half);
+                const auto ind_color =
+                    string_member(candidate, "indicator_color");
+                if (!ind_color.empty())
+                    control.attributes["knob_ind_color"] = ind_color;
+            }
+        }
+
         root.children.push_back(std::move(control));
         ++lowered;
     }

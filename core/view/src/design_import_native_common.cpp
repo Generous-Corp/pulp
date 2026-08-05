@@ -1757,6 +1757,50 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
         declared && *declared > 0.0f)
         skin.ring_radius_scale = *declared;
 
+    // Where the POINTER rides — the same question the ring was just given a
+    // design-derived answer to, and the same wrong answer until now.
+    //
+    // `paint_mod_ring_knob` draws the pointer from the box CENTRE, which is
+    // right for a stock knob that owns its whole box and is a spoke straight
+    // across the artwork for a knob whose body the design drew. Moving the ring
+    // out and leaving the pointer where it was made that worse, not better:
+    // before, the spoke ended on the cap; now it crosses the cap AND the gap.
+    //
+    // Both ends come from edges that exist rather than from a length that reads
+    // well: it starts a hairline outside the body (the same hairline the ring
+    // clears it by) and ends on the ring's OUTER edge, so the value's own layer
+    // is exactly what the pointer spans. On kelvin's CUTOFF that is a tick from
+    // 81 to 85 on a 160px box whose dial ends at 80.
+    //
+    // A design that wants a longer pointer says so by declaring a ring radius —
+    // the tick follows the ring out, because it is defined against it.
+    if (box > 0.0f) {
+        skin.indicator_inner_scale = 0.5f + 1.0f / box;
+        skin.indicator_outer_scale =
+            skin.ring_radius_scale + (skin.ring_width * 0.5f) / box;
+    }
+
+    // A design that DREW its own pointer says exactly where it belongs, and
+    // that wins over the derivation above — the derivation is what runs when
+    // the design is silent, not a preference.
+    //
+    // The attributes are the ones the Figma lane already writes
+    // (`hoist_captured_art_knobs`) and the browser-capture lane now writes too,
+    // so both importers speak one vocabulary. They are fractions of the disc's
+    // HALF-extent, while the skin's scales are fractions of the whole shorter
+    // side, hence the halving — getting that wrong doubles the pointer and
+    // looks like a geometry bug rather than a units one.
+    if (const auto r_out = attr_float(node, "knob_ind_r_out");
+        r_out && *r_out > 0.0f) {
+        const float r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
+        skin.indicator_outer_scale = *r_out * 0.5f;
+        skin.indicator_inner_scale = r_in * 0.5f;
+        if (const auto w = attr_float(node, "knob_ind_w"); w && *w > 0.0f && box > 0.0f)
+            skin.indicator_width = std::max(1.0f, *w * 0.5f * box);
+        if (const auto hex = attr(node, "knob_ind_color"); hex && !hex->empty())
+            if (auto parsed = parse_any_css_color(*hex)) skin.indicator = *parsed;
+    }
+
     apply_designed_control_skin(control, skin);
     return true;
 }

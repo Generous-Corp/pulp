@@ -39,6 +39,19 @@ struct DesignedControlSkin {
     /// The 0.46 here is only the struct's own default, for a caller that has no
     /// box to measure. It is deliberately not the value the import lane uses.
     float ring_radius_scale = 0.46f;
+
+    /// Where the POINTER starts and ends, as fractions of the shorter side.
+    ///
+    /// The ring was given a design-derived radius so it would stop crossing the
+    /// body; the pointer was left running from the box CENTRE, so it kept doing
+    /// exactly what the ring had stopped doing — a full-radius spoke over the
+    /// design's own cap. Both ends are derived from real edges in
+    /// apply_designed_body_skin: the body edge, and the ring's outer edge.
+    ///
+    /// Zero on either keeps the stock behaviour (centre, and the ring radius),
+    /// so a caller with no box to measure is unaffected.
+    float indicator_inner_scale = 0.0f;
+    float indicator_outer_scale = 0.0f;
 };
 
 /// Install the value-only painter on `control`. After this the widget draws no

@@ -164,6 +164,46 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return null;
     }
   };
+  // The design's OWN pointer, when the author marked it with
+  // data-pulp-indicator. Same contract as paintBox above and for the same
+  // reason: only the author knows which child is the pointer, and inferring it
+  // (the thinnest child, the one whose class says "needle") would hard-code one
+  // design system's vocabulary into the importer.
+  //
+  // Null when unmarked, which is the common case and NOT a defect: a design
+  // that draws no pointer gets the widget's derived tick instead. Bounds are
+  // page coordinates, the same frame as the candidate's own.
+  const indicatorBox = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked) return null;
+      const box = marked.getBoundingClientRect();
+      return {
+        left: box.left + window.scrollX,
+        top: box.top + window.scrollY,
+        width: box.width,
+        height: box.height
+      };
+    } catch (e) {
+      return null;
+    }
+  };
+  // The pointer's resolved colour, read the same way the accent is: from
+  // computed style, so a value set anywhere up the tree arrives resolved.
+  // Border first, because a hairline pointer is usually a border rather than a
+  // fill, and a transparent fill would otherwise win.
+  const indicatorColor = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked) return '';
+      const style = window.getComputedStyle(marked);
+      const bg = style.getPropertyValue('background-color').trim();
+      if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
+      return style.getPropertyValue('border-top-color').trim();
+    } catch (e) {
+      return '';
+    }
+  };
   // The accent this control is actually drawn in, resolved by the browser.
   //
   // Reading the PACK's accent token instead is wrong whenever a panel scopes or
@@ -350,6 +390,12 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // only the author knows which child is the painted control. Inferring it
       // would hard-code one design system's class vocabulary into the importer.
       paint_bounds: paintBox(element),
+      // The design's own pointer geometry, when it declared one. The lowering
+      // turns it into the same knob_ind_* vocabulary the Figma lane already
+      // writes, so the consumer has ONE name for the thing rather than one per
+      // importer.
+      indicator_bounds: indicatorBox(element),
+      indicator_color: indicatorColor(element),
       accent: accentColor(element),
       data_pulp: data,
       evidence,
