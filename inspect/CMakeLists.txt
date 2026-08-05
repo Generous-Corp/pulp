@@ -61,6 +61,27 @@ if(WIN32)
     target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
 endif()
 
+add_library(pulp-inspect-control
+    src/control_grants.cpp
+    src/control_identity.cpp
+    src/control_peer.cpp)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    target_sources(pulp-inspect-control PRIVATE src/control_peer_mac.cpp)
+else()
+    target_sources(pulp-inspect-control PRIVATE src/control_peer_stub.cpp)
+endif()
+add_library(pulp::inspect-control ALIAS pulp-inspect-control)
+target_include_directories(pulp-inspect-control
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-control
+    PUBLIC pulp::inspect-protocol pulp::events)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    target_link_libraries(pulp-inspect-control PRIVATE
+        "-framework Security" "-framework CoreFoundation")
+endif()
+
 add_library(pulp-inspect-client src/client.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)
 target_include_directories(pulp-inspect-client
@@ -168,6 +189,7 @@ foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-discovery-support
         pulp-inspect-discovery
         pulp-inspect-publication
+        pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime
         pulp-inspect-telemetry

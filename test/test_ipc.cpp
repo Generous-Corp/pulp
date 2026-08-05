@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,6 +21,11 @@
 #include <process.h>
 #else
 #include <unistd.h>
+#ifdef __APPLE__
+#include <fcntl.h>
+#include <membership.h>
+#include <sys/acl.h>
+#endif
 #endif
 
 using namespace pulp::events;
@@ -75,6 +81,54 @@ std::string unique_pipe_name(std::string_view stem) {
         .string();
 #endif
 }
+
+#ifndef _WIN32
+struct LocalSocketFixture {
+    LocalSocketFixture() {
+        const auto now = static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        directory = std::filesystem::temp_directory_path() /
+                    ("pulp-local-ipc-" + std::to_string(getpid()) + "-" +
+                     std::to_string(now));
+        std::filesystem::create_directory(directory);
+        std::filesystem::permissions(
+            directory, std::filesystem::perms::owner_all,
+            std::filesystem::perm_options::replace);
+        endpoint = directory / "broker.sock";
+    }
+
+    ~LocalSocketFixture() {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
+    }
+
+    std::filesystem::path directory;
+    std::filesystem::path endpoint;
+};
+
+#ifdef __APPLE__
+bool add_directory_allow_acl(const std::filesystem::path& path) {
+    const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0)
+        return false;
+    acl_t acl = ::acl_init(1);
+    acl_entry_t entry = nullptr;
+    uuid_t group{};
+    bool valid = acl != nullptr && ::acl_create_entry(&acl, &entry) == 0 &&
+                 ::mbr_gid_to_uuid(::getegid(), group) == 0 &&
+                 ::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0 &&
+                 ::acl_set_qualifier(entry, group) == 0;
+    acl_permset_t permissions = nullptr;
+    valid = valid && ::acl_get_permset(entry, &permissions) == 0 &&
+            ::acl_add_perm(permissions, ACL_READ_DATA) == 0 &&
+            ::acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED) == 0;
+    if (acl != nullptr)
+        ::acl_free(acl);
+    ::close(descriptor);
+    return valid;
+}
+#endif
+#endif
 
 void wait_for_named_pipe_server_ready(const std::string& pipe_name,
                                       const std::atomic<bool>& server_started) {
@@ -444,6 +498,170 @@ TEST_CASE("IPC named pipe observes abrupt peer death",
 TEST_CASE("IPC server initial state", "[events][ipc]") {
     InterprocessConnectionServer server;
     REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC local server authenticates the kernel-observed peer",
+          "[events][ipc][local][security]") {
+#ifdef _WIN32
+    InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start("pulp-local-ipc", IpcTransport::LocalSocket));
+#else
+    LocalSocketFixture fixture;
+    InterprocessConnectionServer server;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::optional<LocalPeerCredentials> credentials;
+    std::unique_ptr<InterprocessConnection> accepted;
+    std::string received;
+
+    server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> connection) {
+        connection->set_on_text_message([&](std::string_view message) {
+            std::lock_guard lock(mutex);
+            received.assign(message);
+            cv.notify_all();
+        });
+        std::lock_guard lock(mutex);
+        credentials = connection->local_peer_credentials();
+        accepted = std::move(connection);
+        cv.notify_all();
+    };
+
+    REQUIRE(server.start(fixture.endpoint.string(), IpcTransport::LocalSocket));
+    REQUIRE(std::filesystem::exists(fixture.endpoint));
+    const auto permissions = std::filesystem::status(fixture.endpoint).permissions();
+    REQUIRE((permissions & std::filesystem::perms::owner_read) !=
+            std::filesystem::perms::none);
+    REQUIRE((permissions & std::filesystem::perms::owner_write) !=
+            std::filesystem::perms::none);
+    REQUIRE((permissions & std::filesystem::perms::group_all) ==
+            std::filesystem::perms::none);
+    REQUIRE((permissions & std::filesystem::perms::others_all) ==
+            std::filesystem::perms::none);
+
+    InterprocessConnection client;
+    REQUIRE(client.connect(fixture.endpoint.string(), IpcTransport::LocalSocket,
+                           std::chrono::seconds(2)));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return credentials.has_value();
+        }));
+        REQUIRE(credentials->user_id == static_cast<std::uint64_t>(getuid()));
+        REQUIRE(credentials->group_id == static_cast<std::uint64_t>(getgid()));
+        REQUIRE(credentials->process_id == static_cast<std::int64_t>(getpid()));
+#ifdef __APPLE__
+        REQUIRE(credentials->process_generation_id > 0);
+#endif
+    }
+
+    REQUIRE(client.send_message("credential-bound"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return received == "credential-bound";
+        }));
+    }
+
+    client.disconnect();
+    accepted.reset();
+    server.stop();
+    REQUIRE_FALSE(std::filesystem::exists(fixture.endpoint));
+#endif
+}
+
+TEST_CASE("IPC local server refuses to replace an existing endpoint",
+          "[events][ipc][local][security]") {
+#ifndef _WIN32
+    LocalSocketFixture fixture;
+    {
+        std::ofstream existing(fixture.endpoint);
+        REQUIRE(existing.good());
+    }
+    InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start(fixture.endpoint.string(), IpcTransport::LocalSocket));
+    REQUIRE(std::filesystem::is_regular_file(fixture.endpoint));
+#endif
+}
+
+TEST_CASE("IPC local server cleanup preserves a replaced filesystem object",
+          "[events][ipc][local][security]") {
+#ifndef _WIN32
+    LocalSocketFixture fixture;
+    InterprocessConnectionServer server;
+    REQUIRE(server.start(fixture.endpoint.string(), IpcTransport::LocalSocket));
+    REQUIRE(std::filesystem::remove(fixture.endpoint));
+    {
+        std::ofstream replacement(fixture.endpoint);
+        REQUIRE(replacement.good());
+    }
+    server.stop();
+    REQUIRE(std::filesystem::is_regular_file(fixture.endpoint));
+#endif
+}
+
+TEST_CASE("IPC local server bounds a partial frame",
+          "[events][ipc][local][security][timeout]") {
+#ifndef _WIN32
+    LocalSocketFixture fixture;
+    InterprocessConnectionServer server;
+    server.set_frame_read_timeout(std::chrono::milliseconds(50));
+    std::mutex mutex;
+    std::condition_variable disconnected_cv;
+    bool disconnected = false;
+    std::unique_ptr<InterprocessConnection> accepted;
+    server.on_client_connected =
+        [&](std::unique_ptr<InterprocessConnection> connection) {
+            connection->set_on_disconnected([&] {
+                std::lock_guard lock(mutex);
+                disconnected = true;
+                disconnected_cv.notify_all();
+            });
+            std::lock_guard lock(mutex);
+            accepted = std::move(connection);
+        };
+
+    REQUIRE(server.start(fixture.endpoint.string(), IpcTransport::LocalSocket));
+    Socket client;
+    REQUIRE(client.create(SocketType::Local));
+    REQUIRE(client.connect_local(
+        fixture.endpoint.string(), std::chrono::seconds(2)));
+    const std::uint8_t partial_header = 1;
+    REQUIRE(client.send(&partial_header, 1) == 1);
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(disconnected_cv.wait_for(
+            lock, std::chrono::seconds(2), [&] { return disconnected; }));
+    }
+    client.close();
+    accepted.reset();
+    server.stop();
+#endif
+}
+
+TEST_CASE("IPC local server rejects a shared parent directory",
+          "[events][ipc][local][security]") {
+#ifndef _WIN32
+    const auto endpoint = std::filesystem::path("/tmp") /
+                          ("pulp-local-ipc-unsafe-" +
+                           std::to_string(getpid()) + ".sock");
+    std::error_code ignored;
+    std::filesystem::remove(endpoint, ignored);
+    InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start(endpoint.string(), IpcTransport::LocalSocket));
+    REQUIRE_FALSE(std::filesystem::exists(endpoint));
+#endif
+}
+
+TEST_CASE("IPC local server rejects an extended ACL on its private parent",
+          "[events][ipc][local][security][macos][acl]") {
+#ifdef __APPLE__
+    LocalSocketFixture fixture;
+    REQUIRE(add_directory_allow_acl(fixture.directory));
+    InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start(
+        fixture.endpoint.string(), IpcTransport::LocalSocket));
+    REQUIRE_FALSE(std::filesystem::exists(fixture.endpoint));
+#endif
 }
 
 // ── Child process manager ───────────────────────────────────────────────

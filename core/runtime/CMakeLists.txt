@@ -213,6 +213,10 @@ if(TARGET mbedcrypto)
     )
 endif()
 
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    target_link_libraries(pulp-runtime PRIVATE bsm)
+endif()
+
 # cpp-httplib (header-only HTTP(S) client/server). Consumed via the shared
 # interface target so the CPPHTTPLIB_MBEDTLS_SUPPORT macro, include path, and
 # mbedTLS/Security links stay identical across every TU that includes httplib.h
