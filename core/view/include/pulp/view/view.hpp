@@ -1702,11 +1702,20 @@ public:
         return style_extras_ ? style_extras_->background_origin : kEmpty;
     }
 
-    /// CSS background-position / background-size. Both are storage-only slots
-    /// today: Pulp's solid-bg paint path doesn't honor position or size offsets
-    /// (these only matter for url()/image-set() raster backgrounds). Storing
-    /// the keyword keeps the round-trip honest so the image pipeline can honor
-    /// the existing value without a JS-side change.
+    /// CSS background-position / background-size.
+    ///
+    /// `background-size` IS read at paint wherever the layer repeats — it sizes
+    /// the gradient tile. `background-position` is still storage-only, as is
+    /// `background-size` on a non-repeating layer, because the remaining cases
+    /// only matter for url()/image-set() raster backgrounds and there is no
+    /// image paint pass yet.
+    ///
+    /// Storing a keyword nothing reads is a deliberate strategy here, but it
+    /// carries a cost worth naming: the compat entry for `background-origin`
+    /// justified a `supported` claim on "pulp doesn't paint repeating gradient
+    /// tiles", and when tile paint arrived that claim went false with no edit
+    /// to the entry. If you make one of these slots load-bearing, re-read what
+    /// the matrix says about its neighbours.
     void set_background_position(std::string kw)   { style_extras().background_position = std::move(kw); }
     const std::string& background_position() const {
         static const std::string kEmpty;

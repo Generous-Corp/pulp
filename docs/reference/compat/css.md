@@ -38,6 +38,28 @@ mapping, evidence, and caveat text.
 
 ## Recently changed
 
+- **`background-origin` demoted to `partial` — a conditional claim whose
+  condition flipped** — the entry was marked `supported`, and its own
+  written justification was that all three values "paint identically
+  because pulp doesn't paint repeating gradient tiles (the only case
+  where this would matter)". Pulp now paints repeating gradient tiles
+  (see the next entry), so the one case the row named as mattering
+  became the normal case and the claim went false without anyone editing
+  it.
+
+  The property is still a storage-only slot the paint path never reads,
+  so the tile grid is anchored on the **border box** where CSS specifies
+  the **padding box**. On any node with a border or padding the stripe
+  train sits `borderWidth` early against a browser; `border-box` agrees
+  only by accident. A percentage `background-size` resolves against the
+  wrong box for the same reason.
+
+  Worth recording as a pattern rather than a one-off: the original entry
+  did the right thing by writing its assumption down in the row. What
+  failed was re-reading that assumption when the feature it depended on
+  landed. **When you make a stored-but-unread slot load-bearing, re-read
+  what the matrix claims about its neighbours.**
+
 - **A sized gradient layer TILES, and an all-`px` stop list resolves** —
   two halves of one change, and they only work together. Previously
   `background-size` reached `View` and stopped: it was a storage-only
