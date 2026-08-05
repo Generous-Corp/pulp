@@ -926,6 +926,52 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
+`BeatDivision` is an append-only persisted vocabulary for straight, dotted, and
+triplet values from whole notes through sixty-fourth notes. `beat_fraction()`
+returns the reduced rational quarter-note value and `division_ticks()` converts
+it to the exact document lattice, failing explicitly if a future division is
+invalid, out of range, or not exactly representable.
+
+`project_grid()` projects those divisions through explicit
+`GridProjectionRange` values. Each range carries its document sample/tick
+anchors and its independent monotonic anchors, matching the clock domains a
+transport publishes without introducing a dependency on playback. A pre-loop
+range uses its ordinary document interval; every loop pass reuses the loop's
+document sample interval and advances only the monotonic anchor; a seek may
+replace the document anchor without resetting the monotonic clock.
+Timeline-anchored grids retain global phase and bar-anchored grids restart at
+exact bar boundaries. A stopped request emits no points. Callers provide output
+storage; insufficient capacity reports the required count without modifying it,
+and malformed ranges or sample/tick overflow fail explicitly. A block is bounded
+to 65,536 candidate and projected points, with an overflow-safe preflight before
+enumeration. Host-beat-mapped ranges retain their precise fractional tick
+endpoints and project ticks proportionally into output frames, so session tempo
+may differ from the document tempo without silently falling back to the document
+sample map. Their `HostGridAnchor` names one continuous source tick at one
+absolute output frame plus the source-ticks-per-frame slope; loop ranges add
+their document-to-source pass offset. Reusing that anchor across callbacks keeps
+a rounded loop split from moving a grid tick by one frame when callback
+partitioning changes. For document-clock ranges the rounded tick end is
+inclusive only as a candidate search bound; the half-open document sample
+interval is authoritative. This preserves a grid point in a one-frame range
+even when a sparse tick map rounds both range endpoints to the same tick,
+without duplicating it in the next range.
+
+`OrderPreservingGrooveKernel` is not the canonical, named, sequence-owned
+`timeline::GrooveTemplate`. It is a fixed-capacity realtime projection kernel
+for the stricter non-reordering subset of that model. Its independent swing and
+table grids, 0..1000 strengths, 0..4000 velocity accents, and 1024-step ceiling
+match the timeline value domains so callers can adapt existing authored values
+without inventing another format. Timing strength scales both swing and table,
+making zero a complete identity. Construction checks the combined
+configured transform over a bounded joint period and rejects reorder or a
+period too large to validate. Application reports range failure rather than
+saturating a document-visible tick.
+
+`coordinate_random()` and `coordinate_chance()` derive deterministic values
+from seed, tick, lane, loop cycle, and stream, rather than callback-local mutable
+RNG state.
+
 `LoopRegion` is the loop bounds a transport honours, in document ticks. It lives
 here rather than beside either consumer because that is all it is — two document
 positions and whether they are in force — so the rung that runs the transport

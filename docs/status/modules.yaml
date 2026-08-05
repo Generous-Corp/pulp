@@ -9,7 +9,7 @@ modules:
     docs: reference/modules.md#playback
 
   - name: timebase
-    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup and streaming transport cursors
+    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup streaming transport cursors exact rational beat divisions transport-range grid projection order-preserving groove kernel and coordinate-seeded randomness
     status: experimental
     dependencies: [runtime]
     docs: reference/modules.md#timebase
