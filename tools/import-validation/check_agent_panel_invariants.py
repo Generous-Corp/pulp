@@ -42,6 +42,36 @@ def skip(msg: str) -> "int":
     return EX_SKIP
 
 
+def classify_failure(output: str, expect_reject: str) -> str:
+    """Why a non-zero import exited, as one of three verdicts.
+
+    Order is the whole content of this function, and it was wrong.
+
+    The expected REFUSAL is checked FIRST, because it is a positive
+    identification and the browser-unavailable test is a heuristic. That
+    heuristic looks for "browser" and "not" anywhere in the last four lines —
+    and the importer prints "[browser-capture] ..." banners plus a trailing
+    "the native design path is NOT covered by this run" on every refused
+    capture. So both substrings are present in exactly the output that PROVES
+    the gate fired, and the clipped-panel fixture skipped deterministically:
+    it could not pass, only ever be skipped, and ctest reports a skip inside
+    "100% tests passed".
+
+    That is the same defect the unconditional registration had just fixed one
+    layer up — a gate that does not run — so a named-reason match must never
+    be preemptable by a guess about the environment.
+
+    A genuinely absent browser cannot produce the expected reason, so it still
+    falls through to the heuristic and still skips.
+    """
+    if expect_reject and expect_reject in output:
+        return "rejected-as-intended"
+    tail = " ".join(output.strip().splitlines()[-4:]).lower()
+    if "browser" in tail and "not" in tail:
+        return "browser-unavailable"
+    return "failed"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True)
@@ -88,16 +118,13 @@ def main() -> int:
         output = proc.stdout + proc.stderr
         if proc.returncode != 0:
             tail = output.strip().splitlines()[-4:]
-            if "browser" in " ".join(tail).lower() and "not" in " ".join(tail).lower():
+            verdict = classify_failure(output, args.expect_reject)
+            if verdict == "rejected-as-intended":
+                print(f"PASS rejected as intended   {args.expect_reject}")
+                return 0
+            if verdict == "browser-unavailable":
                 return skip("browser capture unavailable: " + " / ".join(tail))
-            # A fixture whose whole job is to be refused. Checked BEFORE the
-            # generic failure path, and it demands the NAMED reason: any import
-            # error would otherwise satisfy "it failed", so a gate that stopped
-            # working would keep passing on the back of an unrelated crash.
             if args.expect_reject:
-                if args.expect_reject in output:
-                    print(f"PASS rejected as intended   {args.expect_reject}")
-                    return 0
                 fail(f"import failed, but not with '{args.expect_reject}' — "
                      "this fixture exists to prove that gate still fires")
                 print("\n".join("  " + t for t in tail))

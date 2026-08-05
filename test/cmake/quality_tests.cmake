@@ -302,6 +302,16 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(check-panel-presence-selftest PROPERTIES
         TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+    # The agent-panel gate's own failure classifier. The negative fixture
+    # passes by being REFUSED, so which of three verdicts this returns is the
+    # only thing between "the clipping gate still fires" and "nobody noticed it
+    # stopped". Pure Python, no fixtures, no browser -- so unlike the gate it
+    # guards, this one always runs.
+    add_test(NAME agent-panel-gate-classifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_agent_panel_invariants.py")
+    set_tests_properties(agent-panel-gate-classifier-selftest PROPERTIES
+        TIMEOUT 120)
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest
