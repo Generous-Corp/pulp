@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/view/css_effect_parse.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -53,6 +56,49 @@ std::vector<unsigned char> render_bytes(const DesignIR& ir, const char* name) {
                                       std::istreambuf_iterator<char>());
 }
 
+/// Two flat opaque rectangles, the upper one carrying `blend`. Flat colours
+/// and full cover make the composite arithmetic checkable by hand: the child
+/// fills the ground exactly, so every interior pixel is one blend of one pair.
+DesignIR flat_over_flat(const std::string& blend) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "ground";
+    ir.root.style.width = 64.0f;
+    ir.root.style.height = 64.0f;
+    ir.root.style.background_color = "#483221";  // (72, 50, 33)
+
+    IRNode bar;
+    bar.type = "frame";
+    bar.name = "bar";
+    bar.style.width = 64.0f;
+    bar.style.height = 64.0f;
+    bar.style.background_color = "#C86B37";  // (200, 107, 55)
+    if (!blend.empty()) bar.style.mix_blend_mode = blend;
+    ir.root.children.push_back(std::move(bar));
+    return ir;
+}
+
+struct Rgb {
+    int r = 0, g = 0, b = 0;
+};
+
+/// The centre pixel of the rendered tree, from the Skia raster path's own
+/// buffer. No PNG encode/decode round-trip, so the value read is the value
+/// composited.
+Rgb render_centre(const DesignIR& ir) {
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_to_rgba(*root, 64, 64, 1.0f, &w, &h);
+    // An empty buffer would read as (0,0,0) and quietly fail every assertion
+    // for the wrong reason.
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(w == 64u);
+    REQUIRE(h == 64u);
+    const size_t i = (static_cast<size_t>(32) * w + 32u) * 4u;
+    return Rgb{rgba[i], rgba[i + 1], rgba[i + 2]};
+}
+
 }  // namespace
 
 TEST_CASE("a blur filter changes what the native tree draws",
@@ -85,6 +131,55 @@ TEST_CASE("a blend mode changes what the native tree draws",
 
     REQUIRE_FALSE(plain.empty());
     CHECK(plain != screened);
+}
+
+TEST_CASE("the CSS blend parser maps the additive keywords",
+          "[view][blend][design]") {
+    using BM = pulp::canvas::Canvas::BlendMode;
+    // The parser is the native lane's only mapping from the IR keyword to a
+    // canvas blend mode. A keyword it does not know is not an error anywhere
+    // downstream — the importer simply never calls set_mix_blend_mode and the
+    // node composites source-over — so an absent entry is invisible except in
+    // pixels.
+    CHECK(css_blend_mode("plus-lighter") == BM::lighter);
+    CHECK(css_blend_mode("plus-darker") == BM::lighter);
+    CHECK(css_blend_mode("screen") == BM::screen);
+    CHECK(css_blend_mode("multiply") == BM::multiply);
+    // Still nothing for a keyword with no faithful lowering, which is what
+    // keeps an unhonored mode visible as absent rather than as normal.
+    CHECK_FALSE(css_blend_mode("linear-burn").has_value());
+}
+
+TEST_CASE("plus-lighter composites additively in the native tree",
+          "[view][blend][design]") {
+    // A bar of (200,107,55) over a ground of (72,50,33). Additive compositing
+    // gives (272,157,88), which clamps to (255,157,88) — brighter than either
+    // input in every channel. Source-over leaves the bar's own colour.
+    //
+    // Measured numbers, not invented ones: on the lattice fixture's velocity
+    // row the native render drew (200,107,55) where the browser drew
+    // (241,143,82) over the same (72,50,33) backdrop, with the bar geometry an
+    // exact match. Nothing but the compositing was wrong, and it was wrong
+    // because the keyword had no entry in the parser above — so the importer
+    // never called set_mix_blend_mode and the View stayed at
+    // BlendMode::normal.
+    const Rgb source_over = render_centre(flat_over_flat(""));
+    // Control first: the reader must be able to report the UN-blended state,
+    // or an additive assertion below would only be agreeing with itself.
+    CHECK(std::abs(source_over.r - 200) <= 1);
+    CHECK(std::abs(source_over.g - 107) <= 1);
+    CHECK(std::abs(source_over.b - 55) <= 1);
+
+    const Rgb additive = render_centre(flat_over_flat("plus-lighter"));
+    INFO("plus-lighter centre = " << additive.r << "," << additive.g << ","
+                                  << additive.b);
+    // The sum is taken on the 8-bit sRGB-encoded values, which is what Skia's
+    // kPlus does on this raster surface and what the browser does in device
+    // space. A blend performed in linear light would land near (255,118,65)
+    // instead and fail these bounds loudly rather than silently passing.
+    CHECK(additive.r >= 250);
+    CHECK(std::abs(additive.g - 157) <= 4);
+    CHECK(std::abs(additive.b - 88) <= 4);
 }
 
 TEST_CASE("a filter list without blur leaves the node unfiltered",

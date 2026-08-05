@@ -120,6 +120,20 @@ std::optional<canvas::Canvas::BlendMode> css_blend_mode(const std::string& keywo
         {"saturation", BlendMode::saturation},
         {"color", BlendMode::color},
         {"luminosity", BlendMode::luminosity},
+        // The CSS Compositing and Blending Level 2 additive pair. Both lower
+        // to `lighter` (SkBlendMode::kPlus), which is the same lowering the
+        // scripted lane's `setMixBlendMode` uses and the same pair the IR's
+        // supported-blend table admits — so a design that adds light composites
+        // identically through the native tree and the scripted one. Level 2
+        // specifies plus-darker as a distinct multiplicative variant, but Skia
+        // and Chromium both ship kPlus for it, and mirroring them is nearer the
+        // authored intent than dropping the mode.
+        //
+        // Dropping them is not a subtle loss: `plus-lighter` is how a lit bar
+        // or a bloom ADDS light to what is behind it, so a normal-composited
+        // fallback paints the source colour flat and every glow goes dull.
+        {"plus-lighter", BlendMode::lighter},
+        {"plus-darker", BlendMode::lighter},
     };
     const auto it = kModes.find(keyword);
     return it == kModes.end() ? std::nullopt
