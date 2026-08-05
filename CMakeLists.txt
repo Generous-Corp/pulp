@@ -336,6 +336,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 # Order matters: dependencies first
 add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
+add_subdirectory(core/music)
 add_subdirectory(core/timebase)
 add_subdirectory(core/timeline)
 if(PULP_ENABLE_PROJECT_PACKAGE)
