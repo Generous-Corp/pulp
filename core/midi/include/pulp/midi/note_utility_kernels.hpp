@@ -403,7 +403,7 @@ template <typename Serial = std::uint32_t> class BasicMonophonicNoteSelector {
         for (const auto& event : input) {
             if (event.is_note_on()) {
                 const int key = utility_detail::key_index(event.channel(), event.note());
-                if (held_depth_[key] != std::numeric_limits<std::uint16_t>::max())
+                if (held_depth_[key] != std::numeric_limits<std::uint32_t>::max())
                     ++held_depth_[key];
                 velocity_[key] = event.velocity();
                 if (next_serial_ == std::numeric_limits<Serial>::max())
@@ -566,7 +566,7 @@ template <typename Serial = std::uint32_t> class BasicMonophonicNoteSelector {
 
     MonophonicSpec spec_{};
     std::optional<MonophonicSpec> pending_spec_;
-    std::array<std::uint16_t, 16 * 128> held_depth_{};
+    std::array<std::uint32_t, 16 * 128> held_depth_{};
     std::array<std::uint8_t, 16 * 128> velocity_{};
     std::array<Serial, 16 * 128> serial_{};
     Serial next_serial_ = 1;

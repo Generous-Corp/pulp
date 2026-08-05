@@ -35,8 +35,9 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
     }
 
     bool note_event(std::size_t voice_index, const midi::MidiEvent& event,
-                    std::uint32_t note_id = 0) noexcept {
-        if (voice_index >= MaximumVoices || (!event.is_note_on() && !event.is_note_off()))
+                    std::uint32_t note_id) noexcept {
+        if (voice_index >= MaximumVoices || note_id == 0 ||
+            (!event.is_note_on() && !event.is_note_off()))
             return false;
         auto& voice = voices_[voice_index];
         if (event.is_note_on()) {
@@ -52,7 +53,7 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
     }
 
     bool mpe_expression(std::size_t voice_index, const midi::MpeNoteState& expression) noexcept {
-        if (voice_index >= MaximumVoices || !expression.active)
+        if (voice_index >= MaximumVoices || !expression.active || expression.note_id == 0)
             return false;
         if (!std::isfinite(expression.pitch_bend_semitones) ||
             !std::isfinite(expression.pressure) || !std::isfinite(expression.timbre))
@@ -107,9 +108,12 @@ template <std::size_t MaximumVoices> class MidiVoiceModulationAdapter {
         return voice_index < MaximumVoices ? &voices_[voice_index] : nullptr;
     }
 
-    void release_voice(std::size_t voice_index) noexcept {
-        if (voice_index < MaximumVoices)
-            voices_[voice_index] = {};
+    bool release_voice(std::size_t voice_index, std::uint32_t note_id) noexcept {
+        if (voice_index >= MaximumVoices || note_id == 0 || !voices_[voice_index].active ||
+            voices_[voice_index].note_id != note_id)
+            return false;
+        voices_[voice_index] = {};
+        return true;
     }
 
     void flush() noexcept {

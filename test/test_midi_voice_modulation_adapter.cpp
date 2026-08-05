@@ -67,19 +67,29 @@ TEST_CASE("MIDI note events populate the existing voice modulation contract",
 TEST_CASE("Voice modulation adapter reset and hot swap clear voice ownership",
           "[audio][midi][voice-mod][lifecycle]") {
     pulp::audio::MidiVoiceModulationAdapter<1> adapter;
-    REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(0, 64, 127)));
+    REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(0, 64, 127), 1));
     REQUIRE(adapter.state(0)->active);
     adapter.hot_swap_reset();
     CHECK_FALSE(adapter.state(0)->active);
-    REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(0, 65, 127)));
+    REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(0, 65, 127), 2));
     adapter.reset();
     CHECK_FALSE(adapter.state(0)->active);
 
     SECTION("release identity prevents stale note generations from clearing a voice") {
         REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 100), 100));
+        REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 110), 101));
         CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 99));
         REQUIRE(adapter.state(0)->active);
-        REQUIRE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 100));
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_off(2, 70), 100));
+        REQUIRE(adapter.state(0)->active);
+        CHECK_FALSE(adapter.release_voice(0, 100));
+        REQUIRE(adapter.state(0)->active);
+        REQUIRE(adapter.release_voice(0, 101));
         CHECK_FALSE(adapter.state(0)->active);
+    }
+
+    SECTION("zero is not a usable ownership generation") {
+        CHECK_FALSE(adapter.note_event(0, pulp::midi::MidiEvent::note_on(2, 70, 100), 0));
+        CHECK_FALSE(adapter.release_voice(0, 0));
     }
 }

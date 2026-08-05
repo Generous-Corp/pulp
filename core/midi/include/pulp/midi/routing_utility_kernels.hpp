@@ -125,7 +125,7 @@ class NoteRangeFilter {
         if (!valid_)
             return {0, input.size(), 0, false};
         for (const auto& event : input) {
-            if ((event.is_note_on() || event.is_note_off()) &&
+            if (utility_detail::is_note_addressed(event) &&
                 (event.note() < spec_.lowest || event.note() > spec_.highest))
                 continue;
             utility_detail::emit(output, event, report);
@@ -133,7 +133,7 @@ class NoteRangeFilter {
         bool copied_sidecars = utility_detail::copy_sysex_sidecar(input, output);
         if (const auto* source = input.ump()) {
             for (const auto& event : *source) {
-                if (utility_detail::is_note(event.packet) &&
+                if (utility_detail::is_note_addressed(event.packet) &&
                     (event.packet.note_number() < spec_.lowest ||
                      event.packet.note_number() > spec_.highest))
                     continue;
@@ -197,37 +197,58 @@ class KeyboardSplit {
         if (!valid_)
             return {0, input.size(), 0, false};
         for (const auto& event : input) {
-            if (!event.is_note_on() && !event.is_note_off()) {
+            if (!utility_detail::is_channel_voice(event)) {
                 utility_detail::emit(lower, event, report);
                 utility_detail::emit(upper, event, report);
                 continue;
             }
-            const bool is_upper = event.note() > spec_.split_note ||
-                                  (event.note() == spec_.split_note && spec_.split_note_is_upper);
-            auto routed = utility_detail::with_channel(event, is_upper ? spec_.upper_channel
-                                                                       : spec_.lower_channel);
-            utility_detail::emit(is_upper ? upper : lower, routed, report);
+            if (utility_detail::is_note_addressed(event)) {
+                const bool is_upper =
+                    event.note() > spec_.split_note ||
+                    (event.note() == spec_.split_note && spec_.split_note_is_upper);
+                auto routed = utility_detail::with_channel(event, is_upper ? spec_.upper_channel
+                                                                           : spec_.lower_channel);
+                utility_detail::emit(is_upper ? upper : lower, routed, report);
+                continue;
+            }
+            utility_detail::emit(lower, utility_detail::with_channel(event, spec_.lower_channel),
+                                 report);
+            utility_detail::emit(upper, utility_detail::with_channel(event, spec_.upper_channel),
+                                 report);
         }
         bool copied_sidecars = utility_detail::copy_sysex_sidecar(input, lower);
         copied_sidecars = utility_detail::copy_sysex_sidecar(input, upper) && copied_sidecars;
         if (const auto* source = input.ump()) {
             for (const auto& event : *source) {
-                if (!utility_detail::is_note(event.packet)) {
+                if (!utility_detail::is_channel_voice(event.packet)) {
                     copied_sidecars =
                         utility_detail::emit_ump(lower.ump(), event) && copied_sidecars;
                     copied_sidecars =
                         utility_detail::emit_ump(upper.ump(), event) && copied_sidecars;
                     continue;
                 }
-                const bool is_upper =
-                    event.packet.note_number() > spec_.split_note ||
-                    (event.packet.note_number() == spec_.split_note && spec_.split_note_is_upper);
-                auto routed = event;
-                routed.packet = utility_detail::with_channel(
-                    event.packet, is_upper ? spec_.upper_channel : spec_.lower_channel);
+                if (utility_detail::is_note_addressed(event.packet)) {
+                    const bool is_upper = event.packet.note_number() > spec_.split_note ||
+                                          (event.packet.note_number() == spec_.split_note &&
+                                           spec_.split_note_is_upper);
+                    auto routed = event;
+                    routed.packet = utility_detail::with_channel(
+                        event.packet, is_upper ? spec_.upper_channel : spec_.lower_channel);
+                    copied_sidecars =
+                        utility_detail::emit_ump(is_upper ? upper.ump() : lower.ump(), routed) &&
+                        copied_sidecars;
+                    continue;
+                }
+                auto lower_event = event;
+                lower_event.packet =
+                    utility_detail::with_channel(event.packet, spec_.lower_channel);
                 copied_sidecars =
-                    utility_detail::emit_ump(is_upper ? upper.ump() : lower.ump(), routed) &&
-                    copied_sidecars;
+                    utility_detail::emit_ump(lower.ump(), lower_event) && copied_sidecars;
+                auto upper_event = event;
+                upper_event.packet =
+                    utility_detail::with_channel(event.packet, spec_.upper_channel);
+                copied_sidecars =
+                    utility_detail::emit_ump(upper.ump(), upper_event) && copied_sidecars;
             }
         }
         if (!copied_sidecars) {

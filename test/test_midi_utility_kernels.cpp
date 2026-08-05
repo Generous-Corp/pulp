@@ -77,6 +77,31 @@ void seed_stale_sidecars(midi::MidiBuffer& buffer, midi::UmpBuffer& ump) {
     REQUIRE(ump.add(midi::UmpPacket::note_off_2(0, 0, 1), 1));
 }
 
+midi::MidiEvent poly_pressure(std::uint8_t channel, std::uint8_t note, std::uint8_t value) {
+    return {
+        choc::midi::ShortMessage(static_cast<std::uint8_t>(0xa0 | (channel & 0x0f)), note, value),
+        0, 0.0};
+}
+
+midi::UmpPacket midi1_voice(std::uint8_t status, std::uint8_t channel, std::uint8_t data1,
+                            std::uint8_t data2) {
+    midi::UmpPacket packet;
+    packet.word_count = 1;
+    packet.words[0] = (0x2u << 28) | (static_cast<std::uint32_t>(status | (channel & 0x0f)) << 16) |
+                      (static_cast<std::uint32_t>(data1) << 8) | data2;
+    return packet;
+}
+
+midi::UmpPacket midi2_voice(std::uint8_t status, std::uint8_t channel, std::uint8_t data1,
+                            std::uint8_t data2, std::uint32_t value) {
+    midi::UmpPacket packet;
+    packet.word_count = 2;
+    packet.words[0] = (0x4u << 28) | (static_cast<std::uint32_t>(status | (channel & 0x0f)) << 16) |
+                      (static_cast<std::uint32_t>(data1) << 8) | data2;
+    packet.words[1] = value;
+    return packet;
+}
+
 void check_exact_sidecars(const midi::MidiBuffer& buffer) {
     REQUIRE(buffer.sysex().size() == 1);
     CHECK(buffer.sysex()[0].data == std::vector<std::uint8_t>{0xf0, 0x7d, 0x01, 0xf7});
@@ -236,6 +261,84 @@ TEST_CASE("MIDI routing utilities transform native UMP channel voice events",
     REQUIRE(lower_ump.size() == 1);
     CHECK(lower_ump[0].packet.channel() == 2);
     CHECK(upper_ump.empty());
+}
+
+TEST_CASE("MIDI range and split routing cover channel-wide and note-addressed expression",
+          "[midi][utility][routing][ump][expression]") {
+    midi::MidiBuffer input;
+    midi::UmpBuffer input_ump;
+    input.reserve(8, 0, 0);
+    input.set_realtime_capacity_limit(true);
+    input_ump.reserve(16);
+    input_ump.set_realtime_capacity_limit(true);
+    input.attach_ump(&input_ump);
+    REQUIRE(input.add(midi::MidiEvent::cc(3, 1, 64)));
+    REQUIRE(input.add(poly_pressure(3, 59, 70)));
+    REQUIRE(input.add(poly_pressure(3, 60, 71)));
+    REQUIRE(input_ump.add(midi1_voice(0xb0, 3, 1, 64)));
+    REQUIRE(input_ump.add(midi1_voice(0xa0, 3, 59, 70)));
+    REQUIRE(input_ump.add(midi::UmpPacket::cc_2(2, 3, 1, 0x12345678)));
+    REQUIRE(input_ump.add(midi::UmpPacket::registered_per_note_cc(2, 3, 59, 74, 0x11111111)));
+    REQUIRE(input_ump.add(midi::UmpPacket::assignable_per_note_cc(2, 3, 59, 7, 0x22222222)));
+    REQUIRE(input_ump.add(midi::UmpPacket::per_note_pitch_bend(2, 3, 60, 0x87654321)));
+    REQUIRE(input_ump.add(midi2_voice(0xa0, 3, 60, 0, 0x33333333)));
+    REQUIRE(input_ump.add(midi::UmpPacket::per_note_management(2, 3, 60, 1)));
+
+    midi::MidiBuffer ranged;
+    midi::UmpBuffer ranged_ump;
+    ranged.reserve(8, 0, 0);
+    ranged.set_realtime_capacity_limit(true);
+    ranged_ump.reserve(16);
+    ranged_ump.set_realtime_capacity_limit(true);
+    ranged.attach_ump(&ranged_ump);
+    midi::NoteRangeFilter range({60, 72});
+    REQUIRE(range.process(input, ranged).complete);
+    REQUIRE(ranged.size() == 2);
+    CHECK(ranged[0].is_cc());
+    CHECK(ranged[1].note() == 60);
+    REQUIRE(ranged_ump.size() == 5);
+    CHECK(ranged_ump[0].packet.status() == 0xb3);
+    CHECK(ranged_ump[1].packet.status() == 0xb3);
+    CHECK(ranged_ump[2].packet.note_number() == 60);
+    CHECK(ranged_ump[3].packet.note_number() == 60);
+    CHECK(ranged_ump[4].packet.note_number() == 60);
+
+    midi::MidiBuffer lower;
+    midi::MidiBuffer upper;
+    midi::UmpBuffer lower_ump;
+    midi::UmpBuffer upper_ump;
+    lower.reserve(8, 0, 0);
+    upper.reserve(8, 0, 0);
+    lower.set_realtime_capacity_limit(true);
+    upper.set_realtime_capacity_limit(true);
+    lower_ump.reserve(16);
+    upper_ump.reserve(16);
+    lower_ump.set_realtime_capacity_limit(true);
+    upper_ump.set_realtime_capacity_limit(true);
+    lower.attach_ump(&lower_ump);
+    upper.attach_ump(&upper_ump);
+    midi::KeyboardSplit split({60, true, 2, 14});
+    REQUIRE(split.process(input, lower, upper).complete);
+    REQUIRE(lower.size() == 2);
+    REQUIRE(upper.size() == 2);
+    CHECK(lower[0].channel() == 2);
+    CHECK(lower[1].channel() == 2);
+    CHECK(lower[1].note() == 59);
+    CHECK(upper[0].channel() == 14);
+    CHECK(upper[1].channel() == 14);
+    CHECK(upper[1].note() == 60);
+    REQUIRE(lower_ump.size() == 5);
+    REQUIRE(upper_ump.size() == 5);
+    for (const auto& event : lower_ump)
+        CHECK(event.packet.channel() == 2);
+    for (const auto& event : upper_ump)
+        CHECK(event.packet.channel() == 14);
+    CHECK(lower_ump[1].packet.note_number() == 59);
+    CHECK(lower_ump[3].packet.note_number() == 59);
+    CHECK(lower_ump[4].packet.note_number() == 59);
+    CHECK(upper_ump[2].packet.note_number() == 60);
+    CHECK(upper_ump[3].packet.note_number() == 60);
+    CHECK(upper_ump[4].packet.note_number() == 60);
 }
 
 TEST_CASE("MIDI utilities reject aliased input and output buffers", "[midi][utility][contract]") {
@@ -476,6 +579,37 @@ TEST_CASE("Last-note priority rebases deterministically across serial rollover",
     input.add(midi::MidiEvent::note_on(0, 80, 100));
     REQUIRE(selector.process(input, output).complete);
     CHECK(selector.pitch_state().note == 80);
+}
+
+TEST_CASE("Monophonic held ownership remains exact beyond uint16 depth",
+          "[midi][utility][mono][overflow]") {
+    constexpr std::size_t attacks = 65'536;
+    auto input = prepared_buffer(attacks);
+    auto output = prepared_buffer(2);
+    for (std::size_t i = 0; i < attacks; ++i)
+        REQUIRE(input.add(midi::MidiEvent::note_on(0, 60, 100)));
+
+    midi::MonophonicNoteSelector selector;
+    NoteBalance balance;
+    const auto attack_report = selector.process(input, output);
+    REQUIRE(attack_report.complete);
+    REQUIRE(attack_report.emitted == 1);
+    balance.feed(output);
+
+    input.clear();
+    for (std::size_t i = 0; i < attacks - 1; ++i)
+        REQUIRE(input.add(midi::MidiEvent::note_off(0, 60)));
+    REQUIRE(selector.process(input, output).complete);
+    CHECK(output.empty());
+    CHECK(selector.pitch_state().active);
+
+    input.clear();
+    REQUIRE(input.add(midi::MidiEvent::note_off(0, 60)));
+    REQUIRE(selector.process(input, output).complete);
+    REQUIRE(output.size() == 1);
+    CHECK(output[0].is_note_off());
+    balance.feed(output);
+    CHECK(balance.balanced());
 }
 
 TEST_CASE("Controller mapping applies caller-owned curves, smoothing, and legal CC domains",

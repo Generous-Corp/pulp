@@ -567,15 +567,21 @@ distinct buffers (as must both split outputs), including their attached UMP
 storage; aliased calls are rejected before any block is cleared.
 Channel routing, note-range filtering, and keyboard splitting apply the same
 channel/note decisions to native MIDI 1.0 and MIDI 2.0 UMP channel-voice
-packets; other UMP message types and SysEx retain their exact payloads.
+packets. Note-addressed expression (poly pressure plus MIDI 2 per-note
+controllers, bend, and management) follows the addressed note through a range
+or split. A split duplicates channel-wide voice messages onto both configured
+output channels. Other UMP message types and SysEx retain their exact payloads.
 
 `audio/midi_voice_modulation_adapter.hpp` projects a caller-selected voice slot's
 note/MPE state into the existing `VoiceModulationBuffer`. Voice ownership stays
 with the instrument's allocator, preserving the MIDI-to-audio dependency
 direction and avoiding a second voice-allocation policy. Expression and release
-updates must match the slot's channel, note, and `note_id`, so a stale generation
-cannot mutate or release a reused voice slot. Destinations are preflighted for
-four lanes and the complete frame capacity before any lane is written.
+updates must carry a nonzero `note_id`: event releases match channel, note, and
+generation, while index-based releases match the generation explicitly. A stale
+generation therefore cannot mutate or release a reused voice slot. `flush()` and
+`reset()` are the deliberate identity-free lifecycle clears. Destinations are
+preflighted for four lanes and the complete frame capacity before any lane is
+written.
 
 ### MIDI effects
 
