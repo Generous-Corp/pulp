@@ -125,7 +125,7 @@ modules:
     docs: reference/modules.md#audio
 
   - name: music
-    summary: Dependency-light 12-TET pitch-class and scale values plus fixed-capacity chord formulas construction and inversion with stable Pulp and Forge compatibility identities
+    summary: Dependency-light 12-TET pitch-class and scale values fixed-capacity chord construction spelling voicing minimum-motion voice leading diatonic harmony and ambiguity-preserving recognition with stable Pulp and Forge compatibility identities
     status: experimental
     dependencies: []
     docs: reference/modules.md#music

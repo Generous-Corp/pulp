@@ -455,30 +455,64 @@ codec delegate through these compatibility maps. Their public enum ordinals and
 stored names remain unchanged while the interval and identity data has one
 owner.
 
-`ChordFormula` accepts fixed-capacity ascending semitone formulas, including
-extensions and alterations. `kPulpTimelineChordQualities` and
+`ChordFormula` accepts fixed-capacity ascending semitone formulas. Its
+`with_extension()`, `with_suspension()`, and `with_alteration()` transforms add
+the common ninth/eleventh/thirteenth vocabulary without allocating or changing
+the stored identities of named formulas. `kPulpTimelineChordQualities` and
 `kForgeChordQualities` map the two existing stored identities onto the shared
 named qualities. `Chord::construct()` builds bounded MIDI pitches and
 deterministic inversions, failing when a root, inversion, formula, or resulting
 pitch is outside its legal domain.
+
+Pitch spelling is policy-driven: callers select `prefer_sharps`,
+`prefer_flats`, or deterministic `minimize_accidentals`. `spell_chord()` keeps
+the formula's diatonic letter roles, so a C-sharp major third is E-sharp while
+the same pitch-class root under the flat policy is spelled D-flat/F/A-flat.
+`minimize_accidentals` chooses a natural spelling when one exists and resolves
+equal-cost single-accidental ties toward sharps; it is deterministic rather
+than key-signature contextual.
+
+`voice_chord()` applies closed, open, drop-2, drop-3, or spread constraints and
+fits the result into an explicit MIDI range. It returns no value when the
+spacing or range is impossible. `minimum_motion_voice_leading()` searches the
+bounded MIDI domain across every assignment of the formula's fixed tone multiset,
+including compound and duplicated pitch classes, for the global minimum summed
+motion without voice crossing. Equal-cost answers use ascending pitch order as
+the stable tie-break.
+
+`diatonic_chord()` constructs scale-degree third stacks directly from an
+arbitrary `Scale`. `recognize_chord()` ranks every stable named quality and root
+by missing and extra pitch classes. `best_equivalent_count()` and `ambiguous()`
+make symmetric or otherwise tied analyses explicit instead of selecting one
+silently; MIDI-note input additionally reports a recognized inversion when the
+bass identifies exactly one formula degree. `inversion_match_count` and
+`inversion_match_mask` expose duplicate-degree matches; `inversion` remains
+empty when a pitch-class bass cannot distinguish them. This inversion evidence
+participates in ranking and best-equivalence grouping. The candidate catalog is
+deliberately the 12 stable named qualities. Extended or altered input is ranked
+against that catalog by its missing and extra tones; recognition does not invent
+an extension identity.
 
 ```cpp
 #include <pulp/music/music.hpp>
 
 using namespace pulp::music;
 const auto scale = Scale::named(PitchClass::d, NamedScale::dorian);
-const auto formula = ChordFormula::for_quality(ChordQuality::minor7);
+const auto base = ChordFormula::for_quality(ChordQuality::minor7);
+const auto formula = base->with_extension(ChordExtension::ninth);
 const auto first_inversion = Chord::construct(62, *formula, 1);
+const auto spelling = spell_chord(*first_inversion, AccidentalPolicy::prefer_flats);
+
+VoicingConstraints constraints;
+constraints.mode = VoicingMode::drop2;
+constraints.range = {48, 84};
+const auto voiced = voice_chord(62, *formula, constraints);
+const auto analyses = recognize_chord(first_inversion->pitch_classes());
 ```
 
 The named collection is a 12-TET compatibility vocabulary, not a claim of
 microtonal support. More tuning systems belong in the provider-neutral MIDI
 tuning APIs rather than in this representation.
-
-This module is the shared-theory foundation sub-slice. It does not yet provide
-pitch spelling, chord recognition, voicing constraints, or minimum-motion
-voice leading; those remain separate later additions rather than implied
-capabilities of `ChordFormula`.
 
 ---
 
