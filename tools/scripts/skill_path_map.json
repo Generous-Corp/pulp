@@ -347,6 +347,8 @@
       "paths": [
         "core/midi/include/**/*mpe*",
         "core/midi/include/**/*ump*",
+        "core/midi/include/**/*utility*.hpp",
+        "core/audio/include/**/midi_voice_modulation_adapter.hpp",
         "examples/mpe-*/**"
       ]
     },

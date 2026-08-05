@@ -195,6 +195,23 @@ than growing vectors during `clap_process()`. If you add a new adapter
 or widen the sidecar contract, test the overflow path without copying
 large event vectors inside the processor no-allocation guard.
 
+### Scale-aware bend and voice-modulation projection
+
+`pulp::midi::ScaleAwareMpePitch` in `utility_kernels.hpp` maps the tracked
+member-channel bend onto `pulp::music::Scale` degrees and owns only one pitch
+glide state. Feed it `MpeNoteState`; do not add another MPE tracker or scale
+table. Its bend input is the tracker's semitone value, so configure
+`input_bend_range_semitones` to the same member range used by the tracker.
+
+`pulp::audio::MidiVoiceModulationAdapter<MaximumVoices>` is the dependency-safe
+bridge to `VoiceModulationBuffer`. The instrument's existing allocator supplies
+the voice index; the adapter records note/MPE values for that slot and never
+allocates or steals a voice. Putting this bridge in `core/midi` would reverse
+the established `audio -> midi` dependency and create a cycle. Pass the same
+nonzero `note_id` generation to note-on, expression, and note-off calls; stale
+identity updates are rejected. Prepare the destination for at least four lanes
+before `write_voice()` so the adapter can publish its block atomically.
+
 ## Reference material
 
 - Guide: [docs/guides/mpe.md](../../../docs/guides/mpe.md)

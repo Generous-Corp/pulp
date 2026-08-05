@@ -551,10 +551,36 @@ send_sysex(inquiry);  // Send over MIDI port
 | Tuning | `tuning.hpp`, `mts_esp_tuning.hpp`, `scala_tuning.hpp` | Provider-neutral note-to-frequency API with 12-TET default, optional MTS-ESP session/SysEx provider, and optional Scala SCL/KBM local-file provider |
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
+| Utility kernels | `utility_kernels.hpp` umbrella; `routing_utility_kernels.hpp`, `note_utility_kernels.hpp`, `controller_utility_kernels.hpp` | Fixed-capacity channel routing, note-range filtering, keyboard splitting, balanced note-length shaping, low/high/last monophonic priority with legato/glide state, CC mapping/smoothing, and scale-aware MPE bend/glide |
+
+Every utility kernel publishes a `MidiUtilityContract` describing maximum event
+amplification, fixed state capacity, overflow behavior, same-sample ordering,
+and transport requirements. Stateful note kernels retain release debt when an
+output buffer fills: stop, seek, loop, reset, and spec replacement call
+`flush()`/`reset()` until `complete` is true, so capacity pressure cannot strand
+a downstream note. Scheduling accepts `timebase::SamplePosition`; the kernels
+do not own or advance another clock. Realtime calls require output buffers that
+were reserved for the contract's worst case and pinned with
+`set_realtime_capacity_limit(true)`; an unpinned output is rejected instead of
+silently allocating in `add()` or stable `sort()`. Inputs and outputs must be
+distinct buffers (as must both split outputs), including their attached UMP
+storage; aliased calls are rejected before any block is cleared.
+Channel routing, note-range filtering, and keyboard splitting apply the same
+channel/note decisions to native MIDI 1.0 and MIDI 2.0 UMP channel-voice
+packets; other UMP message types and SysEx retain their exact payloads.
+
+`audio/midi_voice_modulation_adapter.hpp` projects a caller-selected voice slot's
+note/MPE state into the existing `VoiceModulationBuffer`. Voice ownership stays
+with the instrument's allocator, preserving the MIDI-to-audio dependency
+direction and avoiding a second voice-allocation policy. Expression and release
+updates must match the slot's channel, note, and `note_id`, so a stale generation
+cannot mutate or release a reused voice slot. Destinations are preflighted for
+four lanes and the complete frame capacity before any lane is written.
 
 ### MIDI effects
 
-Pulp's format layer hosts MIDI-only processors, and Forge supplies a bounded,
+Pulp's format layer hosts MIDI-only processors. The SDK supplies the bounded
+utility kernels above, while Forge supplies a bounded,
 hot-swappable ordered transform chain with 20 transforms, fixed host macros,
 pattern/chord data, note-balance enforcement, and realtime-safe publication.
 See the [MIDI FX guide](../guides/midi-fx.md) for the complete transform
