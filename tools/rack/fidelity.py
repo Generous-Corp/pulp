@@ -242,6 +242,64 @@ def pitch_sources(patch: dict, names: dict) -> list[tuple[int, int]]:
     return out
 
 
+def is_step_param(name: str) -> bool:
+    """Whether a knob called `name` holds one step's pitch.
+
+    Whole words again, and both halves required: "step" alone also names the
+    trigger buttons beside the pitch knobs on the same panel, and a check that
+    counted those would expect twice as many notes as any patch plays. "Steps"
+    -- how many steps the sequence has -- is a different word and does not
+    match, which is the point of comparing words rather than substrings.
+    """
+    w = _words(name)
+    if w & {"TRIGGER", "TRIG", "GATE"}:
+        return False
+    return "STEP" in w and bool(w & {"CV", "PITCH", "VALUE", "NOTE"})
+
+
+def param_names(portmap: dict) -> dict:
+    """(plugin, model, index) -> the name its author gave the knob."""
+    out = {}
+    for e in (portmap.get("modules") or []):
+        for p in (e.get("params") or []):
+            out[(e.get("plugin"), e.get("model"), p.get("index"))] = \
+                p.get("name") or ""
+    return out
+
+
+def step_values(patch: dict, source_id: int, names: dict
+                ) -> tuple[list[float], str]:
+    """(the pitches the patch wrote into `source_id`'s steps, why it could not).
+
+    Only parameters the patch WROTE are counted. A step the file left alone is
+    a step the generator did not choose, and holding the module's defaults
+    against what plays would report a sequence nobody asked for as missing.
+
+    The reason is returned rather than swallowed. A module with no mapped
+    parameter names yields no steps, which is indistinguishable from a module
+    whose steps are all zero -- and a check that cannot tell those apart would
+    pass the silent patch it exists to catch.
+    """
+    mod = next((m for m in (patch.get("modules") or [])
+                if m.get("id") == source_id), None)
+    if not mod:
+        return [], f"module {source_id} is not in the patch"
+    key = (mod.get("plugin"), mod.get("model"))
+    known = [i for (p, m, i) in names if (p, m) == key]
+    if not known:
+        return [], (f"{key[0]}/{key[1]} has no mapped parameter names, so "
+                    f"which knobs hold the steps is not known here — run "
+                    f"measure_ranges.py for that plugin")
+    out = []
+    for p in (mod.get("params") or []):
+        if is_step_param(names.get((key[0], key[1], p.get("id")), "")):
+            out.append(float(p.get("value", 0.0)))
+    if not out:
+        return [], (f"the patch wrote no step values on {key[0]}/{key[1]}, so "
+                    f"there is no written sequence to hold the run against")
+    return out, ""
+
+
 def choose_taps(patch: dict, names: dict) -> list[tuple[int, int, str]]:
     """What to listen to, in probe-input order: the sound first, then the CV.
 
@@ -703,15 +761,18 @@ class Verdict:
         self.notes: list[float] = []
         self.distinct: list[float] = []
         self.volts: list[float] = []
+        self.written: list[float] = []        # the steps the file asked for
         self.error: float | None = None       # worst tracking error, semitones
         self.audible_why = ""                 # why the audible claim is unproven
+        self.played_why = ""                  # why the written steps are unproven
         self.dropped = 0
         self.lines: list[str] = []
 
     @property
     def ok(self) -> bool:
         return (self.structural_ran and not self.structural
-                and self.audible_ran and not self.audible_why)
+                and self.audible_ran and not self.audible_why
+                and not self.played_why)
 
 
 # How far a heard pitch may sit from the pitch its CV asked for. A semitone is
@@ -720,8 +781,26 @@ class Verdict:
 TRACKING_TOLERANCE = 0.25
 
 
-def judge(given: dict, got: Run, taps: list[tuple]) -> Verdict:
-    """Turn one run into the two claims, with the evidence for each."""
+# How far an emitted voltage may sit from the step value that was written.
+# A tenth of a volt is well over a semitone, so this is generous about
+# measurement and still nowhere near letting a defaulted or clamped knob pass.
+STEP_TOLERANCE = 0.01
+
+
+def judge(given: dict, got: Run, taps: list[tuple],
+          names: dict | None = None) -> Verdict:
+    """Turn one run into the claims it supports, with the evidence for each.
+
+    Three links, kept apart because they fail in different places and a reader
+    needs to know which one gave way:
+
+      the file's numbers  ->  the loaded engine        (structural)
+      the written steps   ->  the voltages emitted     (played)
+      the voltages        ->  the pitches heard        (audible)
+
+    Only all three together mean the patch plays what was written. Any one of
+    them alone is a partial result, and is reported as one.
+    """
     v = Verdict()
     v.structural = structural_diff(given, got.engine)
     v.structural_ran = got.engine is not None
@@ -754,6 +833,27 @@ def judge(given: dict, got: Run, taps: list[tuple]) -> Verdict:
             v.volts = held_voltages(got.frames[ch], rate)
             v.lines.append(f"{where} {len(v.volts)} held values — "
                            f"{distinct(v.volts, 0.01)} V")
+            v.written, v.played_why = step_values(given, src_mod, names or {})
+
+    heard = distinct(v.volts, STEP_TOLERANCE)
+    want = distinct(v.written, STEP_TOLERANCE)
+    if not v.played_why and v.volts:
+        missing = [w for w in want
+                   if all(abs(w - h) > STEP_TOLERANCE for h in heard)]
+        extra = [h for h in heard
+                 if all(abs(h - w) > STEP_TOLERANCE for w in want)]
+        v.lines.append(f"  the patch wrote {len(want)} distinct step pitches; "
+                       f"{len(heard)} came out")
+        if missing:
+            v.played_why = (f"step pitches the patch wrote never played: "
+                            f"{missing} V")
+        elif extra:
+            v.played_why = (f"voltages came out that the patch never wrote: "
+                            f"{extra} V")
+    elif not v.played_why:
+        v.played_why = "no pitch CV was tapped, so no written step was proven"
+    if v.played_why:
+        v.lines.append("  " + v.played_why)
 
     if not v.notes:
         v.audible_why = ("nothing pitched came out of the audio tap, so no "
@@ -787,6 +887,7 @@ def check(patch_path: str, seconds: float = 4.0,
         original = json.load(f)
 
     stage = tempfile.mkdtemp(prefix="fidelity-")
+    portmap = mr.read_portmap()
     try:
         probe = probe_dir or build_probe(stage)
         given, used = instrument(original, taps)
@@ -804,7 +905,7 @@ def check(patch_path: str, seconds: float = 4.0,
         got = run(rack, run_patch, probe, seconds)
         if got.why:
             return 2, [f"the run did not measure anything: {got.why}"]
-        v = judge(given, got, used)
+        v = judge(given, got, used, param_names(portmap))
         return (0 if v.ok else 1), v.lines
     finally:
         shutil.rmtree(stage, ignore_errors=True)
