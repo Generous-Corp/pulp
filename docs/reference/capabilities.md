@@ -151,10 +151,12 @@ Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio
 | MIDI device I/O (CoreMIDI) | usable | [midi](modules.md#midi) | |
 | MIDI file read/write | usable | [midi](modules.md#midi) | |
 | Provider-neutral microtuning | usable | [midi](modules.md#midi) | Optional MTS-ESP session/SysEx provider and Scala SCL/KBM local-file provider |
+| Fixed-capacity MIDI utility kernels | experimental | [midi](modules.md#midi) | Channel/filter/split, balanced note length, monophonic priority, CC mapping, and scale-aware MPE pitch |
+| MIDI note/MPE to voice modulation adapter | experimental | [audio](modules.md#audio) | Reuses caller-owned voice slots and `VoiceModulationBuffer` |
 | Win32 MIDI | experimental | [midi](modules.md#midi) | |
 | ALSA Raw MIDI | experimental | [midi](modules.md#midi) | |
 
-Key headers: `pulp/midi/message.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`, `pulp/midi/tuning.hpp`, `pulp/midi/mts_esp_tuning.hpp`, `pulp/midi/scala_tuning.hpp`
+Key headers: `pulp/midi/message.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`, `pulp/midi/tuning.hpp`, `pulp/midi/mts_esp_tuning.hpp`, `pulp/midi/scala_tuning.hpp`, `pulp/midi/utility_kernels.hpp`, `pulp/audio/midi_voice_modulation_adapter.hpp`
 
 ---
 
