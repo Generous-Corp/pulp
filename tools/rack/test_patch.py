@@ -2533,6 +2533,480 @@ def check_melody_is_written() -> tuple:
     return bad, 8
 
 
+def _classified_inv():
+    """A CV funk-shaped inventory carrying a CLASSIFIED sequencer.
+
+    Names deliberately chosen so no word list could read them: `Ouros`,
+    `Slant`, `Node` and `Pressed Duck` are the real modules that defeat one,
+    and a fixture that spelled its steps "Step 1" would prove the fallback
+    works rather than the classification.
+    """
+    return {
+        "CVfunk": {
+            "name": "CV funk", "brand": "CV funk", "version": "2.0",
+            "modules": {
+                "Ouros": {
+                    "name": "Ouros",
+                    "description": "A four-stage tone row with slew",
+                    "tags": ["Sequencer"],
+                    "inputs": ["Clock"], "outputs": ["CV"],
+                    "params": [
+                        {"id": 0, "name": "Alpha", "affords": "structure",
+                         "affordance_confidence": "known"},
+                        {"id": 1, "name": "Beta", "affords": "structure",
+                         "affordance_confidence": "known"},
+                        {"id": 2, "name": "Gamma", "affords": "structure",
+                         "affordance_confidence": "known"},
+                        {"id": 3, "name": "Sway", "affords": "chance",
+                         "affordance_confidence": "known"},
+                    ]},
+                "Slant": {
+                    "name": "Slant", "description": "A tilting waveshaper",
+                    "tags": ["Waveshaper"],
+                    "inputs": ["In"], "outputs": ["Out"],
+                    "params": [
+                        {"id": 0, "name": "Lean", "affords": "timbre",
+                         "affordance_confidence": "known"},
+                        {"id": 1, "name": "Cant", "affords": "timbre",
+                         "affordance_confidence": "guessed"},
+                    ]},
+            }}}
+
+
+def check_affordances_are_classified() -> tuple:
+    """A module is read ONCE for what its knobs can express, and kept.
+
+    A word list over param names was measured at 73% against the 419 real
+    params on this machine, and the misses land on the modules with the most
+    character. So each module is classified from everything it publishes --
+    the maker's own description most of all -- and the answer is cached,
+    content-addressed by plugin version and by the classification prompt.
+    """
+    import affordances as A
+    bad = 0
+
+    entry = {"name": "Ouros", "description": "A four-stage tone row with slew",
+             "tags": ["Sequencer"], "inputs": ["Clock"], "outputs": ["CV"],
+             "params": [{"id": 0, "name": "Alpha"},
+                        {"id": 1, "name": "Beta", "min": 0.0, "max": 2.0,
+                         "default": 0.5}]}
+
+    # The DESCRIPTION is the whole reason this is not a word list. A prompt
+    # that omitted it would be a word list with a model attached, at the same
+    # ceiling and a much higher price.
+    text = A.build_prompt("CVfunk", "Ouros", entry, "CV funk")
+    for want in ("four-stage tone row", "Sequencer", "Alpha", "Beta",
+                 "range 0..2", "range not measured"):
+        if want not in text:
+            bad += 1
+            print(f"  WRONG  the classification prompt does not carry "
+                  f"{want!r}, so the classifier is reading less than the "
+                  f"module publishes")
+            break
+    else:
+        print("  ok     the classifier is given the description, tags, param "
+              "names and ranges — and told which ranges were never measured")
+
+    good = ('{"module": ["structure"], "advice": "clock it", "params": '
+            '{"0": {"affords": "structure", "confidence": "known"}, '
+            '"1": {"affords": "pitch", "confidence": "guessed"}}}')
+    record, why = A.parse_reply(good, entry)
+    if record is None or record["params"]["0"]["affords"] != "structure" \
+            or record["params"]["1"]["confidence"] != "guessed":
+        bad += 1
+        print(f"  WRONG  a well-formed classification was refused: {why}")
+    else:
+        # Models fence JSON without being asked. A reader that only accepts a
+        # bare object throws away a perfectly good answer and spends the call
+        # again on the next pass, forever.
+        fenced, _ = A.parse_reply(
+            "Here you go:\n\n```json\n" + good + "\n```\n", entry)
+        if fenced != record:
+            bad += 1
+            print("  WRONG  a fenced answer is not read, so a model that "
+                  "formats its reply loses it")
+        else:
+            print("  ok     a well-formed classification is read back, fenced "
+                  "or bare")
+
+    # Every one of these is a reply ABOUT SOMETHING ELSE, and a cache entry
+    # outlives the run that wrote it — so none of it is trusted, rather than
+    # the good half being kept.
+    refusals = [
+        ("an invented affordance",
+         '{"params": {"0": {"affords": "groove"}, '
+         '"1": {"affords": "pitch"}}}'),
+        ("a param the module does not have",
+         '{"params": {"0": {"affords": "pitch"}, "1": {"affords": "pitch"}, '
+         '"9": {"affords": "pitch"}}}'),
+        ("a param left unanswered",
+         '{"params": {"0": {"affords": "pitch"}}}'),
+        ("an invented module affordance",
+         '{"module": ["groove"], "params": {"0": {"affords": "pitch"}, '
+         '"1": {"affords": "pitch"}}}'),
+        ("no JSON at all", "I could not tell what these knobs do."),
+    ]
+    for what, reply in refusals:
+        record, why = A.parse_reply(reply, entry)
+        if record is not None:
+            bad += 1
+            print(f"  WRONG  {what} was accepted into the cache, where it "
+                  f"outlives the run that produced it")
+            break
+    else:
+        print("  ok     a reply that invents a word, a param, or an answer is "
+              "refused whole")
+
+    # An unreadable confidence is the LOW tier. A guess treated as a fact is
+    # the expensive mistake; a fact treated as a guess costs a suggestion.
+    record, _ = A.parse_reply(
+        '{"params": {"0": {"affords": "pitch", "confidence": "fairly sure"}, '
+        '"1": {"affords": "pitch"}}}', entry)
+    if record is None or record["params"]["0"]["confidence"] != "guessed":
+        bad += 1
+        print("  WRONG  an unreadable confidence is not demoted to a guess")
+    else:
+        print("  ok     an unreadable confidence fails down to 'guessed'")
+
+    # Content-addressing, both halves. Version, because a vendor update can
+    # rename params; prompt, because an improvement that never reaches the
+    # modules already cached is an improvement nobody receives.
+    rec = {"plugin_version": "2.0", "prompt": A.prompt_hash(), "params": {}}
+    checks = [("a current entry", rec, "2.0", A.prompt_hash(), True),
+              ("a vendor update", rec, "2.1", A.prompt_hash(), False),
+              ("a better prompt", rec, "2.0", "0000deadbeef", False)]
+    for what, r, ver, ph, want in checks:
+        if A.is_current(r, ver, ph) != want:
+            bad += 1
+            print(f"  WRONG  {what} is treated as {'stale' if want else 'current'}")
+            break
+    else:
+        print("  ok     a classification expires on a vendor update AND on a "
+              "changed prompt")
+
+    inv = _classified_inv()
+    for m in inv["CVfunk"]["modules"].values():          # start from unread
+        for q in m["params"]:
+            q.pop("affords", None)
+            q.pop("affordance_confidence", None)
+    inv["CVfunk"]["modules"]["Node"] = {
+        "name": "Node", "description": "", "tags": ["Utility"],
+        "params": [{"id": 0, "name": "Bias"}]}
+    cache = {"version": A.CACHE_VERSION, "modules": {
+        "CVfunk/Ouros": {
+            "plugin_version": "2.0", "prompt": A.prompt_hash(),
+            "module": ["structure"], "advice": "clock it and write the row",
+            "params": {"0": {"affords": "structure", "confidence": "known"},
+                       "3": {"affords": "chance", "confidence": "guessed"}}}}}
+    A.annotate(inv, cache)
+    ouros = inv["CVfunk"]["modules"]["Ouros"]
+    node = inv["CVfunk"]["modules"]["Node"]
+    if ouros["params"][0].get("affords") != "structure" or \
+            ouros["params"][3].get("affordance_confidence") != "guessed":
+        bad += 1
+        print("  WRONG  a cached classification does not reach the inventory")
+    elif node["params"][0].get("affords") is not None:
+        bad += 1
+        print("  WRONG  an unclassified module was annotated anyway")
+    elif ouros["params"][0].get("name") != "Alpha":
+        bad += 1
+        print("  WRONG  annotating a param cost it its name")
+    else:
+        print("  ok     classifications reach the inventory; an unclassified "
+              "module keeps exactly what it had")
+
+    text = P.render_inventory(inv)
+    if "affords: structure" not in text:
+        bad += 1
+        print(f"  WRONG  a known affordance is not shown to the model")
+    elif "possibly: chance" not in text or "unconfirmed" not in text:
+        bad += 1
+        print("  WRONG  a guess is printed as a fact, which is how a wrong "
+              "reading becomes a wrong patch")
+    elif "0=Alpha" not in text:
+        bad += 1
+        print("  WRONG  the params line lost its names to the affordances")
+    elif "affords" in text.split("`Node`")[1].split("- `")[0]:
+        bad += 1
+        print("  WRONG  an unclassified module renders differently now, so "
+              "'unknown means less help' is not what shipped")
+    else:
+        print("  ok     known affordances are asserted, guesses are offered, "
+              "and an unclassified module renders exactly as before")
+
+    # THE PORT MAP IS NOT WHERE THIS LIVES, and the plan said it was.
+    # `portmap_merge.hpp` takes a re-measured module's whole block from the
+    # fresh scan, so a classification stored there would be erased by the
+    # next scan — silently, and only for the modules being actively used.
+    if A.CACHE_PATH.startswith(P.RACK_USER) or A.CACHE_PATH == P.PORTMAP:
+        bad += 1
+        print("  WRONG  the classification cache lives in the scanner's "
+              "directory, where a rescan replaces a module's whole record")
+    else:
+        rescanned = _classified_inv()
+        for m in rescanned["CVfunk"]["modules"].values():
+            for q in m["params"]:
+                q.pop("affords", None)
+                q.pop("affordance_confidence", None)
+        A.annotate(rescanned, cache)
+        if rescanned["CVfunk"]["modules"]["Ouros"]["params"][0].get(
+                "affords") != "structure":
+            bad += 1
+            print("  WRONG  a freshly scanned module loses its classification")
+        else:
+            print("  ok     a rescan does not cost a module its classification")
+
+    # Only modules with measured params are worth a call; and a classified
+    # one is not asked twice.
+    todo = A.pending(inv, cache)
+    if ("CVfunk", "Ouros") in todo:
+        bad += 1
+        print("  WRONG  a current classification is queued for reclassifying")
+    elif ("CVfunk", "Slant") not in todo or ("CVfunk", "Node") not in todo:
+        bad += 1
+        print(f"  WRONG  an unclassified module is not queued: {todo}")
+    else:
+        print("  ok     the background pass asks only for what it lacks")
+
+    return bad, 10
+
+
+def check_behaviour_drives_the_check() -> tuple:
+    """The dormant `behaviour` field decides what must be WRITTEN, and varied.
+
+    `behaviour` sat in every idiom JSON unread: live data, dead code. The
+    chain adjective -> idiom -> behaviour -> required affordances is now all
+    data, and this is the half that reads the patch. The half that listens is
+    a separate gate; what cannot be read is handed to it by name rather than
+    passed silently.
+    """
+    import idiom_check as I
+    import affordances as A
+    bad = 0
+    idioms = I.load_idioms()
+    behaviours = I.load_behaviours()
+
+    # A flag no behaviour file explains is dead data again, which is the
+    # exact fault this slice exists to end.
+    declared = {f for i in idioms.values() for f, on in
+                (i.get("behaviour") or {}).items() if on}
+    unexplained = sorted(declared - set(behaviours))
+    if unexplained:
+        bad += 1
+        print(f"  WRONG  idioms declare behaviours nothing gives meaning to: "
+              f"{unexplained}")
+    else:
+        print(f"  ok     all {len(declared)} declared behaviours have "
+              f"requirements or a named measurement")
+
+    outside = sorted({w for spec in behaviours.values()
+                      for req in spec.get("requires", [])
+                      for w in req.get("any_of", [])} - set(A.VOCABULARY))
+    if outside:
+        bad += 1
+        print(f"  WRONG  a behaviour requires affordances outside the closed "
+              f"vocabulary: {outside}")
+    else:
+        print("  ok     every required affordance is in the closed vocabulary")
+
+    inv = _classified_inv()
+    melodic = idioms["sequenced-voice"]
+
+    def seq(params, model="Ouros"):
+        return {"version": "2.6.6",
+                "modules": [dict(mod(1, "CVfunk", model), params=params)],
+                "cables": []}
+
+    # The shipped bug: perfect wiring, nothing written, one held note. The
+    # rejection has to carry the NUMBERS, so a retry knows which knobs and a
+    # person can see the check is wrong when it is.
+    findings, _ = I.check_behaviour(seq([]), inv, melodic)
+    f = findings[0] if findings else None
+    if not f or f.measured != {"params": 3, "written": 0, "distinct": 0}:
+        bad += 1
+        print(f"  WRONG  an unwritten row is not measured: "
+              f"{[repr(x) for x in findings]}")
+    elif "3 params" not in str(f) or "0 distinct" not in str(f):
+        bad += 1
+        print(f"  WRONG  the measurement is not in what the model is told: {f}")
+    else:
+        print("  ok     an unwritten row is rejected WITH the count that "
+              "failed, on params no word list could have read")
+
+    flat = [{"id": 0, "value": 0.5}, {"id": 1, "value": 0.5},
+            {"id": 2, "value": 0.5}]
+    findings, _ = I.check_behaviour(seq(flat), inv, melodic)
+    if not findings or findings[0].measured["distinct"] != 1:
+        bad += 1
+        print(f"  WRONG  a row written to one value passes as a melody: "
+              f"{findings}")
+    else:
+        print("  ok     a row written to one value is rejected, and counted")
+
+    tune = [{"id": 0, "value": 0.0}, {"id": 1, "value": 0.25},
+            {"id": 2, "value": 0.583}]
+    findings, _ = I.check_behaviour(seq(tune), inv, melodic)
+    if findings:
+        bad += 1
+        print(f"  WRONG  a written melody is rejected: {findings}")
+    else:
+        print("  ok     a written melody passes")
+
+    # A GUESS MAY NEVER REJECT A PATCH. Same module, same silence, the only
+    # difference is the confidence tier.
+    guessy = _classified_inv()
+    for q in guessy["CVfunk"]["modules"]["Ouros"]["params"]:
+        if q.get("affords") == "structure":
+            q["affordance_confidence"] = "guessed"
+    findings, deferrals = I.check_behaviour(seq([]), guessy, melodic)
+    if findings:
+        bad += 1
+        print(f"  WRONG  a GUESSED affordance rejected a patch: {findings}")
+    elif not any(d.behaviour == "melodic" for d in deferrals):
+        bad += 1
+        print("  WRONG  a guess-only reading is silently passed rather than "
+              "handed to the gate that listens")
+    else:
+        print("  ok     a guessed affordance suggests and never rejects")
+
+    # Nothing readable is not a pass. The sequencer that keeps its pattern in
+    # module `data` lands here, and must reach the listening gate by name.
+    findings, deferrals = I.check_behaviour(seq([], model="Slant"), inv, melodic)
+    mel = [d for d in deferrals if d.behaviour == "melodic"]
+    if findings:
+        bad += 1
+        print(f"  WRONG  a patch with nothing readable was rejected: {findings}")
+    elif not mel or not mel[0].measures:
+        bad += 1
+        print("  WRONG  an unreadable behaviour is passed silently, with no "
+              "measurement named for the gate that could settle it")
+    elif mel[0].measures[0].get("measure") != "distinct_pitches":
+        bad += 1
+        print(f"  WRONG  the deferral names no usable measurement: "
+              f"{mel[0].measures}")
+    else:
+        print("  ok     what cannot be read is handed to the listening gate, "
+              "naming the measurement that settles it")
+
+    # A behaviour with no static half must ALSO defer rather than vanish.
+    _, deferrals = I.check_behaviour(seq(tune), inv, melodic)
+    if not any(d.behaviour == "rhythmic" for d in deferrals):
+        bad += 1
+        print("  WRONG  a listen-only behaviour disappears instead of being "
+              "handed on")
+    else:
+        print("  ok     a listen-only behaviour is handed on, not dropped")
+
+    # The other shape of requirement: an amount written to zero. It fires
+    # only on a value the patch WROTE, because an unwritten param sits at a
+    # default nobody here has measured.
+    wander = {"behaviour": {"varies_timing": True}}
+    zeroed = [{"id": 0, "value": 0.1}, {"id": 1, "value": 0.4},
+              {"id": 3, "value": 0.0}]
+    findings, _ = I.check_behaviour(seq(zeroed), inv, wander)
+    if not findings or findings[0].measured.get("ids") != [3]:
+        bad += 1
+        print(f"  WRONG  an amount written to zero is not caught: {findings}")
+    else:
+        raised = [{"id": 3, "value": 0.3}]
+        f2, _ = I.check_behaviour(seq(raised), inv, wander)
+        f3, _ = I.check_behaviour(seq([]), inv, wander)
+        if f2 or f3:
+            bad += 1
+            print(f"  WRONG  a raised or unwritten amount is rejected: "
+                  f"{f2}{f3}")
+        else:
+            print("  ok     an amount written to zero is named; a raised or "
+                  "unwritten one is left alone")
+
+    # Four zeroed rows of an eight-row attenuverter are four unused channels,
+    # not a module that cannot move. Rejecting that would teach the model to
+    # avoid the module rather than to use it.
+    rows = _classified_inv()
+    rows["CVfunk"]["modules"]["Ouros"]["params"] = [
+        {"id": i, "name": f"Row {i}", "affords": "motion",
+         "affordance_confidence": "known"} for i in range(4)]
+    part = [{"id": 0, "value": 0.6}, {"id": 1, "value": 0.0},
+            {"id": 2, "value": 0.0}, {"id": 3, "value": 0.0}]
+    findings, _ = I.check_behaviour(seq(part), rows, wander)
+    if findings:
+        bad += 1
+        print(f"  WRONG  unused channels zeroed alongside a live one are "
+              f"read as a module that cannot move: {findings}")
+    else:
+        allzero = [{"id": i, "value": 0.0} for i in range(4)]
+        f4, _ = I.check_behaviour(seq(allzero), rows, wander)
+        if not f4 or f4[0].measured != {"params": 4, "zeroed": 4,
+                                        "ids": [0, 1, 2, 3]}:
+            bad += 1
+            print(f"  WRONG  a module with every amount at zero passes: {f4}")
+        else:
+            print("  ok     zeroing some amounts is an arrangement; zeroing "
+                  "all of them is the fault, and it is counted")
+
+    # `any_of` is ordered: a patch holding the notes themselves is judged on
+    # those, and a pair of pitch knobs elsewhere is not asked to be a melody.
+    both = _classified_inv()
+    both["CVfunk"]["modules"]["Slant"]["params"] = [
+        {"id": 0, "name": "Alpha", "affords": "pitch",
+         "affordance_confidence": "known"},
+        {"id": 1, "name": "Beta", "affords": "pitch",
+         "affordance_confidence": "known"}]
+    two = {"version": "2.6.6",
+           "modules": [dict(mod(1, "CVfunk", "Ouros"), params=[]),
+                       dict(mod(2, "CVfunk", "Slant", (10, 0)), params=[])],
+           "cables": []}
+    findings, _ = I.check_behaviour(two, both, melodic)
+    named = {f.module for f in findings}
+    if named != {"Ouros"}:
+        bad += 1
+        print(f"  WRONG  the melody is demanded of {named or 'nothing'}; "
+              f"asking a pair of pitch knobs to differ is asking for a "
+              f"chord, and it is the wrong instruction to hand a retry")
+    else:
+        print("  ok     a patch that holds the notes is judged on those, and "
+              "not on whatever else has two pitch knobs")
+
+    # A SEQUENCER WHOSE PATTERN LIVES IN MODULE `data`. It was read, and the
+    # answer is that none of its knobs hold notes -- the steps are in the
+    # patch's opaque data blob. Its params are still NAMED like steps, so the
+    # name-matching stopgap would happily reject it for not writing values
+    # that do not exist. Read means read: the stopgap stays asleep, and the
+    # gate that listens is the only thing that can settle this patch.
+    opaque = _classified_inv()
+    opaque["CVfunk"]["modules"]["Ouros"]["classified"] = True
+    opaque["CVfunk"]["modules"]["Ouros"]["params"] = [
+        {"id": 0, "name": "Step 1"}, {"id": 1, "name": "Step 2"},
+        {"id": 2, "name": "Step 3"}]
+    findings, deferrals = I.check_behaviour(seq([]), opaque, melodic)
+    if findings:
+        bad += 1
+        print(f"  WRONG  a module read and found to hold no notes is still "
+              f"judged on its param NAMES: {findings}")
+    elif not any(d.behaviour == "melodic" for d in deferrals):
+        bad += 1
+        print("  WRONG  a pattern kept in module data is silently passed "
+              "rather than handed to the gate that listens")
+    else:
+        print("  ok     a pattern kept in module data reaches the listening "
+              "gate instead of being rejected on its param names")
+
+    # A single knob cannot differ from itself, and demanding it would be a
+    # requirement no patch could ever satisfy.
+    one = _classified_inv()
+    one["CVfunk"]["modules"]["Ouros"]["params"] = [
+        {"id": 0, "name": "Alpha", "affords": "pitch",
+         "affordance_confidence": "known"}]
+    findings, deferrals = I.check_behaviour(seq([]), one, melodic)
+    if findings:
+        bad += 1
+        print(f"  WRONG  one knob is asked to vary against itself: {findings}")
+    else:
+        print("  ok     a lone param is never asked to differ from itself")
+
+    return bad, 13
+
+
 def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
@@ -2555,12 +3029,14 @@ def main():
     ver_bad, ver_ran = check_version_stamping()
     vp_bad, vp_ran = check_vendor_params_reach_model()
     mel_bad, mel_ran = check_melody_is_written()
+    aff_bad, aff_ran = check_affordances_are_classified()
+    beh_bad, beh_ran = check_behaviour_drives_the_check()
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
-    acq_bad += vp_bad + mel_bad
-    acq_ran += vp_ran + mel_ran
+    acq_bad += vp_bad + mel_bad + aff_bad + beh_bad
+    acq_ran += vp_ran + mel_ran + aff_ran + beh_ran
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
