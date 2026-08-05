@@ -6,8 +6,9 @@
 
 Everything downstream of writing a patch file has been taken on trust: that
 Rack restores the parameter values the generator chose, connects the cables it
-drew, and that the result makes the notes it describes. This measures both
-halves, and keeps them apart, because they are different claims:
+drew, and that the result makes the notes it describes. This measures the
+chain in three links, kept apart because a reader needs to know which one gave
+way -- and because any one of them alone is a partial result:
 
   STRUCTURAL -- the engine, once loaded, holds what the file said. Rejects a
   value the loader clamped, an index that addressed the wrong knob, a cable on
@@ -15,13 +16,21 @@ halves, and keeps them apart, because they are different claims:
   only ever REJECT: a patch whose numbers all survived can still be wired into
   silence.
 
+  PLAYED -- the step pitches the file wrote are the voltages the sequencer
+  emits. This is where a knob addressed by the wrong index shows up, and it
+  shows up with the file, the engine and the audio all looking correct.
+
   AUDIBLE -- the pitches a listener would hear, read off the signal the patch
   actually produced. The claim that matters, and the only one that can accept.
 
-Both are measured from inside a running Rack, by a probe module the harness
-builds and drops into a scratch install (see `fidelity_probe.cpp`). The probe
-writes down the engine's own view of the patch, and records whatever is patched
-into its jacks.
+An exit code of 1 means a claim failed; 2 means the run could not measure at
+all. They are different, and a measurement that did not happen is never
+reported as a patch that passed.
+
+All three are measured from inside a running Rack, by a probe module the
+harness builds and drops into a scratch install (see `fidelity_probe.cpp`).
+The probe writes down the engine's own view of the patch, and records whatever
+is patched into its jacks.
 
 AUDIO: the harness DELETES every audio-interface module before it runs, and
 replaces it with the probe. Nothing in the patch can then reach an output
