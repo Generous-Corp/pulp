@@ -21,15 +21,18 @@ class CombinedInstallerTest(unittest.TestCase):
         path.chmod(0o755)
 
     def _run_installer(
-        self, plugins: list[tuple[str, str]], license_text: str | None = None
+        self, plugins: list[tuple[str, str]], license_text: str | None = None,
+        apps: list[tuple[str, bool]] | None = None,
     ) -> str:
         self._last_productbuild_argv = ""
+        self._last_pkgbuild_argv = ""
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             fake_bin = tmp / "bin"
             fake_bin.mkdir()
             capture = tmp / "distribution.xml"
             capture_argv = tmp / "productbuild-argv.txt"
+            capture_pkg_argv = tmp / "pkgbuild-argv.txt"
             output = tmp / "out"
 
             self._write_tool(fake_bin, "codesign", "exit 0\n")
@@ -40,11 +43,43 @@ class CombinedInstallerTest(unittest.TestCase):
                 "# Bundle relocation validation is outside this graph test.\n"
                 "exit 0\n",
             )
+            # `--analyze` must produce a component plist that PlistBuddy can
+            # actually read. Touching an empty file (what this stub used to do
+            # for every invocation) makes PlistBuddy fail and the script exit 2,
+            # so any fixture exercising the app path failed for a reason that
+            # had nothing to do with the code under test — which is presumably
+            # why no fixture exercised it.
             self._write_tool(
                 fake_bin,
                 "pkgbuild",
-                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
-                'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
+                'printf "%s\\n" "$@" >> "$CAPTURE_PKG_ARGV"\n'
+                'analyze=0\nlast=""\n'
+                'for arg in "$@"; do\n'
+                '  [[ "$arg" == "--analyze" ]] && analyze=1\n'
+                '  last="$arg"\n'
+                'done\n'
+                'mkdir -p "$(dirname "$last")"\n'
+                'if [[ "$analyze" == 1 ]]; then\n'
+                '  cat > "$last" <<\'PLIST\'\n'
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0">\n'
+                '<array>\n'
+                '  <dict>\n'
+                '    <key>BundleIsRelocatable</key><true/>\n'
+                '    <key>BundleHasStrictIdentifier</key><true/>\n'
+                '    <key>BundleIsVersionChecked</key><true/>\n'
+                '    <key>BundleOverwriteAction</key><string>upgrade</string>\n'
+                '    <key>RootRelativeBundlePath</key>'
+                '<string>Applications/Fixture.app</string>\n'
+                '  </dict>\n'
+                '</array>\n'
+                '</plist>\n'
+                'PLIST\n'
+                'else\n'
+                '  : > "$last"\n'
+                'fi\n',
             )
             self._write_tool(
                 fake_bin,
@@ -81,12 +116,25 @@ class CombinedInstallerTest(unittest.TestCase):
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--plugin", kind, str(bundle)))
 
+            for app_name, with_scripts in (apps or []):
+                bundle = tmp / f"{app_name}.app"
+                (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                args.extend(("--app", app_name, str(bundle)))
+                if with_scripts:
+                    scripts = tmp / f"{app_name}-scripts"
+                    scripts.mkdir()
+                    hook = scripts / "postinstall"
+                    hook.write_text("#!/bin/bash\nexit 0\n")
+                    hook.chmod(0o755)
+                    args.extend(("--app-scripts", app_name, str(scripts)))
+
             env = {
                 "PATH": f"{fake_bin}:/usr/bin:/bin",
                 "HOME": str(tmp),
                 "TMPDIR": str(tmp),
                 "CAPTURE_XML": str(capture),
                 "CAPTURE_ARGV": str(capture_argv),
+                "CAPTURE_PKG_ARGV": str(capture_pkg_argv),
                 "PULP_SKIP_SIGNING_PREFLIGHT": "1",
             }
             if license_text is not None:
@@ -113,6 +161,8 @@ class CombinedInstallerTest(unittest.TestCase):
             )
             if capture_argv.is_file():
                 self._last_productbuild_argv = capture_argv.read_text()
+            if capture_pkg_argv.is_file():
+                self._last_pkgbuild_argv = capture_pkg_argv.read_text()
             return capture.read_text()
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
@@ -180,6 +230,74 @@ class CombinedInstallerTest(unittest.TestCase):
             (Path(resources) / "license.txt").name, "license.txt"
         )
         self.assertIn('<license file="license.txt"/>', xml)
+
+
+    # The app component, which had no coverage on either side of the merge.
+    #
+    # The app loop carries two flags that are mutually necessary and easy to
+    # separate, because each looks redundant next to the other:
+    #
+    #   --scripts          our postinstall, which places the Rack modules into
+    #                      the logged-in user's home directory. It hardcodes
+    #                      $VOLUME/Applications/Forge Modular.app and then
+    #                      deliberately never fails.
+    #   --component-plist  relocation pinning. pkgbuild marks app bundles
+    #                      relocatable by default, so on a machine where Launch
+    #                      Services knows another copy of the bundle ID,
+    #                      Installer overwrites THAT copy instead of installing
+    #                      to /Applications.
+    #
+    # Apart, each is quietly broken: with relocation left on, the payload lands
+    # in some other copy, the hardcoded path is absent, the postinstall logs one
+    # line and exits 0, and the installer reports success having placed nothing.
+    # Relocation pinning alone lands the app but never places the modules.
+    #
+    # `--component-plist` is NOT about component selectability. Selectability is
+    # a productbuild Distribution-XML concern and lives in the <choice> machinery
+    # with the `required` lock asserted below. The two never meet, which is why
+    # `--component-plist` looks deletable once the lock is visible. It is not.
+
+    def test_an_app_component_passes_its_scripts_to_pkgbuild(self) -> None:
+        xml = self._run_installer([("Kick", "au")], apps=[("Forge Modular", True)])
+
+        argv = self._last_pkgbuild_argv.splitlines()
+        self.assertIn("--scripts", argv)
+        # ONE argv entry despite the space in the title. If the empty-array
+        # idiom guarding this ever word-split, the directory would arrive as
+        # two entries -- ".../Forge" followed by "Modular-scripts" -- and
+        # pkgbuild would be handed a path that does not exist.
+        scripts_dir = argv[argv.index("--scripts") + 1]
+        self.assertTrue(scripts_dir.endswith("/Forge Modular-scripts"), scripts_dir)
+        self.assertNotIn("Modular-scripts", argv)
+
+        # The user must not be able to deselect the app and thereby skip the
+        # postinstall that places everything else. The lock is these two
+        # attributes on the choice, not the word "Required" in its description.
+        self.assertIn('<line choice="forge-modular"/>', xml)
+        self.assertIn('choice id="forge-modular"', xml)
+        self.assertRegex(xml, r'choice id="forge-modular".*enabled="false"')
+        self.assertRegex(xml, r'choice id="forge-modular".*selected="true"')
+
+    def test_an_app_without_scripts_passes_no_scripts_flag(self) -> None:
+        self._run_installer([("Kick", "au")], apps=[("Forge Modular", False)])
+        self.assertNotIn("--scripts", self._last_pkgbuild_argv.splitlines())
+
+    def test_relocation_is_pinned_whenever_the_component_is_analyzed(self) -> None:
+        """If the app component is analyzed, its plist must reach pkgbuild.
+
+        Forward-compatible on purpose. Relocation pinning (`--analyze` +
+        PlistBuddy + `--component-plist`) lives on main and is not on this
+        branch yet, so today this asserts nothing and passes. The moment the
+        two sides merge it becomes load-bearing, and it fails if either half
+        of the union is dropped in the resolution -- which is the conflict
+        this file exists to guard.
+        """
+        self._run_installer([("Kick", "au")], apps=[("Forge Modular", True)])
+        argv = self._last_pkgbuild_argv.splitlines()
+        if "--analyze" in argv:
+            self.assertIn("--component-plist", argv)
+            plist = argv[argv.index("--component-plist") + 1]
+            self.assertTrue(plist.endswith(".plist"), plist)
 
 
 if __name__ == "__main__":
