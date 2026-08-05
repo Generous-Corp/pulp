@@ -66,7 +66,7 @@ control and collaboration are unavailable there.
 
 ## Implemented foundation and current boundary
 
-The optional Phase 2 control core now represents broker identity, exact T0/T1
+The optional control foundation now represents broker identity, exact T0/T1
 registration, and client-scoped grants without opening a listener or routing an
 operation. Verified peer identity binds UID/SID, PID, process generation,
 executable identity, publisher, and role; same-UID membership and payload claims
@@ -77,12 +77,25 @@ Interactive trusted-consent decisions reject replay, while an existing user
 policy may be deliberately reusable. All stores have explicit capacity and
 expiry limits, and their security audit contains metadata and reason codes only.
 
-This is a state-model foundation, not a running broker. The OS-authenticated IPC
-carrier, one installed per-user service, trusted consent UI, operation
-dispatcher, receipts, and artifact ACLs are still required. Only Pulp-owned T0
-offline jobs and T1 standalone hosts are admissible at this stage. Shared-host
-slots and direct AUv3 access fail closed as `host-unavailable`; plugin-rendered
-consent and environment-delivered bootstrap credentials remain rejected.
+The first broker-carrier slice extends the existing length-prefixed IPC stack
+with an OS-local stream; it does not introduce a second framing protocol. Its
+filesystem endpoint is confined to an absolute owner-owned private directory,
+rejects group/other access and extended ACLs, never replaces an existing path,
+uses mode `0600`, and is unlinked by the listener owner. On macOS the accepted
+socket yields kernel UID/GID/PID plus the audit-token PID generation. The peer
+verifier then validates the live dynamic code signature and binds its signing
+identifier, CDHash, and Team ID (or a per-artifact ad-hoc CDHash fallback) to
+that carrier evidence. It rechecks process start and ownership across signature
+inspection. TCP, POSIX FIFO, client payload identity, dead/zombie processes,
+missing PID generation, signature failure, and any expectation mismatch fail
+closed. Other platforms do not yet mint a verified control peer.
+
+This remains a dormant foundation, not a running broker. The one installed
+per-user service, trusted consent UI, operation dispatcher, receipts, and
+artifact ACLs are still required. Only Pulp-owned T0 offline jobs and T1
+standalone hosts are admissible at this stage. Shared-host slots and direct
+AUv3 access fail closed as `host-unavailable`; plugin-rendered consent and
+environment-delivered bootstrap credentials remain rejected.
 
 ## Threats and required controls
 
@@ -90,7 +103,7 @@ consent and environment-delivered bootstrap credentials remain rejected.
 |---|---|
 | Local attacker reads discovery or replays credentials | Owner-private files, no inherited ACLs, mutual challenge/proof, fresh nonces, bounded expiry, credential wipe, peer identity checks, replay rejection |
 | Confused deputy asks a trusted client to control another instance | Exact session/instance/publication selection; client-scoped grants; capability and operation binding; no newest-instance fallback |
-| PID reuse, restart, stale project intent, or stale grant | Opaque non-reusable process generation and publication IDs; heartbeat/expiry; disconnect revocation; restore creates fresh grants only after revalidation |
+| PID reuse, restart, stale project intent, or stale grant | Kernel-origin process generation where available, process-start recheck across code-signature inspection, opaque publication IDs, heartbeat/expiry, disconnect revocation; restore creates fresh grants only after revalidation |
 | Malicious plugin claims another publisher, slot, service, or capability | Signed artifact/declaration verification plus trusted host slot attestation; manifest is only an upper bound; broker rejects self-asserted identity |
 | Compromised or over-broad client | Least-privilege client grants, controller leases, expiry, explicit revocation, typed schemas, idempotency keys, bounded receipts, artifact ACLs |
 | Plugin or client bypasses policy with raw transport | No generic message or peer socket SDK; one broker transport; generated typed bindings; legacy Remote View mutation removed; raw host/port authority deleted by the broker migration |

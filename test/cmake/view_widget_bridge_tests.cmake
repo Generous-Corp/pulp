@@ -83,6 +83,12 @@ target_link_libraries(pulp-test-control-identity PRIVATE
 catch_discover_tests(pulp-test-control-identity
     PROPERTIES LABELS "inspect;control;identity")
 
+add_executable(pulp-test-control-peer test_control_peer.cpp)
+target_link_libraries(pulp-test-control-peer PRIVATE
+    pulp::inspect-control Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-peer
+    PROPERTIES LABELS "inspect;control;identity;peer")
+
 add_executable(pulp-test-control-grants test_control_grants.cpp)
 target_link_libraries(pulp-test-control-grants PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
