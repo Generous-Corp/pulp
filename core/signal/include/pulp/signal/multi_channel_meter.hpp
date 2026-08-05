@@ -24,6 +24,10 @@
 
 namespace pulp::signal {
 
+namespace detail {
+struct MultiChannelMeterTestAccess;
+}
+
 /// Maximum supported channel count for metering.
 static constexpr int kMaxMeterChannels = 16;
 
@@ -295,24 +299,13 @@ public:
     /// Get the latest metering snapshot.
     const MultiChannelMeterData& snapshot() const { return snapshot_; }
 
-    /// Diagnostics for proving that programme reset is a logical epoch change
-    /// rather than a sweep over the prepared histogram storage.
-    std::uint64_t loudness_histogram_epoch() const { return gate_epoch_; }
-    std::size_t loudness_histogram_nodes_initialized() const {
-        return gate_nodes_initialized_;
-    }
-    std::size_t loudness_histogram_reset_work_units() const {
-        return gate_reset_work_units_;
-    }
-    static constexpr std::size_t loudness_histogram_capacity() {
-        return kGateBinCount;
-    }
-
     void reset() {
         reset_measurement_state(0);
     }
 
 private:
+    friend struct detail::MultiChannelMeterTestAccess;
+
     void reset_measurement_state(int active_channels) {
         for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
             block_peak_[ch] = 0.0f;
@@ -469,7 +462,6 @@ private:
         snapshot_.lufs_momentary = -std::numeric_limits<float>::infinity();
         snapshot_.lufs_integrated = -std::numeric_limits<float>::infinity();
         gate_nodes_initialized_ = 0;
-        gate_reset_work_units_ = 1;
         // A 64-bit epoch cannot wrap in a practical process lifetime. If it
         // nevertheless exhausts, stop accumulating integrated loudness until
         // the control thread calls prepare(); never bulk-clear on process().
@@ -598,7 +590,6 @@ private:
     std::vector<std::uint64_t> gate_node_epoch_;
     std::uint64_t gate_epoch_ = 0;
     std::size_t gate_nodes_initialized_ = 0;
-    std::size_t gate_reset_work_units_ = 0;
     bool gate_epoch_active_ = true;
 
     MultiChannelMeterData snapshot_;

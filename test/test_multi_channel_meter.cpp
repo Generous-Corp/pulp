@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -16,6 +17,29 @@
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp::signal;
+
+namespace pulp::signal::detail {
+
+struct MultiChannelMeterTestAccess {
+    template <typename SampleType>
+    static std::uint64_t gate_epoch(const MultiChannelMeterT<SampleType>& meter) {
+        return meter.gate_epoch_;
+    }
+
+    template <typename SampleType>
+    static std::size_t current_epoch_nodes(const MultiChannelMeterT<SampleType>& meter) {
+        return static_cast<std::size_t>(std::count(
+            meter.gate_node_epoch_.begin(), meter.gate_node_epoch_.end(),
+            meter.gate_epoch_));
+    }
+
+    template <typename SampleType>
+    static std::size_t gate_capacity(const MultiChannelMeterT<SampleType>& meter) {
+        return meter.gate_node_epoch_.size();
+    }
+};
+
+} // namespace pulp::signal::detail
 
 namespace {
 
@@ -351,10 +375,10 @@ TEST_CASE("MultiChannelMeter restarts every window across 2 to 1 to 2 topology c
     meter.process(clipped, 2, static_cast<int>(clipped_left.size()));
     REQUIRE(meter.snapshot().channels[0].clipped);
     REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
-    const auto populated_epoch = meter.loudness_histogram_epoch();
-    REQUIRE(meter.loudness_histogram_nodes_initialized() > 0);
-    REQUIRE(meter.loudness_histogram_nodes_initialized()
-            < MultiChannelMeter::loudness_histogram_capacity());
+    const auto populated_epoch = detail::MultiChannelMeterTestAccess::gate_epoch(meter);
+    REQUIRE(detail::MultiChannelMeterTestAccess::current_epoch_nodes(meter) > 0);
+    REQUIRE(detail::MultiChannelMeterTestAccess::current_epoch_nodes(meter)
+            < detail::MultiChannelMeterTestAccess::gate_capacity(meter));
 
     std::array<float, sample_rate / 200> mono{};
     mono.fill(0.75f);
@@ -380,13 +404,12 @@ TEST_CASE("MultiChannelMeter restarts every window across 2 to 1 to 2 topology c
     REQUIRE_THAT(mono_snapshot.channels[0].peak, WithinAbs(0.0f, 1e-6f));
     REQUIRE_FALSE(mono_snapshot.channels[0].clipped);
     REQUIRE(std::isinf(mono_snapshot.lufs_integrated));
-    REQUIRE(meter.loudness_histogram_epoch() == populated_epoch + 2);
-    REQUIRE(meter.loudness_histogram_reset_work_units()
-            < MultiChannelMeter::loudness_histogram_capacity());
+    REQUIRE(detail::MultiChannelMeterTestAccess::gate_epoch(meter)
+            == populated_epoch + 2);
     // Neither short post-change block reaches a loudness hop. Zero initialized
     // nodes proves the resets only advanced an epoch; they did not touch all
     // histogram bins.
-    REQUIRE(meter.loudness_histogram_nodes_initialized() == 0);
+    REQUIRE(detail::MultiChannelMeterTestAccess::current_epoch_nodes(meter) == 0);
 
     const auto& snapshot = meter.snapshot();
     REQUIRE(snapshot.num_channels == 2);
