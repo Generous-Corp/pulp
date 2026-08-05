@@ -5,7 +5,7 @@ Drives the script over a throwaway PULP_WORKTREES_ROOT so no real worktree is
 touched. Verifies:
 
   1. Dry-run lists coverage dirs and deletes nothing (exit 0).
-  2. --yes removes `build-cov` / `build-coverage` and ONLY those — a sibling
+  2. --yes removes exact or hyphen-suffixed coverage builds and ONLY those — a sibling
      `build/` and a source dir are left intact.
   3. Idle gating: a coverage dir whose absolute path appears in a live process's
      command line (a stand-in for an in-flight coverage build) is skipped.
@@ -41,6 +41,8 @@ def make_layout(root: pathlib.Path) -> None:
     (root / "wt-a" / "build-cov" / "obj").mkdir(parents=True)
     (root / "wt-a" / "build-cov" / "obj" / "f.o").write_text("x")
     (root / "wt-b" / "build-coverage").mkdir(parents=True)
+    (root / "wt-d" / "build-cov-phase6-gpu").mkdir(parents=True)
+    (root / "wt-e" / "build-covariance-data").mkdir(parents=True)
     (root / "wt-c" / "build").mkdir(parents=True)        # primary build — keep
     (root / "wt-c" / "src").mkdir(parents=True)          # source — keep
     (root / "wt-c" / "src" / "a.cpp").write_text("int main(){}")
@@ -62,6 +64,8 @@ class CleanBuildCovTests(unittest.TestCase):
             # Nothing deleted.
             self.assertTrue((root / "wt-a" / "build-cov").is_dir())
             self.assertTrue((root / "wt-b" / "build-coverage").is_dir())
+            self.assertTrue((root / "wt-d" / "build-cov-phase6-gpu").is_dir())
+            self.assertTrue((root / "wt-e" / "build-covariance-data").is_dir())
 
     def test_apply_removes_only_coverage_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -71,6 +75,8 @@ class CleanBuildCovTests(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertFalse((root / "wt-a" / "build-cov").exists())
             self.assertFalse((root / "wt-b" / "build-coverage").exists())
+            self.assertFalse((root / "wt-d" / "build-cov-phase6-gpu").exists())
+            self.assertTrue((root / "wt-e" / "build-covariance-data").is_dir())
             # Primary build/ and source tree untouched.
             self.assertTrue((root / "wt-c" / "build").is_dir())
             self.assertTrue((root / "wt-c" / "src" / "a.cpp").exists())
