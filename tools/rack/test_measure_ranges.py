@@ -188,66 +188,49 @@ def test_scan_is_read_from_racks_own_log() -> int:
     return bad
 
 
-def test_launch_reaches_the_gui_session() -> int:
-    """Rack is routed into the GUI session exactly when this shell is not in one.
+def test_the_launch_is_a_plain_exec() -> int:
+    """Rack is launched directly, and NOT through `launchctl asuser`.
 
-    An SSH shell has no GUI login session, so Rack aborts in CoreMIDI before it
-    reaches the patch -- and a crash before the patch reads, from the map, as a
-    library with nothing in it.
+    Wrapping it looks right -- CoreMIDI wants the user's GUI bootstrap
+    namespace -- and is measurably wrong: `launchctl asuser` needs root, and
+    without it the command is never executed at all. Over SSH, 50 of 50
+    wrapped probes failed where 0 of 50 unwrapped ones did. This guards the
+    plain exec against being helpfully re-wrapped.
     """
     bad = 0
-    keep = os.environ.pop("SECURITYSESSIONID", None)
-    try:
-        argv = mr.rack_argv("/A/Rack", "/scratch", "/p.vcv")
-        bad += check(argv[:3] == ["launchctl", "asuser", str(os.getuid())],
-                     "outside a GUI session, Rack is launched into the user's",
-                     f"got {argv[:3]}")
-        bad += check(argv[-4:] == ["-h", "-u", "/scratch", "/p.vcv"],
-                     "and its arguments survive the wrapping", f"got {argv}")
-
-        os.environ["SECURITYSESSIONID"] = "186a5"
-        argv = mr.rack_argv("/A/Rack", "/scratch", "/p.vcv")
-        bad += check(argv[0] == "/A/Rack",
-                     "inside one, it is a plain exec a person can copy and run",
-                     f"got {argv[0]}")
-    finally:
-        os.environ.pop("SECURITYSESSIONID", None)
-        if keep is not None:
-            os.environ["SECURITYSESSIONID"] = keep
+    argv = mr.rack_argv("/A/Rack", "/scratch", "/p.vcv")
+    bad += check(argv == ["/A/Rack", "-h", "-u", "/scratch", "/p.vcv"],
+                 "the launch is a plain exec of the Rack binary", f"got {argv}")
+    bad += check("launchctl" not in argv,
+                 "and is not wrapped in launchctl, which would need root")
     return bad
 
 
-def test_a_coremidi_abort_is_only_fatal_without_a_session() -> int:
-    """The abort is reported as seen, and blamed on a session only when absent.
+def test_a_coremidi_abort_is_recognised_by_its_stack() -> int:
+    """The abort is claimed on Rack's own frames, not on "the launch failed".
 
-    A CoreMIDI abort in a shell that HAS a GUI session is a blip -- measured
-    here, one launch in ten -- and the next one succeeds. Calling every abort
-    "no GUI login session" would send a reader to debug a machine that is
-    fine, and refusing to retry would fail a whole run over it.
+    Two confident diagnoses of this abort have already been wrong -- a missing
+    GUI session, and client exhaustion from relaunching in a loop -- so what
+    is left says only what the stack shows, and says it only when the stack
+    shows it.
     """
     bad = 0
-    log = "[0.1] MidiInCore::getCoreMidiClientSingleton\nabort()"
-    keep = os.environ.pop("SECURITYSESSIONID", None)
-    try:
-        # Outside a session: the cause is knowable, and is named.
-        why = mr.exit_verdict(log)
-        bad += check("no GUI login session" in why,
-                     "outside a session, the abort names the missing session",
-                     f"got {why!r}")
-        bad += check(not mr.abort_is_retryable(log),
-                     "and it is fatal, because a retry cannot conjure one")
+    crash = ("main + 2912\n  rack::rtmidiInit()\n"
+             "    MidiInCore::getCoreMidiClientSingleton(...)\nabort()")
+    bad += check(mr.aborted_in_coremidi(crash),
+                 "Rack's MIDI-init stack is recognised")
+    bad += check(mr.exit_verdict(crash) ==
+                 "Rack aborted in CoreMIDI before it reached the patch",
+                 "and reported as what was seen, blaming nothing else",
+                 f"got {mr.exit_verdict(crash)!r}")
 
-        os.environ["SECURITYSESSIONID"] = "186a5"
-        why = mr.exit_verdict(log)
-        bad += check(why == "Rack aborted in CoreMIDI",
-                     "inside a session, it reports what was seen and no more",
-                     f"got {why!r}")
-        bad += check(mr.abort_is_retryable(log),
-                     "and it is retried, because it is a blip")
-    finally:
-        os.environ.pop("SECURITYSESSIONID", None)
-        if keep is not None:
-            os.environ["SECURITYSESSIONID"] = keep
+    # An unrelated death must NOT be claimed for this mechanism, or the
+    # diagnosis stops meaning anything the moment it is right.
+    other = "[0.6] Loading patch /tmp/x.vcv\nSegmentation fault"
+    bad += check(not mr.aborted_in_coremidi(other),
+                 "an unrelated death is not claimed for CoreMIDI")
+    bad += check(mr.exit_verdict(other) == "Rack exited before it scanned",
+                 "and is reported plainly", f"got {mr.exit_verdict(other)!r}")
     return bad
 
 
@@ -295,8 +278,8 @@ def main() -> int:
                test_shortfall_names_what_is_missing,
                test_a_module_left_by_an_older_scanner_is_named,
                test_scan_is_read_from_racks_own_log,
-               test_launch_reaches_the_gui_session,
-               test_a_coremidi_abort_is_only_fatal_without_a_session,
+               test_the_launch_is_a_plain_exec,
+               test_a_coremidi_abort_is_recognised_by_its_stack,
                test_launch_closes_stdin):
         print(f"{fn.__name__}:")
         bad += fn()

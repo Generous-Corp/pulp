@@ -271,65 +271,67 @@ LOADING = "Loading patch"
 LOAD_WINDOW = 20.0
 ATTEMPTS = 8
 
-# Rack aborted before it ever reached a patch, from inside CoreMIDI.
-ABORTED = "MidiInCore"
+# Rack died inside its MIDI init, before any patch was parsed. Matched on the
+# frames Rack prints for it rather than on "the launch failed", so this cannot
+# claim the mechanism for an unrelated death.
+ABORT_MARKS = ("rtmidiInit", "RtMidiDriver", "MidiInCore")
 
-
-def in_gui_session() -> bool:
-    """Whether this shell can reach the window server and CoreMIDI.
-
-    An SSH shell cannot. Rack initialises MIDI long before it loads a patch,
-    and `MidiInCore` cannot create a CoreMIDI client without a GUI login
-    session -- RtMidi throws, the exception crosses a `noexcept` boundary, and
-    the process aborts. It never reaches the patch, so from the outside an
-    SSH launch is indistinguishable from a library with nothing in it, which
-    is the one failure this whole tool exists to stop reporting as a result.
-
-    (Same root cause as AU components being invisible over SSH: the registry
-    is a per-GUI-session service.)
-    """
-    return bool(os.environ.get("SECURITYSESSIONID"))
+# A sporadic abort is worth another launch; a machine where CoreMIDI is
+# genuinely unavailable is not worth eight, because each one is a crash report
+# on somebody's desk. Measured rate is well under one percent, so three
+# attempts leaves the odds of a real failure being called sporadic negligible.
+ABORT_ATTEMPTS = 3
 
 
 def rack_argv(rack: str, user_dir: str, patch: str) -> list[str]:
-    """Rack's command line, routed into the GUI session when we are outside it.
+    """Rack's command line: a plain exec, deliberately.
 
-    `launchctl asuser <uid>` runs the process in the user's GUI login session
-    rather than the SSH one, which is what gives CoreMIDI a client to attach
-    to. It is a no-op cost when we are already in that session, so it is only
-    applied when we are not -- keeping a local run a plain exec that a person
-    can copy out of a log and run by hand.
+    The obvious-looking fix for the CoreMIDI aborts below is to launch through
+    `launchctl asuser <uid>`, so the process joins the user's GUI login session
+    and CoreMIDI has a bootstrap namespace to find `MIDIServer` in. Measured,
+    it is wrong twice:
+
+      * `launchctl asuser` needs root. Without it the command is never executed
+        at all -- it fails with "Could not switch to audit session … Operation
+        not permitted", and `launchctl asuser $(id -u) /bin/echo HELLO` prints
+        nothing. Wrapping every SSH launch in it would break the one case it
+        was added for, and 50 of 50 wrapped probes failed where 0 of 50
+        unwrapped ones did.
+      * The session is not the variable anyway. A bare `MIDIClientCreate`
+        probe -- the same call Rack aborts inside -- fails at well under one
+        percent from a GUI session (1 of 400) and not at all over SSH with no
+        `SECURITYSESSIONID` (0 of 50). The aborts are sporadic, not structural.
+
+    So: a plain exec, which is also a line a person can copy out of a log and
+    run by hand. The retry is the whole remedy.
     """
-    argv = [rack, "-h", "-u", user_dir, patch]
-    if in_gui_session():
-        return argv
-    return ["launchctl", "asuser", str(os.getuid())] + argv
+    return [rack, "-h", "-u", user_dir, patch]
 
 
 def exit_verdict(log: str) -> str:
     """Why a launch that ended on its own did not measure anything.
 
-    Says what was seen, and names a cause only where one can be checked. A
-    CoreMIDI abort outside a GUI session IS that session's absence; inside one
-    it is something transient, and asserting the session was missing when it
-    demonstrably was not sends the reader to debug a machine that is fine.
+    Reports what was seen and does not name a cause it cannot check. The
+    CoreMIDI abort in particular has invited two confident wrong diagnoses --
+    a missing GUI session, and client exhaustion from relaunching in a loop --
+    and neither survived measurement, so this says the observable thing and
+    leaves the reader with the skill's account rather than a false lead.
     """
-    if ABORTED in log:
-        why = "Rack aborted in CoreMIDI"
-        if not in_gui_session():
-            why += " — this shell has no GUI login session"
-        return why
+    if aborted_in_coremidi(log):
+        return "Rack aborted in CoreMIDI before it reached the patch"
     return "Rack exited before it scanned"
 
 
-def abort_is_retryable(log: str) -> bool:
-    """Whether launching again could plausibly do better.
+def aborted_in_coremidi(log: str) -> bool:
+    """Whether this launch died in Rack's MIDI init, on the evidence.
 
-    Measured on a machine WITH a GUI session, about one launch in ten aborts
-    in CoreMIDI and the next is fine -- so an abort is a blip to retry there,
-    and only unretryable where the session it wants is the one we cannot give.
+    Gated on the stack Rack actually prints for it -- `rtmidiInit`,
+    `RtMidiDriver`, `MidiInCore` -- rather than on anything about the shell.
+    A diagnosis that fires whenever a launch merely FAILED would claim this
+    mechanism for every unrelated death, which is how a right diagnosis
+    becomes a wrong one.
     """
-    return not (ABORTED in log and not in_gui_session())
+    return any(mark in log for mark in ABORT_MARKS)
 
 
 def launch_once(rack: str, patch: str, scan_window: float) -> tuple[str, str]:
@@ -414,17 +416,27 @@ def run_rack(rack: str, patch: str, scan_window: float,
     launch is treated as cheap and disposable: if the log has not reached
     "Loading patch" in twenty seconds, kill it and launch again.
 
+    A CoreMIDI abort is retried too -- it happens before any of our code is
+    reachable, so it can carry no information about what we came to measure --
+    but on a shorter leash of its own. Each one is a crash report on somebody's
+    desk, so a machine where CoreMIDI is genuinely unavailable should cost
+    three of them and not eight.
+
     What must NOT happen is a wedged launch reported as a library with no
     ranges in it, which is why every giving-up path names its reason and none
     of them returns quietly.
     """
     why = "no attempt was made"
+    aborts = 0
     for attempt in range(1, attempts + 1):
         log, why = launch_once(rack, patch, scan_window)
         if not why:
             return log, ""
-        if not abort_is_retryable(log):
-            return log, why          # retrying cannot conjure a GUI session
+        if aborted_in_coremidi(log):
+            aborts += 1
+            if aborts >= ABORT_ATTEMPTS:
+                return log, (f"{aborts} launches died in CoreMIDI before "
+                             f"reaching the patch")
         if attempt < attempts:
             print(f"    launch {attempt}: {why} — retrying", flush=True)
             time.sleep(2.0)

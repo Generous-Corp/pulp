@@ -324,25 +324,30 @@ from the map like a library with nothing in it:
   on whatever terminal it inherited — forever. Every run leaves a live Rack
   holding an audio device, and somebody has to force-quit it. Launch with
   `stdin=DEVNULL` and kill the process yourself once the map is written.
-- *The shell has no GUI login session.* Rack initialises MIDI long before it
-  loads a patch, and `MidiInCore` cannot create a CoreMIDI client outside a GUI
-  session: RtMidi throws, the exception crosses a `noexcept` boundary, and the
-  process aborts. So an SSH-launched Rack aborts every time. Route it into the
-  user's session with `launchctl asuser $(id -u) …`. Same root cause as AU
-  components being invisible over SSH.
+- *Rack aborts inside its MIDI init.* `rack::rtmidiInit` → `MidiInCore` →
+  `getCoreMidiClientSingleton` throws, the exception crosses a `noexcept`
+  boundary, and the process aborts about 170ms in — before any patch is
+  parsed and before any of our code is reachable. **It is sporadic, and the
+  retry is the entire remedy.** Two confident explanations for it have now
+  been measured and both are wrong, so do not reach for a third without
+  numbers:
 
-  But **an abort is not proof the session is missing.** Roughly one launch in
-  ten to thirty aborts identically on a machine that plainly has one — from a
-  terminal inside a GUI app, not only over SSH — and the next succeeds. Report
-  the abort as what was observed, name the session only where its absence can
-  be checked, and retry unless the session really is the missing thing. Blaming
-  every abort on the session sends a reader to debug a machine that is fine,
-  and refusing to retry fails a whole run over a blip.
+  | explanation | prediction | measured |
+  |---|---|---|
+  | no GUI login session | fails over SSH, fine locally | a bare `MIDIClientCreate` probe: **1/400** failures in a GUI session, **0/50** over SSH with no `SECURITYSESSIONID` |
+  | client exhaustion from rapid relaunch | failures cluster under hammering | **0/14** launches back to back; the single abort came from the run spaced 3s apart |
 
-  It is **not** exhaustion from rapid relaunching, which is the intuitive
-  guess: 14 launches back to back produced zero aborts, and the one abort in
-  the following 14 came from the run SPACED three seconds apart. So spacing
-  buys nothing and the retry is the whole remedy.
+  **Do NOT wrap the launch in `launchctl asuser`.** It is the obvious fix and
+  it is worse than nothing: it needs root, and without it the command is never
+  executed at all — `launchctl asuser $(id -u) /bin/echo HELLO` prints nothing
+  and exits 1 with "Could not switch to audit session … Operation not
+  permitted". Over SSH, **50 of 50** wrapped probes failed where **0 of 50**
+  unwrapped ones did. It would break the one case it gets added for.
+
+  Claim this mechanism on the stack Rack prints (`rtmidiInit`, `RtMidiDriver`,
+  `MidiInCore`) and never on "the launch failed" — a diagnosis that fires for
+  every death stops meaning anything the moment it is right. Bound the retry
+  separately and tightly: each abort is a crash report on somebody's desk.
 - *The crash prompt*, above.
 
 **`install_pack.sh` reporting success does not mean Rack loads what you built.**
