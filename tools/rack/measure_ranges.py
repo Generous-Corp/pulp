@@ -162,6 +162,31 @@ def shortfall(portmap: dict, plugin: str,
     return missing, unranged
 
 
+def stale_scans(portmap: dict, plugin: str, models: list[str]) -> list[str]:
+    """Target models whose entry was written by an older scanner than the map's.
+
+    A launch that aborts leaves its subjects exactly as they were, so a sweep
+    can finish looking complete while some modules still carry an entry from a
+    scanner that did not measure what this one does. Nothing else notices: the
+    entry is present, it parses, and it is simply less than it should be.
+
+    The bar is the newest scan version anywhere in the map rather than a
+    constant, so this cannot drift out of step with CARTOG's `kScanVersion`
+    the next time that moves -- a duplicated constant would go stale in the
+    one file whose job is noticing staleness.
+    """
+    entries = {e.get("model"): e for e in (portmap.get("modules") or [])
+               if e.get("plugin") == plugin}
+    versions = [e.get("scan") for e in (portmap.get("modules") or [])
+                if isinstance(e.get("scan"), int)]
+    if not versions:
+        return []
+    newest = max(versions)
+    return [m for m in models
+            if m in entries and isinstance(entries[m].get("scan"), int)
+            and entries[m]["scan"] < newest]
+
+
 def measured(portmap: dict, plugin: str) -> tuple[int, int]:
     """(modules with params, modules whose params carry ranges)."""
     seen = ranges_by_model(portmap, plugin)
@@ -484,7 +509,12 @@ def main(argv: list[str]) -> int:
               f"ranges: {before[1]} -> {after[1]} modules"
               + (f"   (scanner saw {saw})" if saw is not None else ""))
 
-        missing, unranged = shortfall(read_portmap(), plugin, models)
+        after_map = read_portmap()
+        missing, unranged = shortfall(after_map, plugin, models)
+        stale = stale_scans(after_map, plugin, models)
+        if stale:
+            failures.append(f"{plugin}: left behind by an older scanner: "
+                            f"{', '.join(stale)}")
         if missing:
             failures.append(f"{plugin}: never mapped: {', '.join(missing)}")
         if unranged:

@@ -142,6 +142,36 @@ def test_shortfall_names_what_is_missing() -> int:
     return bad
 
 
+def test_a_module_left_by_an_older_scanner_is_named() -> int:
+    """A sweep can finish looking complete with subjects an abort never touched.
+
+    The entry is present and it parses; it is simply less than the scanner
+    that wrote the rest of the map would have recorded. Nothing else in the
+    run notices, which is exactly why a partial sweep reads as a finished one.
+    """
+    portmap = {"modules": [
+        {"plugin": "CVfunk", "model": "Steps", "scan": 4, "params": [
+            {"index": 0, "name": "Bias", "minValue": -5.0, "maxValue": 5.0}]},
+        {"plugin": "CVfunk", "model": "Ouros", "scan": 3, "params": [
+            {"index": 0, "name": "Rate", "minValue": 0.0, "maxValue": 1.0}]},
+        {"plugin": "Fundamental", "model": "VCO", "scan": 4, "params": []},
+    ]}
+    bad = 0
+    models = ["Steps", "Ouros", "Node"]
+    bad += check(mr.stale_scans(portmap, "CVfunk", models) == ["Ouros"],
+                 "a subject an abort skipped is named, even carrying ranges",
+                 f"got {mr.stale_scans(portmap, 'CVfunk', models)}")
+    # The bar is the map's own newest version, so bumping CARTOG's scan
+    # version cannot leave this check quietly comparing against a stale one.
+    older = {"modules": [dict(e, scan=3) for e in portmap["modules"]]}
+    bad += check(mr.stale_scans(older, "CVfunk", models) == [],
+                 "a map written entirely by one scanner has nothing stale in it",
+                 f"got {mr.stale_scans(older, 'CVfunk', models)}")
+    bad += check(mr.stale_scans({"modules": []}, "CVfunk", models) == [],
+                 "an empty map reports nothing rather than everything")
+    return bad
+
+
 def test_scan_is_read_from_racks_own_log() -> int:
     """How many modules the scanner saw, so a zero can be told from a misfire."""
     bad = 0
@@ -263,6 +293,7 @@ def main() -> int:
     bad = 0
     for fn in (test_scanner_is_last, test_portmap_is_a_list,
                test_shortfall_names_what_is_missing,
+               test_a_module_left_by_an_older_scanner_is_named,
                test_scan_is_read_from_racks_own_log,
                test_launch_reaches_the_gui_session,
                test_a_coremidi_abort_is_only_fatal_without_a_session,

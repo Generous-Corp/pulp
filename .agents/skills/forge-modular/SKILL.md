@@ -331,12 +331,18 @@ from the map like a library with nothing in it:
   user's session with `launchctl asuser $(id -u) …`. Same root cause as AU
   components being invisible over SSH.
 
-  But **an abort is not proof the session is missing.** About one launch in ten
-  aborts identically on a machine that plainly has one, and the next succeeds.
-  Report the abort as what was observed, name the session only where its
-  absence can be checked, and retry unless the session really is the missing
-  thing. Blaming every abort on the session sends a reader to debug a machine
-  that is fine, and refusing to retry fails a whole run over a blip.
+  But **an abort is not proof the session is missing.** Roughly one launch in
+  ten to thirty aborts identically on a machine that plainly has one — from a
+  terminal inside a GUI app, not only over SSH — and the next succeeds. Report
+  the abort as what was observed, name the session only where its absence can
+  be checked, and retry unless the session really is the missing thing. Blaming
+  every abort on the session sends a reader to debug a machine that is fine,
+  and refusing to retry fails a whole run over a blip.
+
+  It is **not** exhaustion from rapid relaunching, which is the intuitive
+  guess: 14 launches back to back produced zero aborts, and the one abort in
+  the following 14 came from the run SPACED three seconds apart. So spacing
+  buys nothing and the retry is the whole remedy.
 - *The crash prompt*, above.
 
 **`install_pack.sh` reporting success does not mean Rack loads what you built.**
@@ -346,6 +352,14 @@ what Rack loads. Same version in both places is not the documented refusal
 ("keeping X, which is newer"); it is a clean exit 0 with the old binary still
 live. **Verify by hash, not by exit code**, and if the directory is stale move
 it aside and unpack the archive over it.
+
+**A partial sweep is the outcome that looks finished and is not.** An aborted
+launch leaves its subjects exactly as they were, so a batch can end with some
+modules still carrying an entry from an older scanner: present, parsing, and
+quietly less than the rest of the map. `stale_scans` names them, measured
+against the newest scan version anywhere in the map rather than a constant —
+a constant duplicated from `kScanVersion` would go stale in the one place
+whose job is noticing staleness.
 
 **A zero here is never evidence on its own.** A wedged launch, a scanner placed
 first, and a genuinely empty library all produce the same "measured nothing".
