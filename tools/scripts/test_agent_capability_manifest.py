@@ -33,6 +33,7 @@ def main() -> int:
     expect_failure("wrong-types.json", "summary must be a non-empty string")
     expect_failure("nested-wrong-types.json", "units must be an array of non-empty strings")
     expect_failure("count-drift.json", "counts must exactly match")
+    expect_failure("unknown-field.json", "unknown fields: schedulling")
 
     canonical = json.loads(run("--json").stdout)
     with tempfile.TemporaryDirectory() as temp:
@@ -66,7 +67,7 @@ def main() -> int:
         class_name = row["symbol"].split("::")[-1].split("<", 1)[0]
         assert any(item["class"] == class_name for item in vocabulary[relative]), class_name
 
-    print("agent-capabilities: 10 negative/compatibility checks passed")
+    print("agent-capabilities: 11 negative/compatibility checks passed")
     return 0
 
 

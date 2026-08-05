@@ -187,6 +187,9 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
         missing = sorted(REQUIRED - row.keys())
         if missing:
             problems.append(f"{where} missing required fields: {', '.join(missing)}")
+        unknown = sorted(row.keys() - (REQUIRED | {"forge_descriptor"}))
+        if unknown:
+            problems.append(f"{where} has unknown fields: {', '.join(unknown)}")
         for field in sorted(STRING_FIELDS):
             value = row.get(field)
             if not isinstance(value, str) or not value.strip():

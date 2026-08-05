@@ -48,23 +48,62 @@ def consumer_source(document: dict) -> str:
     return "\n".join(lines)
 
 
-def configure_and_build(cmake: str, prefix: pathlib.Path, project: pathlib.Path,
-                        document: dict) -> subprocess.CompletedProcess[str]:
+def configure_consumer(cmake: str, prefix: pathlib.Path, project: pathlib.Path,
+                       document: dict | None = None) -> subprocess.CompletedProcess[str]:
+    document = document or load_installed_manifest(prefix)
     project.mkdir(parents=True, exist_ok=True)
     (project / "main.cpp").write_text(consumer_source(document))
     (project / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(pulp_agent_capability_consumer LANGUAGES CXX)\n"
-        "find_package(Pulp CONFIG REQUIRED)\n"
+        "find_package(Pulp CONFIG REQUIRED NO_DEFAULT_PATH "
+        "PATHS \"${PULP_SDK_PREFIX}/lib/cmake/Pulp\")\n"
         "add_executable(consumer main.cpp)\n"
         "target_link_libraries(consumer PRIVATE Pulp::sequence)\n"
+        "get_target_property(PULP_EXPORTED_INCLUDE_DIRS Pulp::sequence "
+        "INTERFACE_INCLUDE_DIRECTORIES)\n"
+        "file(WRITE \"${CMAKE_BINARY_DIR}/pulp-include-dirs.txt\" "
+        "\"${PULP_EXPORTED_INCLUDE_DIRS}\n\")\n"
     )
-    configured = run([cmake, "-S", str(project), "-B", str(project / "build"),
-                      "-DCMAKE_BUILD_TYPE=Release", f"-DPulp_DIR={prefix / 'lib/cmake/Pulp'}"],
-                     cwd=project)
-    if configured.returncode != 0:
-        return configured
-    return run([cmake, "--build", str(project / "build"), "-j2"], cwd=project)
+    return run([
+        cmake, "-S", str(project), "-B", str(project / "build"),
+        "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE",
+        "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE",
+        "-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=TRUE",
+        "-DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=TRUE",
+        "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
+        "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON",
+        f"-DPULP_SDK_PREFIX={prefix}",
+    ], cwd=project)
+
+
+def build_consumer(cmake: str, project: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    return run([cmake, "--build", str(project / "build"), "-j2", "--verbose"], cwd=project)
+
+
+def inspect_isolation(prefix: pathlib.Path, project: pathlib.Path,
+                      forbidden_roots: list[pathlib.Path]) -> None:
+    include_file = project / "build/pulp-include-dirs.txt"
+    include_dirs = [entry for entry in include_file.read_text().strip().split(";") if entry]
+    if not include_dirs:
+        raise AssertionError("Pulp::sequence exported no install include directory")
+    prefix_root = prefix.resolve()
+    for entry in include_dirs:
+        path = pathlib.Path(entry).resolve()
+        if not path.is_relative_to(prefix_root):
+            raise AssertionError(f"exported include directory escapes install prefix: {entry}")
+
+    commands_path = project / "build/compile_commands.json"
+    commands_text = commands_path.read_text()
+    for forbidden in forbidden_roots:
+        spellings = {str(forbidden), str(forbidden.resolve())}
+        if any(spelling in commands_text for spelling in spellings):
+            raise AssertionError(f"consumer compile command leaks checkout path: {forbidden}")
+    installed_include_spellings = {
+        str(prefix / "include"), str((prefix / "include").resolve())}
+    if not any(spelling in commands_text for spelling in installed_include_spellings):
+        raise AssertionError("consumer compile command does not use the installed include directory")
 
 
 def expect_failure(label: str, operation) -> None:
@@ -81,6 +120,12 @@ def main() -> int:
     parser.add_argument("--cmake", default="cmake")
     args = parser.parse_args()
     build_dir = args.build_dir.resolve()
+    cache = (build_dir / "CMakeCache.txt").read_text()
+    source_line = next((line for line in cache.splitlines()
+                        if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL=")), None)
+    if source_line is None:
+        raise RuntimeError("build CMakeCache.txt does not identify its source checkout")
+    source_root = pathlib.Path(source_line.split("=", 1)[1]).resolve()
 
     with tempfile.TemporaryDirectory(prefix="pulp-installed-capability-") as temp:
         root = pathlib.Path(temp)
@@ -94,7 +139,10 @@ def main() -> int:
         held_manifest = manifest.with_suffix(".held")
         manifest.rename(held_manifest)
         try:
-            expect_failure("missing installed manifest", lambda: load_installed_manifest(prefix))
+            expect_failure(
+                "missing installed manifest",
+                lambda: configure_consumer(args.cmake, prefix, root / "missing-manifest"),
+            )
         finally:
             held_manifest.rename(manifest)
 
@@ -102,7 +150,16 @@ def main() -> int:
         held_header = header.with_suffix(header.suffix + ".held")
         header.rename(held_header)
         try:
-            expect_failure("missing advertised installed header", lambda: load_installed_manifest(prefix))
+            missing_header_project = root / "missing-header"
+            configured = configure_consumer(
+                args.cmake, prefix, missing_header_project, document)
+            if configured.returncode != 0:
+                raise AssertionError(
+                    "missing-header control did not reach compilation:\n"
+                    f"{configured.stdout}\n{configured.stderr}")
+            failed = build_consumer(args.cmake, missing_header_project)
+            if failed.returncode == 0:
+                raise AssertionError("negative control compiled without an advertised header")
         finally:
             held_header.rename(header)
 
@@ -110,21 +167,27 @@ def main() -> int:
         held_targets = targets.with_suffix(".held")
         targets.rename(held_targets)
         try:
-            failed = configure_and_build(args.cmake, prefix, root / "missing-export", document)
+            failed = configure_consumer(args.cmake, prefix, root / "missing-export", document)
             if failed.returncode == 0:
-                raise AssertionError("negative control unexpectedly linked without PulpTargets.cmake")
+                raise AssertionError("negative control unexpectedly configured without PulpTargets.cmake")
         finally:
             held_targets.rename(targets)
 
-        consumer = configure_and_build(args.cmake, prefix, root / "consumer", document)
-        if consumer.returncode != 0:
-            raise RuntimeError(f"installed consumer failed:\n{consumer.stdout}\n{consumer.stderr}")
+        consumer_project = root / "consumer"
+        configured = configure_consumer(args.cmake, prefix, consumer_project, document)
+        if configured.returncode != 0:
+            raise RuntimeError(
+                f"installed consumer configure failed:\n{configured.stdout}\n{configured.stderr}")
+        inspect_isolation(prefix, consumer_project, [source_root, build_dir])
+        built = build_consumer(args.cmake, consumer_project)
+        if built.returncode != 0:
+            raise RuntimeError(f"installed consumer build failed:\n{built.stdout}\n{built.stderr}")
         executable = root / "consumer/build/consumer"
         executed = run([str(executable)], cwd=root)
         if executed.returncode != 0:
             raise RuntimeError(f"installed consumer exited {executed.returncode}")
 
-    print("agent-capabilities-installed-sdk: 4 install/include/export/consumer checks passed")
+    print("agent-capabilities-installed-sdk: 5 install/isolation/include/export/consumer checks passed")
     return 0
 
 
