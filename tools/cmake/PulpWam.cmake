@@ -59,6 +59,7 @@ set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/platform/include
     ${_PULP_WAM_ROOT}/core/runtime/include
     ${_PULP_WAM_ROOT}/core/timebase/include
+    ${_PULP_WAM_ROOT}/core/music/include
     ${_PULP_WAM_ROOT}/core/timeline/include
     ${_PULP_WAM_ROOT}/core/playback/include
     ${_PULP_WAM_ROOT}/core/state/include

@@ -498,7 +498,7 @@ pulp_resolve_timeline_sources(
 add_library(pulp-test-timeline-no-exceptions OBJECT
     ${_PULP_TIMELINE_NO_EXCEPTIONS_SOURCES})
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
-    pulp::runtime pulp::timebase)
+    pulp::runtime pulp::timebase pulp::music)
 target_include_directories(pulp-test-timeline-no-exceptions PRIVATE
     ${CMAKE_SOURCE_DIR}/core/timeline/include)
 if(MSVC)
