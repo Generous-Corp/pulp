@@ -128,7 +128,13 @@
           "requirement": "hits-trigger",
           "message": "the hits trigger nothing"
         }
-      ]
+      ],
+      "axis": {
+        "family": "clock-transformation",
+        "position": "spread as evenly as the step count allows",
+        "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
+      }
     },
     {
       "slug": "kick-drum",
@@ -376,7 +382,13 @@
           "requirement": "drives",
           "message": "the swung clock drives nothing"
         }
-      ]
+      ],
+      "axis": {
+        "family": "clock-transformation",
+        "position": "alternate pulses delayed",
+        "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
+      }
     },
     {
       "slug": "ratcheting",
@@ -593,7 +605,13 @@
           "requirement": "out",
           "message": "the multiplied clock drives nothing"
         }
-      ]
+      ],
+      "axis": {
+        "family": "clock-transformation",
+        "position": "multiplied into faster pulses",
+        "set_by": "the clock modulator's own mode and ratio — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "One clock modulator between a clock and whatever it drives. Dividing, multiplying, swinging and spreading evenly are four settings of that one structure, so a checker reading cables cannot tell them apart. Separate records still earn their place: a person asking for swing is not asking for a divider."
+      }
     }
   ]
 }

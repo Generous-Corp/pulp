@@ -15,6 +15,13 @@
       "is": "A slow oscillator modulating pitch by a small amount, so the note wavers around itself rather than moving to another note.",
       "sounds_right_when": "the pitch moves periodically and stays recognisably one note.",
       "source": "Standard practice",
+      "axis": {
+        "family": "modulation-rate-and-index",
+        "position": "below hearing, so the movement is heard as movement",
+        "set_by": "the modulator's rate, and how much of it reaches the frequency input — both knobs; every position on this axis patches a source to an oscillator's frequency input and they sound nothing alike",
+        "neighbours": {"more": "fm-voice"},
+        "$comment": "The rate at which a modulator stops being heard as a wobble and starts being heard as a timbre is somewhere around the bottom of hearing, and it is a knob. This library keeps a record on either side of it because the two are different requests, and marks them as one continuum because a checker reading cables cannot tell them apart."
+      },
       "at_least": {"lfo": 1},
       "topology": [
         {"id": "lfo-to-pitch", "from_module": "lfo", "from_port": "cv_out",
@@ -40,6 +47,13 @@
       "is": "A slow oscillator modulating an amplifier, so loudness moves periodically.",
       "sounds_right_when": "the level pulses at a steady rate.",
       "source": "Standard practice",
+      "axis": {
+        "family": "amplitude-modulation-rate",
+        "position": "below hearing, heard as a pulsing level",
+        "set_by": "the modulator's rate — a knob; both positions on this axis patch a source into an amplifier's control input",
+        "neighbours": {"more": "ring-modulated-texture"},
+        "$comment": "Push the modulator's rate up through the bottom of hearing and the pulsing stops being a pulse and becomes sum and difference tones. Same three jacks, entirely different sound, and nothing in the cables says which one you have."
+      },
       "at_least": {"lfo": 1, "amplifier": 1},
       "topology": [
         {"id": "lfo-to-vca", "from_module": "lfo", "from_port": "cv_out",
@@ -86,7 +100,7 @@
     {
       "slug": "envelope-follower",
       "names": ["envelope follower"],
-      "implies": ["follow the amplitude", "react to the input level", "ducking"],
+      "implies": ["follow the amplitude", "react to the input level"],
       "is": "An audio signal converted to a control voltage that tracks its loudness, then used to move something else.",
       "sounds_right_when": "the destination moves in step with how loud the source is.",
       "source": "Standard practice",
@@ -115,6 +129,12 @@
       "is": "A modulation source passed through an attenuverter so its depth — and direction — can be set before it reaches its destination.",
       "sounds_right_when": "the modulation is present but clearly bounded.",
       "source": "Standard practice; the reason attenuverters exist",
+      "axis": {
+        "family": "voltage-conditioning",
+        "position": "scaled, and inverted through zero",
+        "set_by": "the processor's gain and offset knobs — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "A voltage through a processor and on to its destination. Attenuating, inverting and offsetting are the same three jacks; what differs is where the knobs sit."
+      },
       "at_least": {"attenuator": 1},
       "topology": [
         {"id": "into", "from_module": "any", "from_port": "cv_out",
@@ -140,6 +160,10 @@
       "is": "Two sources each modulating the other, so neither is simply the modulator — the pair produces behaviour neither has alone.",
       "sounds_right_when": "the result is unpredictable in a way that changes with either source's settings.",
       "source": "Strange's treatment of interdependent modulation",
+      "listen_for": {
+        "sounds_like": "two voices that will not settle into a relationship — each one audibly bending the other, so the result keeps arriving at places neither would reach alone",
+        "confusable_with": "one-way modulation, which is predictable once you know the modulator; cut either cable here and the character collapses, not just half of it"
+      },
       "at_least": {"oscillator": 2},
       "topology": [
         {"id": "a-to-b", "from_module": "oscillator", "from_port": "any_out",
@@ -218,6 +242,18 @@
       "is": "One modulator moving another's rate or depth, so the modulation itself is never constant.",
       "sounds_right_when": "the sense of motion changes over time rather than staying periodic.",
       "source": "Strange; the standard way to defeat obvious periodicity",
+      "listen_for": {
+        "sounds_like": "movement whose speed keeps changing — you start counting along and lose it, then find it again at a different rate",
+        "confusable_with": "a single slow modulator, which you can always count; the tell is whether the period stays put over a minute",
+        "expect": [
+          {
+            "field": "onsets.interval_cv",
+            "op": ">=",
+            "value": 0.15,
+            "why": "if the modulated modulator is driving events, their spacing should be measurably uneven; perfectly even spacing means the second modulator is not reaching the first's rate"
+          }
+        ]
+      },
       "at_least": {"lfo": 2},
       "topology": [
         {"id": "lfo-to-lfo", "from_module": "lfo", "from_port": "cv_out",

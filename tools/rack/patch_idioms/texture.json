@@ -138,6 +138,18 @@
       "is": "Noise shaped by a moving filter, so the texture reads as weather rather than as hiss.",
       "sounds_right_when": "the noise has a moving centre of gravity, not a fixed one.",
       "source": "Strange's treatment of noise as a sound source",
+      "listen_for": {
+       "sounds_like": "weather rather than an instrument: broadband, continuous, with the sense of a moving band inside it and no pitch to hold onto",
+       "confusable_with": "a very bright oscillator, which has a pitch even when it is harsh",
+       "expect": [
+        {
+         "field": "pitch.voiced_fraction",
+         "op": "<=",
+         "value": 0.3,
+         "why": "noise should defeat a pitch tracker; a confidently tracked pitch means an oscillator is in the path"
+        }
+       ]
+      },
       "at_least": {
         "noise": 1,
         "filter": 1
@@ -310,6 +322,19 @@
       "is": "Two audio signals multiplied, producing sums and differences that rarely belong to either — inharmonic by construction.",
       "sounds_right_when": "the result is bell-like or clangorous rather than a chord.",
       "source": "Strange on ring modulation",
+      "listen_for": {
+       "sounds_like": "clangorous and unresolved, the two source pitches replaced by tones that belong to neither — move either source and the result moves in a direction that feels wrong",
+       "confusable_with": "amplitude modulation, where the original note survives underneath; if you can still hear the carrier, the multiplier is not balanced"
+      },
+      "axis": {
+        "family": "amplitude-modulation-rate",
+        "position": "at audio rate, heard as sum and difference tones",
+        "set_by": "the modulator's rate — a knob; both positions on this axis patch a source into an amplifier's control input",
+        "neighbours": {
+          "less": "tremolo"
+        },
+        "$comment": "Two things this axis deliberately does NOT split. Below hearing the same patch is tremolo, which is the neighbour above. And amplitude modulation proper — where the carrier survives — differs from ring modulation, where it is cancelled, only in whether the multiplier is BALANCED. That is a property of the module's internals, not of any cable, so no checker reading a patch can tell them apart and there is no second record pretending otherwise. A listener can: if you can still hear the original note underneath, it is AM."
+      },
       "at_least": {
         "audio_oscillator": 2
       },

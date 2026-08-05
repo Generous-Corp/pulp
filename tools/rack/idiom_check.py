@@ -11,11 +11,20 @@ decay, with end-of-cycle retriggering it" is a method, and a method is
 checkable. This module checks it, against the same library the model is told
 about, so a rejection can say which connection is missing rather than "no".
 
+The library holds two sizes of record. A `whole` idiom is a patch, from a
+source to the way out. A `fragment` is a technique that lives inside one -- a
+vibrato that fades in, a lag that turns a jump into a glide -- checked exactly
+the same way, minus the audible tail, which belongs to whatever it decorates.
+See KINDS below.
+
     python3 idiom_check.py <patch.vcv> [idiom-slug]
     python3 idiom_check.py --self-test          # every idiom's own mistakes
 
 With no slug the idiom is resolved from the patch's name; `--self-test` is the
-important one, and is described at `self_test` below.
+important one, and is described at `self_test` below. It also runs
+`library_problems`, which asks whether the RECORDS are well formed -- a
+different question from whether they can reject a patch, and the one that rots
+silently.
 """
 
 from __future__ import annotations
@@ -30,6 +39,40 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 IDIOM_DIR = os.path.join(HERE, "patch_idioms")
 
 
+# TWO KINDS OF RECORD, BECAUSE TECHNIQUE COMES IN TWO SIZES.
+#
+# A `whole` idiom is a patch: it names every connection from a source to the
+# way out, and a patch either is one or is not. That is the shape every record
+# in this library had, and it is the wrong shape for most of what a technique
+# book actually teaches. Strange's units are not patches — a vibrato that
+# decorates any voice, an envelope that opens two things at once, a lag that
+# turns a jump into a glide — they are things you do INSIDE a patch, and
+# writing them as whole idioms would mean inventing an arbitrary host for each
+# and then checking the host instead of the technique.
+#
+# So a `fragment` names a technique and nothing else. It carries the same
+# topology in the same words, is asserted by the same `check`, and is proved
+# able to fail by the same negative controls. The one rule that distinguishes
+# it: A FRAGMENT MAY NOT REQUIRE THE AUDIBLE TAIL. "and it reaches the output"
+# belongs to the host, and a fragment that claimed it would be unsatisfiable
+# in every patch that puts anything after it. `library_problems` enforces that,
+# because a fragment quietly requiring an output is a fragment nothing can
+# ever compose with.
+KINDS = ("whole", "fragment")
+
+# Which part of a host patch a fragment decorates. A closed set, so a slot is
+# a thing you can ask for ("what could fill the timbre slot of this voice?")
+# rather than free text nobody can index.
+#
+# Deliberately declared BY THE FRAGMENT rather than listed on the host. A host
+# listing its permitted fragments is an N×M table that goes stale the moment
+# somebody adds a fragment and forgets a host — and the failure is invisible,
+# because a missing entry looks exactly like "nothing fits here". One
+# declaration per fragment cannot rot that way, and the host-to-fragment
+# listing is derived from it (`fragments_for`).
+SLOTS = ("pitch", "timbre", "level", "timing", "space", "control")
+
+
 # --------------------------------------------------------------------------
 # the library
 
@@ -37,6 +80,12 @@ IDIOM_DIR = os.path.join(HERE, "patch_idioms")
 def load_roles() -> dict:
     with open(os.path.join(IDIOM_DIR, "_roles.json")) as f:
         return json.load(f)
+
+
+def load_measurements() -> dict:
+    """Every number the gate reports, keyed by its dotted field name."""
+    with open(os.path.join(IDIOM_DIR, "_measurements.json")) as f:
+        return json.load(f).get("fields", {})
 
 
 def load_idioms() -> dict:
@@ -55,8 +104,40 @@ def load_idioms() -> dict:
                 continue
             if slug in out:
                 raise ValueError(f"two idioms share the slug {slug!r}")
+            # A file may carry a default family and an idiom may override it.
+            # Provenance and taxonomy are different axes: the ARP 2600 patches
+            # arrived together and belong apart, one to voice, one to texture,
+            # one to rhythm. Grouping them by the manual they came from would
+            # file them under where they were found rather than under what
+            # they are, which is the one thing the model reads the grouping
+            # for.
             idiom.setdefault("family", doc.get("family", name[:-5]))
+            idiom.setdefault("kind", doc.get("kind", "whole"))
             out[slug] = idiom
+    return out
+
+
+def wholes(idioms: dict) -> dict:
+    return {s: i for s, i in idioms.items() if i.get("kind") != "fragment"}
+
+
+def fragments(idioms: dict) -> dict:
+    return {s: i for s, i in idioms.items() if i.get("kind") == "fragment"}
+
+
+def fragments_for(slug: str, idioms: dict | None = None) -> list[str]:
+    """The fragments that can decorate one host idiom, by slot.
+
+    Derived, never written down: a fragment says which hosts it suits (or says
+    nothing, meaning any), and this reads that. The inverse table would be a
+    second place to forget an entry.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    out = []
+    for fslug, frag in sorted(fragments(idioms).items()):
+        hosts = frag.get("hosts")
+        if hosts is None or slug in hosts:
+            out.append(fslug)
     return out
 
 
@@ -71,21 +152,29 @@ def resolve_exact(prompt: str, idioms: dict | None = None) -> str | None:
     `names` match the idiom by name; `implies` match a description of it, which
     is the half that would otherwise never be tested -- most people do not know
     the word "krell", they ask for a patch that plays itself.
+
+    A WHOLE IDIOM OUTRANKS A FRAGMENT AT THE SAME STRENGTH. Both are askable --
+    "add a delayed vibrato" is a direct request for a fragment and should
+    resolve to one -- but a request that matches both equally well is asking
+    for a patch, not for a decoration, and resolving it to the decoration would
+    grade the patch on the one part of it nobody asked about. Before this the
+    tie was broken by whichever file happened to be read first.
     """
     idioms = idioms if idioms is not None else load_idioms()
     text = " " + " ".join(prompt.lower().replace("-", " ").split()) + " "
 
-    best: tuple[int, str] | None = None
+    best: tuple[tuple[int, int], str] | None = None
     for slug, idiom in idioms.items():
+        rank = 0 if idiom.get("kind") == "fragment" else 1
         for name in idiom.get("names", []):
             if f" {name.lower()} " in text:
                 # A name is a direct request and outranks any description.
-                score = 1000 + len(name)
+                score = (1000 + len(name), rank)
                 if best is None or score > best[0]:
                     best = (score, slug)
         for phrase in idiom.get("implies", []):
             if f" {phrase.lower()} " in text:
-                score = len(phrase)
+                score = (len(phrase), rank)
                 if best is None or score > best[0]:
                     best = (score, slug)
     return best[1] if best else None
@@ -375,111 +464,42 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
                 if _module_matches(role, _entry(inv, m), roles)}
 
     for req in idiom.get("topology", []):
-        from_role = req.get("from_module", "any")
-        to_role = req.get("to_module", "any")
-        from_port = req.get("from_port", "any_out")
-        to_port = req.get("to_port", "any_in")
-        want_same = bool(req.get("same_module"))
-
-        froms, tos = candidates(from_role), candidates(to_role)
-
-        # A signal that passes through a multiple, an attenuator or a slew is
-        # still that signal. "The random voltage reaches the envelope's time"
-        # is just as true through a mult -- which is how people actually patch
-        # -- so the sources are widened to anything a source reaches through a
-        # chain of those. Without this the checker rejects correct patches for
-        # being tidily wired, which is the worst thing a checker can do.
-        transparent = {mid for mid, m in by_id.items()
-                       if any(roles["roles"].get(r, {}).get("transparent")
-                              and _module_matches(r, _entry(inv, m), roles)
-                              for r in roles["roles"])}
-        # The widening is KIND-AWARE. A relayed source is exempt from the
-        # port check at the far end -- a mult's own jacks are "1 2 3" and role
-        # Cv whatever is fed in -- so the kind has to be established at the
-        # cable that ENTERS the chain, or the exemption would let anything
-        # through a multiple satisfy any requirement: an audio signal into an
-        # envelope's trigger would read as a gate.
-        # `relayed` is tracked SEPARATELY from `reached`, not as the part of it
-        # that was added late. When from_module is "any" every module is a
-        # candidate already, so "was it added by widening" is always false --
-        # and the exemption below became dead code for exactly the
-        # requirements that need it most, the ones that say a gate may come
-        # from anything. Direct wiring held and the same patch through a
-        # multiple did not.
-        reached = set(froms)
-        relayed = set()          # arrived by passing through a mult etc.
-        changed = True
-        while changed:
-            changed = False
-            for c in patch.get("cables", []):
-                src, dst = c.get("outputModuleId"), c.get("inputModuleId")
-                if dst not in transparent or dst in relayed:
-                    continue
-                if src not in reached and src not in relayed:
-                    continue
-                if src in relayed:
-                    pass                      # already vouched for upstream
-                else:
-                    origin = by_id.get(src)
-                    if origin is None:
-                        continue
-                    orole, olabel = _port_info(inv, origin, "out",
-                                               c.get("outputId", 0))
-                    if not _port_matches(from_port, orole, olabel, roles) \
-                       and not _uncartographed(inv, origin, "out"):
-                        continue              # wrong kind entering the chain
-                relayed.add(dst)
-                changed = True
-        froms = reached | relayed
-
-        found = False
-        for c in patch.get("cables", []):
-            src_id, dst_id = c.get("outputModuleId"), c.get("inputModuleId")
-            if src_id not in froms or dst_id not in tos:
-                continue
-            if want_same and src_id != dst_id:
-                continue
-            if req.get("different_module") and src_id == dst_id:
-                continue
-            src, dst = by_id.get(src_id), by_id.get(dst_id)
-            if src is None or dst is None:
-                continue
-            srole, slabel = _port_info(inv, src, "out", c.get("outputId", 0))
-            drole, dlabel = _port_info(inv, dst, "in", c.get("inputId", 0))
-            # A port nobody has cartographed is UNKNOWN, not wrong. Rejecting
-            # on it made every idiom unsatisfiable for the vendor modules that
-            # make up most of any real rack.
-            blind: list[str] = []
-            # A multiple's own jacks are generic: its outputs are "1 2 3", role
-            # Cv, whatever is fed into them. So the KIND of signal was settled
-            # upstream, at the module the widening started from, and asking a
-            # mult's output to look like a gate rejects the patch for the
-            # relaying it was widened to allow. It did: a kick drum clocked
-            # from an LFO's SQR through a multiple -- the ordinary way to fire
-            # two envelopes from one clock -- was told nothing triggered it.
-            if src_id in relayed:
-                pass
-            elif not _port_matches(from_port, srole, slabel, roles):
-                if not _uncartographed(inv, src, "out"):
-                    continue
-                blind.append(f"{src.get('plugin')}/{src.get('model')}")
-            if not _port_matches(to_port, drole, dlabel, roles):
-                if not _uncartographed(inv, dst, "in"):
-                    continue
-                blind.append(f"{dst.get('plugin')}/{dst.get('model')}")
-            found = True
+        found, blind = _satisfied(patch, by_id, inv, roles, req, candidates,
+                                  blind_ok=True)
+        if found:
             if blind:
                 unchecked.append(
-                    f"{req.get('id') or f'{from_role} → {to_role}'}: the cable "
-                    f"is there, but {' and '.join(blind)} has no port map, so "
-                    f"which jack it lands on could not be checked")
-            break
-
-        if not found:
+                    f"{req.get('id') or 'a requirement'}: the cable is there, "
+                    f"but {' and '.join(blind)} has no port map, so which jack "
+                    f"it lands on could not be checked")
+        else:
             # Named in the words a person would recognise, because a rejection
             # that says "requirement 3 failed" teaches nobody anything.
             problems.append(req.get("describe") or
-                            f"missing: {from_role} → {to_role}")
+                            f"missing: {req.get('from_module', 'any')} → "
+                            f"{req.get('to_module', 'any')}")
+
+    # A TECHNIQUE CAN BE DEFINED BY WHAT IS NOT PATCHED.
+    #
+    # A filter played as an oscillator is a filter with nothing in its audio
+    # input: the resonance is the sound. Every positive requirement it could
+    # carry is also true of an ordinary filtered voice, so written with
+    # `topology` alone the idiom is a sentence that cannot fail. `forbidden`
+    # already refuses a MODULE; this refuses a CONNECTION, which is the shape
+    # an absence usually has.
+    #
+    # A blind match does not count as a violation. Elsewhere an unreadable
+    # jack is leniency in the direction of accepting the patch; here the same
+    # leniency runs the other way, and rejecting a patch because a module
+    # nobody cartographed MIGHT have the forbidden cable would punish exactly
+    # the modules we know least about.
+    for req in idiom.get("forbidden_topology", []):
+        found, _ = _satisfied(patch, by_id, inv, roles, req, candidates,
+                              blind_ok=False)
+        if found:
+            problems.append(req.get("describe") or
+                            f"should not contain: {req.get('from_module', 'any')}"
+                            f" → {req.get('to_module', 'any')}")
 
     for req in idiom.get("forbidden", []):
         role = req.get("module", "any")
@@ -493,6 +513,114 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
             problems.append(f"needs at least {n} {role} module(s), found {have}")
 
     return problems
+
+
+def _satisfied(patch: dict, by_id: dict, inv: dict, roles: dict, req: dict,
+               candidates, blind_ok: bool) -> tuple[bool, list[str]]:
+    """Is there a cable answering `req`, and which of its ends went unread.
+
+    Shared by the requirements a patch MUST satisfy and the ones it must NOT,
+    so the two can never disagree about what "this cable exists" means. The
+    only difference between the two callers is `blind_ok`: whether a cable
+    landing on a jack nobody has cartographed counts.
+    """
+    from_role = req.get("from_module", "any")
+    to_role = req.get("to_module", "any")
+    from_port = req.get("from_port", "any_out")
+    to_port = req.get("to_port", "any_in")
+    want_same = bool(req.get("same_module"))
+
+    froms, tos = candidates(from_role), candidates(to_role)
+
+    # A signal that passes through a multiple, an attenuator or a slew is
+    # still that signal. "The random voltage reaches the envelope's time"
+    # is just as true through a mult -- which is how people actually patch
+    # -- so the sources are widened to anything a source reaches through a
+    # chain of those. Without this the checker rejects correct patches for
+    # being tidily wired, which is the worst thing a checker can do.
+    transparent = {mid for mid, m in by_id.items()
+                   if any(roles["roles"].get(r, {}).get("transparent")
+                          and _module_matches(r, _entry(inv, m), roles)
+                          for r in roles["roles"])}
+    # The widening is KIND-AWARE. A relayed source is exempt from the
+    # port check at the far end -- a mult's own jacks are "1 2 3" and role
+    # Cv whatever is fed in -- so the kind has to be established at the
+    # cable that ENTERS the chain, or the exemption would let anything
+    # through a multiple satisfy any requirement: an audio signal into an
+    # envelope's trigger would read as a gate.
+    # `relayed` is tracked SEPARATELY from `reached`, not as the part of it
+    # that was added late. When from_module is "any" every module is a
+    # candidate already, so "was it added by widening" is always false --
+    # and the exemption below became dead code for exactly the
+    # requirements that need it most, the ones that say a gate may come
+    # from anything. Direct wiring held and the same patch through a
+    # multiple did not.
+    reached = set(froms)
+    relayed = set()          # arrived by passing through a mult etc.
+    changed = True
+    while changed:
+        changed = False
+        for c in patch.get("cables", []):
+            src, dst = c.get("outputModuleId"), c.get("inputModuleId")
+            if dst not in transparent or dst in relayed:
+                continue
+            if src not in reached and src not in relayed:
+                continue
+            if src in relayed:
+                pass                      # already vouched for upstream
+            else:
+                origin = by_id.get(src)
+                if origin is None:
+                    continue
+                orole, olabel = _port_info(inv, origin, "out",
+                                           c.get("outputId", 0))
+                if not _port_matches(from_port, orole, olabel, roles) \
+                   and not _uncartographed(inv, origin, "out"):
+                    continue              # wrong kind entering the chain
+            relayed.add(dst)
+            changed = True
+    froms = reached | relayed
+
+    for c in patch.get("cables", []):
+        src_id, dst_id = c.get("outputModuleId"), c.get("inputModuleId")
+        if src_id not in froms or dst_id not in tos:
+            continue
+        if want_same and src_id != dst_id:
+            continue
+        if req.get("different_module") and src_id == dst_id:
+            continue
+        src, dst = by_id.get(src_id), by_id.get(dst_id)
+        if src is None or dst is None:
+            continue
+        srole, slabel = _port_info(inv, src, "out", c.get("outputId", 0))
+        drole, dlabel = _port_info(inv, dst, "in", c.get("inputId", 0))
+        # A port nobody has cartographed is UNKNOWN, not wrong. Rejecting
+        # on it made every idiom unsatisfiable for the vendor modules that
+        # make up most of any real rack.
+        blind: list[str] = []
+        # A multiple's own jacks are generic: its outputs are "1 2 3", role
+        # Cv, whatever is fed into them. So the KIND of signal was settled
+        # upstream, at the module the widening started from, and asking a
+        # mult's output to look like a gate rejects the patch for the
+        # relaying it was widened to allow. It did: a kick drum clocked
+        # from an LFO's SQR through a multiple -- the ordinary way to fire
+        # two envelopes from one clock -- was told nothing triggered it.
+        if src_id in relayed:
+            pass
+        elif not _port_matches(from_port, srole, slabel, roles):
+            if not _uncartographed(inv, src, "out"):
+                continue
+            blind.append(f"{src.get('plugin')}/{src.get('model')}")
+        if not _port_matches(to_port, drole, dlabel, roles):
+            if not _uncartographed(inv, dst, "in"):
+                continue
+            blind.append(f"{dst.get('plugin')}/{dst.get('model')}")
+        if blind and not blind_ok:
+            # The caller is asking whether a FORBIDDEN cable is there. A jack
+            # nobody has read is not evidence that it is.
+            continue
+        return True, blind
+    return False, []
 
 
 # --------------------------------------------------------------------------
@@ -810,6 +938,276 @@ def check_written(patch: dict, inv: dict, idiom: dict,
 
 
 # --------------------------------------------------------------------------
+# the library's own faults
+#
+# Everything below asks a question about the LIBRARY rather than about a
+# patch. The self-test proves an idiom can reject a patch; nothing proved an
+# idiom was well-formed, and the new fields are exactly the kind that rot
+# silently: a `hosts` list naming a slug somebody renamed, an axis whose
+# neighbour does not name it back, a `listen_for` predicting a number the gate
+# does not measure. Each of those reads as data and checks nothing.
+
+
+_INF = float("inf")
+_OPS_SET = (">=", "<=", ">", "<", "==")
+
+
+def _interval(op: str, value) -> tuple:
+    """One condition as the range of values that satisfy it."""
+    v = float(value)
+    return {">=": (v, True, _INF, False),
+            ">": (v, False, _INF, False),
+            "<=": (-_INF, False, v, True),
+            "<": (-_INF, False, v, False),
+            "==": (v, True, v, True)}[op]
+
+
+def _disjoint(a: tuple, b: tuple) -> bool:
+    """Whether two ranges share no value at all."""
+    lo, lo_inc = max((a[0], a[1]), (b[0], b[1]))
+    hi, hi_inc = min((a[2], not a[3]), (b[2], not b[3]))
+    hi_inc = not hi_inc
+    if lo > hi:
+        return True
+    return lo == hi and not (lo_inc and hi_inc)
+
+
+def _hpp_members(path: str) -> set:
+    """Every measurement member name the gate declares, read from its header."""
+    import re                              # noqa: PLC0415 - only used here
+    try:
+        text = open(path).read()
+    except OSError:
+        return set()
+    return set(re.findall(r"^\s*(?:int|double|[A-Za-z]+Measure)\s+(\w+)\s*[=;]",
+                          text, re.M))
+
+
+def library_problems(idioms: dict | None = None,
+                     roles: dict | None = None) -> list[str]:
+    """Everything structurally wrong with the library itself, in words.
+
+    Not a check on any patch. A check on whether the records could check a
+    patch -- which is the failure the rest of this file cannot see, because a
+    field nothing reads passes every test by never being consulted.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    roles = roles if roles is not None else load_roles()
+    measures = load_measurements()
+    behaviours = load_behaviours()
+    with open(os.path.join(HERE, "patch_behaviour_thresholds.json")) as f:
+        flags = json.load(f).get("flags", {})
+    bad: list[str] = []
+
+    # 1. The measurement namespace is the gate's, not ours. Two directions:
+    #    a field the thresholds already use that this file does not declare
+    #    would let a calibration reference an undeclared number; a field this
+    #    file declares that the gate does not measure is a prediction nothing
+    #    can ever be compared against.
+    members = _hpp_members(os.path.join(HERE, "patch_behaviour.hpp"))
+    for field in sorted(measures):
+        group, _, leaf = field.partition(".")
+        if members and (group not in members or leaf not in members):
+            bad.append(f"_measurements.json declares {field}, which "
+                       f"patch_behaviour.hpp does not measure")
+    for flag, spec in sorted(flags.items()):
+        for key in ("needs", "all_of", "any_of"):
+            for cond in spec.get(key) or []:
+                if cond.get("field") not in measures:
+                    bad.append(f"the {flag} threshold reads "
+                               f"{cond.get('field')}, which "
+                               f"_measurements.json does not declare")
+
+    # 2. A word may belong to one idiom. Two records claiming the same name or
+    #    the same phrase make resolution a coin toss settled by which file was
+    #    read first, and the loser is unreachable without anybody noticing.
+    claimed: dict[str, str] = {}
+    for slug, idiom in sorted(idioms.items()):
+        for phrase in list(idiom.get("names", [])) + list(idiom.get("implies", [])):
+            key = phrase.lower().strip()
+            if key in claimed and claimed[key] != slug:
+                bad.append(f"{slug} and {claimed[key]} both claim the phrase "
+                           f"{phrase!r}, so which one a request reaches "
+                           f"depends on file order")
+            claimed.setdefault(key, slug)
+
+    # 3. Two idioms asserting the same structure are one idiom with two names:
+    #    no patch can ever satisfy one and fail the other, so the distinction
+    #    they claim is not a distinction this checker can make.
+    #
+    #    Unless they SAY so. A divider and a multiplier are one structure at
+    #    two settings, and so are an attenuverter and an offset — the knob
+    #    moves, the cables do not. Declaring both on one `axis` is the honest
+    #    version of that: it keeps the two records, because the model needs
+    #    both words, and states in data that what separates them is a control
+    #    this checker cannot read. Silence is what this rule refuses. Four
+    #    pairs in the library were silently identical when it was written.
+    shapes: dict[tuple, str] = {}
+    for slug, idiom in sorted(idioms.items()):
+        shape = (tuple(sorted((r.get("from_module", "any"),
+                               r.get("from_port", "any_out"),
+                               r.get("to_module", "any"),
+                               r.get("to_port", "any_in"),
+                               bool(r.get("same_module")),
+                               bool(r.get("different_module")))
+                              for r in idiom.get("topology") or [])),
+                 tuple(sorted((idiom.get("at_least") or {}).items())),
+                 tuple(sorted((r.get("from_module", "any"),
+                               r.get("to_module", "any"),
+                               r.get("to_port", "any_in"))
+                              for r in idiom.get("forbidden_topology") or [])))
+        if shape in shapes:
+            mine = (idiom.get("axis") or {}).get("family")
+            theirs = (idioms[shapes[shape]].get("axis") or {}).get("family")
+            if mine is None or mine != theirs:
+                bad.append(
+                    f"{slug} asserts exactly the structure {shapes[shape]} "
+                    f"does, so no patch can tell them apart; put both on one "
+                    f"axis if the difference is a setting rather than a cable")
+        shapes[shape] = slug
+
+    for slug, idiom in sorted(idioms.items()):
+        kind = idiom.get("kind")
+        if kind not in KINDS:
+            bad.append(f"{slug} has kind {kind!r}, which is not one of {KINDS}")
+
+        # 4. A fragment is a technique, not a patch. Two rules make it
+        #    composable, and both are the kind a well-meaning edit breaks.
+        if kind == "fragment":
+            slot = idiom.get("slot")
+            if slot not in SLOTS:
+                bad.append(f"{slug} is a fragment with slot {slot!r}, which is "
+                           f"not one of {SLOTS}")
+            for req in idiom.get("topology") or []:
+                if req.get("to_module") == "output":
+                    bad.append(f"{slug} is a fragment requiring a cable to the "
+                               f"output; the audible tail belongs to the host, "
+                               f"and requiring it here makes the fragment "
+                               f"unsatisfiable in every patch that puts "
+                               f"anything after it")
+            for host in idiom.get("hosts") or []:
+                if host not in idioms:
+                    bad.append(f"{slug} says it decorates {host}, which is not "
+                               f"an idiom")
+                elif idioms[host].get("kind") == "fragment":
+                    bad.append(f"{slug} says it decorates {host}, which is "
+                               f"itself a fragment")
+        elif idiom.get("slot"):
+            bad.append(f"{slug} is a whole patch and carries a slot; slots say "
+                       f"where a fragment goes, and a whole patch goes nowhere")
+
+        # A forbidden connection is the one requirement that holds by DEFAULT:
+        # the minimal patch never contains the cable, so the ban is satisfied
+        # without ever being consulted. Cutting a cable cannot break it either,
+        # so it needs a control that PATCHES one.
+        if idiom.get("forbidden_topology") and not any(
+                m.get("do") == "wire"
+                for m in idiom.get("common_mistakes") or []):
+            bad.append(f"{slug} forbids a connection and never patches one, so "
+                       f"the ban holds by default and proves nothing")
+
+        # 5. An axis is a continuum written down: the members are separate
+        #    idioms with separate structures, linked so neither the model nor
+        #    a reader mistakes one position for the whole technique.
+        axis = idiom.get("axis")
+        if axis is not None:
+            if not axis.get("family") or not axis.get("position"):
+                bad.append(f"{slug}'s axis needs both a family and a position")
+            # The point of an axis is that the positions differ by something
+            # NOT in the cables. Naming that something is the whole admission;
+            # an axis without it is a claim that two records differ, with no
+            # statement of how.
+            if len(str(axis.get("set_by") or "")) < 8:
+                bad.append(f"{slug}'s axis does not say what control moves "
+                           f"along it, which is the one thing an axis is for")
+            for other, spec in sorted(idioms.items()):
+                if other == slug or (spec.get("axis") or {}).get("family") \
+                        != axis.get("family"):
+                    continue
+                if spec["axis"].get("position") == axis.get("position"):
+                    bad.append(f"{slug} and {other} claim the same position "
+                               f"{axis.get('position')!r} on the "
+                               f"{axis.get('family')} axis")
+            for direction, other in (axis.get("neighbours") or {}).items():
+                if direction not in ("more", "less"):
+                    bad.append(f"{slug}'s axis neighbour {direction!r} is "
+                               f"neither 'more' nor 'less'")
+                if other not in idioms:
+                    bad.append(f"{slug}'s axis points {direction} at {other}, "
+                               f"which is not an idiom")
+                    continue
+                mine = axis.get("family")
+                theirs = (idioms[other].get("axis") or {}).get("family")
+                if theirs != mine:
+                    bad.append(f"{slug} puts {other} on the {mine} axis, but "
+                               f"{other} is on {theirs!r}")
+
+        # 6. The calibration. Free text is what a person hears; `expect` is
+        #    the same claim in the numbers the gate reports, and it is the only
+        #    ground truth the thresholds have. It has to be comparable to them,
+        #    and it must not CONTRADICT the ones this idiom already asks for --
+        #    an idiom flagged `sustained` whose calibration predicts four
+        #    attacks a second is telling the gate and the listener two
+        #    different things, and only one of them can be right.
+        listen = idiom.get("listen_for")
+        if listen is not None:
+            if len(str(listen.get("sounds_like") or "")) < 20:
+                bad.append(f"{slug}'s listen_for says nothing about what you "
+                           f"would hear")
+            for exp in listen.get("expect") or []:
+                field, op = exp.get("field"), exp.get("op")
+                if field not in measures:
+                    bad.append(f"{slug} expects {field}, which the gate does "
+                               f"not measure")
+                    continue
+                if op not in _OPS_SET or not isinstance(exp.get("value"),
+                                                        (int, float)):
+                    bad.append(f"{slug}'s expectation on {field} is not a "
+                               f"comparison the gate could make")
+                    continue
+                mine = _interval(op, exp["value"])
+                for flag, on in (idiom.get("behaviour") or {}).items():
+                    if not on or flag not in flags:
+                        continue
+                    # `any_of` is a disjunction: disagreeing with one branch of
+                    # it is not a contradiction, so only the conjunctive
+                    # conditions are compared.
+                    for key in ("needs", "all_of"):
+                        for cond in flags[flag].get(key) or []:
+                            if cond.get("field") != field:
+                                continue
+                            theirs = _interval(cond["op"], cond["value"])
+                            if _disjoint(mine, theirs):
+                                bad.append(
+                                    f"{slug} expects {field} {op} "
+                                    f"{exp['value']}, and its own {flag} flag "
+                                    f"requires {field} {cond['op']} "
+                                    f"{cond['value']} — the calibration and "
+                                    f"the gate cannot both be satisfied")
+    return bad
+
+
+
+# --------------------------------------------------------------------------
+# which fragments a patch already carries
+
+
+def fragments_present(patch: dict, inv: dict, idioms: dict | None = None,
+                      roles: dict | None = None) -> list[str]:
+    """The fragments this patch satisfies, whatever it was asked for.
+
+    Reported, never gating. A patch asked for a bassline that also happens to
+    carry a portamento has done something the request did not name, and saying
+    so is how a person finds out the library recognised more of their patch
+    than the one idiom it was graded on.
+    """
+    idioms = idioms if idioms is not None else load_idioms()
+    roles = roles if roles is not None else load_roles()
+    return [slug for slug, frag in sorted(fragments(idioms).items())
+            if not check(patch, inv, frag, roles)]
+
+
+# --------------------------------------------------------------------------
 # the negative controls
 
 
@@ -869,6 +1267,37 @@ def apply_mistake(patch: dict, mistake: dict, inv: dict, roles: dict) -> dict | 
                          and c.get("inputModuleId") not in dropped]
         return out
 
+    if kind == "wire":
+        # The negative control for an idiom defined by an ABSENCE. Cutting a
+        # cable cannot break "nothing feeds the filter"; patching one can, and
+        # a forbidden requirement nobody has watched reject anything is the
+        # same empty sentence a positive one would be.
+        #
+        # Jack indices come from `_PORT_INDEX`, exactly as `synthesize` picks
+        # them, because this only ever runs against the fixture rack that
+        # function builds. It is not a general patch editor.
+        target = mistake.get("requirement")
+        req = next((r for r in mistake.get("_forbidden_topology", [])
+                    if r.get("id") == target), None)
+        if req is None:
+            return None
+        dst = next((m for m in out.get("modules", [])
+                    if _module_matches(req.get("to_module", "any"),
+                                       _entry(inv, m), roles)), None)
+        src = next((m for m in out.get("modules", [])
+                    if _module_matches(req.get("from_module", "any"),
+                                       _entry(inv, m), roles)
+                    and (m is not dst or req.get("same_module"))), None)
+        if src is None or dst is None:
+            return None
+        out.setdefault("cables", []).append({
+            "outputModuleId": src.get("id"),
+            "outputId": _PORT_INDEX.get(req.get("from_port", "any_out"), 0),
+            "inputModuleId": dst.get("id"),
+            "inputId": _PORT_INDEX.get(req.get("to_port", "any_in"), 0),
+        })
+        return out
+
     return None
 
 
@@ -886,6 +1315,15 @@ def self_test(verbose: bool = True) -> int:
     inv = _fixture_inventory(roles)
     bad = 0
     checked = 0
+    forbidden = 0
+
+    # A malformed record is a check nobody can rely on, and unlike a missing
+    # negative control it does not announce itself: an axis pointing at a slug
+    # that no longer exists, or a calibration naming a number the gate never
+    # reports, reads as data and asserts nothing.
+    for problem in library_problems(idioms, roles):
+        print(f"  WRONG  {problem}")
+        bad += 1
 
     for slug, idiom in sorted(idioms.items()):
         patch = synthesize(idiom, inv, roles)
@@ -911,6 +1349,7 @@ def self_test(verbose: bool = True) -> int:
         for mistake in mistakes:
             mistake = dict(mistake)
             mistake["_topology"] = idiom.get("topology", [])
+            mistake["_forbidden_topology"] = idiom.get("forbidden_topology", [])
             broken = apply_mistake(patch, mistake, inv, roles)
             if broken is None:
                 print(f"  WRONG  {slug}/{mistake.get('id')}: the mistake could "
@@ -924,10 +1363,14 @@ def self_test(verbose: bool = True) -> int:
                 bad += 1
                 continue
             checked += 1
+            if mistake.get("do") == "wire":
+                forbidden += 1
             if verbose:
                 print(f"  ok     {slug}/{mistake.get('id')} → {got[0]}")
 
-    print(f"\n{len(idioms)} idioms, {checked} negative controls, {bad} wrong")
+    print(f"\n{len(idioms)} idioms "
+          f"({len(fragments(idioms))} fragments), {checked} negative controls "
+          f"({forbidden} by patching a forbidden cable), {bad} wrong")
     return 1 if bad else 0
 
 
@@ -949,8 +1392,13 @@ def _fixture_inventory(roles: dict) -> dict:
         # still resolve to the same KIND. Without the repeats the mixer's
         # extra jacks fell off the end of the list and the idiom failed its
         # own patch -- a fixture artefact reported as a library fault.
-        ins = ["IN", "V/OCT", "GATE", "CLK", "CV", "TRIG", "TIME", "SPARE"]
-        in_roles = ["Audio", "Pitch", "Gate", "Clock", "Cv", "Trigger", "Cv", "Cv"]
+        # PWM and SYNC sit in the two slots nothing indexes, so the block stays
+        # eight jacks long: the fan-in bump below adds 8 to reach "another jack
+        # of the same kind", and a ninth entry would silently hand a mixer's
+        # second channel a sync input.
+        ins = ["IN", "V/OCT", "GATE", "CLK", "CV", "TRIG", "PWM", "SYNC"]
+        in_roles = ["Audio", "Pitch", "Gate", "Clock", "Cv", "Trigger", "Cv",
+                    "Trigger"]
         outs = ["OUT", "GATE", "EOC", "CV", "SAW", "CLK", "TRIG", "SPARE"]
         out_roles = ["Audio", "Gate", "Trigger", "Cv", "Audio", "Clock",
                      "Trigger", "Cv"]
@@ -967,7 +1415,7 @@ def _fixture_inventory(roles: dict) -> dict:
 
 _PORT_INDEX = {
     "audio_in": 0, "pitch_in": 1, "gate_in": 2, "clock_in": 3, "cv_in": 4,
-    "any_in": 0,
+    "pwm_in": 6, "sync_in": 7, "any_in": 0,
     "audio_out": 0, "gate_out": 1, "cycle_out": 2, "cv_out": 3,
     "clock_out": 5, "any_out": 0,
 }
@@ -1062,6 +1510,13 @@ def main(argv: list[str]) -> int:
 
     unchecked: list[str] = []
     problems = check(patch, inv, idiom, None, unchecked)
+
+    # What ELSE the library recognises here, reported whatever the verdict.
+    # A patch is graded against one idiom and is usually doing more than one
+    # thing; naming the techniques it carries is how somebody finds out the
+    # library saw more of their patch than the line it was judged on.
+    also = [f for f in fragments_present(patch, inv, idioms) if f != slug]
+
     if not problems:
         print(f"  {slug}: holds")
         # A hold with a gap in it says so. Silence here would be the same
@@ -1069,10 +1524,14 @@ def main(argv: list[str]) -> int:
         # be looked at", which are not the same claim.
         for note in unchecked:
             print(f"    (not fully checked) {note}")
+        if also:
+            print(f"    (also carries) {', '.join(also)}")
         return 0
     print(f"  {slug}: not a {slug} patch yet —")
     for p in problems:
         print(f"    - {p}")
+    if also:
+        print(f"    (it does carry) {', '.join(also)}")
     return 1
 
 

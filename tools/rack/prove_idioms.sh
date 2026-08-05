@@ -69,11 +69,26 @@ for entry in "${PROMPTS[@]}"; do
     [ -n "$only" ] && [ "$only" != "$n" ] && continue
     IFS='|' read -r family prompt how <<< "$entry"
 
+    # `resolve_exact` and not `resolve`: there has never been a function by
+    # that name, so this import raised, every prompt came back empty, and all
+    # twelve lines of the report said NO IDIOM RESOLVED whatever the library
+    # did. A harness that reports the same failure for every input is not
+    # reporting on its input, and the empty-string capture hid the traceback.
+    #
+    # stderr is kept and the exit status is checked for that reason: an
+    # unresolved prompt and a broken script must not print the same sentence.
+    err="$LOGS/$(printf '%02d' "$n")-resolve.err"
     slug="$(cd "$HERE" && python3 -c "
 import sys; sys.path.insert(0,'.')
-from idiom_check import resolve
-print(resolve('''$prompt''') or '')
-")"
+from idiom_check import resolve_exact
+print(resolve_exact('''$prompt''') or '')
+" 2>"$err")"
+    if [ $? -ne 0 ]; then
+        printf '%2d. %-9s %-52s RESOLVER BROKE (see %s)\n' \
+            "$n" "$family" "${prompt:0:52}" "$err" | tee -a "$OUT"
+        fail=$((fail + 1))
+        continue
+    fi
     if [ -z "$slug" ]; then
         printf '%2d. %-9s %-52s NO IDIOM RESOLVED\n' "$n" "$family" "${prompt:0:52}" | tee -a "$OUT"
         fail=$((fail + 1))

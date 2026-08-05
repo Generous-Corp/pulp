@@ -135,6 +135,12 @@
       "is": "A voltage scaled and shifted so it lands in the range its destination expects, which is what makes a modulation source usable rather than merely present.",
       "sounds_right_when": "the destination moves across its useful range rather than sitting at an extreme.",
       "source": "Standard practice",
+      "axis": {
+        "family": "voltage-conditioning",
+        "position": "scaled and shifted into range",
+        "set_by": "the processor's gain and offset knobs — a knob, not a cable, so every position on this axis patches identically",
+        "$comment": "A voltage through a processor and on to its destination. Attenuating, inverting and offsetting are the same three jacks; what differs is where the knobs sit. Separate records still earn their place: somebody asking to bring a voltage into range is not asking for an inverter."
+      },
       "at_least": {"attenuator": 1},
       "topology": [
         {"id": "into", "from_module": "any", "from_port": "cv_out",

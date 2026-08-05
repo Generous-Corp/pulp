@@ -21,6 +21,10 @@
    "is": "An oscillator through a filter through an amplifier, with an envelope opening the amplifier — the standard voice everything else is a variation on.",
    "sounds_right_when": "notes have a clear start and end rather than droning, and the filter audibly removes harmonics.",
    "source": "The east-coast signal chain as set out in Strange",
+   "listen_for": {
+    "sounds_like": "a note with a shape: an attack, a body that is duller than the raw waveform, and an ending that the envelope decides rather than the clock",
+    "confusable_with": "a drone with a filter on it, which never stops; the articulation is what separates them"
+   },
    "at_least": {
     "audio_oscillator": 1,
     "filter": 1,
@@ -157,6 +161,18 @@
    "is": "A sequencer supplying both pitch and gate to a voice, so the pattern plays itself in time.",
    "sounds_right_when": "the same phrase repeats in time, with each step clearly articulated.",
    "source": "Standard practice; Strange's chapter on sequential controllers",
+   "listen_for": {
+    "sounds_like": "a phrase that repeats exactly, each step separately articulated, landing on the pulse",
+    "confusable_with": "one held note through perfect wiring — which is what a correctly patched sequencer with unwritten steps produces, and the single most common way this patch disappoints",
+    "expect": [
+     {
+      "field": "pitch.distinct_pitches",
+      "op": ">=",
+      "value": 3,
+      "why": "the steps are the melody; three or fewer distinct pitches means most of them are still at their default"
+     }
+    ]
+   },
    "at_least": {
     "sequencer": 1
    },
@@ -261,12 +277,21 @@
    ],
    "implies": [
     "one oscillator modulating another",
-    "metallic tone",
-    "bell tone"
+    "metallic tone"
    ],
    "is": "One oscillator modulating another's frequency at audio rate, producing sidebands rather than vibrato.",
    "sounds_right_when": "the timbre is metallic or bell-like and changes character with modulation depth, not just pitch.",
    "source": "Chowning's FM synthesis, as practised in modular form",
+   "axis": {
+    "family": "modulation-rate-and-index",
+    "position": "at audio rate, so the movement is heard as timbre",
+    "set_by": "the modulator's rate, and how much of it reaches the frequency input — both knobs; every position on this axis patches a source to an oscillator's frequency input and they sound nothing alike",
+    "neighbours": {
+     "less": "vibrato",
+     "more": "dynamic-fm-index"
+    },
+    "$comment": "Below hearing this same cable is vibrato; with the depth under an envelope it is an FM voice whose timbre is an event. Three records, one structure, because the difference is rate and amount and this checker reads neither."
+   },
    "at_least": {
     "audio_oscillator": 2
    },
@@ -533,6 +558,10 @@
    "is": "A harmonically rich source through resonant filters tuned to formant regions, so the timbre reads as a vowel.",
    "sounds_right_when": "you hear a vowel rather than a filter sweep.",
    "source": "Strange's treatment of formant synthesis with resonant filters",
+   "listen_for": {
+    "sounds_like": "a vowel — two or three fixed resonant regions that stay put in absolute frequency while the note moves under them",
+    "confusable_with": "a filter sweep, where the resonance follows the note; if the vowel changes when you play higher, the formants are tracking and should not be"
+   },
    "at_least": {
     "filter": 2
    },

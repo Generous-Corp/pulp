@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import sys
 
-from idiom_check import load_idioms, resolve_intent
+from idiom_check import fragments_for, load_idioms, resolve_intent
 
 MARKER = "<!--PATCH_VOCABULARY-->"
 
@@ -69,12 +69,29 @@ def render(idioms: dict | None = None) -> str:
         "matches one, build that structure -- the checker asserts it, and a",
         "patch that merely sounds plausible will be rejected by name.",
         "",
+        "Records in the `fragment` family are different in one way: they are",
+        "techniques that live INSIDE a patch rather than patches. A fragment",
+        "never reaches the output on its own -- the host patch does that -- so",
+        "build one on top of a whole idiom, never instead of it.",
+        "",
     ]
     for family in sorted(families):
         out.append(f"## {family}")
         for slug, idiom in families[family]:
             out.append(f"### {slug}")
             out.append(f"    {idiom.get('is', '')}")
+            if idiom.get("kind") == "fragment":
+                hosts = idiom.get("hosts")
+                out.append(f"    fragment: fills the {idiom.get('slot')} slot of "
+                           + (", ".join(hosts) if hosts else "any patch"))
+            axis = idiom.get("axis")
+            if axis:
+                near = ", ".join(f"{d}: {s}" for d, s in
+                                 sorted((axis.get("neighbours") or {}).items()))
+                out.append(f"    one position ({axis.get('position')}) on the "
+                           f"{axis.get('family')} continuum"
+                           + (f" — {near}" if near else "")
+                           + f"; what moves along it is {axis.get('set_by')}")
             need = needed_modules(idiom)
             if need:
                 out.append("    modules: " +
@@ -88,6 +105,12 @@ def render(idioms: dict | None = None) -> str:
             right = idiom.get("sounds_right_when")
             if right:
                 out.append(f"    right when: {right}")
+            listen = idiom.get("listen_for") or {}
+            if listen.get("sounds_like"):
+                out.append(f"    listen for: {listen['sounds_like']}")
+            if listen.get("confusable_with"):
+                out.append(f"    not to be confused with: "
+                           f"{listen['confusable_with']}")
             mistakes = idiom.get("common_mistakes") or []
             if mistakes:
                 out.append("    do not:")
@@ -140,6 +163,55 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
     if need:
         listed = ", ".join(f"{n} {role}" for role, n in sorted(need.items()))
         lines += ["", f"It needs at least: {listed}."]
+
+    # An idiom on a continuum is one position on it, and the neighbouring
+    # position is usually a KNOB away. Saying so is the difference between
+    # the model building a vibrato and the model building an FM voice when
+    # somebody asked for one and got the other.
+    axis = idiom.get("axis")
+    if axis:
+        lines += ["", f"This is one position ({axis['position']}) on the "
+                      f"{axis['family']} continuum. What moves along it is "
+                      f"{axis['set_by']}."]
+        for direction, other in sorted((axis.get("neighbours") or {}).items()):
+            lines.append(f"  - {direction}: {other} — "
+                         f"{idioms[other].get('is', '')}")
+
+    if idiom.get("kind") == "fragment":
+        hosts = idiom.get("hosts")
+        lines += ["", f"This is a FRAGMENT: it fills the {idiom['slot']} slot "
+                      f"of " + (", ".join(hosts) if hosts else "a patch") +
+                      ". It does not reach the output by itself; build it on "
+                      "top of a whole patch."]
+    else:
+        # Two tiers, because listing two dozen techniques in full is the same
+        # as listing none: the model skims it. A fragment that NAMES this host
+        # was written with it in mind and gets its sentence; the rest are one
+        # line of slugs, enough to be looked up in the library above if the
+        # request actually asks for one.
+        named = [f for f in fragments_for(slug, idioms) if idioms[f].get("hosts")]
+        general = [f for f in fragments_for(slug, idioms)
+                   if not idioms[f].get("hosts")]
+        if named:
+            lines += ["", "Fragments written for this patch, if the request "
+                          "asks for one — do not add them uninvited:"]
+            for f in named:
+                lines.append(f"  - {f} ({idioms[f]['slot']}): "
+                             f"{idioms[f].get('is', '')}")
+        if general:
+            by_slot: dict[str, list[str]] = {}
+            for f in general:
+                by_slot.setdefault(idioms[f]["slot"], []).append(f)
+            lines += ["", "Other fragments that would compose with it, by slot "
+                          "(again, only if asked for):"]
+            for slot, names in sorted(by_slot.items()):
+                lines.append(f"  {slot}: {', '.join(names)}")
+
+    listen = idiom.get("listen_for") or {}
+    if listen.get("sounds_like"):
+        lines += ["", f"It should sound like: {listen['sounds_like']}"]
+    if listen.get("confusable_with"):
+        lines.append(f"It is NOT: {listen['confusable_with']}")
     return "\n".join(lines) + "\n"
 
 

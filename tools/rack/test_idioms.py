@@ -417,6 +417,200 @@ def capture_vendor() -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# the library's own lint, broken on purpose
+#
+# `library_problems` is the only check here that examines the RECORDS rather
+# than a patch, and it is the one most likely to quietly stop working: it
+# passes on a clean library, and a clean library is exactly what it would
+# report if it had been disabled. So each rule is given a library with that one
+# fault deliberately made in it, and has to name the right thing.
+#
+# The faults are made on a COPY loaded in memory. Nothing on disk is touched.
+
+def _mutate(fn):
+    """A copy of the real library with one thing wrong with it."""
+    import copy
+    idioms = copy.deepcopy(idiom_check.load_idioms())
+    fn(idioms)
+    return idioms
+
+
+def _drop(d: dict, key: str):
+    d.pop(key, None)
+
+
+LINT_CASES = [
+    ("a kind nobody defined",
+     lambda i: i["vibrato"].__setitem__("kind", "halfway"),
+     "which is not one of"),
+
+    ("a fragment in a slot that does not exist",
+     lambda i: i["portamento"].__setitem__("slot", "vibes"),
+     "not one of"),
+
+    ("a fragment demanding the audible tail",
+     lambda i: i["portamento"]["topology"].append(
+         {"id": "heard", "from_module": "audio_oscillator",
+          "from_port": "audio_out", "to_module": "output",
+          "to_port": "audio_in", "describe": "reaches the interface"}),
+     "belongs to the host"),
+
+    ("a fragment decorating an idiom that was renamed away",
+     lambda i: i["delayed-vibrato"].__setitem__("hosts", ["subtractive-voyce"]),
+     "which is not an idiom"),
+
+    ("a fragment decorating another fragment",
+     lambda i: i["delayed-vibrato"].__setitem__("hosts", ["portamento"]),
+     "itself a fragment"),
+
+    ("two records claiming one phrase",
+     lambda i: i["krell"]["names"].append("portamento"),
+     "both claim the phrase"),
+
+    ("two records asserting the same structure",
+     lambda i: i.__setitem__("krell-again", dict(i["krell"], slug="krell-again",
+                                                 names=["krell again"])),
+     "asserts exactly the structure"),
+
+    ("an axis that does not say what moves along it",
+     lambda i: _drop(i["vibrato"]["axis"], "set_by"),
+     "what control moves along it"),
+
+    ("an axis pointing at an idiom that is not on it",
+     lambda i: i["vibrato"]["axis"]["neighbours"].__setitem__("more", "krell"),
+     "is on None"),
+
+    ("two records claiming one position on an axis",
+     lambda i: i["fm-voice"]["axis"].__setitem__(
+         "position", i["vibrato"]["axis"]["position"]),
+     "claim the same position"),
+
+    ("a calibration predicting a number the gate does not report",
+     lambda i: i["filter-ping"]["listen_for"]["expect"][0].__setitem__(
+         "field", "onsets.groove"),
+     "the gate does not measure"),
+
+    # The load-bearing one. A calibration says what a technique should sound
+    # like; the idiom's own behaviour flags say what the gate will demand of
+    # it. Both are guesses, and two guesses about the same number that cannot
+    # both be true is a fact about the library nobody had to listen to find.
+    ("a calibration that contradicts the idiom's own behaviour flag",
+     lambda i: i["additive-partials"]["listen_for"]["expect"].append(
+         {"field": "onsets.per_second", "op": ">=", "value": 4.0,
+          "why": "deliberately at odds with `sustained`"}),
+     "cannot both be satisfied"),
+
+    ("a forbidden connection with no control that ever patches one",
+     lambda i: i["self-oscillating-filter-voice"].__setitem__(
+         "common_mistakes",
+         [m for m in i["self-oscillating-filter-voice"]["common_mistakes"]
+          if m.get("do") != "wire"]),
+     "holds by default"),
+]
+
+
+def check_library_lint() -> int:
+    roles = idiom_check.load_roles()
+    bad = 0
+    if idiom_check.library_problems(idiom_check.load_idioms(), roles):
+        print("  WRONG  the library as shipped does not pass its own lint")
+        bad += 1
+    for name, break_it, expect in LINT_CASES:
+        got = idiom_check.library_problems(_mutate(break_it), roles)
+        if not got:
+            print(f"  WRONG  {name}: the lint said nothing")
+            bad += 1
+        elif not any(expect in g for g in got):
+            print(f"  WRONG  {name}: the lint complained, but not about "
+                  f"{expect!r}: {got}")
+            bad += 1
+        else:
+            print(f"  ok     {name}")
+    return bad
+
+
+def check_fragments() -> int:
+    """A fragment is composable, askable, and recognised inside a whole patch.
+
+    Three claims the fragment schema makes that nothing else here tests. The
+    third is the one that matters: a fragment that cannot be found in a patch
+    that contains it is a record the checker will never once consult.
+    """
+    idioms = idiom_check.load_idioms()
+    roles = idiom_check.load_roles()
+    inv = vendor_inventory()
+    bad = 0
+
+    frags = idiom_check.fragments(idioms)
+    if len(frags) < 10:
+        print(f"  WRONG  only {len(frags)} fragments; the composable half of "
+              f"the library did not load")
+        bad += 1
+    else:
+        print(f"  ok     {len(frags)} fragments load, "
+              f"{len(idiom_check.wholes(idioms))} whole patches")
+
+    # Askable. A fragment reached by NAME may gate, exactly as a whole idiom
+    # does -- "add a glide" is a request with a checkable answer.
+    for prompt, want in [("give it some portamento", "portamento"),
+                         ("add a delayed vibrato to the lead", "delayed-vibrato"),
+                         ("sequence the brightness instead of the pitch",
+                          "timbre-sequencing")]:
+        got = idiom_check.resolve_intent(prompt, idioms)
+        if got.slug != want:
+            print(f"  WRONG  {prompt!r} resolved to {got.slug!r}, not {want!r}")
+            bad += 1
+        elif not got.gating:
+            print(f"  WRONG  {prompt!r} named {want} and still cannot gate")
+            bad += 1
+        else:
+            print(f"  ok     {want:<20} <- {prompt[:44]}")
+
+    # Recognised inside a host. A textbook subtractive voice built from a bare
+    # Rack install, with a slew put in the pitch line: the host still holds,
+    # and the fragment is FOUND rather than having to be asked for.
+    #
+    # The control is the same patch without the slew. If the fragment were
+    # reported either way, "carries a portamento" would mean nothing.
+    def voice(with_glide: bool):
+        # Fundamental's only slew limiter is `Process`, which the recording
+        # has no port map for -- so this doubles as the case where a fragment
+        # is recognised through a module nobody has cartographed.
+        mods = [("Fundamental", "SEQ3"), ("Fundamental", "VCO"),
+                ("Fundamental", "VCF"), ("Fundamental", "ADSR"),
+                ("Fundamental", "VCA"), ("Fundamental", "LFO"),
+                ("Fundamental", "Process"), AUDIO2]
+        wires = [(1, 4, 4, 4),      # Step 1 fires the envelope
+                 (6, 3, 1, 1),      # the LFO's square clocks the sequencer
+                 (2, 2, 3, 3),      # sawtooth into the filter
+                 (4, 0, 5, 0),      # envelope opens the amplifier
+                 (3, 0, 5, 2),      # filter through the amplifier
+                 (5, 0, 8, 0)]      # and out
+        wires += ([(1, 1, 7, 0), (7, 0, 2, 0)] if with_glide
+                  else [(1, 1, 2, 0)])
+        return _p(mods, wires)
+
+    for with_glide in (True, False):
+        patch = voice(with_glide)
+        held = not idiom_check.check(patch, inv, idioms["sequenced-voice"], roles)
+        found = idiom_check.fragments_present(patch, inv, idioms, roles)
+        if not held:
+            print(f"  WRONG  the host voice does not hold with_glide="
+                  f"{with_glide}: "
+                  f"{idiom_check.check(patch, inv, idioms['sequenced-voice'], roles)}")
+            bad += 1
+        elif ("portamento" in found) != with_glide:
+            print(f"  WRONG  with_glide={with_glide} but the fragments found "
+                  f"were {found}")
+            bad += 1
+        else:
+            print(f"  ok     a sequenced voice {'with' if with_glide else 'without'}"
+                  f" a glide {'is' if with_glide else 'is not'} reported as "
+                  f"carrying portamento")
+    return bad
+
+
 def main() -> int:
     if "--capture-vendor" in sys.argv:
         return capture_vendor()
@@ -451,6 +645,12 @@ def main() -> int:
         bad += 1
     else:
         print(f"  ok     {named} named, {implied} implied")
+
+    print("\nthe library's own lint can fail:")
+    bad += check_library_lint()
+
+    print("\nfragments compose:")
+    bad += check_fragments()
 
     print("\nthe modules everyone actually has:")
     bad += check_vendor(idioms)

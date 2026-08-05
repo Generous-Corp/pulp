@@ -1,0 +1,425 @@
+{
+  "$comment": [
+    "Whole patches derived from worked examples -- the ARP 2600 owner's manual's",
+    "patch section, and Strange's chapters on voices built from these parts.",
+    "",
+    "THE FILE IS PROVENANCE; THE FAMILY IS TAXONOMY. Every record here declares",
+    "its own `family`, so a bell goes to texture and a self-oscillating filter",
+    "goes to voice, whatever book they arrived in. Filing them under where they",
+    "were found instead would group them by the one property nobody browsing the",
+    "library is looking for. Where each came from is in `source`, which is where",
+    "provenance belongs.",
+    "",
+    "THE 2600 WAS NORMALLED AND A RACK IS NOT. Its worked patches assume a set",
+    "of connections the instrument had already made -- the keyboard to the",
+    "oscillators, the oscillators to the filter, the filter to the amplifier --",
+    "and describe only the cables you add on top. Translated to an unnormalled",
+    "rack, every one of those assumed connections becomes a requirement, which",
+    "is why several records here look longer than the patch they came from.",
+    "",
+    "Techniques and facts are not anybody's property; the words are ours."
+  ],
+
+  "idioms": [
+    {
+      "slug": "bell-tone",
+      "family": "texture",
+      "names": ["bell tone", "gong", "bell patch"],
+      "implies": ["bell like strike", "metallic percussion", "struck metal"],
+      "is": "Two oscillators multiplied to give an inharmonic spectrum, then struck: the sum and difference tones belong to no scale, and an envelope on the filter gives them an attack and a decay.",
+      "sounds_right_when": "the strike reads as metal — a definite attack, a long inharmonic ring, and no clear sense of a single note.",
+      "source": "The ARP 2600 owner's manual's ring-modulator patches",
+      "at_least": {"audio_oscillator": 2, "amplifier": 1, "filter": 1, "envelope": 1},
+      "topology": [
+        {"id": "carrier", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "one oscillator has to be the carrier"},
+        {"id": "modulator", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "amplifier", "to_port": "cv_in", "different_module": true,
+         "describe": "the other has to multiply it at audio rate — that multiplication is where the inharmonic partials come from"},
+        {"id": "into-the-body", "from_module": "amplifier", "from_port": "audio_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "the multiplied signal has to reach a filter, which is the bell's body"},
+        {"id": "struck", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "filter", "to_port": "cv_in",
+         "describe": "an envelope has to strike it — without one the inharmonic spectrum simply drones, which is a texture and not a bell"},
+        {"id": "heard", "from_module": "filter", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the result has to reach the audio path"}
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a struck bell or gong: a bright clangorous attack that decays into a smaller number of ringing partials, none of which agrees with the others about what note this is",
+        "confusable_with": "a detuned pair, which beats but stays harmonic; if you can hum the note, the two oscillators are being summed rather than multiplied",
+        "expect": [
+          {"field": "pitch.voiced_fraction", "op": "<=", "value": 0.6,
+           "why": "an inharmonic spectrum should defeat a pitch tracker for much of the run; a confidently tracked pitch throughout is evidence the multiplication is not happening"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "no-modulator", "do": "cut", "requirement": "modulator",
+         "message": "nothing multiplies at audio rate, so the spectrum stays harmonic and this is a filtered tone"},
+        {"id": "unstruck", "do": "cut", "requirement": "struck",
+         "message": "nothing strikes it, so the bell drones instead of ringing"},
+        {"id": "no-carrier", "do": "cut", "requirement": "carrier",
+         "message": "no carrier passes through the multiplier"},
+        {"id": "no-body", "do": "cut", "requirement": "into-the-body",
+         "message": "the multiplied signal never reaches the filter"}
+      ]
+    },
+
+    {
+      "slug": "external-audio-processing",
+      "family": "utility",
+      "names": ["external audio", "process external audio", "external input"],
+      "implies": ["run something through the rack", "process an incoming signal", "use the rack as an effect"],
+      "is": "Audio brought in from outside the rack, processed, and sent back out, so the rack acts on a sound it did not generate.",
+      "sounds_right_when": "you recognise the incoming sound and hear what the rack did to it.",
+      "source": "The ARP 2600 owner's manual's external-input and preamp patches",
+      "at_least": {"output": 1, "filter": 1},
+      "topology": [
+        {"id": "in-from-outside", "from_module": "output", "from_port": "audio_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "the interface's input has to reach something — an audio interface is a way IN as well as a way out, and this is the half people forget"},
+        {"id": "back-out", "from_module": "filter", "from_port": "audio_out",
+         "to_module": "output", "to_port": "audio_in",
+         "describe": "the processed signal has to go back out, or the rack is listening and saying nothing"}
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "the source, still identifiable, wearing whatever the rack put on it — if you cannot tell what went in, the processing has gone too far to be called processing",
+        "confusable_with": "a patch that generates its own sound and happens to have an interface in it"
+      },
+      "common_mistakes": [
+        {"id": "nothing-comes-in", "do": "cut", "requirement": "in-from-outside",
+         "message": "no external audio reaches the rack"},
+        {"id": "nothing-goes-out", "do": "cut", "requirement": "back-out",
+         "message": "the processed signal never returns to the output"}
+      ]
+    },
+
+    {
+      "slug": "self-oscillating-filter-voice",
+      "family": "voice",
+      "names": ["self oscillating filter", "filter as an oscillator", "resonant sine"],
+      "implies": ["make the filter sing", "sine from the filter", "filter with nothing going into it"],
+      "is": "A resonant filter with nothing patched into its audio input, played by voltage at its cutoff: the resonance itself is the sound, which is a near-sine tone with no oscillator in the patch.",
+      "sounds_right_when": "you hear a pure, slightly unstable sine whose pitch follows the cutoff voltage.",
+      "source": "The ARP 2600 owner's manual, on running the filter's resonance up until it sings",
+      "at_least": {"filter": 1, "amplifier": 1, "envelope": 1},
+      "topology": [
+        {"id": "played", "from_module": "any", "from_port": "cv_out",
+         "to_module": "filter", "to_port": "cv_in",
+         "describe": "a voltage has to play the cutoff, because the cutoff IS the pitch here"},
+        {"id": "the-filter-is-the-source", "from_module": "filter", "from_port": "audio_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "the filter's output has to reach an amplifier"},
+        {"id": "articulated", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "an envelope has to open the amplifier, or the tone never stops"},
+        {"id": "heard", "from_module": "amplifier", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the amplifier has to reach the audio path"}
+      ],
+      "forbidden_topology": [
+        {"id": "nothing-feeds-it", "from_module": "any", "from_port": "any_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "nothing may be patched into the filter's audio input — the moment something is, this is an ordinary filtered voice and the resonance is a colour rather than the sound"}
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a clean sine that is not quite clean: it wavers slightly, it does not track pitch perfectly across the range, and it thins out at the extremes in a way an oscillator does not",
+        "confusable_with": "an oscillator through a resonant filter, which is steadier and richer; the tell is that this one has no oscillator to turn off",
+        "expect": [
+          {"field": "pitch.voiced_fraction", "op": ">=", "value": 0.5,
+           "why": "a self-oscillating filter is close to a pure sine, so a pitch tracker should hold onto it for most of the run"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "fed", "do": "wire", "requirement": "nothing-feeds-it",
+         "message": "something is patched into the filter's audio input, so the resonance is filtering a sound rather than being one"},
+        {"id": "unplayed", "do": "cut", "requirement": "played",
+         "message": "nothing plays the cutoff, so the tone sits on one pitch"},
+        {"id": "unheard", "do": "cut", "requirement": "the-filter-is-the-source",
+         "message": "the filter never reaches an amplifier"}
+      ]
+    },
+
+    {
+      "slug": "randomly-gated-noise",
+      "family": "texture",
+      "names": ["random noise bursts", "gated noise"],
+      "implies": ["bursts of noise", "irregular hiss", "noise that comes and goes"],
+      "is": "Noise through an amplifier opened by an envelope that an unpredictable source fires, so the texture arrives in bursts nobody can anticipate.",
+      "sounds_right_when": "the bursts are clearly separate events and their spacing has no pattern you can hold onto.",
+      "source": "The ARP 2600 owner's manual's noise and sample-and-hold patches",
+      "at_least": {"noise": 1, "random": 1, "envelope": 1, "amplifier": 1},
+      "topology": [
+        {"id": "noise-in", "from_module": "noise", "from_port": "any_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "noise has to pass through the amplifier"},
+        {"id": "chance-fires", "from_module": "random", "from_port": "gate_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "an unpredictable source has to fire the envelope — a steady clock here gives a rhythm, which is a different patch"},
+        {"id": "envelope-opens", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "the envelope has to open the amplifier, or the noise runs continuously"},
+        {"id": "heard", "from_module": "amplifier", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the gated noise has to reach the audio path"}
+      ],
+      "behaviour": {"keeps_going": true, "varies_timing": true},
+      "listen_for": {
+        "sounds_like": "handfuls of gravel, or rain on a roof: separate events, each one broadband, arriving at intervals you cannot predict or tap along with",
+        "confusable_with": "continuous filtered noise, which has no events in it at all",
+        "expect": [
+          {"field": "onsets.periodicity", "op": "<=", "value": 0.5,
+           "why": "if the bursts lock to a strong pulse, something steady is firing the envelope and the chance source is not reaching it"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "continuous", "do": "cut", "requirement": "envelope-opens",
+         "message": "nothing gates the noise, so it runs continuously instead of arriving in bursts"},
+        {"id": "unfired", "do": "cut", "requirement": "chance-fires",
+         "message": "nothing fires the envelope, so there are no bursts"},
+        {"id": "no-noise", "do": "cut", "requirement": "noise-in",
+         "message": "no noise passes through the amplifier"}
+      ]
+    },
+
+    {
+      "slug": "filter-ping",
+      "family": "rhythm",
+      "names": ["filter ping", "pinged filter"],
+      "implies": ["strike the filter", "pitched blip", "resonant blip"],
+      "is": "A trigger sent into a resonant filter's audio input, so each pulse excites the resonance and rings out as a pitched blip — a percussive voice with no oscillator and no envelope.",
+      "sounds_right_when": "each hit is a short pitched ring whose pitch is the cutoff and whose length is the resonance.",
+      "source": "Standard practice with a resonant filter; the same excitation idea as a struck string",
+      "at_least": {"clock": 1, "filter": 1},
+      "topology": [
+        {"id": "struck", "from_module": "clock", "from_port": "gate_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "the trigger has to go into the filter's AUDIO input — into the cutoff it is a sweep, and nothing rings"},
+        {"id": "heard", "from_module": "filter", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the filter has to reach the audio path"}
+      ],
+      "behaviour": {"rhythmic": true, "keeps_going": true},
+      "listen_for": {
+        "sounds_like": "a woodblock or a tuned drum: a click with a pitched tail, the tail getting longer as resonance rises until it stops being a hit and starts being a note",
+        "confusable_with": "an oscillator with a short envelope, which has a body the whole way through; a ping is almost all decay",
+        "expect": [
+          {"field": "dynamics.duty_cycle", "op": "<=", "value": 0.7,
+           "why": "a ping decays to nothing between hits; sound present for nearly the whole run means the resonance is set high enough to be a drone"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "unstruck", "do": "cut", "requirement": "struck",
+         "message": "nothing strikes the filter, so there is nothing to ring"},
+        {"id": "unheard", "do": "cut", "requirement": "heard",
+         "message": "the filter never reaches the audio path"}
+      ]
+    },
+
+    {
+      "slug": "dynamic-fm-index",
+      "family": "voice",
+      "names": ["dynamic fm", "swept index", "fm with an index envelope"],
+      "implies": ["fm that gets brighter on the attack", "modulation depth on an envelope", "brassy attack"],
+      "is": "Audio-rate frequency modulation whose depth is itself opened by an envelope, so each note starts rich in sidebands and settles toward the carrier as the envelope falls.",
+      "sounds_right_when": "the attack is markedly brighter and more complex than the sustain, without a filter anywhere in the patch.",
+      "source": "Strange on modulation index as the parameter that governs an FM timbre",
+      "at_least": {"audio_oscillator": 2, "amplifier": 1, "envelope": 1},
+      "axis": {
+        "family": "modulation-rate-and-index",
+        "position": "audio rate, with the depth itself under an envelope",
+        "set_by": "the modulator's rate and the amount of it reaching the carrier's frequency input — two knobs, and every position on this axis patches from an oscillator to a frequency input",
+        "neighbours": {"less": "fm-voice"},
+        "$comment": "One structure, three sounds. Below hearing the movement is heard AS movement, which is vibrato; above it the same cable produces sidebands, which is FM; and putting the depth under an envelope makes the timbre an event rather than a setting. A checker reading cables sees one technique, which is why these are three records on one axis rather than one skeleton."
+      },
+      "topology": [
+        {"id": "modulator-through-a-vca", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "the modulator has to pass through an amplifier — that amplifier is the index"},
+        {"id": "index-envelope", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "an envelope has to open it, or the index is a knob and every note has the same brightness"},
+        {"id": "into-the-carrier", "from_module": "amplifier", "from_port": "audio_out",
+         "to_module": "audio_oscillator", "to_port": "cv_in",
+         "describe": "the gated modulation has to reach a carrier's frequency input"},
+        {"id": "heard", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the carrier has to reach the audio path"}
+      ],
+      "behaviour": {"spectrally_varying": true},
+      "listen_for": {
+        "sounds_like": "a brass-like note: a bright, slightly harsh attack that mellows into a much simpler sustain, all of it happening with no filter in the patch",
+        "confusable_with": "an envelope on a filter, which removes harmonics that were there; this adds harmonics that were not",
+        "expect": [
+          {"field": "spectrum.centroid_range_octaves", "op": ">=", "value": 0.5,
+           "why": "the index sweep should move the brightness by at least a half-octave; less than that and the envelope is barely reaching the amplifier"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "static-index", "do": "cut", "requirement": "index-envelope",
+         "message": "nothing opens the index amplifier, so every note has the same brightness"},
+        {"id": "no-modulation", "do": "cut", "requirement": "into-the-carrier",
+         "message": "the gated modulation never reaches a carrier, so there is no FM"},
+        {"id": "no-modulator", "do": "cut", "requirement": "modulator-through-a-vca",
+         "message": "no modulator passes through the index amplifier"}
+      ]
+    },
+
+    {
+      "slug": "following-filter",
+      "family": "modulation",
+      "names": ["following filter", "auto wah"],
+      "implies": ["the filter opens when it gets loud", "filter follows the level", "wah that reacts"],
+      "is": "A signal's own loudness converted to a control voltage and used to open the filter it is passing through, so the sound opens itself on every attack.",
+      "sounds_right_when": "louder moments are brighter, and the brightness follows the playing rather than a clock.",
+      "source": "Strange on envelope following as a source of control voltage",
+      "at_least": {"slew": 1, "filter": 1},
+      "topology": [
+        {"id": "audio-to-the-follower", "from_module": "any", "from_port": "audio_out",
+         "to_module": "slew", "to_port": "audio_in",
+         "describe": "audio has to reach the follower"},
+        {"id": "follower-to-cutoff", "from_module": "slew", "from_port": "cv_out",
+         "to_module": "filter", "to_port": "cv_in",
+         "describe": "the followed level has to open the filter — that link is the entire technique"},
+        {"id": "audio-through-the-filter", "from_module": "any", "from_port": "audio_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "audio has to pass through the filter it is opening, or the patch is following one thing and brightening another"}
+      ],
+      "behaviour": {"spectrally_varying": true},
+      "listen_for": {
+        "sounds_like": "the sound opening on each attack and closing as it dies away — the timbre tied to the dynamics rather than to any clock",
+        "confusable_with": "an envelope on the filter, which opens by the same amount every time regardless of how loud the note is",
+        "expect": [
+          {"field": "spectrum.centroid_cv", "op": ">=", "value": 0.15,
+           "why": "if the brightness barely moves, the follower's output is not reaching the cutoff with any range"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "controls-nothing", "do": "cut", "requirement": "follower-to-cutoff",
+         "message": "the followed level never reaches the filter"},
+        {"id": "nothing-to-follow", "do": "cut", "requirement": "audio-to-the-follower",
+         "message": "no audio reaches the follower"},
+        {"id": "nothing-filtered", "do": "cut", "requirement": "audio-through-the-filter",
+         "message": "no audio passes through the filter being opened"}
+      ]
+    },
+
+    {
+      "slug": "self-modulated-oscillator",
+      "family": "texture",
+      "names": ["self modulation", "oscillator feedback"],
+      "implies": ["oscillator modulating itself", "feedback into the oscillator", "screaming oscillator"],
+      "is": "An oscillator's output returned to its own frequency input, so it modulates itself and its waveform becomes something no waveform switch offers.",
+      "sounds_right_when": "the tone is harsh and continuous, and small changes in the return amount change its character completely.",
+      "source": "Strange on feedback applied to a control input",
+      "at_least": {"audio_oscillator": 1},
+      "topology": [
+        {"id": "feeds-itself", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "audio_oscillator", "to_port": "cv_in", "same_module": true,
+         "describe": "the oscillator's output has to reach its OWN frequency input — a second oscillator doing it is ordinary FM"},
+        {"id": "heard", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the oscillator has to reach the audio path"}
+      ],
+      "behaviour": {},
+      "listen_for": {
+        "sounds_like": "a raw, buzzing tone that gets thicker and less stable as the return rises, eventually losing its pitch altogether",
+        "confusable_with": "a waveshaper, which adds harmonics predictably; self-modulation goes unstable and does not come back gracefully"
+      },
+      "common_mistakes": [
+        {"id": "no-feedback", "do": "cut", "requirement": "feeds-itself",
+         "message": "the oscillator does not modulate itself, so this is a plain waveform"},
+        {"id": "unheard", "do": "cut", "requirement": "heard",
+         "message": "the oscillator never reaches the audio path"}
+      ]
+    },
+
+    {
+      "slug": "self-clocked-melody",
+      "family": "generative",
+      "names": ["self clocked melody", "note picks the next note"],
+      "implies": ["each note chooses the next pitch", "melody that generates itself", "notes that follow each other"],
+      "is": "A cycling function generator that samples a new pitch every time it finishes, so the patch plays a melody it decides on as it goes, one note at a time.",
+      "sounds_right_when": "notes arrive continuously, each at a new pitch, with nobody having written the sequence.",
+      "source": "Standard function-generator practice; the same self-clocking loop as the krell patch, with the sampled voltage choosing pitch rather than duration",
+      "at_least": {"function_generator": 1, "sample_and_hold": 1, "audio_oscillator": 1, "amplifier": 1},
+      "topology": [
+        {"id": "retrigger", "from_module": "function_generator", "from_port": "cycle_out",
+         "to_module": "function_generator", "to_port": "gate_in", "same_module": true,
+         "describe": "the generator has to retrigger itself, or the patch plays one note and stops"},
+        {"id": "note-ends-picks-next", "from_module": "function_generator", "from_port": "cycle_out",
+         "to_module": "sample_and_hold", "to_port": "clock_in",
+         "describe": "the end of each note has to take a new sample — that is what makes the melody self-generated rather than sequenced"},
+        {"id": "picked-pitch-plays", "from_module": "sample_and_hold", "from_port": "cv_out",
+         "to_module": "audio_oscillator", "to_port": "pitch_in",
+         "describe": "the held voltage has to reach a pitch input"},
+        {"id": "articulated", "from_module": "function_generator", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "the generator has to open an amplifier, or the notes run together into a glide"}
+      ],
+      "behaviour": {"keeps_going": true, "melodic": true},
+      "listen_for": {
+        "sounds_like": "an unbroken line of separate notes at unrelated pitches, evenly spaced unless something is randomising the generator's time as well",
+        "confusable_with": "a krell, where what the sampled voltage sets is the DURATION; if the pitches repeat and the timing wanders, the cable is on the wrong input",
+        "expect": [
+          {"field": "pitch.distinct_pitches", "op": ">=", "value": 3,
+           "why": "the sampled voltage should reach at least three pitches; one or two means the sample-and-hold is not being clocked"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "plays-once", "do": "cut", "requirement": "retrigger",
+         "message": "the generator never retriggers, so the patch plays a single note"},
+        {"id": "one-pitch", "do": "cut", "requirement": "note-ends-picks-next",
+         "message": "nothing clocks the sample-and-hold, so every note is the same pitch"},
+        {"id": "unpitched", "do": "cut", "requirement": "picked-pitch-plays",
+         "message": "the sampled voltage never reaches a pitch input"},
+        {"id": "unarticulated", "do": "cut", "requirement": "articulated",
+         "message": "nothing opens an amplifier, so the notes run together"}
+      ]
+    },
+
+    {
+      "slug": "additive-partials",
+      "family": "texture",
+      "names": ["additive", "additive partials"],
+      "implies": ["build the sound from partials", "each harmonic on its own envelope", "stack of tuned oscillators"],
+      "is": "Several oscillators, each through its own amplifier with its own envelope, summed — so the partials of the sound come and go independently and the timbre is built rather than filtered.",
+      "sounds_right_when": "the balance between the partials changes over the note, and no filter is doing it.",
+      "source": "Strange on additive synthesis with an independent envelope per partial",
+      "at_least": {"audio_oscillator": 3, "amplifier": 3, "mixer": 1, "envelope": 1},
+      "topology": [
+        {"id": "partial-through-a-vca", "from_module": "audio_oscillator", "from_port": "audio_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "each partial has to pass through its own amplifier"},
+        {"id": "its-own-envelope", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "an envelope has to control that amplifier — without one the partials cannot move against each other, which is the whole point"},
+        {"id": "summed", "from_module": "amplifier", "from_port": "audio_out",
+         "to_module": "mixer", "to_port": "audio_in",
+         "describe": "the partials have to be summed"}
+      ],
+      "behaviour": {"sustained": true},
+      "listen_for": {
+        "sounds_like": "a tone whose colour shifts from the inside, as though parts of it were being played separately — quite unlike a filter, which moves everything at once and in one direction",
+        "confusable_with": "a drone cluster, where the oscillators are simply summed and their balance is fixed",
+        "expect": [
+          {"field": "spectrum.centroid_cv", "op": ">=", "value": 0.15,
+           "why": "independent envelopes on the partials should move the brightness; a flat centroid means they are all opening together"}
+        ]
+      },
+      "common_mistakes": [
+        {"id": "fixed-balance", "do": "cut", "requirement": "its-own-envelope",
+         "message": "the partials have no envelopes, so their balance never changes and this is a drone cluster"},
+        {"id": "unsummed", "do": "cut", "requirement": "summed",
+         "message": "the partials are never summed"},
+        {"id": "no-partials", "do": "cut", "requirement": "partial-through-a-vca",
+         "message": "no oscillator passes through an amplifier"}
+      ]
+    }
+  ]
+}

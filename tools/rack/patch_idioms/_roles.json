@@ -339,6 +339,31 @@
         "3"
       ]
     },
+    "sync_in": {
+      "$comment": "LABELS ONLY, DELIBERATELY. A sync jack is cartographed as Trigger, and so are gate and clock inputs, so admitting the role here would make hard sync indistinguishable from firing an envelope -- and the technique's whole content is which jack the cable lands on. Every sync jack in a real library publishes the word: Fundamental and Bogaudio write \"Sync\", Befaco writes \"Hard Sync\" and \"Hard sync\". A module that spells it some other way will fail the requirement rather than pass it silently, which is the right way round.",
+      "ports": [],
+      "labels": [
+        "SYNC",
+        "SYNC IN",
+        "HARD SYNC",
+        "HARDSYNC",
+        "RESET"
+      ]
+    },
+    "pwm_in": {
+      "$comment": "Labels only, for the same reason: a pulse-width input is cartographed as Cv like every other modulation jack, so modulating width and modulating pitch would be one requirement. The spellings are the ones vendors publish -- \"Pulse width modulation\", \"Pulse width CV\", \"PWM\".",
+      "ports": [],
+      "labels": [
+        "PWM",
+        "PW",
+        "WIDTH",
+        "WIDTH CV",
+        "PULSE WIDTH",
+        "PULSE WIDTH CV",
+        "PULSE WIDTH MODULATION",
+        "SQUARE PULSE WIDTH CV"
+      ]
+    },
     "cycle_out": {
       "ports": [
         "Gate",
