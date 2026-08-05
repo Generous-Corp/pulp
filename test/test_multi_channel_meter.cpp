@@ -1,6 +1,7 @@
 #include <pulp/signal/multi_channel_meter.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+#include "support/audio_test_signals.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -8,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp::signal;
@@ -15,10 +17,10 @@ using namespace pulp::signal;
 TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after prepare",
           "[signal][meter][rt-safety]") {
     MultiChannelMeter meter;
-    meter.prepare(1000.0f, 2);
+    meter.prepare(48000.0f, 2);
 
-    std::array<float, 10> left{};
-    std::array<float, 10> right{};
+    std::array<float, 4800> left{};
+    std::array<float, 4800> right{};
     for (std::size_t i = 0; i < left.size(); ++i) {
         left[i] = (i == 3) ? 1.1f : 0.25f;
         right[i] = (i % 2 == 0) ? -0.25f : 0.25f;
@@ -29,7 +31,8 @@ TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after pr
 
     {
         pulp::test::RtAllocationProbe probe;
-        meter.process(channels, 2, static_cast<int>(left.size()));
+        for (int hop = 0; hop < 5; ++hop)
+            meter.process(channels, 2, static_cast<int>(left.size()));
         const auto& snapshot = meter.snapshot();
         ballistics.update(snapshot, 0.016f);
         ballistics.clear_clips();
@@ -164,27 +167,134 @@ TEST_CASE("MultiChannelMeter correlation window can replace previous sign", "[si
     REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(-1.0f, 1e-6f));
 }
 
-TEST_CASE("MultiChannelMeter integrated LUFS averages multiple windows", "[signal][meter][issue-645]") {
+TEST_CASE("K-weighting design reproduces the BS.1770 48 kHz coefficient tables",
+          "[signal][meter][loudness]") {
+    const auto coefficients = k_weighting_coefficients(48000.0);
+    REQUIRE(coefficients.valid);
+    REQUIRE_THAT(coefficients.shelf.b0, WithinAbs(1.53512485958697, 2e-12));
+    REQUIRE_THAT(coefficients.shelf.b1, WithinAbs(-2.69169618940638, 2e-12));
+    REQUIRE_THAT(coefficients.shelf.b2, WithinAbs(1.19839281085285, 2e-12));
+    REQUIRE_THAT(coefficients.shelf.a1, WithinAbs(-1.69065929318241, 2e-12));
+    REQUIRE_THAT(coefficients.shelf.a2, WithinAbs(0.73248077421585, 2e-12));
+    REQUIRE_THAT(coefficients.high_pass.b0, WithinAbs(1.0, 1e-15));
+    REQUIRE_THAT(coefficients.high_pass.b1, WithinAbs(-2.0, 1e-15));
+    REQUIRE_THAT(coefficients.high_pass.b2, WithinAbs(1.0, 1e-15));
+    REQUIRE_THAT(coefficients.high_pass.a1, WithinAbs(-1.99004745483398, 2e-12));
+    REQUIRE_THAT(coefficients.high_pass.a2, WithinAbs(0.99007225036621, 2e-12));
+    REQUIRE_FALSE(k_weighting_coefficients(0.0).valid);
+}
+
+TEST_CASE("MultiChannelMeter matches the BS.1770 997 Hz reference level",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(1, sample_rate * 3, 997.0f, sample_rate);
+    const float* channels[] = {tone.channel(0).data()};
+
     MultiChannelMeter meter;
-    meter.prepare(10.0f, 1);
+    meter.prepare(sample_rate, 1);
+    meter.process(channels, 1, static_cast<int>(tone.num_samples()));
 
-    float half[] = {0.5f};
-    const float* half_channels[] = {half};
-    for (int i = 0; i < 4; ++i)
-        meter.process(half_channels, 1, 1);
+    // BS.1770-5 Annex 1 states -3.01 LKFS for a full-scale 997 Hz sine.
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(-3.01f, 0.01f));
+    REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(-3.01f, 0.01f));
 
-    REQUIRE(std::isfinite(meter.snapshot().lufs_integrated));
+    // Planted negative control: unweighted mean square plus -0.691 is wrong by
+    // the K-weighting calibration gain and must not satisfy the oracle.
+    const float unweighted = -0.691f + 10.0f * std::log10(0.5f);
+    REQUIRE(std::abs(unweighted - meter.snapshot().lufs_momentary) > 0.65f);
+}
 
-    float quarter[] = {0.25f};
-    const float* quarter_channels[] = {quarter};
-    for (int i = 0; i < 4; ++i)
-        meter.process(quarter_channels, 1, 1);
+TEST_CASE("MultiChannelMeter applies the K-weighting frequency response",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(1, sample_rate * 3, 100.0f, sample_rate);
+    const float* channels[] = {tone.channel(0).data()};
 
-    constexpr double first_mean_sq = 0.25;
-    constexpr double second_mean_sq = 0.0625;
-    auto expected = -0.691f + 10.0f * static_cast<float>(
-        std::log10((first_mean_sq + second_mean_sq) / 2.0));
-    REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(expected, 1e-4f));
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 1);
+    meter.process(channels, 1, static_cast<int>(tone.num_samples()));
+
+    // Independent double-precision evaluation of the BS.1770-5 Tables 1/2
+    // biquads gives -4.835 dB for this steady-state vector.
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(-4.835f, 0.015f));
+    const float unweighted = -0.691f + 10.0f * std::log10(0.5f);
+    REQUIRE(std::abs(unweighted - meter.snapshot().lufs_momentary) > 1.0f);
+}
+
+TEST_CASE("MultiChannelMeter integrated loudness uses absolute and relative gates",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    constexpr int segment_frames = sample_rate * 5;
+    auto loud = pulp::test::audio::make_sine(1, segment_frames, 997.0f, sample_rate, 0.1f);
+    auto quiet = pulp::test::audio::make_sine(1, segment_frames, 997.0f, sample_rate, 0.01f);
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 1);
+    const float* loud_channels[] = {loud.channel(0).data()};
+    const float* quiet_channels[] = {quiet.channel(0).data()};
+    meter.process(loud_channels, 1, segment_frames);
+    meter.process(quiet_channels, 1, segment_frames);
+
+    // The -43.01 LUFS half lies below the relative gate. Independent block
+    // enumeration gives -23.141 LUFS because the three 75%-overlapped blocks
+    // crossing the level transition remain above the gate. An unweighted,
+    // ungated energy average would be about -25.98 LUFS.
+    REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(-23.141f, 0.02f));
+    constexpr float ungated_negative_control = -25.977f;
+    REQUIRE(std::abs(ungated_negative_control - meter.snapshot().lufs_integrated) > 2.8f);
+}
+
+TEST_CASE("MultiChannelMeter applies surround weighting and excludes LFE",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(2, sample_rate * 2, 997.0f, sample_rate);
+    const float* channels[] = {tone.channel(0).data(), tone.channel(1).data()};
+    const LoudnessChannelRole roles[] = {
+        LoudnessChannelRole::left_surround, LoudnessChannelRole::lfe};
+
+    MultiChannelMeter meter;
+    meter.prepare(sample_rate, 2, roles);
+    meter.process(channels, 2, static_cast<int>(tone.num_samples()));
+
+    REQUIRE_THAT(meter.snapshot().lufs_momentary, WithinAbs(-1.518f, 0.015f));
+    REQUIRE(std::isinf(meter.snapshot().channels[1].lufs_momentary));
+
+    const LoudnessChannelRole rear_role[] = {LoudnessChannelRole::left_rear_surround};
+    const float* rear_channel[] = {tone.channel(0).data()};
+    MultiChannelMeter rear_meter;
+    rear_meter.prepare(sample_rate, 1, rear_role);
+    rear_meter.process(rear_channel, 1, static_cast<int>(tone.num_samples()));
+    REQUIRE_THAT(rear_meter.snapshot().lufs_momentary, WithinAbs(-3.01f, 0.015f));
+}
+
+TEST_CASE("MultiChannelMeter loudness is invariant to process block partitioning",
+          "[signal][meter][loudness]") {
+    constexpr int sample_rate = 48000;
+    auto tone = pulp::test::audio::make_sine(2, sample_rate * 3, 997.0f, sample_rate, 0.2f);
+
+    MultiChannelMeter contiguous;
+    contiguous.prepare(sample_rate, 2);
+    const float* all[] = {tone.channel(0).data(), tone.channel(1).data()};
+    contiguous.process(all, 2, static_cast<int>(tone.num_samples()));
+
+    MultiChannelMeter partitioned;
+    partitioned.prepare(sample_rate, 2);
+    constexpr std::array<int, 7> block_sizes{1, 17, 64, 127, 255, 511, 1024};
+    int offset = 0;
+    std::size_t block_index = 0;
+    while (offset < static_cast<int>(tone.num_samples())) {
+        const int frames = std::min(block_sizes[block_index++ % block_sizes.size()],
+                                    static_cast<int>(tone.num_samples()) - offset);
+        const float* block[] = {tone.channel(0).data() + offset,
+                                tone.channel(1).data() + offset};
+        partitioned.process(block, 2, frames);
+        offset += frames;
+    }
+
+    REQUIRE_THAT(partitioned.snapshot().lufs_momentary,
+                 WithinAbs(contiguous.snapshot().lufs_momentary, 1e-6f));
+    REQUIRE_THAT(partitioned.snapshot().lufs_integrated,
+                 WithinAbs(contiguous.snapshot().lufs_integrated, 1e-6f));
 }
 
 TEST_CASE("MultiChannelMeter prepare clamps channel count and reset clears snapshot", "[signal][meter][issue-645]") {
@@ -356,7 +466,7 @@ TEST_CASE("MultiChannelMeter accumulates short blocks until the emit threshold",
     REQUIRE_THAT(snap.channels[0].peak, WithinAbs(1.25f, 1e-6f));
     REQUIRE(snap.channels[0].clipped);
     REQUIRE(snap.channels[0].rms > 0.5f);
-    REQUIRE(std::isfinite(snap.channels[0].lufs_momentary));
+    REQUIRE(std::isinf(snap.channels[0].lufs_momentary));
 }
 
 TEST_CASE("MultiChannelMeter first null channel clears stale stereo state",
@@ -427,8 +537,8 @@ TEST_CASE("MultiChannelMeter zero sample rate still emits finite one-sample snap
     REQUIRE(snap.num_channels == 1);
     REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.5f, 1e-6f));
     REQUIRE_THAT(snap.channels[0].rms, WithinAbs(0.5f, 1e-6f));
-    REQUIRE(std::isfinite(snap.channels[0].lufs_momentary));
-    REQUIRE(std::isfinite(snap.lufs_integrated));
+    REQUIRE(std::isinf(snap.channels[0].lufs_momentary));
+    REQUIRE(std::isinf(snap.lufs_integrated));
 }
 
 TEST_CASE("MultiChannelBallistics releases peaks RMS and clip holds independently",
