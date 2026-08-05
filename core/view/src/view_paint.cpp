@@ -50,6 +50,58 @@ namespace {
 //        |               |
 //      bl|               |br
 //        +---------------+
+// How far past its own border box a view's OUTSET box-shadows reach, per side.
+//
+// A compositing layer's bounds are a CLIP, not a hint:
+// `SkCanvas::saveLayer(&bounds, ...)` discards everything drawn outside them,
+// and `paint_outset_shadows` draws INSIDE that layer because CSS puts a
+// shadow in the element's own stacking context. So a layer sized to the border
+// box erases every outset shadow the box has — silently, and only on the nodes
+// that open a layer at all, which is why it hid until `mix-blend-mode:
+// plus-lighter` started opening one.
+//
+// The extent is GEOMETRY, not a pad. A shadow's silhouette is the box grown by
+// `spread` and translated by (offset_x, offset_y); the blur adds its own
+// visible reach around that. The reach is `3 * sigma + 2` with
+// `sigma = blur / 2`, which is not a guess twice over:
+//
+//   * `sigma = blur / 2` is what `skia_canvas_box_shadow.cpp:79` actually
+//     rasterizes with, and it is MEASURED rather than assumed — a browser
+//     oracle fitted it at six radii to ~0.2/255 (`D07-oracle.html`), refuting
+//     the competing rule at every one.
+//   * `3 * sigma + 2` is the same expression that file already uses to size
+//     its own shadow cache (`:98`). Deriving a second, different number here
+//     would let the layer clip ink the rasterizer had decided to draw.
+//
+// INSET shadows are excluded, and must be: an inset shadow paints inside the
+// padding box by definition, so it cannot grow the layer. Counting its blur
+// would inflate a layer on every node that has one, for no ink.
+struct OutsetShadowExtent {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+};
+
+OutsetShadowExtent outset_shadow_extent(
+    const std::vector<pulp::view::View::BoxShadow>& shadows) {
+    OutsetShadowExtent e;
+    for (const auto& s : shadows) {
+        if (s.inset) continue;
+        const float reach =
+            s.blur > 0.0f ? std::ceil(1.5f * s.blur) + 2.0f : 0.0f;
+        const float grow = s.spread + reach;
+        e.left = std::max(e.left, grow - s.offset_x);
+        e.right = std::max(e.right, grow + s.offset_x);
+        e.top = std::max(e.top, grow - s.offset_y);
+        e.bottom = std::max(e.bottom, grow + s.offset_y);
+    }
+    // A negative spread shrinks the silhouette; it can never pull the layer
+    // inside the box, which would clip the box itself.
+    e.left = std::max(0.0f, e.left);
+    e.right = std::max(0.0f, e.right);
+    e.top = std::max(0.0f, e.top);
+    e.bottom = std::max(0.0f, e.bottom);
+    return e;
+}
+
 void build_per_corner_rounded_rect_path(
     pulp::canvas::Canvas& canvas,
     float w, float h,
@@ -379,6 +431,20 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // rounding never lands inside it.
     const float blur_pad = filter_blur_ > 0.0f ? filter_blur_ * 2.0f : 0.0f;
 
+    // The layer must also contain the view's OUTSET shadows, which paint
+    // inside it. Sized to the box, it deletes them: a node carrying both a
+    // blend mode and an outset shadow lost the shadow entirely, and nothing
+    // in the corpus had exposed it because no node that opened a layer had a
+    // shadow until `plus-lighter` started opening one. The four sides are
+    // resolved independently because an OFFSET shadow is not symmetric.
+    const OutsetShadowExtent shadow_pad = outset_shadow_extent(shadows_);
+    const float pad_l = blur_pad + shadow_pad.left;
+    const float pad_t = blur_pad + shadow_pad.top;
+    const float pad_r = blur_pad + shadow_pad.right;
+    const float pad_b = blur_pad + shadow_pad.bottom;
+    const float layer_w = bounds_.width + pad_l + pad_r;
+    const float layer_h = bounds_.height + pad_t + pad_b;
+
     // How many layers we pushed, so we pop exactly that many below. Only an
     // effect can push more than one (EffectChain pushes one per child); every
     // other path pushes a single layer.
@@ -413,6 +479,12 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                     "canvas backend cannot apply mask layers; mask-image "
                     "collapses to a plain layer (mask ignored)");
             }
+            // Deliberately NOT grown by the shadow extent. A mask's own
+            // coordinate space is the layer rect, so widening it would resize
+            // and re-anchor the mask image rather than admit more ink. A masked
+            // node with an outset shadow still loses the shadow; fixing that
+            // means giving the mask an explicit origin, which is its own
+            // change.
             canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
                                          opacity_, mask_image(), mask_size());
         } else if (!filter_chain_.empty()) {
@@ -440,28 +512,30 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
             // So the blend layer is the outer one. `layers_pushed` is what the
             // restore below pops, so counting both keeps the stack balanced.
             if (needs_blend_layer) {
-                canvas.save_layer_with_blend(
-                    -blur_pad, -blur_pad,
-                    bounds_.width + blur_pad * 2.0f,
-                    bounds_.height + blur_pad * 2.0f,
-                    1.0f, 0.0f, mix_blend_mode_);
+                canvas.save_layer_with_blend(-pad_l, -pad_t, layer_w, layer_h,
+                                             1.0f, 0.0f, mix_blend_mode_);
                 ++layers_pushed;
             }
+            // The INNER filter layer takes the same bounds. Growing only the
+            // outer one would leave the shadow clipped by this one instead,
+            // which looks like the fix not working rather than like a second
+            // clip. A filter applies to the element's whole rendering, shadow
+            // included, so admitting it here is also what CSS asks for.
             const auto chain = to_canvas_filter_chain(filter_chain_);
-            canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
+            canvas.save_layer_with_filters(-pad_l, -pad_t, layer_w, layer_h,
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
             ++layers_pushed;
         } else if (needs_blend_layer) {
             // saveLayer with explicit blend mode for CSS / RN `mix-blend-mode`.
-            canvas.save_layer_with_blend(-blur_pad, -blur_pad,
-                                         bounds_.width + blur_pad * 2.0f,
-                                         bounds_.height + blur_pad * 2.0f,
+            canvas.save_layer_with_blend(-pad_l, -pad_t, layer_w, layer_h,
                                          opacity_, filter_blur_, mix_blend_mode_);
         } else {
-            canvas.save_layer(-blur_pad, -blur_pad,
-                              bounds_.width + blur_pad * 2.0f,
-                              bounds_.height + blur_pad * 2.0f,
+            // Not blend-specific. An opacity or blur layer sized to the box
+            // clipped its outset shadows the same way; blend is only where it
+            // was noticed, because it is the one layer whose visual signature
+            // makes a missing halo obvious.
+            canvas.save_layer(-pad_l, -pad_t, layer_w, layer_h,
                               opacity_, filter_blur_);
         }
         // Every branch above except the effect chain and the filter branch

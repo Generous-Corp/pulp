@@ -78,6 +78,63 @@ DesignIR flat_over_flat(const std::string& blend) {
     return ir;
 }
 
+/// A dark ground with one small opaque square in the middle, carrying a box
+/// shadow and optionally a blend mode. Small box, wide shadow: almost all of
+/// the shadow's ink lands OUTSIDE the box, which is exactly the ink a layer
+/// sized to the box throws away.
+DesignIR dot_with_shadow(const std::string& blend, bool inset = false) {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "ground";
+    ir.root.style.width = 96.0f;
+    ir.root.style.height = 96.0f;
+    ir.root.style.background_color = "#07080B";
+
+    IRNode dot;
+    dot.type = "frame";
+    dot.name = "dot";
+    dot.style.width = 24.0f;
+    dot.style.height = 24.0f;
+    dot.style.position = "absolute";
+    dot.style.left = 36.0f;
+    dot.style.top = 36.0f;
+    dot.style.background_color = "#C86B37";
+    IRBoxShadow glow;
+    glow.blur = 16.0f;
+    glow.color = "rgba(200, 107, 55, 0.9)";
+    glow.inset = inset;
+    dot.style.box_shadow.push_back(glow);
+    if (!blend.empty()) dot.style.mix_blend_mode = blend;
+    ir.root.children.push_back(std::move(dot));
+    return ir;
+}
+
+/// How many pixels OUTSIDE the dot's own 24x24 box carry ink the flat ground
+/// does not. Counted rather than compared: the point is whether the halo
+/// exists at all, and a count says that without depending on what a blend mode
+/// does to the halo's colour.
+int halo_pixels(const DesignIR& ir) {
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    uint32_t w = 0, h = 0;
+    const auto rgba = render_to_rgba(*root, 96, 96, 1.0f, &w, &h);
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(w == 96u);
+    REQUIRE(h == 96u);
+    int lit = 0;
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            const bool inside_dot = x >= 36u && x < 60u && y >= 36u && y < 60u;
+            if (inside_dot) continue;
+            const size_t i = (static_cast<size_t>(y) * w + x) * 4u;
+            // The ground is (7, 8, 11). Anything meaningfully above it in red
+            // is the warm glow, and nothing else in this document paints.
+            if (static_cast<int>(rgba[i]) > 7 + 6) ++lit;
+        }
+    }
+    return lit;
+}
+
 struct Rgb {
     int r = 0, g = 0, b = 0;
 };
@@ -180,6 +237,48 @@ TEST_CASE("plus-lighter composites additively in the native tree",
     CHECK(additive.r >= 250);
     CHECK(std::abs(additive.g - 157) <= 4);
     CHECK(std::abs(additive.b - 88) <= 4);
+}
+
+TEST_CASE("a blend mode does not delete the node's outset shadow",
+          "[view][blend][shadow][design]") {
+    // A compositing layer's bounds are a CLIP, and an outset shadow paints
+    // INSIDE that layer. Sized to the border box, the layer threw the shadow
+    // away — every pixel of it, because a 16px glow on a 24px box is almost
+    // entirely outside the box.
+    //
+    // The bug is older than the blend support that exposed it: nothing in the
+    // fixture corpus opened a layer AND carried a shadow until `plus-lighter`
+    // started opening one. It does now — kelvin's three envelope vertex dots
+    // and lattice's fifteen velocity bars all carry `plus-lighter` and an
+    // outset glow — so this is a live defect, not a hypothetical.
+    //
+    // Control first. Without a blend mode no layer opens, so this is the halo
+    // the renderer has always drawn and the number the assertion below is
+    // measured against. If it is zero the instrument is broken and the blend
+    // assertion would be agreeing with itself.
+    const int plain = halo_pixels(dot_with_shadow(""));
+    INFO("halo without a blend mode: " << plain);
+    REQUIRE(plain > 500);
+
+    const int blended = halo_pixels(dot_with_shadow("plus-lighter"));
+    INFO("halo with plus-lighter: " << blended);
+    // Before the fix this is exactly 0 — the layer is 24x24 and the glow has
+    // nowhere to land. After it, the halo is the same silhouette composited
+    // additively, so it covers at least as much ground as the plain one.
+    CHECK(blended >= plain);
+}
+
+TEST_CASE("an inset shadow does not grow a blend node's layer",
+          "[view][blend][shadow][design]") {
+    // The other half of the contract, and the reason the extent is computed
+    // from the shadow list rather than padded by a constant. An inset shadow
+    // paints inside the padding box by definition, so it must contribute
+    // nothing to the layer — a constant pad would enlarge the layer for every
+    // node that has one and admit ink that does not exist.
+    //
+    // Asserted where it is observable: no ink outside the box, blend or not.
+    CHECK(halo_pixels(dot_with_shadow("", /*inset=*/true)) == 0);
+    CHECK(halo_pixels(dot_with_shadow("plus-lighter", /*inset=*/true)) == 0);
 }
 
 TEST_CASE("a filter list without blur leaves the node unfiltered",
