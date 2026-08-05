@@ -614,6 +614,8 @@ AudioWidgetType audio_widget_from_id(const std::string& id) {
     if (lower == "waveform") return AudioWidgetType::waveform;
     if (lower == "spectrum") return AudioWidgetType::spectrum;
     if (lower == "toggle" || lower == "switch") return AudioWidgetType::toggle;
+    if (lower == "selector" || lower == "select" || lower == "segmented")
+        return AudioWidgetType::selector;
     return AudioWidgetType::none;
 }
 

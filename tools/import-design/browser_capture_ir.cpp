@@ -461,6 +461,12 @@ int lower_semantic_controls(const fs::path& path,
         // instead of leaving the element as part of the backdrop -- a shape
         // that reads to a player as something to flip and moves nothing.
         else if (kind == "toggle") widget = pulp::view::AudioWidgetType::toggle;
+        // A choice between named alternatives. `tab` is included because a
+        // segmented row and a tab strip are the same control wearing two
+        // costumes, and a designer reaches for whichever the panel's idiom
+        // suggests.
+        else if (kind == "select" || kind == "tab")
+            widget = pulp::view::AudioWidgetType::selector;
         else continue;  // buttons and unknowns stay part of the backdrop
 
         const auto data = object_member(candidate, "data_pulp");
@@ -558,6 +564,16 @@ int lower_semantic_controls(const fs::path& path,
             // lit -- the panel changed the moment it loaded.
             if (widget == pulp::view::AudioWidgetType::toggle)
                 control.attributes["checked"] = declared_value;
+        }
+        // The segment labels, declared rather than scraped: only the author
+        // knows which children are segments, and scraping the element's text
+        // turns a caption or a badge inside the control into an extra choice.
+        // A selector with no declared choices has nothing to light, so it stays
+        // part of the backdrop rather than arriving as an empty track.
+        if (widget == pulp::view::AudioWidgetType::selector) {
+            const auto choices = string_member(data, "choices");
+            if (choices.empty()) continue;
+            control.attributes["pulpChoices"] = choices;
         }
         control.style.position = "absolute";
         control.style.left =

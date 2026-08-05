@@ -249,6 +249,18 @@ bool bind_imported_view(View& view,
         ctx.bind_checkbox(*checkbox, scalar_descriptor(md));
         return true;
     }
+    if (auto* segmented = dynamic_cast<SegmentedControl*>(&view);
+        segmented && has_text(md.param_key)) {
+        ctx.bind_segmented(*segmented,
+                           NativeImportSegmentedBindingDescriptor{
+                               .route_id = text_or_empty(md.route_id),
+                               .param_key = text_or_empty(md.param_key),
+                               .binding_module = text_or_empty(md.binding_module),
+                               .binding_param = text_or_empty(md.binding_param),
+                               .segment_count =
+                                   static_cast<int>(segmented->segments().size())});
+        return true;
+    }
     if (auto* pad = dynamic_cast<XYPad*>(&view);
         pad && has_text(md.x_param_key) && has_text(md.y_param_key)) {
         ctx.bind_xy_pad(*pad,
@@ -334,6 +346,8 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Checkbox*>(&view) && has_text(md.param_key))
+        return true;
+    if (dynamic_cast<SegmentedControl*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
@@ -441,6 +455,7 @@ std::optional<NativeWidgetKind> kind_from_audio(AudioWidgetType audio_widget) {
         case AudioWidgetType::waveform: return NativeWidgetKind::waveform;
         case AudioWidgetType::spectrum: return NativeWidgetKind::spectrum;
         case AudioWidgetType::toggle: return NativeWidgetKind::toggle_button;
+        case AudioWidgetType::selector: return NativeWidgetKind::segmented;
         case AudioWidgetType::none: break;
     }
     return std::nullopt;
@@ -1967,6 +1982,20 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             checkbox->set_checked(semantics.checked);
             return checkbox;
         }
+        case NativeWidgetKind::segmented: {
+            // ONE control with a shared track, not a row of adjacent toggles.
+            // A row of independent switches can show two lit at once, and even
+            // when it does not it reads as several controls that happen to
+            // touch rather than as one choice.
+            auto segmented = std::make_unique<SegmentedControl>();
+            auto labels = semantics.segments;
+            if (labels.empty()) labels.push_back(text.empty() ? std::string("1") : text);
+            const auto count = static_cast<int>(labels.size());
+            segmented->set_segments(std::move(labels));
+            segmented->set_selected_silent(
+                selector_segment_index(semantics.normalized_value, count));
+            return segmented;
+        }
         case NativeWidgetKind::toggle_button: {
             auto button = std::make_unique<ToggleButton>();
             if (!text.empty()) button->set_label(text);
@@ -2349,6 +2378,7 @@ std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& 
 
 bool is_interactive_native_kind(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
@@ -2375,6 +2405,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
 
 bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
     switch (kind) {
+        case NativeWidgetKind::segmented:
         case NativeWidgetKind::text_button:
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
@@ -2457,6 +2488,7 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor: return "text_editor";
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::toggle_button: return "toggle_button";
+        case NativeWidgetKind::segmented: return "segmented";
         case NativeWidgetKind::combo_box: return "combo_box";
         case NativeWidgetKind::knob: return "knob";
         case NativeWidgetKind::fader: return "fader";
@@ -2508,6 +2540,17 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
             out.text_value = out.text;
     }
 
+    // `pulpChoices` is a pipe-separated list, because a segment label may
+    // legitimately contain a comma ("1, 2 & 4") and a comma-separated list
+    // would silently split it into two segments.
+    if (const auto choices = attr(node, "pulpChoices"); choices && !choices->empty()) {
+        std::string current;
+        for (const char c : *choices) {
+            if (c == '|') { out.segments.push_back(current); current.clear(); }
+            else current.push_back(c);
+        }
+        out.segments.push_back(current);
+    }
     out.checked = attr_bool(node, "checked");
     out.toggle_on = out.checked || attr_bool(node, "value");
     out.toggle_on_background_color = non_empty(md.on_background_color);

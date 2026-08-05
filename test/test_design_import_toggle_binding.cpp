@@ -18,6 +18,7 @@
 #include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -97,6 +98,18 @@ T* find_widget(View& view) {
 class StoreBindingContext final : public NativeImportBindingContext {
 public:
     explicit StoreBindingContext(pulp::state::StateStore& store) : store_(store) {}
+
+    void bind_segmented(SegmentedControl& segmented,
+                        const NativeImportSegmentedBindingDescriptor& d) override {
+        const auto id = id_for(d.param_key);
+        if (id == 0) return;
+        const int count = d.segment_count;
+        segmented.set_selected_silent(
+            selector_segment_index(store_.get_value(id), count));
+        segmented.on_change = [this, id, count](int index) {
+            store_.set_value(id, selector_segment_value(index, count));
+        };
+    }
 
     void bind_toggle_button(ToggleButton& button,
                             const NativeImportBindingDescriptor& d) override {
@@ -231,4 +244,102 @@ TEMPLATE_TEST_CASE("every drivable kind moves its parameter through the default 
     drive(*control);
     INFO("sync " << before << " -> " << store.get_value(1));
     CHECK(store.get_value(1) != before);
+}
+
+namespace {
+
+/// A four-way selector, the shape lattice's DIRECTION control has: one track,
+/// four labelled segments, exactly one lit.
+DesignIR panel_with_a_selector(const std::string& param) {
+    auto ir = panel_with_one_control(AudioWidgetType::selector, param);
+    auto& control = ir.root.children.front();
+    control.style.width = 200.0f;
+    control.style.height = 28.0f;
+    control.attributes["pulpChoices"] = "Up|Down|Converge|Random";
+    return ir;
+}
+
+/// Click the centre of segment `index` of `count` along the control's track.
+void click_segment(View& control, int index, int count) {
+    const auto box = control.bounds();
+    const float width = box.width / static_cast<float>(count);
+    MouseEvent event;
+    event.position = {width * (static_cast<float>(index) + 0.5f), box.height * 0.5f};
+    event.is_down = true;
+    control.on_mouse_event(event);
+}
+
+}  // namespace
+
+TEST_CASE("a selector's segments are one group, and each writes its own value",
+          "[view][import][native-materializer][binding][selector]") {
+    const auto ir = panel_with_a_selector("sync");
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, 240.0f, 120.0f});
+    root->layout_children();
+
+    auto* segmented = find_widget<SegmentedControl>(*root);
+    REQUIRE(segmented != nullptr);
+    // ONE control carrying four segments, not four controls that happen to
+    // touch. A row of independent toggles can light two at once; this cannot.
+    REQUIRE(segmented->segments().size() == 4);
+
+    pulp::state::StateStore store;
+    add_sync_param(store);
+    StoreBindingContext ctx{store};
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    for (const auto& d : diagnostics) INFO(d.code << ": " << d.message);
+    CHECK(diagnostics.empty());
+
+    // Each segment writes ITS value, not merely "something changed".
+    click_segment(*segmented, 3, 4);
+    CHECK(store.get_value(1) == 1.0f);
+    CHECK(segmented->selected() == 3);
+
+    click_segment(*segmented, 1, 4);
+    CHECK(store.get_value(1) == selector_segment_value(1, 4));
+    // And picking a sibling RELEASES the first — the property that makes this
+    // one choice rather than four independent states.
+    CHECK(segmented->selected() == 1);
+}
+
+TEST_CASE("a selector drives its parameter through both script emitters",
+          "[view][import][codegen][binding][selector]") {
+    const auto ir = panel_with_a_selector("sync");
+
+    for (const auto mode : {CodeGenMode::web_compat, CodeGenMode::bridge_native_js}) {
+        CodeGenOptions options;
+        options.mode = mode;
+        options.include_comments = false;
+        const auto js = generate_pulp_js(ir, options);
+
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0.0f, 0.0f, 240.0f, 120.0f});
+        root.set_theme(Theme::dark());
+        pulp::state::StateStore store;
+        add_sync_param(store);
+        WidgetBridge bridge(engine, root, store);
+        bridge.load_script(js);
+        root.layout_children();
+
+        INFO("mode=" << (mode == CodeGenMode::web_compat ? "web_compat" : "bridge_native_js"));
+        INFO("children=" << root.child_count());
+        auto* segmented = find_widget<SegmentedControl>(root);
+        INFO("emitted script:\n" << js);
+        REQUIRE(segmented != nullptr);
+        REQUIRE(segmented->segments().size() == 4);
+
+        click_segment(*segmented, 3, 4);
+        INFO("after segment 3: " << store.get_value(1));
+        CHECK(store.get_value(1) == 1.0f);
+
+        click_segment(*segmented, 1, 4);
+        INFO("after segment 1: " << store.get_value(1));
+        CHECK(store.get_value(1) == selector_segment_value(1, 4));
+        CHECK(segmented->selected() == 1);
+    }
 }

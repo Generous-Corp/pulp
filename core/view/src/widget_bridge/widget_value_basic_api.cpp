@@ -68,12 +68,29 @@ void BridgeRegistrars::register_widget_value_basic_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // setSegments(id, [labels]) — a selector's choices, in order.
+    register_bridge_function(api, "setSegments", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        if (auto* seg = dynamic_cast<SegmentedControl*>(self.widget(id))) {
+            std::vector<std::string> labels;
+            if (args.numArgs > 1 && args[1]) {
+                auto& arr = *args[1];
+                for (uint32_t i = 0; i < arr.size(); ++i)
+                    labels.push_back(std::string(arr[i].toString()));
+            }
+            seg->set_segments(std::move(labels));
+        }
+        return choc::value::Value();
+    });
+
     // setSelected(id, index) — set ComboBox selected index without firing on_change
     register_bridge_function(api, "setSelected", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto idx = args.get<int>(1, 0);
         if (auto* c = dynamic_cast<ComboBox*>(self.widget(id))) {
             c->set_selected_silent(idx);
+        } else if (auto* seg = dynamic_cast<SegmentedControl*>(self.widget(id))) {
+            seg->set_selected_silent(idx);
         }
         return choc::value::Value();
     });

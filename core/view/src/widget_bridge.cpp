@@ -779,6 +779,8 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<Fader>();
     } else if (tag == "toggle") {
         w = std::make_unique<Toggle>();
+    } else if (tag == "segmented") {
+        w = std::make_unique<SegmentedControl>();
     } else if (tag == "combo" || tag == "select") {
         w = std::make_unique<ComboBox>();
     } else if (tag == "checkbox") {

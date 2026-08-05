@@ -66,6 +66,22 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             BridgeCallbackScope scope(alive);
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
+    } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
+        // Mirror createSegmented's inline wiring so a `<segmented>` tag routed
+        // through __domAppend dispatches the same `select` event the factory
+        // path does. Without this the DOM path builds a real, clickable
+        // selector whose changes reach nothing — the factory path works and
+        // the tag path does not, which is invisible from the emitted script.
+        //
+        // A selector has no drag lifecycle, so bracket its instantaneous edit
+        // with a gesture the way a Toggle does, or the declarative binding
+        // re-asserts the store value over the click on the very next frame.
+        wire_parameter_gestures(id, w);
+        seg->on_change = [this, alive, engine, id](int index) {
+            begin_param_gesture(id);
+            dispatch_event(alive, engine, id, "select", std::to_string(index));
+            end_param_gesture(id);
+        };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
         // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag
         // routed through __domAppend dispatches the same `select` event as the

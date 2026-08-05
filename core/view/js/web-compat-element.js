@@ -70,6 +70,7 @@ var __widgetTagFactory__ = {
     knob:     function(id) { createKnob(id, ""); },
     fader:    function(id) { createFader(id, "vertical", ""); },
     toggle:   function(id) { createToggle(id, ""); },
+    segmented: function(id) { createSegmented(id, ""); },
     combo:    function(id) { createCombo(id, ""); },
     checkbox: function(id) { createCheckbox(id, ""); },
     spectrum: function(id) { createSpectrum(id, ""); },

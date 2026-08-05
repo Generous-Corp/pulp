@@ -1708,6 +1708,26 @@ differently (`el._id` versus a string-literal id), which is what made the
 emission get duplicated and then maintained on one side only, so the helper
 takes the id EXPRESSION. Add a binder there, not in an arm.
 
+A widget reached through the web-compat DOM has a SECOND wiring path inside the
+bridge, and it is easy to miss: `createX` wires its callbacks inline, while a
+lowercase tag routed through `__domAppend` goes to `make_widget_for_tag()` and
+gets its callbacks from `wire_callbacks()`. A new widget kind needs FOUR tables
+in step — the factory (`factory_api.cpp`), the tag map (`web-compat-element.js`
+`__widgetTagFactory__`), `make_widget_for_tag()` (`widget_bridge.cpp`), and
+`wire_callbacks()` (`widget_callbacks.cpp`) — plus a row in
+`widget_bridge_api_manifest.tsv`. Miss the last wiring one and the factory path
+works while the tag path builds a real, clickable control whose changes reach
+nothing; the emitted script is identical either way.
+
+A SELECTOR is one control with a shared track, never N adjacent toggles: a row
+of independent switches can show two lit at once, and even when it does not it
+reads as several controls that happen to touch. The value a segment writes is a
+function of the segment COUNT, so both directions go through
+`selector_segment_value()` / `selector_segment_index()` (design_ir.hpp) rather
+than a restated formula — and the script emitter bakes those numbers at `%.9g`,
+because a truncated literal still selects the right segment and is no longer
+the value a native host would have written for it.
+
 Pinned by `test_design_import_toggle_binding.cpp`, which proves the same thing
 on both paths the only way that distinguishes a wired control from a convincing
 one: click it and assert the STORE moved.

@@ -128,6 +128,7 @@ static const char* audio_widget_web_tag(AudioWidgetType t) {
         case AudioWidgetType::waveform: return "waveform";
         case AudioWidgetType::spectrum: return "spectrum";
         case AudioWidgetType::toggle:   return "toggle";
+        case AudioWidgetType::selector: return "segmented";
         default: return nullptr;
     }
 }
@@ -141,6 +142,7 @@ static const char* audio_widget_type_name(AudioWidgetType t) {
         case AudioWidgetType::waveform: return "WaveformView";
         case AudioWidgetType::spectrum: return "SpectrumView";
         case AudioWidgetType::toggle:   return "Toggle";
+        case AudioWidgetType::selector: return "SegmentedControl";
         default: return nullptr;
     }
 }
@@ -229,6 +231,22 @@ static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
     append_plain(cursor, n);  // trailing base-styled text
 }
 
+/// A selector's segment labels, as the author declared them. Pipe separated
+/// because a label may legitimately contain a comma ("1, 2 & 4"), which a
+/// comma-separated list would split into two segments.
+static std::vector<std::string> selector_segments(const IRNode& node) {
+    std::vector<std::string> out;
+    const auto choices = node.attributes.find("pulpChoices");
+    if (choices == node.attributes.end() || choices->second.empty()) return out;
+    std::string current;
+    for (const char c : choices->second) {
+        if (c == '|') { out.push_back(current); current.clear(); }
+        else current.push_back(c);
+    }
+    out.push_back(current);
+    return out;
+}
+
 // How a lowered control reaches its parameter, stated once for BOTH script
 // emitters.
 //
@@ -273,6 +291,31 @@ static void emit_js_param_binding(std::ostringstream& ss, const std::string& ind
             ss << ind << "on(" << id_expr << ", 'toggle', function (v) { setParam('"
                << escaped << "', v ? 1 : 0); });\n";
             return;
+        case AudioWidgetType::selector: {
+            // A selector reports `select` with the segment INDEX, so the write
+            // back is a table lookup rather than the value itself. The table is
+            // built from selector_segment_value() (design_ir.hpp) at emit time,
+            // so the numbers a panel writes and the ones a native host reads
+            // come from one function rather than two spellings of a formula.
+            const auto count = static_cast<int>(selector_segments(node).size());
+            ss << ind << "bindWidgetToParam(" << id_expr << ", '" << escaped << "');\n";
+            ss << ind << "on(" << id_expr << ", 'select', function (i) { setParam('"
+               << escaped << "', [";
+            for (int i = 0; i < count; ++i) {
+                // %.9g, not the stream's default 6 digits: the emitted literal
+                // has to READ BACK as the same float the shared mapping
+                // produced, or the panel writes a value a native host would
+                // not have written for the same segment. It still selects the
+                // right segment either way, which is exactly why the drift
+                // would never be noticed.
+                char literal[32] = {};
+                std::snprintf(literal, sizeof(literal), "%.9g",
+                              static_cast<double>(selector_segment_value(i, count)));
+                ss << (i ? "," : "") << literal;
+            }
+            ss << "][i] || 0); });\n";
+            return;
+        }
         // A pad writes two parameters and a scope reads a whole block, so
         // neither is a scalar binding; both are left to their own routes.
         case AudioWidgetType::xy_pad:
@@ -456,6 +499,15 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                 accent != node.attributes.end() && !accent->second.empty()) {
                 ss << ind << "setAccentColor(" << var << "._id, '"
                    << js_single_quote_escape(accent->second) << "');\n";
+            }
+            // Labels before the binding: the binding's own value table is
+            // sized by the segment count, and a selector the bridge has not
+            // been given segments for has nothing to light.
+            if (const auto labels = selector_segments(node); !labels.empty()) {
+                ss << ind << "setSegments(" << var << "._id, [";
+                for (std::size_t i = 0; i < labels.size(); ++i)
+                    ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
+                ss << "]);\n";
             }
             emit_js_param_binding(ss, ind, var + "._id", node);
 
@@ -1644,7 +1696,32 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << id << "', 'width', " << sz << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << sz << ");\n";
     }
-    else if (wtype == AudioWidgetType::toggle) {
+    else if (wtype == AudioWidgetType::selector) {
+        const auto labels = selector_segments(node);
+        const float w = std::max(node.style.width.value_or(160.0f), 80.0f);
+        const float h = std::max(node.style.height.value_or(28.0f), 20.0f);
+        ss << ind << "setFlex('" << col_id << "', 'height', " << (h + 20) << ");\n";
+        fid_w = w; fid_h = h;  // emitted widget dims (fidelity)
+        ss << ind << "createSegmented('" << id << "', '" << col_id << "');\n";
+        ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+        ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+        if (!labels.empty()) {
+            ss << ind << "setSegments('" << id << "', [";
+            for (std::size_t i = 0; i < labels.size(); ++i)
+                ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
+            ss << "]);\n";
+        }
+        if (!label_text.empty()) {
+            const std::string lbl_id = id + "_lbl";
+            ss << ind << "createLabel('" << lbl_id << "', '"
+               << js_single_quote_escape(label_text) << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << lbl_id << "', 'height', " << kMinLabelHeight << ");\n";
+            ss << ind << "setFontSize('" << lbl_id << "', 11);\n";
+            ss << ind << "setTextColor('" << lbl_id << "', '#a6adc8');\n";
+            ss << ind << "setTextAlign('" << lbl_id << "', 'center');\n";
+        }
+    }
+        else if (wtype == AudioWidgetType::toggle) {
         // Without a branch here the switch falls off the end of this chain: the
         // wrapper column and the anchor are emitted and the widget never is, so
         // the panel loads with a labelled gap where the control should be.

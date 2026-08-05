@@ -320,6 +320,29 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         return choc::value::createString(id);
     });
 
+    // A segmented selector: ONE control with a shared track and exactly one
+    // segment lit. Deliberately not N adjacent toggles — a row of independent
+    // switches can show two lit at once, and reads as several controls that
+    // happen to touch rather than as one choice.
+    //
+    // The change event is `select` with the segment INDEX, matching combo and
+    // list rather than the `change` a value widget reports: a selector has no
+    // continuous position, and a consumer that listened for `change` here
+    // would register a handler that never fires.
+    register_bridge_function(api, "createSegmented", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
+        auto seg = std::make_unique<SegmentedControl>(); seg->set_id(id);
+        auto* ptr = seg.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
+        seg->on_change = [alive, engine, id](int index) {
+            dispatch_event(alive, engine, id, "select", std::to_string(index));
+        };
+        self.wire_parameter_gestures(id, ptr);
+        self.resolve_parent(pid)->add_child(std::move(seg));
+        return choc::value::createString(id);
+    });
+
     register_bridge_function(api, "createProgress", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<ProgressBar>(); p->set_id(id);

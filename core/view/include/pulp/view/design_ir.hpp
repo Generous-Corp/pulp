@@ -256,8 +256,34 @@ enum class AudioWidgetType {
     // script emitter reaches its factory and its parameter binding through
     // widget_type_name(). A toggle expressed any other way binds on one path
     // and renders inert on the other.
-    toggle
+    toggle,
+    // A choice between named alternatives, drawn as ONE control: a shared
+    // track with N labelled segments and exactly one lit. Not N adjacent
+    // toggles — a row of independent switches can show two lit at once and
+    // reads as several controls that happen to touch.
+    selector
 };
+
+/// The value a segmented selector writes for segment `index` of `count`, and
+/// the segment a parameter value selects. Stated once, here, because BOTH
+/// script emitters and every native host binder have to agree on it: a panel
+/// whose segments write one mapping while the host reads another lights the
+/// wrong segment for the value it just wrote, and looks like a rendering bug.
+///
+/// A single-segment selector is degenerate and pinned at 0 rather than
+/// dividing by zero.
+inline float selector_segment_value(int index, int count) {
+    if (count <= 1) return 0.0f;
+    const int clamped = index < 0 ? 0 : (index >= count ? count - 1 : index);
+    return static_cast<float>(clamped) / static_cast<float>(count - 1);
+}
+
+inline int selector_segment_index(float value, int count) {
+    if (count <= 1) return 0;
+    const float scaled = value * static_cast<float>(count - 1);
+    const int nearest = static_cast<int>(scaled + 0.5f);
+    return nearest < 0 ? 0 : (nearest >= count ? count - 1 : nearest);
+}
 
 struct IRNode;
 

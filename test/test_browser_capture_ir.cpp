@@ -2132,3 +2132,59 @@ TEST_CASE("a bound switch lowers to a control rather than staying backdrop",
     // the moment the panel loads.
     REQUIRE(sync.attributes.at("checked") == "1");
 }
+
+TEST_CASE("a bound selector lowers with the segments its author declared",
+          "[import][browser-capture][semantics][selector]") {
+    // A choice between named alternatives is the control a synth panel needs
+    // most and could not have: the semantics pass named it `select`, and the
+    // lowering dropped it, so a designer's mode row was drawn and wired to
+    // nothing.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"select","binding_status":"bound","name":"direction",
+         "bounds":{"left":24,"top":40,"width":200,"height":28},
+         "data_pulp":{"param":"shape","choices":"Up|Down|Converge|Random"}},
+        {"kind":"select","binding_status":"bound","name":"unlabelled",
+         "bounds":{"left":24,"top":90,"width":200,"height":28},
+         "data_pulp":{"param":"nothing"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> selectors;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.audio_widget == pulp::view::AudioWidgetType::selector)
+                selectors.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    // The second candidate declared no choices, so it has nothing to light and
+    // stays part of the backdrop rather than arriving as an empty track.
+    REQUIRE(selectors.size() == 1);
+    const auto& direction = *selectors.front();
+    REQUIRE(direction.attributes.at("pulpChoices") == "Up|Down|Converge|Random");
+    REQUIRE(direction.attributes.at("binding") == "shape");
+    REQUIRE(direction.attributes.at("pulpParamKey") == "shape");
+    REQUIRE(direction.stable_anchor_id);
+}

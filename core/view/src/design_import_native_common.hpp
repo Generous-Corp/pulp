@@ -17,6 +17,7 @@ enum class NativeWidgetKind {
     text_editor,
     checkbox,
     toggle_button,
+    segmented,
     combo_box,
     knob,
     fader,
@@ -61,6 +62,12 @@ struct ImportedWidgetSemantics {
     std::optional<std::string> toggle_off_border_color;
     std::optional<float> toggle_corner_radius;
     std::optional<float> toggle_font_size;
+
+    // A selector's segment labels, in order, as the author declared them.
+    // Read from an attribute rather than scraped from child text: only the
+    // author knows which children are segments, and a scrape turns a caption
+    // or a badge inside the control into a fifth choice.
+    std::vector<std::string> segments;
 
     float normalized_value = 0.5f;
     float normalized_default = 0.5f;

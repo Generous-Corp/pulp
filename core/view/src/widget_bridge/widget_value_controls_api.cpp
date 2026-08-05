@@ -1,6 +1,8 @@
 // widget_bridge/widget_value_controls_api.cpp - scalar control value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/design_ir.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "api_registry.hpp"
 
@@ -38,6 +40,13 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
             stepper->set_value(value);
         else if (auto* pan = dynamic_cast<PanControl*>(it->second.view))
             pan->set_value(static_cast<float>(value));
+        // A selector has segments, not a position: the normalized value picks
+        // which one is lit. Silent, because this is the host pushing state in
+        // — echoing it back as a user edit would fight the binding every frame.
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view))
+            seg->set_selected_silent(selector_segment_index(
+                static_cast<float>(value),
+                static_cast<int>(seg->segments().size())));
 
         return choc::value::Value();
     });
@@ -52,6 +61,9 @@ void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
 
         if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             return choc::value::createFloat64(knob->value());
+        if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view))
+            return choc::value::createFloat64(selector_segment_value(
+                seg->selected(), static_cast<int>(seg->segments().size())));
         if (auto* fader = dynamic_cast<Fader*>(it->second.view))
             return choc::value::createFloat64(fader->value());
         if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))

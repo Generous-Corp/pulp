@@ -7,6 +7,7 @@ __pulpRuntimeSettle__	runtime_import	function	core/view/src/widget_bridge/runtim
 createKnob	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createFader	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createToggle	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
+createSegmented	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createRangeSlider	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createIcon	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createImage	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
@@ -133,6 +134,7 @@ setSource	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 setStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setWidgetStyle	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setItems	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
+setSegments	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setSelected	widget_value	function	core/view/src/widget_bridge/widget_value_basic_api.cpp
 setFontFamily	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setFontWeight	typography	function	core/view/src/widget_bridge/typography_api.cpp

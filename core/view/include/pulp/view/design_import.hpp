@@ -36,6 +36,7 @@ namespace pulp::view {
 
 class View;
 class Checkbox;
+class SegmentedControl;
 class Knob;
 class Fader;
 class Meter;
@@ -138,6 +139,14 @@ struct NativeImportBindingDescriptor {
     std::string_view binding_param;
     std::string_view event_contract;
     std::string_view gesture_contract;
+};
+
+struct NativeImportSegmentedBindingDescriptor {
+    std::string_view route_id;
+    std::string_view param_key;
+    std::string_view binding_module;
+    std::string_view binding_param;
+    int segment_count = 0;
 };
 
 struct NativeImportXYPadBindingDescriptor {
@@ -246,6 +255,18 @@ public:
     }
     virtual void bind_host_action(TextButton& button, const NativeImportHostActionDescriptor& descriptor) {
         (void)button;
+        (void)descriptor;
+    }
+    /// A segmented selector. `segment_count` travels with the binding because
+    /// the value a segment writes is a function of how many there are, and the
+    /// host cannot see the control's segments from the descriptor alone. Use
+    /// selector_segment_value() / selector_segment_index() (design_ir.hpp) for
+    /// both directions rather than restating the arithmetic — a host that maps
+    /// one way while the panel maps the other lights the wrong segment for the
+    /// value it just wrote.
+    virtual void bind_segmented(SegmentedControl& segmented,
+                                const NativeImportSegmentedBindingDescriptor& descriptor) {
+        (void)segmented;
         (void)descriptor;
     }
     virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {
