@@ -100,6 +100,57 @@ public:
     /// be painted without painting it.
     RackLayout layout_for(float width, float height) const;
 
+    // ── Getting close enough to read it ─────────────────────────────────────
+    //
+    // A 39-module patch fits, and at the scale it fits nothing on a panel is
+    // legible: the whole point of drawing the rack rather than listing it is
+    // lost at the exact size where the rack gets interesting. The bindings are
+    // VCV Rack's own, so somebody who has used Rack already knows them --
+    // Cmd/Ctrl with plus or minus zooms, Cmd/Ctrl with 0 goes back to the fit,
+    // a two-finger drag pans -- plus pinch, which is the gesture a trackpad
+    // offers for this and the one the platform actually delivers today. See
+    // on_key_event for which of these currently reach the app.
+
+    /// Where the camera is. Always within bounds -- every setter clamps.
+    const RackView& view() const { return view_; }
+    /// Move the camera. Clamped against the rack currently on screen, so a
+    /// caller cannot install a pan that puts the rack off the side.
+    void set_view(RackView v);
+    /// One step in or out. Returns whether anything moved, so a caller can
+    /// tell "zoomed" from "already as far in as it goes" rather than assuming.
+    bool zoom_in();
+    bool zoom_out();
+    /// Back to the fit, centred. Returns whether anything moved.
+    bool reset_view();
+    /// Drag the rack by a delta in view points.
+    bool pan_by(float dx, float dy);
+
+    /// The zoom/pan bindings, for a caller that routes keys here. Returns
+    /// whether the key was one of them, so an unhandled key still reaches
+    /// whatever is behind the preview.
+    ///
+    /// The platform modifier with 0 goes back to the fit, and with plus or
+    /// minus zooms. Only the first of those arrives on macOS today: the host's
+    /// virtual-keycode table names the letters, the digits, `;` and `'`, and
+    /// nothing else, so `=` and `-` reach the app as KeyCode::unknown. The
+    /// bindings are here and correct for the moment that table carries them;
+    /// until then pinch is the zoom that works.
+    bool on_key_event(const pulp::view::KeyEvent& event) override;
+
+    /// Pinch zooms, about the fit rather than about the fingers.
+    ///
+    /// This is the zoom path that actually reaches the preview on a trackpad,
+    /// and it is the gesture somebody reaches for first. The macOS window host
+    /// delivers it to the deepest view under the fingers; the PLUGIN view host
+    /// does not implement magnify at all, so in a DAW the preview zooms by
+    /// keyboard and pans by trackpad.
+    void on_gesture_event(const pulp::view::GestureEvent& event) override;
+
+    /// A two-finger drag arrives as a wheel event; it pans rather than
+    /// scrolling an enclosing view, which is why this claims the wheel.
+    bool wants_wheel_scroll() const override { return true; }
+    void on_mouse_event(const pulp::view::MouseEvent& event) override;
+
     /// How strongly a cable is drawn: 1 when it is the highlight or nothing is
     /// highlighted, dimmed otherwise.
     float cable_alpha(std::size_t index) const;
@@ -131,6 +182,10 @@ private:
     std::optional<std::size_t> highlight_;
     std::optional<SignalRole> highlight_role_;
     float progress_ = 1.0f;
+    RackView view_;
+
+    /// Clamp a candidate camera against the rack as it is on screen now.
+    RackView clamped(RackView v) const;
 
     const RackModule* find(const std::string& id) const;
 

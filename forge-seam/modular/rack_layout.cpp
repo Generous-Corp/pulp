@@ -24,8 +24,31 @@ const PanelBox* RackLayout::panel(const std::string& id) const {
     return nullptr;
 }
 
+RackView clamp_rack_view(float content_width, float content_height,
+                         float viewport_width, float viewport_height,
+                         RackView view) {
+    if (!(view.zoom > 0.0f)) view.zoom = kMinZoom;
+    view.zoom = std::clamp(view.zoom, kMinZoom, kMaxZoom);
+
+    // Centred is where the fit puts it, so the pan is measured from there and
+    // an axis with nothing to pan reports zero rather than a number that does
+    // not move anything.
+    const auto axis = [](float content, float viewport, float pan) {
+        const float slack = content - (viewport - 2.0f * kPanGutter);
+        if (!(slack > 0.0f)) return 0.0f;
+        // The rack may travel until either edge reaches the window's, which
+        // from centred is half the slack in each direction.
+        const float reach = slack / 2.0f;
+        return std::clamp(pan, -reach, reach);
+    };
+    view.pan_x = axis(content_width, viewport_width, view.pan_x);
+    view.pan_y = axis(content_height, viewport_height, view.pan_y);
+    return view;
+}
+
 RackLayout layout_rack(const std::vector<RackModule>& modules,
-                       float viewport_width, float viewport_height) {
+                       float viewport_width, float viewport_height,
+                       RackView view) {
     RackLayout out;
     if (modules.empty()) return out;
 
@@ -109,11 +132,22 @@ RackLayout layout_rack(const std::vector<RackModule>& modules,
     // window stop looking like Eurorack.
     const float fit_w = (viewport_width - 70.0f) / out.total_width;
     const float fit_h = (viewport_height - 110.0f) / total_height;
-    out.scale = std::min({fit_w, fit_h, 1.05f});
-    if (!(out.scale > 0.0f)) out.scale = 0.01f;   // a degenerate viewport, not a crash
+    float fit = std::min({fit_w, fit_h, 1.05f});
+    if (!(fit > 0.0f)) fit = 0.01f;   // a degenerate viewport, not a crash
 
-    out.origin_x = (viewport_width - out.total_width * out.scale) / 2.0f;
-    out.origin_y = (viewport_height - total_height * out.scale) / 2.0f - 10.0f;
+    // The camera over the fit. Zoom is settled first, because the size the pan
+    // is held against is the size that will actually be drawn.
+    if (!(view.zoom > 0.0f)) view.zoom = kMinZoom;
+    view.zoom = std::clamp(view.zoom, kMinZoom, kMaxZoom);
+    out.scale = fit * view.zoom;
+
+    const float content_w = out.total_width * out.scale;
+    const float content_h = total_height * out.scale;
+    view = clamp_rack_view(content_w, content_h, viewport_width, viewport_height,
+                           view);
+
+    out.origin_x = (viewport_width - content_w) / 2.0f + view.pan_x;
+    out.origin_y = (viewport_height - content_h) / 2.0f - 10.0f + view.pan_y;
 
     for (std::size_t i = 0; i < modules.size(); ++i) {
         const auto& m = modules[i];

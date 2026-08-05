@@ -73,6 +73,49 @@ std::filesystem::path baseline_dir() {
 
 bool updating() { return std::getenv("FORGE_NO_LEAK_UPDATE") != nullptr; }
 
+#ifndef FORGE_PULP_SDK_VERSION
+#define FORGE_PULP_SDK_VERSION "unknown"
+#endif
+
+/// Which SDK this binary renders with.
+std::string rendering_sdk() { return FORGE_PULP_SDK_VERSION; }
+
+/// Which SDK the committed baselines were recorded with, written beside them.
+///
+/// These are pixel-exact digests, and the renderer is not ours -- so a red
+/// baseline has two completely different causes that a digest cannot tell
+/// apart. Either the chrome changed, which is what the guard is FOR, or the
+/// SDK's rasterisation changed under it, which makes the image stale. They are
+/// repaired in opposite directions: one is a bug to fix, the other is a
+/// picture to retake. Three of these sat red for days because nothing on the
+/// failure said which had happened, and the standing risk of that is somebody
+/// re-recording a real regression to make a test green.
+std::string blessed_sdk() {
+    std::ifstream f(baseline_dir() / "BLESSED-WITH.txt");
+    std::string v;
+    std::getline(f, v);
+    while (!v.empty() && (v.back() == '\n' || v.back() == '\r' || v.back() == ' '))
+        v.pop_back();
+    return v;
+}
+
+/// What to tell somebody staring at a failed digest.
+std::string provenance_note() {
+    const auto was = blessed_sdk();
+    const auto now = rendering_sdk();
+    if (was.empty())
+        return "The baselines do not say which SDK recorded them, so nothing "
+               "here can tell a stale image from a real change.";
+    if (was == now)
+        return "Recorded and rendered on the same SDK (" + now +
+               "), so this is a CHANGE IN THE CHROME, not toolchain drift. Fix "
+               "the render.";
+    return "Recorded on Pulp " + was + ", rendered on Pulp " + now +
+           ". The renderer moved under these images: look at the diff and, if "
+           "it is only the toolchain, re-record with FORGE_NO_LEAK_UPDATE=1 "
+           "and update BLESSED-WITH.txt in the same commit.";
+}
+
 /// A patch the generator really produced, or the one that travels with these
 /// tests.
 ///
@@ -214,14 +257,15 @@ void check_home_frame(const char* product) {
     if (updating() || !std::filesystem::exists(baseline)) {
         std::filesystem::copy_file(
             actual, baseline, std::filesystem::copy_options::overwrite_existing, ec);
-        WARN("wrote baseline for " << product << " -> " << baseline.string());
+        std::ofstream(baseline_dir() / "BLESSED-WITH.txt") << rendering_sdk() << "\n";
+        WARN("wrote baseline for " << product << " -> " << baseline.string()
+                                   << "  (Pulp " << rendering_sdk() << ")");
         return;
     }
 
     const auto want = read_all(baseline);
     INFO("baseline: " << baseline.string() << "\nactual:   " << actual.string()
-                      << "\nIf this change was intended, refresh with "
-                         "FORGE_NO_LEAK_UPDATE=1 and say why in the commit.");
+                      << "\n" << provenance_note());
     CHECK(digest(got) == digest(want));
 }
 
@@ -9304,4 +9348,364 @@ TEST_CASE("a mention fetch that cannot succeed is refused, not promised",
     REQUIRE(forge_modular::plan_mention_fetch(A::available, true, "entitled").fetch);
     // Already installed: saying "fetching" would be its own small lie.
     REQUIRE_FALSE(forge_modular::plan_mention_fetch(A::ready, true, "entitled").fetch);
+}
+
+// A controlled radial gradient, rendered on its own so which SDK is right can
+// be decided by arithmetic rather than by eye. Hidden by default.
+// ── the Player frame is a slot, not a size ───────────────────────────────────
+//
+// The native panel used to be stretched to the authored 1080x600 Player frame.
+// A stock two-macro build then drew as an empty slab with its header floated
+// into the middle and its knobs adrift: every token applied, no content shape,
+// which is exactly what a person reads as an unstyled panel. The generated
+// editor's own canvas was already exempted from that stretch; the native panel
+// was not.
+//
+// Two assertions, because either passes on its own while the other is broken.
+// The first pins that the panel is sized to its CONTENT and bounded by the
+// frame. The second pins that the header still spans the panel, so the title
+// keeps the room the panel has -- a percentage width against a content-sized
+// panel resolved to the header's own content and ellipsized "Lo-Fi Delay" to
+// "Lo-Fi De...".
+template <typename ShellT>
+forge::ForgeChrome::NativePanelFit player_panel_fit() {
+    HermeticProjects isolated;
+    ShellT shell;
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr;
+    pc.max_buffer_size = kFrames;
+    pc.input_channels = 2;
+    pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    chrome->enter_player();
+    REQUIRE(chrome->mode() == forge::ForgeChrome::Mode::Player);
+    view->set_bounds({0, 0, static_cast<float>(forge::ForgeChrome::kDesignWidth),
+                      static_cast<float>(forge::ForgeChrome::kDesignHeight)});
+    view->layout_children();
+    const auto fit = chrome->native_panel_fit();
+    shell.on_view_closed(*view);
+    return fit;
+}
+
+TEST_CASE("the native panel is sized to its content inside the Player frame",
+          "[player][panel]") {
+    const float frame_w = forge::design::geometry::player_editor_width;
+    const float frame_h = forge::design::geometry::player_editor_height;
+    // Every product, because the frame is shared chrome. Each ships a stock
+    // build of a handful of macros, and none of them needs 1080x600.
+    const auto check = [&](const char* product,
+                           const forge::ForgeChrome::NativePanelFit& fit) {
+        INFO(product << ": panel " << fit.panel_width << "x" << fit.panel_height
+                     << "  frame " << frame_w << "x" << frame_h);
+        // Bounded by the frame...
+        CHECK(fit.panel_width <= frame_w);
+        CHECK(fit.panel_height <= frame_h);
+        // ...and not filling it.
+        CHECK(fit.panel_width < frame_w);
+        CHECK(fit.panel_height < frame_h);
+    };
+    check("fx", player_panel_fit<forge::ForgeFxShell>());
+    check("instrument", player_panel_fit<forge::ForgeInstrumentShell>());
+    check("midi", player_panel_fit<forge::ForgeMidiShell>());
+}
+
+TEST_CASE("the native panel's header spans the panel", "[player][panel]") {
+    const auto fit = player_panel_fit<forge::ForgeFxShell>();
+    INFO("panel " << fit.panel_width << "  header " << fit.header_width
+                  << "  title " << fit.title_width << " needs "
+                  << fit.title_intrinsic);
+    REQUIRE(fit.panel_width > 0.0f);
+    // The header row reaches both padded edges of the panel rather than
+    // collapsing onto its own content.
+    CHECK(fit.header_width > fit.panel_width * 0.8f);
+    // And the title is given strictly MORE room than its own text measures.
+    // Equal is not enough: the ellipsis fires at the measured width, which is
+    // exactly what the collapsed header handed it.
+    CHECK(fit.title_width > fit.title_intrinsic);
+}
+
+
+// ── Getting close enough to read a big patch ─────────────────────────────────
+//
+// A 39-module rack fits, and at the scale it fits a panel is a few points wide
+// and nothing on it is legible -- so the preview is a picture of a rack that
+// cannot be read, which is the one thing drawing it rather than listing it was
+// for. Zoom and pan are a camera over the same layout: the rack does not
+// change, the view of it does.
+
+namespace {
+
+/// A rack of `n` modules, each 10 HP, laid end to end -- the shape of a big
+/// generated patch, with nothing else going on.
+std::vector<forge_modular::RackModule> a_rack_of(std::size_t n) {
+    std::vector<forge_modular::RackModule> mods;
+    for (std::size_t i = 0; i < n; ++i) {
+        forge_modular::RackModule m;
+        m.id = "M" + std::to_string(i);
+        m.name = m.id;
+        m.hp = 10;
+        mods.push_back(std::move(m));
+    }
+    return mods;
+}
+
+float content_width_of(const forge_modular::RackLayout& L) {
+    return L.total_width * L.scale;
+}
+
+}  // namespace
+
+TEST_CASE("a rack too big to read can be zoomed until it is", "[rack][view]") {
+    const auto mods = a_rack_of(39);
+    const float vw = 1100.0f, vh = 620.0f;
+
+    const auto fit = forge_modular::layout_rack(mods, vw, vh);
+    // The premise: at the fit one panel is a strip, not a module.
+    REQUIRE(fit.panels.front().width < 30.0f);
+
+    forge_modular::RackView in;
+    in.zoom = forge_modular::kMaxZoom;
+    const auto close = forge_modular::layout_rack(mods, vw, vh, in);
+    // Zoomed all the way in, a panel is drawn at least life size -- 10 HP is
+    // 150 points, and a panel narrower than that is still a diagram.
+    CHECK(close.panels.front().width >= 10.0f * forge_modular::kHorizontalPitch);
+    CHECK(close.scale == Approx(fit.scale * forge_modular::kMaxZoom));
+
+    // The rack itself is untouched: same modules, same widths in HP, same
+    // order. Only the scale moved.
+    REQUIRE(close.panels.size() == fit.panels.size());
+    CHECK(close.total_width == Approx(fit.total_width));
+}
+
+TEST_CASE("the fit is the floor, and life size is the ceiling", "[rack][view]") {
+    const auto mods = a_rack_of(39);
+    const float vw = 1100.0f, vh = 620.0f;
+    const auto fitted = forge_modular::layout_rack(mods, vw, vh);
+    const float content_h = static_cast<float>(fitted.rows) *
+                            forge_modular::kPanelHeight * fitted.scale;
+
+    // Below the fit the window already shows the whole rack with room over,
+    // so there is nothing further out to go.
+    forge_modular::RackView out;
+    out.zoom = 0.25f;
+    CHECK(forge_modular::clamp_rack_view(content_width_of(fitted), content_h, vw,
+                                         vh, out)
+              .zoom == Approx(forge_modular::kMinZoom));
+
+    forge_modular::RackView way_in;
+    way_in.zoom = 100.0f;
+    CHECK(forge_modular::clamp_rack_view(content_width_of(fitted), content_h, vw,
+                                         vh, way_in)
+              .zoom == Approx(forge_modular::kMaxZoom));
+}
+
+TEST_CASE("a rack that already fits has nothing to pan", "[rack][view]") {
+    // Three modules in a wide window: dragging must not slide the rack out of
+    // a window it is entirely inside, because nothing would say where it went.
+    const auto mods = a_rack_of(3);
+    const float vw = 1100.0f, vh = 620.0f;
+    const auto fitted = forge_modular::layout_rack(mods, vw, vh);
+    const float content_h = static_cast<float>(fitted.rows) *
+                            forge_modular::kPanelHeight * fitted.scale;
+    REQUIRE(content_width_of(fitted) < vw);
+
+    forge_modular::RackView dragged;
+    dragged.pan_x = -900.0f;
+    dragged.pan_y = 400.0f;
+    const auto held = forge_modular::clamp_rack_view(content_width_of(fitted),
+                                                     content_h, vw, vh, dragged);
+    CHECK(held.pan_x == Approx(0.0f));
+    CHECK(held.pan_y == Approx(0.0f));
+}
+
+TEST_CASE("a panned rack stops at its own edge", "[rack][view]") {
+    const auto mods = a_rack_of(39);
+    const float vw = 1100.0f, vh = 620.0f;
+    forge_modular::RackView zoomed;
+    zoomed.zoom = forge_modular::kMaxZoom;
+    const auto L = forge_modular::layout_rack(mods, vw, vh, zoomed);
+    const float content_w = content_width_of(L);
+    REQUIRE(content_w > vw);   // there IS something to pan
+
+    forge_modular::RackView flung = zoomed;
+    flung.pan_x = -100000.0f;
+    const auto stopped = forge_modular::clamp_rack_view(
+        content_w, static_cast<float>(L.rows) * forge_modular::kPanelHeight * L.scale,
+        vw, vh, flung);
+    // Dragged as far left as it goes, the rack's right edge is at the window's
+    // -- within the gutter, and never past it.
+    const auto at_edge = forge_modular::layout_rack(mods, vw, vh, stopped);
+    const float right = at_edge.origin_x + content_w;
+    CHECK(right >= vw - forge_modular::kPanGutter - 0.51f);
+    CHECK(right <= vw + 0.51f);
+}
+
+TEST_CASE("zooming out brings a panned rack back", "[rack][view]") {
+    // A pan that was legal while zoomed in reaches past the window once the
+    // rack shrinks, and leaving it there parks the rack off the side.
+    forge_modular::RackPreview preview;
+    preview.set_bounds({0, 0, 1100, 620});
+    preview.set_rack(a_rack_of(39), {});
+
+    for (int i = 0; i < 12; ++i) preview.zoom_in();
+    REQUIRE(preview.view().zoom == Approx(forge_modular::kMaxZoom));
+    preview.pan_by(-100000.0f, 0.0f);
+    REQUIRE(preview.view().pan_x < 0.0f);
+
+    REQUIRE(preview.reset_view());
+    CHECK(preview.view().zoom == Approx(forge_modular::kMinZoom));
+    CHECK(preview.view().pan_x == Approx(0.0f));
+    CHECK(preview.view().pan_y == Approx(0.0f));
+}
+
+TEST_CASE("the zoom keys are the ones Rack uses", "[rack][view]") {
+    forge_modular::RackPreview preview;
+    preview.set_bounds({0, 0, 1100, 620});
+    preview.set_rack(a_rack_of(39), {});
+
+    const auto press = [&](int character, std::uint16_t mods) {
+        pulp::view::KeyEvent e;
+        e.key = static_cast<pulp::view::KeyCode>(character);
+        e.modifiers = mods;
+        e.is_down = true;
+        return preview.on_key_event(e);
+    };
+    const std::uint16_t cmd = pulp::view::kModCmd;
+
+    CHECK(press('=', cmd));
+    CHECK(preview.view().zoom > 1.0f);
+    const float after_one = preview.view().zoom;
+    CHECK(press('-', cmd));
+    CHECK(preview.view().zoom < after_one);
+
+    CHECK(press('=', cmd));
+    CHECK(press('0', cmd));
+    CHECK(preview.view().zoom == Approx(forge_modular::kMinZoom));
+
+    // Without the modifier they are just characters somebody is typing.
+    CHECK_FALSE(press('=', 0));
+    CHECK(preview.view().zoom == Approx(forge_modular::kMinZoom));
+}
+
+TEST_CASE("a two-finger drag pans the rack", "[rack][view]") {
+    // Three rows, because a rack one row tall has nothing to pan VERTICALLY
+    // however far in it is zoomed -- and a test that asserted otherwise would
+    // be asking the clamp to be wrong.
+    auto mods = a_rack_of(39);
+    for (std::size_t i = 0; i < mods.size(); ++i) {
+        mods[i].has_grid_pos = true;
+        mods[i].grid_x = static_cast<int>(i % 13) * 10;
+        mods[i].grid_y = static_cast<int>(i / 13);
+    }
+    forge_modular::RackPreview preview;
+    preview.set_bounds({0, 0, 1100, 620});
+    preview.set_rack(std::move(mods), {});
+    for (int i = 0; i < 12; ++i) preview.zoom_in();
+
+    pulp::view::MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 40.0f;      // two fingers down the trackpad
+    preview.on_mouse_event(wheel);
+    // The rack walks up as the fingers walk down, which is what following the
+    // fingers means.
+    CHECK(preview.view().pan_y == Approx(-40.0f));
+
+    wheel.scroll_delta_y = 0.0f;
+    wheel.scroll_delta_x = 25.0f;
+    preview.on_mouse_event(wheel);
+    CHECK(preview.view().pan_x == Approx(-25.0f));
+}
+
+TEST_CASE("the cable a pointer finds is the cable that was drawn, zoomed",
+          "[rack][view][hover]") {
+    // Paint and the hit test read one layout. Two layouts would put the same
+    // cable in two places and the glow would land where the pointer is not.
+    auto mods = a_rack_of(2);
+    mods[0].ports.push_back({"out", "OUT", 0.5f, 200.0f, false});
+    mods[1].ports.push_back({"in", "IN", 0.5f, 200.0f, true});
+    std::vector<forge_modular::Connection> cables{
+        {"M0", "out", "M1", "in", forge_modular::SignalRole::audio, ""}};
+
+    forge_modular::RackPreview preview;
+    preview.set_bounds({0, 0, 1100, 620});
+    preview.set_rack(mods, cables);
+
+    const auto midpoint = [&]() {
+        const auto L = preview.layout_for(1100.0f, 620.0f);
+        const auto from = forge_modular::port_point(L, preview.modules(), "M0",
+                                                    "out", "M1");
+        const auto to = forge_modular::port_point(L, preview.modules(), "M1",
+                                                  "in", "M0");
+        float x = 0, y = 0;
+        forge_modular::cable_point(forge_modular::cable_curve(from, to), 0.5f, x, y);
+        return std::pair<float, float>{x, y};
+    };
+
+    auto [x0, y0] = midpoint();
+    REQUIRE(preview.cable_at(x0, y0).has_value());
+
+    for (int i = 0; i < 4; ++i) preview.zoom_in();
+    auto [x1, y1] = midpoint();
+    // The cable moved -- otherwise this proves nothing.
+    REQUIRE(std::abs(x1 - x0) + std::abs(y1 - y0) > forge_modular::kCableGrabPoints);
+    CHECK(preview.cable_at(x1, y1).has_value());
+    CHECK_FALSE(preview.cable_at(x0, y0).has_value());
+}
+
+TEST_CASE("render a big rack at the fit and zoomed, for a look", "[.zoom-look]") {
+    auto mods = a_rack_of(39);
+    for (std::size_t i = 0; i < mods.size(); ++i) {
+        mods[i].has_grid_pos = true;
+        mods[i].grid_x = static_cast<int>(i % 13) * 10;
+        mods[i].grid_y = static_cast<int>(i / 13);
+    }
+    forge_modular::RackPreview preview;
+    preview.set_rack(mods, {});
+    preview.set_bounds({0, 0, 1100, 620});
+
+    const auto shoot = [&](const char* name) {
+        const auto path = std::filesystem::temp_directory_path() / name;
+        REQUIRE(pulp::view::render_to_file(preview, 1100, 620, path.string(),
+                                           /*scale=*/1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        WARN(name << " -> " << path.string());
+    };
+    shoot("modular-rack-fit.png");
+    for (int i = 0; i < 5; ++i) preview.zoom_in();
+    shoot("modular-rack-zoomed.png");
+    preview.pan_by(-600.0f, -300.0f);
+    shoot("modular-rack-panned.png");
+}
+
+TEST_CASE("a pinch zooms the rack", "[rack][view]") {
+    // The zoom that actually reaches the preview on a trackpad: the macOS
+    // window host routes magnify to the deepest view under the fingers.
+    forge_modular::RackPreview preview;
+    preview.set_bounds({0, 0, 1100, 620});
+    preview.set_rack(a_rack_of(39), {});
+
+    const auto pinch = [&](float delta) {
+        pulp::view::GestureEvent g;
+        g.phase = pulp::view::GesturePhase::changed;
+        g.delta_scale = delta;
+        g.scale = 1.0f + delta;
+        preview.on_gesture_event(g);
+    };
+
+    // A pinch arrives as a stream of small increments, and they accumulate.
+    for (int i = 0; i < 10; ++i) pinch(0.05f);
+    const float opened = preview.view().zoom;
+    CHECK(opened > 1.0f);
+
+    for (int i = 0; i < 5; ++i) pinch(-0.05f);
+    CHECK(preview.view().zoom < opened);
+
+    // Pinching back past the fit stops at it rather than shrinking the rack
+    // inside a window that already shows all of it.
+    for (int i = 0; i < 40; ++i) pinch(-0.1f);
+    CHECK(preview.view().zoom == Approx(forge_modular::kMinZoom));
 }
