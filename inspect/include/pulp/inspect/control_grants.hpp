@@ -31,6 +31,9 @@ enum class ControlConsentAuthority : std::uint8_t {
 };
 
 struct ControlConsentDecision {
+    /// Broker-derived decision metadata. A transport handler must determine
+    /// this authority from its trusted consent source, never deserialize it
+    /// from a plugin or client request.
     bool approved = false;
     ControlConsentAuthority authority = ControlConsentAuthority::None;
     std::string decision_id;
@@ -102,6 +105,8 @@ public:
     ControlGrantStore(const ControlGrantStore&) = delete;
     ControlGrantStore& operator=(const ControlGrantStore&) = delete;
 
+    /// Internal broker call. `consent.authority` is trusted composition-root
+    /// input and must never be populated from request payload fields.
     ControlGrantResult issue(ControlGrantRequest request,
                              ControlConsentDecision consent);
     ControlGrantStatus revoke(const ControlGrantId& grant_id,

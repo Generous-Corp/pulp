@@ -83,8 +83,6 @@ bool valid_registration_request(const ControlRegistrationRequest& request) {
 }
 
 bool peer_can_register(ControlHostTier tier, ControlPeerRole role) {
-    if (role == ControlPeerRole::TestFixture)
-        return true;
     if (tier == ControlHostTier::OfflineJob)
         return role == ControlPeerRole::OfflineHost;
     if (tier == ControlHostTier::Standalone)
@@ -284,8 +282,7 @@ ControlBootstrapResult ControlIdentityRegistry::issue_bootstrap(
     const VerifiedControlPeerIdentity& expected_peer) {
     ControlBootstrapResult result;
     if (!impl_->broker_id ||
-        (expected_peer.evidence().role != ControlPeerRole::Client &&
-         expected_peer.evidence().role != ControlPeerRole::TestFixture)) {
+        expected_peer.evidence().role != ControlPeerRole::Client) {
         result.status = impl_->broker_id
                             ? ControlIdentityStatus::PeerRoleMismatch
                             : ControlIdentityStatus::EntropyUnavailable;

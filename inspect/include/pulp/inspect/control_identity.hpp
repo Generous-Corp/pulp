@@ -41,7 +41,6 @@ enum class ControlPeerRole : std::uint8_t {
     OfflineHost,
     StandaloneHost,
     TrustedHostBridge,
-    TestFixture,
 };
 
 /// Evidence observed by the local IPC carrier. Values supplied by a plugin or
