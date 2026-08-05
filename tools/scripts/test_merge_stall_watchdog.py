@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -209,7 +210,15 @@ class TestRequiredCheckResolution(unittest.TestCase):
         self.assertEqual(f2, [])  # "linux" is required but not present/green
 
     def test_default_required_set_used_when_snapshot_omits_it(self):
-        s = {"open_prs": [pr(402, merge_state="CLEAN", green_age_min=90)]}
+        s = {
+            "open_prs": [
+                pr(
+                    402,
+                    merge_state="CLEAN",
+                    checks=green_checks(90, msw.DEFAULT_REQUIRED_CHECKS),
+                )
+            ]
+        }
         _, stuck1 = msw.analyze(s, prev_stuck=[], now=NOW)
         f2, _ = msw.analyze(s, prev_stuck=stuck1, now=NOW)
         self.assertEqual(levels(f2), ["alarm"])
@@ -231,9 +240,213 @@ class TestMultiPrPopulation(unittest.TestCase):
         self.assertEqual(stuck_now, [501, 502])
 
 
-class TestFutureStub(unittest.TestCase):
-    def test_merge_queue_stub_is_inert(self):
-        self.assertEqual(msw.merge_queue_stall_todo({}, NOW), [])
+class TestMergeQueueStall(unittest.TestCase):
+    def queue_snapshot(self, *, age=60, depth=16, last_batch_age=60):
+        return {
+            "merge_queue": {
+                "depth": depth,
+                "last_merge_group_started_at": ago(last_batch_age),
+                "head": {
+                    "number": 6997,
+                    "title": "queue head",
+                    "url": "https://example.invalid/pr/6997",
+                    "state": "AWAITING_CHECKS",
+                    "enqueued_at": ago(age),
+                    "blocking_checks": [
+                        {"name": "macos", "state": "QUEUED", "url": ""}
+                    ],
+                },
+            }
+        }
+
+    def test_old_queue_and_old_batch_alarm_in_one_sweep(self):
+        findings = msw.analyze_merge_queue(self.queue_snapshot(), NOW)
+        self.assertEqual([f["level"] for f in findings], ["queue_alarm"])
+        self.assertEqual(findings[0]["queue_depth"], 16)
+        self.assertEqual(findings[0]["blocking_checks"][0]["name"], "macos")
+
+    def test_recent_batch_keeps_old_queue_quiet(self):
+        findings = msw.analyze_merge_queue(
+            self.queue_snapshot(age=120, last_batch_age=10), NOW
+        )
+        self.assertEqual(findings, [])
+
+    def test_young_head_is_not_stalled(self):
+        self.assertEqual(
+            msw.analyze_merge_queue(self.queue_snapshot(age=10), NOW), []
+        )
+
+    def test_empty_or_unavailable_queue_is_quiet(self):
+        self.assertEqual(msw.analyze_merge_queue({}, NOW), [])
+        self.assertEqual(
+            msw.analyze_merge_queue(self.queue_snapshot(depth=0), NOW), []
+        )
+
+
+class TestMergeQueueCollection(unittest.TestCase):
+    def test_collection_rejects_graphql_errors_in_http_200_response(self):
+        payload = {
+            "data": {"repository": {"mergeQueue": None}},
+            "errors": [{"message": "temporary schema failure"}],
+        }
+        with mock.patch.object(msw, "_gh", return_value=json.dumps(payload)):
+            with self.assertRaisesRegex(KeyError, "merge queue query failed"):
+                msw.collect_merge_queue("Generous-Corp/pulp", "main", REQUIRED)
+
+    def test_collection_scopes_queue_and_runs_to_requested_base(self):
+        queue_payload = {
+            "data": {
+                "repository": {
+                    "mergeQueue": {
+                        "entries": {"totalCount": 0, "nodes": []}
+                    }
+                }
+            }
+        }
+        runs_payload = {
+            "workflow_runs": [
+                {
+                    "head_branch": "gh-readonly-queue/release/pr-9-old",
+                    "run_started_at": "2026-07-16T11:59:00Z",
+                },
+                {
+                    "head_branch": "gh-readonly-queue/main/pr-8-base",
+                    "run_started_at": "2026-07-16T11:30:00Z",
+                },
+            ]
+        }
+        calls: list[list[str]] = []
+
+        def fake_gh(args):
+            calls.append(args)
+            return json.dumps(queue_payload if "graphql" in args else runs_payload)
+
+        with mock.patch.object(msw, "_gh", side_effect=fake_gh):
+            result = msw.collect_merge_queue("Generous-Corp/pulp", "main", REQUIRED)
+
+        self.assertNotIn("last_merge_group_started_at", result)
+        self.assertIn("branch=main", calls[0])
+        self.assertIn("mergeQueue(branch:$branch)", msw._MERGE_QUEUE_QUERY)
+
+    def test_collection_reads_blockers_from_current_merge_group_sha(self):
+        queue_payload = {
+            "data": {
+                "repository": {
+                    "mergeQueue": {
+                        "configuration": {"maximumEntriesToBuild": 2},
+                        "entries": {
+                            "totalCount": 2,
+                            "nodes": [
+                                {
+                                    "position": 1,
+                                    "enqueuedAt": "2026-07-16T11:00:00Z",
+                                    "state": "AWAITING_CHECKS",
+                                    "pullRequest": {
+                                        "number": 42,
+                                        "title": "queued",
+                                        "url": "https://example.invalid/pr/42",
+                                    },
+                                    "headCommit": {"oid": "queue-head-red"},
+                                },
+                                {
+                                    "position": 2,
+                                    "enqueuedAt": "2026-07-16T11:05:00Z",
+                                    "state": "QUEUED",
+                                    "pullRequest": {
+                                        "number": 99,
+                                        "title": "cumulative follower",
+                                        "url": "https://example.invalid/pr/99",
+                                    },
+                                    "headCommit": {"oid": "unrelated-newer"},
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+        runs_payload = {
+            "workflow_runs": [
+                {
+                    "head_branch": "gh-readonly-queue/main/pr-99-unrelated",
+                    "head_sha": "unrelated-newer",
+                    "created_at": "2026-07-16T11:55:00Z",
+                    "run_started_at": "2026-07-16T11:56:00Z",
+                },
+                {
+                    "head_branch": "gh-readonly-queue/main/pr-42-current",
+                    "head_sha": "merge-group-red",
+                    "created_at": "2026-07-16T11:30:00Z",
+                    # A rerun/start delay must not refresh batch formation.
+                    "run_started_at": "2026-07-16T11:59:00Z",
+                }
+            ]
+        }
+        rollup_payload = {
+            "data": {
+                "repository": {
+                    "object": {
+                        "oid": "merge-group-red",
+                        "statusCheckRollup": {
+                            "contexts": {
+                                "nodes": [
+                                    {
+                                        "__typename": "CheckRun",
+                                        "name": "macos",
+                                        "status": "QUEUED",
+                                        "conclusion": None,
+                                        "detailsUrl": "https://example.invalid/check",
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        def fake_gh(args):
+            if "graphql" not in args:
+                return json.dumps(runs_payload)
+            query = next(arg for arg in args if arg.startswith("query="))
+            return json.dumps(
+                rollup_payload if "object(oid:$oid)" in query else queue_payload
+            )
+
+        with mock.patch.object(msw, "_gh", side_effect=fake_gh):
+            result = msw.collect_merge_queue(
+                "Generous-Corp/pulp", "main", REQUIRED
+            )
+
+        self.assertEqual(result["head"]["queue_head_sha"], "queue-head-red")
+        self.assertEqual(result["head"]["merge_group_sha"], "merge-group-red")
+        self.assertEqual(
+            result["last_merge_group_started_at"], "2026-07-16T11:55:00Z"
+        )
+        self.assertEqual(result["maximum_entries_to_build"], 2)
+        blockers = {
+            check["name"]: check for check in result["head"]["blocking_checks"]
+        }
+        self.assertEqual(blockers["macos"]["state"], "QUEUED")
+
+    def test_completed_failure_reports_its_conclusion(self):
+        commit = {
+            "statusCheckRollup": {
+                "contexts": {
+                    "nodes": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "macos",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "detailsUrl": "https://example.invalid/check",
+                        }
+                    ]
+                }
+            }
+        }
+        blockers = msw._blocking_contexts(commit, {"macos"})
+        self.assertEqual(blockers[0]["state"], "FAILURE")
 
 
 class TestMainCli(unittest.TestCase):
@@ -282,6 +495,91 @@ class TestMainCli(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((d / "body.md").exists())
             self.assertEqual(json.loads((d / "state.json").read_text())["stuck_prs"], [])
+
+    def test_degraded_snapshot_preserves_previous_two_sweep_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            degraded = snap()
+            degraded["errors"] = [{"stage": "graphql", "error": "timeout"}]
+            (d / "snap.json").write_text(json.dumps(degraded))
+            (d / "prev.json").write_text(json.dumps({"stuck_prs": [601]}))
+
+            rc = msw.main(
+                [
+                    "--snapshot", str(d / "snap.json"),
+                    "--prev-state", str(d / "prev.json"),
+                    "--findings-out", str(d / "findings.json"),
+                    "--state-out", str(d / "state.json"),
+                    "--body-out", str(d / "body.md"),
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            state = json.loads((d / "state.json").read_text())
+            self.assertEqual(state["stuck_prs"], [601])
+
+    def test_open_pr_graphql_errors_mark_live_snapshot_degraded(self):
+        queue_payload = {
+            "data": {
+                "repository": {
+                    "mergeQueue": {
+                        "entries": {"totalCount": 0, "nodes": []}
+                    }
+                }
+            }
+        }
+        runs_payload = {"workflow_runs": []}
+        pr_error_payload = {
+            "data": {"repository": None},
+            "errors": [{"message": "temporary authorization failure"}],
+        }
+
+        def fake_gh(args):
+            if "graphql" not in args:
+                return json.dumps(runs_payload)
+            query = next(arg for arg in args if arg.startswith("query="))
+            if "mergeQueue(branch:$branch)" in query:
+                return json.dumps(queue_payload)
+            return json.dumps(pr_error_payload)
+
+        with (
+            mock.patch.object(msw, "_gh", side_effect=fake_gh),
+            mock.patch.object(
+                msw,
+                "resolve_required_checks",
+                return_value=(REQUIRED, "branch-protection"),
+            ),
+        ):
+            snapshot = msw.collect_snapshot(
+                "Generous-Corp/pulp", "main", NOW
+            )
+
+        self.assertEqual(snapshot["open_prs"], [])
+        self.assertEqual(snapshot["errors"][0]["stage"], "graphql")
+        self.assertIn("authorization failure", snapshot["errors"][0]["error"])
+
+    def test_workflow_counts_queue_alarms_for_issue_maintenance(self):
+        workflow = (
+            Path(__file__).resolve().parents[2]
+            / ".github"
+            / "workflows"
+            / "merge-stall-check.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("f['level'] in ('alarm', 'queue_alarm')", workflow)
+        self.assertIn('degraded=${degraded}', workflow)
+        self.assertIn('if [ "$DEGRADED" = "true" ]', workflow)
+
+    def test_documented_fallback_contains_every_main_required_context(self):
+        self.assertEqual(
+            set(msw.DEFAULT_REQUIRED_CHECKS),
+            {
+                "macos",
+                "Enforce version & skill sync",
+                "Build + prove + (owner-gated) deploy",
+                "Vellum trusted freeze",
+                "Vellum freeze",
+            },
+        )
 
 
 class TestChecksFromRollup(unittest.TestCase):

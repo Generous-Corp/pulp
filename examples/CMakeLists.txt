@@ -23,6 +23,9 @@ endif()
 
 # PulpGain: minimal gain effect plugin
 add_subdirectory(pulp-gain)
+add_subdirectory(design-panel-plugin)
+add_subdirectory(design-panel-instrument)
+add_subdirectory(design-panel-midi-effect)
 add_subdirectory(eq-curve-demo)
 
 # PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components
@@ -86,6 +89,9 @@ add_subdirectory(PulpDrums)
 
 # StepSequencer: synth-class step sequencer (UI <-> channel <-> Processor proof)
 add_subdirectory(StepSequencer)
+
+# TimelinePluginProof: DocumentSession <-> editor host <-> plugin-state proof
+add_subdirectory(timeline-plugin-proof)
 
 # Phase-1 Creative Timeline Engine proofs. These are desktop/headless adapters
 # over pulp::host, which is intentionally unavailable in the iOS build.

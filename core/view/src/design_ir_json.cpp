@@ -397,6 +397,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("textOverflow", s.text_overflow);
     set_opt_str("overflow", s.overflow);
     set_opt_str("cursor", s.cursor);
+    set_opt_str("pointerEvents", s.pointer_events);
     set_opt_str("position", s.position);
     set_opt_float("top", s.top);
     set_opt_float("left", s.left);
@@ -410,6 +411,30 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("minHeight", s.min_height);
     set_opt_float("maxWidth", s.max_width);
     set_opt_float("maxHeight", s.max_height);
+
+    // clip_rect {x,y,width,height} — the clip an importer resolved along CSS's
+    // containing-block chain, in the node's own coordinate space. A zero-area
+    // rectangle is a real answer (the node is clipped away entirely), so
+    // presence is the test, not size.
+    if (auto k = resolve_key("clipRect")) {
+        auto cr = obj[k->c_str()];
+        if (cr.isObject()) {
+            IRStyle::ClipRect out{};
+            auto crf = [&](const char* m, float& f) {
+                if (cr.hasObjectMember(m))
+                    f = static_cast<float>(cr[m].getWithDefault<double>(0));
+            };
+            crf("x", out.x); crf("y", out.y);
+            crf("width", out.width); crf("height", out.height);
+            // Radii are optional and default to zero, so a document written
+            // before the clip carried a curve still parses as a square clip.
+            crf("radiusTopLeft", out.radius_tl);
+            crf("radiusTopRight", out.radius_tr);
+            crf("radiusBottomRight", out.radius_br);
+            crf("radiusBottomLeft", out.radius_bl);
+            s.clip_rect = out;
+        }
+    }
 
     // render_bounds {w,h,dx,dy} — the asset's true visual extent when it bleeds
     // past the layout box (figma-plugin). Without this the silver-knob graphic
@@ -841,6 +866,39 @@ static std::optional<std::string> normalize_v_constraint(std::string s) {
 // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
 // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
 // any source expressing styled ranges feeds the same IR runs.
+static void parse_ir_text_line_boxes(IRNode& node,
+                                    const choc::value::ValueView& obj) {
+    if (!obj.isObject()) return;
+    if (obj.hasObjectMember("lineBoxes")) {
+        const auto boxes = obj["lineBoxes"];
+        if (boxes.isArray()) {
+            for (uint32_t i = 0; i < boxes.size(); ++i) {
+                const auto entry = boxes[static_cast<int>(i)];
+                if (!entry.isObject()) continue;
+                IRTextLineBox box;
+                box.left = get_float(entry, "left");
+                box.top = get_float(entry, "top");
+                box.width = get_float(entry, "width");
+                box.height = get_float(entry, "height");
+                box.start = static_cast<int>(get_float(entry, "start"));
+                box.length = static_cast<int>(get_float(entry, "length"));
+                node.text_line_boxes.push_back(box);
+            }
+        }
+    }
+    if (obj.hasObjectMember("lineBoxBasis")) {
+        const auto basis = obj["lineBoxBasis"];
+        if (basis.isObject()) {
+            IRTextLayoutBasis parsed;
+            parsed.width = get_float(basis, "width");
+            parsed.resolved_face = get_string(basis, "resolvedFace");
+            node.text_layout_basis = std::move(parsed);
+        }
+    }
+    // Boxes without a basis cannot be validated, so they are not a cache.
+    if (!node.text_layout_basis) node.text_line_boxes.clear();
+}
+
 static void parse_ir_text_runs(IRNode& node, const choc::value::ValueView& obj) {
     for (const char* runs_key : {"runs", "textRuns"}) {
         if (!obj.hasObjectMember(runs_key) || !obj[runs_key].isArray()) continue;
@@ -1043,6 +1101,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
     parse_ir_text_runs(node, obj);
+    parse_ir_text_line_boxes(node, obj);
     parse_ir_identity_fields(node, obj);
 
     // ── Faithful-vector import: render mode + SVG asset + overlays ──
@@ -1861,7 +1920,28 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "whiteSpace", s.white_space);
     write_string_member(out, first, "textOverflow", s.text_overflow);
     write_string_member(out, first, "overflow", s.overflow);
+    // The importer-resolved clip chain, in the node's own coordinate space.
+    // Written as well as read: a field the C++ produces and the round-trip
+    // drops is how an imported panel silently goes back to clipping by
+    // parentage after one save/load.
+    if (s.clip_rect) {
+        write_key(out, first, "clipRect");
+        out << "{\"x\":" << s.clip_rect->x << ",\"y\":" << s.clip_rect->y
+            << ",\"width\":" << s.clip_rect->width
+            << ",\"height\":" << s.clip_rect->height;
+        // Written only when the clip actually curves, so a square clip
+        // serializes exactly as it did before it could carry a radius.
+        if (s.clip_rect->radius_tl != 0 || s.clip_rect->radius_tr != 0 ||
+            s.clip_rect->radius_br != 0 || s.clip_rect->radius_bl != 0) {
+            out << ",\"radiusTopLeft\":" << s.clip_rect->radius_tl
+                << ",\"radiusTopRight\":" << s.clip_rect->radius_tr
+                << ",\"radiusBottomRight\":" << s.clip_rect->radius_br
+                << ",\"radiusBottomLeft\":" << s.clip_rect->radius_bl;
+        }
+        out << '}';
+    }
     write_string_member(out, first, "cursor", s.cursor);
+    write_string_member(out, first, "pointerEvents", s.pointer_events);
     write_string_member(out, first, "position", s.position);
     write_float_member(out, first, "top", s.top);
     write_float_member(out, first, "left", s.left);
@@ -1958,6 +2038,35 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             out << '}';
         }
         out << ']';
+    }
+
+    // Chrome's own line breaking, cached beside the paragraph. A consumer that
+    // finds the basis still holding draws these verbatim instead of reflowing.
+    if (!node.text_line_boxes.empty() && node.text_layout_basis) {
+        write_key(out, first, "lineBoxes");
+        out << '[';
+        for (size_t i = 0; i < node.text_line_boxes.size(); ++i) {
+            if (i) out << ',';
+            const auto& b = node.text_line_boxes[i];
+            out << '{';
+            bool bf = true;
+            write_float_member(out, bf, "left", b.left);
+            write_float_member(out, bf, "top", b.top);
+            write_float_member(out, bf, "width", b.width);
+            write_float_member(out, bf, "height", b.height);
+            write_int_member(out, bf, "start", b.start);
+            write_int_member(out, bf, "length", b.length);
+            out << '}';
+        }
+        out << ']';
+        write_key(out, first, "lineBoxBasis");
+        out << '{';
+        bool basis_first = true;
+        write_float_member(out, basis_first, "width",
+                           node.text_layout_basis->width);
+        write_string_member(out, basis_first, "resolvedFace",
+                            node.text_layout_basis->resolved_face);
+        out << '}';
     }
 
     write_key(out, first, "style");

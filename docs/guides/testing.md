@@ -108,6 +108,16 @@ requested frame delay. `pulp validate --screenshot` batches built plugin editor
 screenshots into `artifacts/screenshots/`. Both are the public workflows to
 document in agent prompts and CI scripts.
 
+A screenshot-only standalone launch opens **no audio device**: it creates no
+audio system, no device and no render callback, so a capture on a shared or
+unattended machine can never produce sound. Ask for a live readout in the same
+run — `--audio-probe-json`, `--audio-scope-json`, `--audio-capture-wav`,
+`--audio-capture-rolling` — and audio stays on, because those readouts are
+produced by the render callback. To capture a UI that must show live signal
+(a meter or scope reading real audio) without asking for a readout, set
+`StandaloneConfig::screenshot_keeps_audio` or export
+`PULP_SCREENSHOT_KEEP_AUDIO=1`.
+
 In C++ tests and tools, prefer `pulp::view::capture_view()` when the caller
 needs a trustworthy PNG. It selects the capture backend for the view tree,
 refuses native-overlay-only captures with a reason, routes GPU-required views

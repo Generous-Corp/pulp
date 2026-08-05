@@ -304,6 +304,50 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
         self.assertEqual(cfg.surfaces[0].version_files[0].path, "CMakeLists.txt")
         self.assertEqual(cfg.surfaces[0].changelog, "CHANGELOG.md")
 
+    def test_inspector_is_an_sdk_release_surface(self) -> None:
+        # Inspector libraries and headers are installed with the SDK. Keep the
+        # public headers (including installed .inc protocol definitions), CMake
+        # target contracts, and install/export wiring on the minor lane. Keep
+        # implementation changes on the patch lane.
+        vbc = self._import_gate_module("version_bump_check")
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+        sdk = cfg["surfaces"]["sdk"]
+
+        self.assertIn("inspect/include/**", sdk["trigger_paths"])
+        self.assertIn("inspect/src/**", sdk["trigger_paths"])
+        self.assertIn("inspect/CMakeLists.txt", sdk["trigger_paths"])
+        self.assertIn(
+            "tools/cmake/PulpInstallRules.cmake", sdk["trigger_paths"]
+        )
+        self.assertIn("inspect/include/**", sdk["public_api_paths"])
+        self.assertIn("inspect/CMakeLists.txt", sdk["public_api_paths"])
+        self.assertIn(
+            "tools/cmake/PulpInstallRules.cmake", sdk["public_api_paths"]
+        )
+        self.assertIn("inspect/src/**", sdk["internal_only_paths"])
+
+        surface = next(s for s in vbc.load_config(cfg_path).surfaces
+                       if s.name == "sdk")
+        with mock.patch.object(
+            vbc, "git_diff_ignore_whitespace_nonempty", return_value=True
+        ):
+            expected_levels = {
+                "inspect/include/pulp/inspect/session.hpp": "minor",
+                "inspect/include/pulp/inspect/protocol_methods.inc": "minor",
+                "inspect/src/session.cpp": "patch",
+                "inspect/CMakeLists.txt": "minor",
+                "tools/cmake/PulpInstallRules.cmake": "minor",
+            }
+            for path, expected in expected_levels.items():
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        vbc.heuristic_for_surface(
+                            surface, [path], "base", "head"
+                        ),
+                        expected,
+                    )
+
     def test_version_bump_missing_config_returns_usage_error(self) -> None:
         code, out = _run(
             [

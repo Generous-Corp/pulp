@@ -10,8 +10,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <algorithm>
 #include <array>
 #include <functional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -46,6 +49,7 @@ using namespace pulp::canvas;
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_run_planner.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFont.h"
@@ -80,10 +84,10 @@ sk_sp<SkFontMgr> test_platform_font_mgr() {
 
 TEST_CASE("Bundled font count matches the embedded asset list (#932)",
           "[canvas][skia][fonts][issue-932]") {
-    // Two faces ship today: Inter-Regular and JetBrainsMono-Regular. If a
-    // future PR grows the bundle, bump this expectation deliberately so
-    // we catch accidental drops.
-    REQUIRE(pulp::canvas::bundled_font_count() == 2);
+    // Six faces ship today: Inter-Regular, JetBrainsMono-Regular, and Jost at
+    // Regular/Medium/SemiBold/Bold. If a future PR grows the bundle, bump this
+    // expectation deliberately so we catch accidental drops.
+    REQUIRE(pulp::canvas::bundled_font_count() == 6);
 }
 
 TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
@@ -497,6 +501,153 @@ TEST_CASE("SkiaCanvas::text_x_for_byte reads caret x off the shaped run",
     REQUIRE(caret_after_A < av_full);
 }
 
+
+// ── Per-glyph fallback must not move the rest of the run ────────────────────
+//
+// `SkiaCanvas::fill_text` routes a string the active typeface does not fully
+// cover through `shape_with_glyph_fallback`, which partitions the string into
+// runs by covering typeface and draws each run as its own `SkTextBlob`. That
+// is the only path an uncovered codepoint takes, and it is rare: a captured
+// panel reached it exactly once — one dropdown caret, U+25BE, which the face
+// the design asked for does not carry — and that glyph rasterized a full
+// ascent below its baseline while every other label on the panel was correct.
+//
+// Two causes produce that symptom and they need different fixes, so the test
+// has to separate them:
+//
+//   * If the blob's ORIGIN is being treated as a line top rather than a
+//     baseline, the whole blob is displaced. The COVERED run then moves too,
+//     even though nothing about it changed — adding one uncovered codepoint to
+//     an otherwise-covered string displaces the text that was already there.
+//   * If instead only the substituted run were placed wrong, the covered run
+//     would stay put and only the fallback glyph would sit low.
+//
+// So draw "A" alone, then "A" followed by an uncovered codepoint, at the same
+// baseline, and require the 'A' to rasterize into the same rows both times.
+// The second check pins the substituted glyph onto that same band.
+//
+// What this cannot see from outside: whether the mixed string really took the
+// fallback path. The two conditions that route it there are asserted directly
+// (the base face lacks the probe; an installed face carries it); the remaining
+// two — no letter-spacing and no font features — are set by this test.
+TEST_CASE("a missing glyph does not move the rest of the run",
+          "[canvas][skia][text][glyph-fallback]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    if (!mgr) {
+        SKIP("no platform font manager on this build — per-glyph fallback has "
+             "no catalog to resolve a substitute face from");
+    }
+
+    // Inter is bundled, so the BASE face is identical on every host. U+4E2D is
+    // outside its repertoire and inside every desktop CJK face, which makes it
+    // a stable "one covered run plus one uncovered run in a single string".
+    const SkUnichar kProbe = 0x4E2D;
+    const std::string probe_utf8 = "\xE4\xB8\xAD";
+    const SkFontStyle upright{SkFontStyle::kNormal_Weight,
+                              SkFontStyle::kNormal_Width,
+                              SkFontStyle::kUpright_Slant};
+
+    auto base = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter",
+                                                     upright);
+    REQUIRE(base != nullptr);
+    if (base->unicharToGlyph(kProbe) != 0) {
+        SKIP("the bundled base face now covers the probe codepoint — choose "
+             "one it does not, or this case exercises nothing");
+    }
+    auto substitute = mgr->matchFamilyStyleCharacter("Inter", upright,
+                                                     nullptr, 0, kProbe);
+    if (!substitute || substitute->unicharToGlyph(kProbe) == 0) {
+        SKIP("no installed face carries the probe codepoint on this host — "
+             "the per-glyph fallback path cannot be exercised");
+    }
+
+    constexpr int kW = 256;
+    constexpr int kH = 64;
+    constexpr float kSize = 18.0f;
+    constexpr float kBaseline = 30.0f;
+    constexpr float kX = 8.0f;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+
+    // First and last row carrying ink within a column band; {-1,-1} for none.
+    auto ink_rows = [](const SkPixmap& pm, int x0, int x1) {
+        std::pair<int, int> band{-1, -1};
+        for (int y = 0; y < pm.height(); ++y) {
+            for (int x = std::max(0, x0); x < x1 && x < pm.width(); ++x) {
+                if (SkColorGetR(pm.getColor(x, y)) < 200) {
+                    if (band.first < 0) band.first = y;
+                    band.second = y;
+                    break;
+                }
+            }
+        }
+        return band;
+    };
+
+    // "A" alone — fully covered, so it never reaches the fallback path.
+    auto plain_surface = SkSurfaces::Raster(info);
+    REQUIRE(plain_surface != nullptr);
+    float advance_a = 0.0f;
+    {
+        auto* sk_canvas = plain_surface->getCanvas();
+        REQUIRE(sk_canvas != nullptr);
+        sk_canvas->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(sk_canvas);
+        canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                             /*letter_spacing=*/0.0f);
+        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+        advance_a = canvas.measure_text("A");
+        REQUIRE(advance_a > 0.0f);
+        canvas.fill_text("A", kX, kBaseline);
+    }
+    SkPixmap plain_pm;
+    REQUIRE(plain_surface->peekPixels(&plain_pm));
+    const int a_x0 = static_cast<int>(kX) - 2;
+    const int a_x1 = static_cast<int>(kX + advance_a) + 1;
+    const auto plain_band = ink_rows(plain_pm, a_x0, a_x1);
+    REQUIRE(plain_band.first >= 0);
+
+    // The same "A", at the same baseline, with one uncovered codepoint after
+    // it. Nothing about the 'A' changed.
+    auto mixed_surface = SkSurfaces::Raster(info);
+    REQUIRE(mixed_surface != nullptr);
+    {
+        auto* sk_canvas = mixed_surface->getCanvas();
+        REQUIRE(sk_canvas != nullptr);
+        sk_canvas->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(sk_canvas);
+        canvas.set_font_full("Inter", kSize, 400, /*slant=*/0,
+                             /*letter_spacing=*/0.0f);
+        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+        canvas.fill_text("A" + probe_utf8, kX, kBaseline);
+    }
+    SkPixmap mixed_pm;
+    REQUIRE(mixed_surface->peekPixels(&mixed_pm));
+    const auto mixed_a_band = ink_rows(mixed_pm, a_x0, a_x1);
+    const auto probe_band = ink_rows(mixed_pm, a_x1 + 1, kW);
+    REQUIRE(mixed_a_band.first >= 0);
+    // The substitute face has to have drawn something, or the comparison below
+    // is between one glyph and an empty band.
+    REQUIRE(probe_band.first >= 0);
+
+    INFO("'A' rows alone [" << plain_band.first << "," << plain_band.second
+         << "]  with a fallback run [" << mixed_a_band.first << ","
+         << mixed_a_band.second << "]  substituted glyph ["
+         << probe_band.first << "," << probe_band.second << "]  font size "
+         << kSize << " baseline " << kBaseline);
+
+    // THE DISCRIMINATOR: the covered run must not care that a fallback run
+    // joined the string. A displacement of roughly one ascent here means the
+    // blob's origin is a line top, not a baseline.
+    CHECK(std::abs(mixed_a_band.first - plain_band.first) <= 1);
+    CHECK(std::abs(mixed_a_band.second - plain_band.second) <= 1);
+
+    // And the substituted glyph shares that baseline rather than hanging an
+    // ascent below it.
+    CHECK(probe_band.first <= plain_band.second);
+    CHECK(probe_band.second >= plain_band.first);
+}
 // ── Variable-font weight instancing + SkParagraph bridge ────────────────────
 //
 // Root cause fixed here: imported designs register fonts via register_font,
@@ -865,6 +1016,320 @@ TEST_CASE("The default font cascade resolves to a face that can draw",
 
         SkFont font(resolved.typeface, opts.size);
         REQUIRE(font.measureText("Mix", 3, SkTextEncoding::kUTF8, nullptr) > 0.0f);
+    }
+}
+
+// ── Weight is a measurement input, not a rasterization detail ───────────────
+//
+// `TextShaper` measured every run through `SkFontStyle::Normal()` while the
+// painter resolved the run's real weight, and its segment cache was keyed on
+// (family, size) alone — so a Bold label and its Regular twin shared one set of
+// advances, whichever ran first. The visible symptom is a paragraph that breaks
+// a word or two late and overflows its box: a wrapping bug in appearance, a
+// measurement bug in fact.
+//
+// The expected numbers come from `test/fixtures/browser-capture-text-wrap`,
+// where Chrome laid out this exact string at this exact size in both weights,
+// from THIS repository's copy of the font. They are Chrome's measurements of
+// its own render — not a second computation from the same font metrics this
+// code uses, which would agree with it whether or not either is right.
+
+namespace {
+
+// Chrome's line-box widths for "Handgloves 123" at 20px, Funnel Display
+// instanced at wght 400 and wght 700. See the fixture's README.
+constexpr float kChromeRegularWidth = 150.8125f;
+constexpr float kChromeBoldWidth = 154.203125f;
+
+}  // namespace
+
+TEST_CASE("shaped width follows the requested weight",
+          "[canvas][skia][fonts][variable-weight][text-metrics]") {
+    const std::string family = "PulpWeightTest-Funnel";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             family));
+
+    pulp::canvas::TextShaper shaper;
+    const auto regular = shaper.prepare("Handgloves 123", family, 20.0f, 400);
+    const auto bold = shaper.prepare("Handgloves 123", family, 20.0f, 700);
+
+    // The defect: identical advances for two different weights. Under the bug
+    // this difference is exactly zero, because both requests resolved the same
+    // face AND shared one cache bucket.
+    INFO("regular " << regular.total_width() << "  bold " << bold.total_width());
+    CHECK(bold.total_width() > regular.total_width());
+
+    // Agreement with the browser, bounded RELATIVELY at 1%.
+    //
+    // Pulp measures this string ~0.65% wider than Chrome's line box at both
+    // weights (151.80 vs 150.81, 155.20 vs 154.20). The residual is systematic,
+    // sub-pixel per glyph, present at both weights, and NOT explained by
+    // segmentation (the summed segments equal a single whole-string advance to
+    // four decimals) nor by ink-vs-advance (Skia's ink extent is wider than its
+    // advance here, while Chrome is narrower than both). It is an open question
+    // about what a `textBoxes` width measures, not a face mismatch.
+    //
+    // 1% is chosen because it separates the two answers this case must tell
+    // apart: shaping the right face at the wrong weight, or the wrong face
+    // entirely, costs 2% and ~10% respectively on this corpus — both an order
+    // of magnitude outside a residual of this size. A tighter absolute bound
+    // would encode the unexplained offset as if it were understood.
+    //
+    // macOS only, because the oracle is: these numbers were measured from
+    // Chrome ON macOS, and they are fractional. FreeType rounds each glyph
+    // advance to a whole pixel, so the same string in the same face measures
+    // 156.0 / 160.0 on a Linux runner — about 3.4% wider, which is per-glyph
+    // rounding accumulated over fourteen glyphs, not a different face. The
+    // invariants above (bold wider than regular, the weight recorded) are the
+    // cross-platform claim; pixel agreement with Chrome is not.
+#if defined(__APPLE__)
+    CHECK_THAT(regular.total_width(),
+               Catch::Matchers::WithinRel(kChromeRegularWidth, 0.01f));
+    CHECK_THAT(bold.total_width(),
+               Catch::Matchers::WithinRel(kChromeBoldWidth, 0.01f));
+    // The weight cost itself, which is what this fix is for, agrees with
+    // Chrome's to a hundredth of a pixel — so it is asserted far more tightly
+    // than the absolute widths it is a difference of.
+    CHECK_THAT(bold.total_width() - regular.total_width(),
+               Catch::Matchers::WithinAbs(
+                   kChromeBoldWidth - kChromeRegularWidth, 0.05));
+#endif  // __APPLE__
+
+    CHECK(regular.font_weight() == 400);
+    CHECK(bold.font_weight() == 700);
+}
+
+TEST_CASE("the segment cache does not serve one weight's widths to another",
+          "[canvas][skia][fonts][variable-weight][text-metrics]") {
+    const std::string family = "PulpWeightCacheTest-Funnel";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                             family));
+
+    // Measure bold FIRST, then regular. With a (family, size) key the second
+    // call is a cache hit on the first's widths, so the order is what makes the
+    // stale bucket observable — measuring regular first would hide it behind
+    // the correct answer.
+    pulp::canvas::TextShaper shaper;
+    const float bold_first = shaper.prepare("Handgloves 123", family, 20.0f, 700)
+                                 .total_width();
+    const float regular_second =
+        shaper.prepare("Handgloves 123", family, 20.0f, 400).total_width();
+    CHECK(regular_second < bold_first);
+
+    // And the reverse order agrees with itself, so neither answer depends on
+    // which weight happened to be measured first.
+    pulp::canvas::TextShaper fresh;
+    const float regular_first =
+        fresh.prepare("Handgloves 123", family, 20.0f, 400).total_width();
+    const float bold_second =
+        fresh.prepare("Handgloves 123", family, 20.0f, 700).total_width();
+    CHECK_THAT(regular_first, Catch::Matchers::WithinAbs(regular_second, 0.001));
+    CHECK_THAT(bold_second, Catch::Matchers::WithinAbs(bold_first, 0.001));
+}
+
+
+// ── Weight selection within one bundled family ─────────────────────────────
+
+#include <pulp/canvas/text_font_context.hpp>
+#include "modules/skparagraph/include/FontCollection.h"
+
+namespace {
+
+// Opaque-pixel count of `text` painted through the SkiaCanvas fill_text path
+// at a given family/weight/size. Black on white, so any non-white pixel is
+// ink. This is the paint path an imported design's Labels actually take —
+// asserting on it is what separates "the resolver returns the right name"
+// from "the right glyphs reach the surface".
+uint32_t painted_ink_px(const std::string& family, int weight, float size,
+                        const std::string& text) {
+    SkBitmap bm;
+    bm.allocPixels(SkImageInfo::Make(900, 120, kN32_SkColorType,
+                                     kPremul_SkAlphaType,
+                                     SkColorSpace::MakeSRGB()));
+    SkCanvas sk(bm);
+    sk.clear(SK_ColorWHITE);
+    pulp::canvas::SkiaCanvas canvas(&sk);
+    canvas.set_font_full(family, size, weight, 0, 0.0f);
+    canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_text(text, 20.0f, 80.0f);
+
+    SkPixmap pm;
+    if (!bm.peekPixels(&pm)) return 0;
+    uint32_t px = 0;
+    for (int y = 0; y < pm.height(); ++y) {
+        for (int x = 0; x < pm.width(); ++x) {
+            const SkColor c = pm.getColor(x, y);
+            if (SkColorGetA(c) > 0 && SkColorGetR(c) < 255) ++px;
+        }
+    }
+    return px;
+}
+
+std::string postscript_name(const sk_sp<SkTypeface>& face) {
+    if (!face) return "<null>";
+    SkString name;
+    face->getPostScriptName(&name);
+    return std::string(name.c_str(), name.size());
+}
+
+} // namespace
+
+// A family is a set of weights, and every one of them reports the same family
+// name — CoreText answers "Jost" for Jost-Regular through Jost-Bold alike.
+// Keying the bundled cache one-face-per-family therefore kept whichever face
+// was declared first and dropped the rest, and the symptom was not a missing
+// font but a WRONG one: `match_bundled_typeface` found only a 400 face, missed
+// every non-400 request, and a 600 heading fell past the bundle to a platform
+// substitute — while the paint path, reading the same cache through
+// `bundled_typefaces_snapshot`, painted the 400 face. Measurement and paint
+// disagreed about the weight as well as the face.
+//
+// The names are asserted, not just the count: a wrong face cannot fake a
+// PostScript name, whereas an ink count alone could coincide.
+TEST_CASE("Every weight of a bundled family survives registration",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    std::vector<int> jost_weights;
+    std::vector<std::string> jost_names;
+    for (const auto& b : pulp::canvas::bundled_typefaces_snapshot()) {
+        if (b.family != "Jost" || !b.typeface) continue;
+        jost_weights.push_back(b.typeface->fontStyle().weight());
+        jost_names.push_back(postscript_name(b.typeface));
+    }
+    std::sort(jost_weights.begin(), jost_weights.end());
+    std::sort(jost_names.begin(), jost_names.end());
+
+    // One entry here is the regression: the bundle ships four Jost faces.
+    REQUIRE(jost_weights == std::vector<int>{400, 500, 600, 700});
+    REQUIRE(jost_names == std::vector<std::string>{
+        "Jost-Bold", "Jost-Medium", "Jost-Regular", "Jost-SemiBold"});
+}
+
+// The three surfaces that must agree on which face a weight means: the
+// bundled cache (what the cascade offers), the FontResolver (what TextShaper
+// measures with), and the SkParagraph FontCollection (what fill_text paints
+// through). A disagreement between the last two is invisible to any single-
+// surface check and lays text out at one weight's metrics while drawing
+// another's.
+TEST_CASE("Measure and paint resolve a bundled family to the same weight",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+    auto collection = pulp::canvas::TextFontContext::shared()->font_collection();
+    REQUIRE(collection != nullptr);
+
+    const std::pair<int, const char*> kExpected[] = {
+        {400, "Jost-Regular"},
+        {500, "Jost-Medium"},
+        {600, "Jost-SemiBold"},
+        {700, "Jost-Bold"},
+    };
+
+    for (const auto& [weight, expected] : kExpected) {
+        INFO("requested weight " << weight);
+        const SkFontStyle style{weight, SkFontStyle::kNormal_Width,
+                                SkFontStyle::kUpright_Slant};
+
+        CHECK(postscript_name(pulp::canvas::match_bundled_typeface(
+                  mgr.get(), "Jost", style)) == expected);
+
+        pulp::canvas::FontOptions opts;
+        opts.family_stack.push_back("Jost");
+        opts.size = 15.0f;
+        opts.weight = static_cast<float>(weight);
+        CHECK(postscript_name(
+                  pulp::canvas::FontResolver::instance()
+                      .resolve_family_list(opts)
+                      .typeface) == expected);
+
+        auto faces = collection->findTypefaces({SkString("Jost")}, style,
+                                               std::nullopt);
+        REQUIRE_FALSE(faces.empty());
+        CHECK(postscript_name(faces[0]) == expected);
+    }
+}
+
+// The ink proof. Resolving the right name is not the same as drawing the
+// right glyphs, so assert on painted pixels: four weights of one family must
+// put strictly more ink on the surface as the weight climbs. Measured at 48px
+// as well as at a UI-realistic 15px, because Regular against Medium is a weak
+// discriminator at small sizes — 400 against 700 at 48px is one no wrong
+// answer can fake, and requiring the whole ladder to be monotonic rules out
+// "every weight painted the same face".
+TEST_CASE("Painted ink tracks the requested weight of a bundled family",
+          "[canvas][skia][fonts][text]") {
+    REQUIRE(pulp::canvas::platform_font_manager() != nullptr);
+
+    for (float size : {15.0f, 48.0f}) {
+        INFO("size " << size);
+        std::vector<uint32_t> ink;
+        for (int weight : {400, 500, 600, 700}) {
+            ink.push_back(painted_ink_px("Jost", weight, size, "Handgloves"));
+        }
+        INFO("ink by weight: " << ink[0] << " " << ink[1] << " " << ink[2]
+                               << " " << ink[3]);
+        REQUIRE(ink[0] > 0);
+        CHECK(ink[0] < ink[1]);
+        CHECK(ink[1] < ink[2]);
+        CHECK(ink[2] < ink[3]);
+    }
+}
+
+// The bound on style matching, from the other side. Selecting the nearest
+// weight within a family must not become "the bundle answers everything":
+// Inter ships at 400 alone, so a 700 request has to miss and let the cascade
+// reach a real system Bold. Without this the bundle would hijack every
+// off-style request and mask the platform's genuine weights.
+TEST_CASE("A bundled family declines a weight it cannot serve",
+          "[canvas][skia][fonts][text]") {
+    auto mgr = pulp::canvas::platform_font_manager();
+    REQUIRE(mgr != nullptr);
+
+    const SkFontStyle bold{SkFontStyle::kBold_Weight,
+                           SkFontStyle::kNormal_Width,
+                           SkFontStyle::kUpright_Slant};
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", bold)
+          == nullptr);
+
+    const SkFontStyle italic{SkFontStyle::kNormal_Weight,
+                             SkFontStyle::kNormal_Width,
+                             SkFontStyle::kItalic_Slant};
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Inter", italic)
+          == nullptr);
+
+    // Jost, which does ship the weight, answers the same request.
+    CHECK(pulp::canvas::match_bundled_typeface(mgr.get(), "Jost", bold)
+          != nullptr);
+}
+
+// The paint side of the letter-spacing contract. SkParagraph adds the spacing
+// after every character, so a caller that reserves one step per GAP reserves
+// one step less than gets drawn — the text then overruns the box that was
+// sized for it. Pinned here because `Label::intrinsic_width` has to agree with
+// this number, and nothing else in the tree measures what the painter does.
+TEST_CASE("Painted text adds letter-spacing after every glyph",
+          "[canvas][skia][fonts][text]") {
+    SkBitmap bm;
+    REQUIRE(bm.tryAllocPixels(
+        SkImageInfo::MakeN32Premul(16, 16, SkColorSpace::MakeSRGB())));
+    SkCanvas sk(bm);
+    pulp::canvas::SkiaCanvas canvas(&sk);
+
+    const float spacing = 10.0f;
+    for (const auto& [text, glyphs] :
+         std::vector<std::pair<std::string, int>>{{"A", 1}, {"AB", 2},
+                                                  {"AAAA", 4}}) {
+        INFO("text: " << text);
+        canvas.set_font_full("Inter", 20.0f, 400, 0, 0.0f);
+        const float tight = canvas.measure_text(text);
+        canvas.set_font_full("Inter", 20.0f, 400, 0, spacing);
+        const float spaced = canvas.measure_text(text);
+        // One step per glyph, not per gap. The tolerance covers the paragraph
+        // path's sub-pixel line width; it is far tighter than one whole step.
+        CHECK_THAT(spaced - tight,
+                   Catch::Matchers::WithinAbs(spacing * glyphs, 2.0));
     }
 }
 

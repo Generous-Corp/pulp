@@ -21,6 +21,10 @@
         "core/**/src/**/*.mm",
         "core/**/src/**/*.c",
         "core/**/platform/**",
+        "inspect/include/**",
+        "inspect/src/**",
+        "inspect/CMakeLists.txt",
+        "tools/cmake/PulpInstallRules.cmake",
         "experimental/pulp-rs/Cargo.toml",
         "experimental/pulp-rs/Cargo.lock",
         "experimental/pulp-rs/src/**/*.rs",
@@ -37,11 +41,15 @@
       ],
       "public_api_paths": [
         "core/**/include/**/*.hpp",
-        "core/**/include/**/*.h"
+        "core/**/include/**/*.h",
+        "inspect/include/**",
+        "inspect/CMakeLists.txt",
+        "tools/cmake/PulpInstallRules.cmake"
       ],
       "internal_only_paths": [
         "core/**/src/**",
-        "core/**/platform/**"
+        "core/**/platform/**",
+        "inspect/src/**"
       ],
       "changelog": "CHANGELOG.md"
     },

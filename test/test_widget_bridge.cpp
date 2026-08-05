@@ -6,7 +6,10 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/drag_drop.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -571,6 +574,46 @@ TEST_CASE("WidgetBridge __domAppend routes <knob> tag to a draggable native Knob
     REQUIRE(type0 == "change");
     auto val0 = engine.evaluate("changes[0].value").getWithDefault<double>(-1);
     REQUIRE(val0 > 0.0);  // dragged up from the 0.0 initial value
+}
+
+// A widget's element id is an addressing handle, not its name. Widgets paint
+// their label, so a caption seeded from the id draws that handle on screen —
+// which is what a browser-imported panel showed instead of its controls'
+// names: every element built through the web-compat DOM carries a generated
+// `__el_N__` id.
+TEST_CASE("a widget never paints its own element id as a caption",
+          "[view][bridge]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        __domAppend('', '__el_3__', 'knob');
+        __domAppend('', '__el_4__', 'fader');
+        __domAppend('', '__el_5__', 'toggle');
+        createKnob('__el_6__', '');
+        createFader('__el_7__', 0, 0, 24, 200, 'vertical');
+        createToggle('__el_8__', 0, 0, 50, 30);
+    )");
+
+    for (const auto* id : {"__el_3__", "__el_4__", "__el_5__",
+                           "__el_6__", "__el_7__", "__el_8__"}) {
+        auto* view = bridge.widget(id);
+        REQUIRE(view != nullptr);
+        std::string label;
+        if (auto* k = dynamic_cast<Knob*>(view)) label = k->label();
+        else if (auto* f = dynamic_cast<Fader*>(view)) label = f->label();
+        else if (auto* t = dynamic_cast<Toggle*>(view)) label = t->label();
+        INFO("widget " << id << " caption: " << label);
+        CHECK(label.empty());
+        CHECK(label.find("__el_") == std::string::npos);
+    }
+
+    // A caption the caller actually asked for still reaches the widget.
+    bridge.load_script("setLabel('__el_3__', 'RATE');");
+    CHECK(dynamic_cast<Knob*>(bridge.widget("__el_3__"))->label() == "RATE");
 }
 
 // ── Routing-parity sweep (breadth) ─────────────────────────────────────────
@@ -2282,6 +2325,27 @@ TEST_CASE("WidgetBridge::clear drops widgets - subsequent lookups return nullptr
     REQUIRE(bridge.widget("bypass") == nullptr);
 }
 
+TEST_CASE("WidgetBridge nested roots invalidate cached descendants on removal",
+          "[view][bridge][lifetime][nested-root]") {
+    ScriptEngine engine;
+    View outer_root;
+    auto nested = std::make_unique<View>();
+    auto* nested_root = nested.get();
+    outer_root.add_child(std::move(nested));
+    StateStore store;
+    WidgetBridge bridge(engine, *nested_root, store);
+    bridge.load_script("createLabel('status', 'ready', '');");
+    auto* status = bridge.widget("status");
+    REQUIRE(status != nullptr);
+    REQUIRE(bridge.widget("status") == status);
+
+    auto removed = nested_root->remove_child(status);
+    REQUIRE(removed.get() == status);
+    removed.reset();
+
+    CHECK(bridge.widget("status") == nullptr);
+}
+
 TEST_CASE("WidgetBridge::clear is safe to call before any script loads",
           "[view][bridge][lifetime][clear]") {
     // Fresh bridge — no widgets have been registered yet. clear() must
@@ -2295,6 +2359,698 @@ TEST_CASE("WidgetBridge::clear is safe to call before any script loads",
     REQUIRE_NOTHROW(bridge.clear());
     REQUIRE(bridge.widget("nothing") == nullptr);
     REQUIRE_NOTHROW(bridge.clear());
+}
+
+TEST_CASE("WidgetBridge realm replacement never executes mutable realm cleanup",
+          "[view][bridge][lifetime][clear][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createLabel('status', 'ready', '');
+        __forgetWidgetCallbacks__ = function () { for (;;) {} };
+    )");
+
+    const auto started = std::chrono::steady_clock::now();
+    bridge.clear_for_realm_replacement();
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(bridge.widget("status") == nullptr);
+}
+
+TEST_CASE("WidgetBridge quarantine restores the root's prior visibility on teardown",
+          "[view][bridge][lifetime][quarantine][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    root.set_visible(true);
+    {
+        WidgetBridge bridge(engine, root, store);
+        bridge.quarantine_realm();
+        REQUIRE_FALSE(root.visible());
+    }
+    REQUIRE(root.visible());
+}
+
+TEST_CASE("WidgetBridge quarantine preserves a newer shared-root visibility decision",
+          "[view][bridge][lifetime][quarantine][runtime-eval]") {
+    ScriptEngine old_engine;
+    ScriptEngine replacement_engine;
+    View root;
+    StateStore store;
+    root.set_visible(false);
+    auto old_bridge =
+        std::make_unique<WidgetBridge>(old_engine, root, store);
+    old_bridge->quarantine_realm();
+
+    WidgetBridge replacement_bridge(replacement_engine, root, store);
+    root.set_visible(true);
+    old_bridge.reset();
+
+    REQUIRE(root.visible());
+}
+
+TEST_CASE("WidgetBridge nested quarantines restore shared-root visibility in either teardown order",
+          "[view][bridge][lifetime][quarantine][runtime-eval]") {
+    const auto verify = [](bool destroy_old_first) {
+        ScriptEngine old_engine;
+        ScriptEngine replacement_engine;
+        ScriptEngine survivor_engine;
+        View root;
+        StateStore store;
+        root.set_visible(true);
+        auto old_bridge =
+            std::make_unique<WidgetBridge>(old_engine, root, store);
+        auto replacement_bridge =
+            std::make_unique<WidgetBridge>(replacement_engine, root, store);
+        WidgetBridge survivor_bridge(survivor_engine, root, store);
+
+        old_bridge->quarantine_realm();
+        replacement_bridge->quarantine_realm();
+        REQUIRE_FALSE(root.visible());
+        if (destroy_old_first) {
+            old_bridge.reset();
+            REQUIRE_FALSE(root.visible());
+            replacement_bridge.reset();
+        } else {
+            replacement_bridge.reset();
+            REQUIRE_FALSE(root.visible());
+            old_bridge.reset();
+        }
+        REQUIRE(root.visible());
+    };
+
+    verify(true);
+    verify(false);
+}
+
+TEST_CASE("WidgetBridge nested quarantine preserves an intervening external visibility decision",
+          "[view][bridge][lifetime][quarantine][runtime-eval]") {
+    ScriptEngine old_engine;
+    ScriptEngine replacement_engine;
+    View root;
+    StateStore store;
+    root.set_visible(false);
+    auto old_bridge =
+        std::make_unique<WidgetBridge>(old_engine, root, store);
+    auto replacement_bridge =
+        std::make_unique<WidgetBridge>(replacement_engine, root, store);
+
+    old_bridge->quarantine_realm();
+    root.set_visible(true);
+    REQUIRE_FALSE(root.visible());
+    replacement_bridge->quarantine_realm();
+    old_bridge.reset();
+    replacement_bridge.reset();
+
+    REQUIRE(root.visible());
+}
+
+TEST_CASE("WidgetBridge repeated quarantine preserves a newer same-value visibility intent",
+          "[view][bridge][lifetime][quarantine][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    root.set_visible(true);
+    auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+
+    bridge->quarantine_realm();
+    root.set_visible(false);
+    REQUIRE_FALSE(root.visible());
+    bridge->quarantine_realm();
+    bridge.reset();
+
+    REQUIRE_FALSE(root.visible());
+}
+
+TEST_CASE("WidgetBridge quarantine removes owned descendants below host nodes",
+          "[view][bridge][lifetime][quarantine][runtime-eval][ownership]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    auto host_owner = std::make_unique<View>();
+    host_owner->set_id("host");
+    auto* host = host_owner.get();
+    root.add_child(std::move(host_owner));
+
+    WidgetBridge bridge(engine, root, store);
+    REQUIRE(bridge.widget("host") == host);
+    bridge.load_script("createLabel('owned', 'ready', 'host');");
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(host->child_count() == 1);
+    REQUIRE(bridge.widget("owned") != nullptr);
+
+    bridge.quarantine_realm();
+    bridge.clear_quarantined_realm();
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0) == host);
+    REQUIRE(host->child_count() == 0);
+    REQUIRE(bridge.widget("owned") == nullptr);
+}
+
+TEST_CASE("WidgetBridge quarantine retains removed ownership until bridge teardown",
+          "[view][bridge][lifetime][quarantine][runtime-eval][ownership]") {
+    struct ThrowingDetach final : View {
+        explicit ThrowingDetach(int& calls) : calls_(calls) {}
+        void on_detached() override {
+            ++calls_;
+            throw std::runtime_error("detach failed");
+        }
+        int& calls_;
+    };
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+    bridge->load_script("createLabel('owned', 'ready', '');");
+    auto* owned = bridge->widget("owned");
+    REQUIRE(owned != nullptr);
+    auto lifetime = std::weak_ptr<const std::uint64_t>{
+        owned->import_binding_lifetime_token()};
+    int detach_calls = 0;
+    owned->add_child(std::make_unique<ThrowingDetach>(detach_calls));
+
+    bridge->quarantine_realm();
+    REQUIRE_NOTHROW(bridge->clear_quarantined_realm());
+    REQUIRE(root.child_count() == 0);
+    REQUIRE_FALSE(lifetime.expired());
+    REQUIRE(detach_calls == 0);
+
+    bridge.reset();
+    REQUIRE(lifetime.expired());
+}
+
+TEST_CASE("WidgetBridge quarantine preserves replacement descendants of owned nodes",
+          "[view][bridge][lifetime][quarantine][runtime-eval][ownership]") {
+    ScriptEngine old_engine;
+    ScriptEngine replacement_engine;
+    View root;
+    StateStore store;
+    WidgetBridge old_bridge(old_engine, root, store);
+    old_bridge.load_script("createRow('old-parent', '');");
+    auto* old_parent = old_bridge.widget("old-parent");
+    REQUIRE(old_parent != nullptr);
+    old_bridge.quarantine_realm();
+
+    WidgetBridge replacement_bridge(replacement_engine, root, store);
+    REQUIRE(replacement_bridge.widget("old-parent") == old_parent);
+    replacement_bridge.load_script(
+        "createLabel('replacement-child', 'ready', 'old-parent');");
+    auto* replacement_child = replacement_bridge.widget("replacement-child");
+    REQUIRE(replacement_child != nullptr);
+    REQUIRE(old_parent->child_count() == 1);
+    int replacement_clicks = 0;
+    root.on_global_click = [&](const std::string&, std::uint16_t) {
+        ++replacement_clicks;
+    };
+
+    old_bridge.clear_quarantined_realm();
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0) == replacement_child);
+    REQUIRE(replacement_bridge.widget_cache_count() == 1);
+    REQUIRE_NOTHROW(replacement_engine.evaluate(
+        "setVisible('old-parent', false);"
+        "setAccessibilityLabel('old-parent', 'gone');"));
+    REQUIRE(replacement_bridge.widget("old-parent") == nullptr);
+    REQUIRE(replacement_bridge.widget("replacement-child") ==
+            replacement_child);
+    REQUIRE(replacement_child->visible());
+    REQUIRE(root.on_global_click);
+    root.on_global_click("replacement-child", 0);
+    REQUIRE(replacement_clicks == 1);
+}
+
+TEST_CASE("WidgetBridge owner teardown fallback retains the complete root without allocation",
+          "[view][bridge][lifetime][quarantine][fail-close]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+    bridge->load_script("createLabel('owned', 'ready', '');");
+    auto lifetime = std::weak_ptr<const std::uint64_t>{
+        bridge->widget("owned")->import_binding_lifetime_token()};
+    auto host_child = std::make_unique<View>();
+    auto host_lifetime = std::weak_ptr<const std::uint64_t>{
+        host_child->import_binding_lifetime_token()};
+    root.add_child(std::move(host_child));
+
+    bridge->force_retire_root_for_owner_teardown();
+    REQUIRE(root.child_count() == 0);
+    REQUIRE_FALSE(lifetime.expired());
+    REQUIRE_FALSE(host_lifetime.expired());
+
+    bridge.reset();
+    REQUIRE(lifetime.expired());
+    REQUIRE(host_lifetime.expired());
+}
+
+TEST_CASE("WidgetBridge retires exact ownership identities during DOM churn",
+          "[view][bridge][lifetime][ownership][dom]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    for (int index = 0; index < 32; ++index) {
+        const auto id = "temporary-" + std::to_string(index);
+        bridge.load_script(
+            "createLabel('" + id + "', 'ready', '');"
+            "__domRemove('" + id + "');");
+        REQUIRE(bridge.owned_widget_identity_count() == 0);
+    }
+
+    bridge.load_script(
+        "createLabel('duplicate', 'first', '');"
+        "createLabel('duplicate', 'second', '');");
+    REQUIRE(bridge.owned_widget_identity_count() == 2);
+    bridge.load_script("__domRemove('duplicate');");
+    REQUIRE(bridge.owned_widget_identity_count() == 1);
+    bridge.clear();
+    REQUIRE(bridge.owned_widget_identity_count() == 0);
+}
+
+TEST_CASE("WidgetBridge deadline aborts cache invalidation before tree detachment",
+          "[view][bridge][lifetime][deadline][runtime-eval]") {
+    ScriptEngine engine;
+    ScriptEngine observer_engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('first', 'ready', '');"
+        "createLabel('second', 'ready', '');");
+    WidgetBridge observer(observer_engine, root, store);
+    REQUIRE(observer.widget("first") != nullptr);
+    REQUIRE(observer.widget("second") != nullptr);
+
+    int checks = 0;
+    REQUIRE_THROWS_AS(
+        bridge.clear_for_realm_replacement([&] {
+            if (++checks == 5)
+                throw std::runtime_error("deadline expired");
+        }),
+        std::runtime_error);
+    REQUIRE(root.child_count() == 2);
+    REQUIRE(observer.widget("first") != nullptr);
+    REQUIRE(observer.widget("second") != nullptr);
+}
+
+TEST_CASE("WidgetBridge deadline clear does not throw after detachment begins",
+          "[view][bridge][lifetime][deadline][runtime-eval]") {
+    ScriptEngine engine;
+    ScriptEngine observer_engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('first', 'ready', '');"
+        "createLabel('second', 'ready', '');");
+    WidgetBridge observer(observer_engine, root, store);
+    REQUIRE(observer.widget("first") != nullptr);
+    REQUIRE(observer.widget("second") != nullptr);
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement([&] {
+        if (root.child_count() < 2)
+            throw std::runtime_error("deadline callback after commit");
+    }));
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(observer.widget("first") == nullptr);
+    REQUIRE(observer.widget("second") == nullptr);
+}
+
+TEST_CASE("WidgetBridge deadline rejects an oversized realm before detachment",
+          "[view][bridge][lifetime][deadline][runtime-eval]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    for (int index = 0; index < 2049; ++index)
+        root.add_child(std::make_unique<View>());
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_THROWS_WITH(
+        bridge.clear_for_realm_replacement([] {}),
+        "Runtime.evaluate realm reset tree exceeds bounded cleanup limit");
+    REQUIRE(root.child_count() == 2049);
+}
+
+TEST_CASE("WidgetBridge deadline rejects an attached native view before detachment",
+          "[view][bridge][lifetime][deadline][runtime-eval][native-view]") {
+    class RecordingNativeHost final : public PluginViewHost {
+    public:
+        NativeViewHandle native_handle() override { return &host_sentinel; }
+        void attach_to_parent(NativeViewHandle) override {}
+        void detach() override {}
+        void repaint() override {}
+        void set_size(uint32_t, uint32_t) override {}
+        Size get_size() const override { return {}; }
+        bool attach_native_child_view(NativeViewHandle child, float, float,
+                                      float, float) override {
+            attached_child = child;
+            return child != nullptr;
+        }
+        void detach_native_child_view(NativeViewHandle child) override {
+            if (child == attached_child) {
+                attached_child = nullptr;
+                ++detach_count;
+            }
+        }
+
+        int host_sentinel = 0;
+        NativeViewHandle attached_child = nullptr;
+        int detach_count = 0;
+    } host;
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    root.set_plugin_view_host(&host);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createNativeView('native', '');");
+    auto* native = dynamic_cast<NativeViewHost*>(bridge.widget("native"));
+    REQUIRE(native != nullptr);
+    int child_sentinel = 0;
+    native->set_native_child(&child_sentinel);
+    native->update_native_layout();
+    REQUIRE(native->is_native_attached());
+
+    REQUIRE_THROWS_WITH(
+        bridge.clear_for_realm_replacement([] {}),
+        "Runtime.evaluate realm reset cannot replace an attached native view");
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(bridge.widget("native") == native);
+    REQUIRE(native->is_native_attached());
+    REQUIRE(host.detach_count == 0);
+}
+
+TEST_CASE("WidgetBridge deadline realm reset skips fallible detach hooks",
+          "[view][bridge][lifetime][deadline][runtime-eval]") {
+    struct ThrowingDetachView final : View {
+        void on_detached() override {
+            throw std::runtime_error("untrusted detach hook");
+        }
+    };
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    root.add_child(std::make_unique<ThrowingDetachView>());
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement([] {}));
+    REQUIRE(root.child_count() == 0);
+}
+
+TEST_CASE("WidgetBridge ordinary realm retirement contains detach failures after ownership commit",
+          "[view][bridge][lifetime][exception-safety]") {
+    struct DetachProbe final : View {
+        explicit DetachProbe(bool should_throw) : should_throw_(should_throw) {}
+        void on_attached() override {
+            attached = true;
+            ++attaches;
+        }
+        void on_detached() override {
+            attached = false;
+            ++detaches;
+            if (should_throw_)
+                throw std::runtime_error("detach failed");
+        }
+        bool should_throw_ = false;
+        bool attached = false;
+        int attaches = 0;
+        int detaches = 0;
+    };
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    auto first = std::make_unique<DetachProbe>(false);
+    auto* first_raw = first.get();
+    auto second = std::make_unique<DetachProbe>(true);
+    auto* second_raw = second.get();
+    root.add_child(std::move(first));
+    root.add_child(std::move(second));
+    ViewCapture first_capture;
+    first_capture.set(first_raw);
+    ViewCapture second_capture;
+    second_capture.set(second_raw);
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement());
+    REQUIRE(root.child_count() == 0);
+    CHECK(first_raw->detaches == 1);
+    CHECK(second_raw->detaches == 1);
+    CHECK(first_raw->attaches == 1);
+    CHECK(second_raw->attaches == 1);
+    CHECK_FALSE(first_raw->attached);
+    CHECK_FALSE(second_raw->attached);
+    CHECK(first_capture.live_in(root) == nullptr);
+    CHECK(second_capture.live_in(root) == nullptr);
+}
+
+TEST_CASE("WidgetBridge ordinary detach hooks may replace root children reentrantly",
+          "[view][bridge][lifetime][reentrant][ownership]") {
+    struct ReentrantDetach final : View {
+        ReentrantDetach(View& root, int& detaches)
+            : root_(root), detaches_(detaches) {}
+        void on_detached() override {
+            ++detaches_;
+            auto replacement = std::make_unique<View>();
+            replacement->set_id("replacement");
+            root_.add_child(std::move(replacement));
+        }
+        View& root_;
+        int& detaches_;
+    };
+    struct DetachProbe final : View {
+        explicit DetachProbe(int& detaches) : detaches_(detaches) {}
+        void on_detached() override { ++detaches_; }
+        int& detaches_;
+    };
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    int reentrant_detaches = 0;
+    int sibling_detaches = 0;
+    root.add_child(std::make_unique<ReentrantDetach>(root, reentrant_detaches));
+    root.add_child(std::make_unique<DetachProbe>(sibling_detaches));
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement());
+    REQUIRE(reentrant_detaches == 1);
+    REQUIRE(sibling_detaches == 1);
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0)->id() == "replacement");
+}
+
+TEST_CASE("WidgetBridge retirement disconnects the old realm from the live frame clock",
+          "[view][bridge][lifetime][frame-clock][runtime-eval]") {
+    struct ClockProbe final : View {
+        explicit ClockProbe(int& changes) : changes_(changes) {}
+        void on_frame_clock_changed() override { ++changes_; }
+        int& changes_;
+    };
+
+    ScriptEngine engine;
+    View root;
+    FrameClock clock;
+    root.set_frame_clock(&clock);
+    StateStore store;
+    int clock_changes = 0;
+    int animation_steps = 0;
+    auto probe = std::make_unique<ClockProbe>(clock_changes);
+    auto* probe_raw = probe.get();
+    auto nested = std::make_unique<View>();
+    auto* nested_raw = nested.get();
+    probe->add_child(std::move(nested));
+    root.add_child(std::move(probe));
+    REQUIRE(probe_raw->parent() == &root);
+    REQUIRE(probe_raw->animate(
+                [&](float) { ++animation_steps; }, 0.0f, 1.0f, 1.0f)
+            != -1);
+    REQUIRE(clock.has_active_subscribers());
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.clear_for_realm_replacement();
+
+    CHECK(probe_raw->parent() == nullptr);
+    CHECK(nested_raw->parent() == probe_raw);
+    CHECK_FALSE(clock.has_active_subscribers());
+    const int steps_after_retirement = animation_steps;
+    clock.tick(0.25f);
+    CHECK(animation_steps == steps_after_retirement);
+    CHECK(clock_changes >= 2); // attachment plus retirement
+}
+
+TEST_CASE("WidgetBridge deadline realm reset defers widget destruction",
+          "[view][bridge][lifetime][deadline][runtime-eval]") {
+    struct DestructorProbe final : View {
+        explicit DestructorProbe(int& calls) : calls_(calls) {}
+        ~DestructorProbe() override { ++calls_; }
+        int& calls_;
+    };
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    int destructor_calls = 0;
+    root.add_child(std::make_unique<DestructorProbe>(destructor_calls));
+    auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge->clear_for_realm_replacement([] {}));
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(destructor_calls == 0);
+
+    bridge.reset();
+    REQUIRE(destructor_calls == 1);
+}
+
+TEST_CASE("WidgetBridge deadline retirement abandons root interaction pointers",
+          "[view][bridge][lifetime][deadline][runtime-eval][drag][overlay]") {
+    struct DragProbe final : View, DropReceiver {
+        bool accept_drag(const DropData&, Point) override { return true; }
+        void leave_drag() override { ++leaves; }
+        bool accept_drop(const DropData&, Point) override { return true; }
+        int leaves = 0;
+    };
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    auto source = std::make_unique<View>();
+    auto* source_ptr = source.get();
+    source->set_bounds({0, 0, 50, 50});
+    auto receiver = std::make_unique<DragProbe>();
+    auto* receiver_ptr = receiver.get();
+    receiver->set_bounds({60, 0, 100, 100});
+    auto combo = std::make_unique<ComboBox>();
+    auto* combo_ptr = combo.get();
+    combo->set_bounds({0, 110, 100, 30});
+    combo->set_items({"one", "two"});
+    root.add_child(std::move(source));
+    root.add_child(std::move(receiver));
+    root.add_child(std::move(combo));
+    WidgetBridge bridge(engine, root, store);
+
+    DropData data;
+    data.type = DropData::Type::text;
+    data.text = "drag";
+    REQUIRE(source_ptr->start_drag(std::move(data)));
+    source_ptr->drag_to({70, 10});
+    REQUIRE(root.drag_active());
+    source_ptr->claim_input_focus();
+    int overlay_dismissals = 0;
+    receiver_ptr->on_overlay_dismissed = [&] { ++overlay_dismissals; };
+    receiver_ptr->claim_overlay();
+    MouseEvent open{};
+    open.phase = MousePhase::press;
+    open.is_down = true;
+    open.button = MouseButton::left;
+    open.position = {1, 1};
+    combo_ptr->on_mouse_event(open);
+    REQUIRE(combo_ptr->is_open());
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement([] {}));
+    REQUIRE(root.child_count() == 0);
+    REQUIRE_FALSE(root.drag_active());
+    REQUIRE(receiver_ptr->leaves == 0);
+    root.cancel_drag();
+    View::dismiss_active_overlay();
+    ComboBox::close_active_popup();
+    REQUIRE(receiver_ptr->leaves == 0);
+    REQUIRE(overlay_dismissals == 0);
+    REQUIRE(combo_ptr->is_open());
+}
+
+TEST_CASE("WidgetBridge deadline realm reset abandons active gesture callbacks",
+          "[view][bridge][lifetime][deadline][runtime-eval][gesture]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 100, 100});
+    int cancelled = 0;
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->on_cancelled = [&](GestureRecognizer&) { ++cancelled; };
+    child->add_gesture_recognizer(std::move(pan));
+    root.add_child(std::move(child));
+    WidgetBridge bridge(engine, root, store);
+
+    MouseEvent down{};
+    down.phase = MousePhase::press;
+    down.is_down = true;
+    down.button = MouseButton::left;
+    down.position = {10.0f, 10.0f};
+    down.window_position = down.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(down, 0.0));
+    MouseEvent drag = down;
+    drag.phase = MousePhase::drag;
+    drag.position = {30.0f, 10.0f};
+    drag.window_position = drag.position;
+    REQUIRE(root.dispatch_gesture_pointer_event(drag, 0.1));
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement([] {}));
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(cancelled == 0);
+}
+
+TEST_CASE("WidgetBridge deadline realm reset defers host gesture-end callbacks",
+          "[view][bridge][lifetime][deadline][runtime-eval][gesture]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    int begins = 0;
+    int ends = 0;
+    store.set_gesture_callbacks(
+        [&](pulp::state::ParamID) { ++begins; },
+        [&](pulp::state::ParamID) { ++ends; });
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createKnob('gain-knob', 0, 0, 48, 48);"
+        "bindWidgetToParam('gain-knob', 'gain');");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("gain-knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->on_gesture_begin);
+    knob->on_gesture_begin();
+    REQUIRE(begins == 1);
+    REQUIRE(store.open_gesture_count() == 1);
+
+    REQUIRE_NOTHROW(bridge.clear_for_realm_replacement([] {}));
+    REQUIRE(ends == 0);
+    REQUIRE(store.open_gesture_count() == 0);
+    store.flush_deferred_gesture_releases();
+    REQUIRE(ends == 1);
+}
+
+TEST_CASE("WidgetBridge reload snapshots honor an absolute deadline callback",
+          "[view][bridge][hot-reload][snapshot][deadline]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('one', 0, 0, 48, 48);
+        createKnob('two', 52, 0, 48, 48);
+    )");
+
+    WidgetReloadSnapshot snapshot;
+    int checks = 0;
+    REQUIRE_THROWS_AS(
+        bridge.snapshot_values(snapshot, [&] {
+            if (++checks == 2)
+                throw std::runtime_error("deadline expired");
+        }),
+        std::runtime_error);
+    REQUIRE(checks == 2);
 }
 
 TEST_CASE("WidgetBridge snapshot_values captures every registered widget value",
@@ -4874,4 +5630,26 @@ TEST_CASE("WidgetBridge does not report a hover sample as a pointerup",
     surface->on_pointer_event(hover);
 
     CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 0);
+}
+
+// The negative control for dropping the id seed: removing a default must not
+// remove the real thing. Covers the FACTORY call shape and the accessible
+// name, neither of which the tag-path case above reaches — an id that stopped
+// painting but still got read aloud would be a half-fix.
+TEST_CASE("an explicit label still reaches a bridge-made control",
+          "[view][bridge][labels]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('k1', 'root');
+        setLabel('k1', 'RATE');
+    )");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("k1"));
+    REQUIRE(knob != nullptr);
+    CHECK(knob->label() == "RATE");
+    CHECK(knob->access_label() == "RATE");
 }

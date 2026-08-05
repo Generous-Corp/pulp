@@ -91,7 +91,7 @@ TEST_CASE("Motion.startTrace registers a geometry trace by node id", "[motion-in
 
     const std::string params = R"({
         "view_name": "CardTrace",
-        "fps": 60,
+        "fps": 6e+1,
         "metrics": [
             {
                 "kind": "geometry",
@@ -177,7 +177,7 @@ TEST_CASE("Motion.stopTrace removes the trace", "[motion-inspector]") {
     REQUIRE(mi.active_trace_count() == 1);
 
     std::ostringstream stop_params;
-    stop_params << "{\"trace_id\":" << trace_id << "}";
+    stop_params << "{\"trace_id\":" << trace_id << "e+0}";
     auto stop_resp = mi.handle(make_request(2, "Motion.stopTrace", stop_params.str()));
     REQUIRE_FALSE(stop_resp.is_error);
     REQUIRE(parse_obj(stop_resp.params_json)["removed"].getBool() == true);
@@ -208,6 +208,87 @@ TEST_CASE("Motion.startTrace errors when metrics array missing", "[motion-inspec
     auto resp = mi.handle(make_request(1, "Motion.startTrace",
                                        R"({"view_name":"X","fps":30})"));
     REQUIRE(resp.is_error);
+}
+
+TEST_CASE("Motion.startTrace enforces the frozen metric count bounds",
+          "[motion-inspector]") {
+    Scaffold s;
+    MotionInspector mi(s.parent, /*server=*/nullptr);
+
+    const auto empty = mi.handle(make_request(
+        1, "Motion.startTrace", R"({"metrics":[]})"));
+    REQUIRE(empty.is_error);
+    CHECK(empty.error_code == "invalid_params");
+
+    std::string oversized = R"({"metrics":[)";
+    for (int index = 0; index < 33; ++index) {
+        if (index != 0) oversized += ',';
+        oversized +=
+            R"({"kind":"geometry","node_id":"card"})";
+    }
+    oversized += "]}";
+    const auto too_many =
+        mi.handle(make_request(2, "Motion.startTrace", oversized));
+    REQUIRE(too_many.is_error);
+    CHECK(too_many.error_code == "invalid_params");
+    CHECK(mi.active_trace_count() == 0);
+    CHECK(Coordinator::instance().active_trace_count() == 0);
+}
+
+TEST_CASE("Motion.startTrace rejects the complete frozen shape before tracing",
+          "[motion-inspector][control-contract]") {
+    Scaffold s;
+    MotionInspector mi(s.parent, /*server=*/nullptr);
+
+    const std::string too_long(129, 'x');
+    const std::vector<std::string> invalid = {
+        R"({"metrics":[{"kind":"geometry","node_id":"card"}],"extra":true})",
+        R"({"view_name":"","metrics":[{"kind":"geometry","node_id":"card"}]})",
+        "{\"view_name\":\"" + too_long +
+            R"(","metrics":[{"kind":"geometry","node_id":"card"}]})",
+        R"({"metrics":[{"kind":7,"node_id":"card"}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","extra":true}]})",
+        R"({"metrics":[{"kind":"geometry","name":"","node_id":"card"}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":7}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","properties":"minX"}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","properties":["minX","minX"]}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","properties":["opacity"]}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","space":"parent"}]})",
+        R"({"metrics":[{"kind":"geometry","node_id":"card","source":"computed"}]})",
+        R"({"metrics":[{"kind":"scroll-geometry","node_id":"card","properties":7}]})",
+        R"({"metrics":[{"kind":"scrollGeometry","node_id":"card","properties":["contentOffsetX","contentOffsetX"]}]})",
+        R"({"metrics":[{"kind":"scroll-geometry","node_id":"card","properties":["velocity"]}]})",
+        // The malformed second metric proves validation finishes before a
+        // TraceBuilder is created for the valid first metric.
+        R"({"metrics":[{"kind":"geometry","node_id":"card"},{"kind":"geometry","node_id":""}]})",
+    };
+
+    std::int64_t request_id = 1;
+    for (const auto& params : invalid) {
+        CAPTURE(params);
+        const auto response =
+            mi.handle(make_request(request_id++, "Motion.startTrace", params));
+        REQUIRE(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+        CHECK(mi.active_trace_count() == 0);
+        CHECK(Coordinator::instance().active_trace_count() == 0);
+    }
+}
+
+TEST_CASE("Motion.startTrace string bounds count Unicode codepoints",
+          "[motion-inspector][control-contract]") {
+    Scaffold s;
+    MotionInspector mi(s.parent, /*server=*/nullptr);
+
+    std::string view_name;
+    for (int index = 0; index < 128; ++index) view_name += "\xc3\xa9";
+    const std::string params =
+        "{\"view_name\":\"" + view_name +
+        R"(","metrics":[{"kind":"geometry","node_id":"card"}]})";
+    const auto response = mi.handle(make_request(1, "Motion.startTrace", params));
+    REQUIRE_FALSE(response.is_error);
+    CHECK(mi.active_trace_count() == 1);
+    CHECK(Coordinator::instance().active_trace_count() == 1);
 }
 
 // ── Snapshot returns coordinator state ────────────────────────────────

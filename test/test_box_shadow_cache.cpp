@@ -1,6 +1,8 @@
-// test_box_shadow_cache.cpp — outset box-shadow coverage cache: visual parity
-// with the direct path, plus the dual-flag behavior (re-blit on move, re-tint
-// on color change, re-blur only on geometry change).
+// test_box_shadow_cache.cpp — outset box-shadow raster path: the CSS blur
+// radius → Gaussian sigma conversion measured against the browser, the
+// coverage cache's visual parity with the direct path, and the dual-flag
+// behavior (re-blit on move, re-tint on color change, re-blur only on
+// geometry change).
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,7 +39,83 @@ int max_abs_diff(const std::vector<std::uint8_t>& a,
     return m;
 }
 
+// Alpha channel of an unpremultiplied RGBA8888 buffer. The shadow is drawn in
+// opaque black, so alpha IS the blur's coverage at that pixel.
+int alpha_at(const std::vector<std::uint8_t>& px, int w, int x, int y) {
+    return px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) +
+               static_cast<std::size_t>(x)) * 4 + 3];
+}
+
+// Sigma of a blurred straight edge, read off the rendered coverage: the
+// distance between the 50% crossing (the silhouette edge) and the 15.87%
+// crossing (one standard deviation out). Independent of where the caller
+// thinks the edge is.
+float measured_edge_sigma(const std::vector<std::uint8_t>& px, int w, int row,
+                          int scan_from) {
+    int x_half = -1;
+    for (int x = scan_from; x < w; ++x) {
+        const int a = alpha_at(px, w, x, row);
+        if (x_half < 0 && a < 128) x_half = x;
+        if (x_half >= 0 && a < 40) return static_cast<float>(x - x_half);
+    }
+    return -1.0f;
+}
+
 }  // namespace
+
+TEST_CASE("outset blur sigma is half the CSS blur radius, as the browser paints it",
+          "[canvas][shadow][parity]") {
+    // Characterization, not a bug fix: this pins the conversion so it cannot be
+    // "corrected" to something that looks more principled but does not match
+    // the oracle. Measured off Chrome 151 (DPR 1, black shadow on white,
+    // least-squares Gaussian-CDF fit to the rendered coverage, residual
+    // ~0.2/255) — `box-shadow: 0 0 Npx` renders with sigma:
+    //
+    //     N       8     16     24     36     48     64
+    //     sigma   4.04   8.04  11.99  17.99  24.07  32.30
+    //
+    // i.e. exactly N/2, which is also what the CSS spec says ("a Gaussian blur
+    // with a standard deviation equal to half the blur radius"). Note that
+    // `filter: drop-shadow(0 0 Npx)` on the same page fits sigma = N, so the
+    // two CSS shadow spellings do NOT share a conversion and the drop-shadow
+    // rule must not be borrowed for this one.
+    constexpr int kW = 400, kH = 400;
+    auto& cache = BoxShadowCache::instance();
+
+    for (const float blur : {16.0f, 36.0f, 64.0f}) {
+        cache.clear();
+        cache.set_enabled(false);
+        // Right edge at x = 200, both corners 100px from the probe row, so the
+        // row reads a straight blurred edge rather than a corner.
+        const auto px = render_box_shadow_to_rgba(
+            kW, kH, 1.0f, 20, 100, 180, 200, 0, 0, blur, 0,
+            Color::rgba(0.0f, 0.0f, 0.0f, 1.0f), 0, false);
+        REQUIRE(px.size() ==
+                static_cast<std::size_t>(kW) * static_cast<std::size_t>(kH) * 4);
+
+        const float sigma = measured_edge_sigma(px, kW, kH / 2, 190);
+        CAPTURE(blur, sigma);
+        REQUIRE(sigma > 0.0f);
+        // +/-20% absorbs Skia's box-blur approximation and 1px quantisation.
+        // The nearest plausible wrong rule (Skia's radius→sigma applied to half
+        // the radius, 0.2887*blur + 0.5) is 1.7x tighter and lands far outside.
+        CHECK(sigma > blur * 0.5f * 0.8f);
+        CHECK(sigma < blur * 0.5f * 1.2f);
+    }
+
+    // Zero blur must stay hard-edged: no sigma, no half-pixel bloom from an
+    // additive term in the conversion. Spread pushes the silhouette 10px out so
+    // the edge is observable outside the box.
+    cache.clear();
+    cache.set_enabled(false);
+    const auto hard = render_box_shadow_to_rgba(
+        kW, kH, 1.0f, 20, 100, 180, 200, 0, 0, 0.0f, 10.0f,
+        Color::rgba(0.0f, 0.0f, 0.0f, 1.0f), 0, false);
+    CHECK(alpha_at(hard, kW, 205, kH / 2) == 255);
+    CHECK(alpha_at(hard, kW, 215, kH / 2) == 0);
+
+    cache.set_enabled(true);  // leave the shared singleton at its default
+}
 
 TEST_CASE("box shadow cache matches the direct path within tolerance",
           "[canvas][shadow][cache]") {

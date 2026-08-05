@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20260803-inspector-runtime-evaluation",
+  "kind": "change",
+  "created_at": "2026-08-04T02:20:03Z",
+  "slices": [
+    "macos-shell",
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's consent-gated Development Inspector runtime evaluator needs the existing view and accessibility callbacks to remain safe while a request crosses the inspector transport and returns to the UI thread. The retained UI dispatch seams now use lifetime-checked callbacks instead of retaining raw owners across pointer, gesture, drag, and accessibility work; the macOS accessibility provider uses the same explicit host-lifetime token so AppKit cannot call through an already-destroyed bridge. These changes preserve the existing event ordering and accessibility semantics while making teardown and concurrent inspector requests fail closed. This is Pulp-specific developer-tool and host-lifecycle integration with no counterpart framework behavior to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-drag-session-lifetime",
+    "pulp-test-gesture-threading",
+    "pulp-test-inspector-server-async-lifecycle",
+    "pulp-test-pointer-delivery",
+    "pulp-test-standalone-runtime-eval"
+  ],
+  "disposition": "pulp-only"
+}

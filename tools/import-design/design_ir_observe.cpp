@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#include <pulp/view/widgets.hpp>
 #include <sstream>
 #include <string>
 
@@ -82,12 +84,23 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto ir = pulp::view::parse_design_ir_json(serialized);
-    auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
+    // The document's own directory is the search root for its manifest assets:
+    // relative local_paths resolve against it, and a local_path that no longer
+    // points at its bytes is recovered by content hash from the asset folders
+    // beside it. Without this the tool depends on the process CWD.
+    auto root = pulp::view::build_native_view_tree(
+        ir, ir.asset_manifest,
+        {.asset_base_directory = input_path.parent_path()});
     if (!root) {
         std::cerr << "Error: could not materialize DesignIR\n";
         return 1;
     }
     root->set_bounds({0.0f, 0.0f, width, height});
+    // Which line-breaking path each Label took. Reported unconditionally
+    // because a cache that never activates and one that always does produce
+    // the same pixels when the reflow happens to agree — and only one of those
+    // is the mechanism working.
+    pulp::view::Label::reset_line_break_path_counts();
     if (!pulp::view::render_to_file(
             *root,
             static_cast<std::uint32_t>(width),
@@ -98,6 +111,11 @@ int main(int argc, char** argv) {
         std::cerr << "Error: could not render DesignIR through Skia\n";
         return 1;
     }
+    const auto paths = pulp::view::Label::line_break_path_counts();
+    std::cerr << "line-break paths: cached=" << paths.cached
+              << " reflowed=" << paths.reflowed
+              << " uncached=" << paths.uncached << "\n";
+
     const auto layout = pulp::view::dump_layout_tree(
         *root,
         {.surface = "design-ir-observer",

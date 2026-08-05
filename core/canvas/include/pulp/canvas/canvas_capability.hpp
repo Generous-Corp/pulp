@@ -23,6 +23,11 @@ enum class CanvasCapability : uint8_t {
     filter_chain,         ///< save_layer_with_filters honors color ops
     mask_layer,           ///< save_layer_with_mask applies the mask
     backdrop_filter,      ///< save_backdrop_filter really blurs the backdrop
+    /// save_backdrop_filter_chain honors the colour ops too. Separate from
+    /// `backdrop_filter` because the degradation is different in kind: a
+    /// backend without it keeps the blur and drops the rest, so a
+    /// `saturate(0)` backdrop comes back fully saturated rather than absent.
+    backdrop_filter_chain,
     bloom_layer,          ///< save_layer_with_bloom is a real bloom
     sksl_draw,            ///< draw_with_sksl executes the shader
     sksl_post_effect,     ///< save_layer_with_sksl_post_effect executes

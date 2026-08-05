@@ -1,6 +1,18 @@
 # CLI unit and shellout test target registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+add_executable(pulp-test-inspector-shipping-report
+    test_inspector_shipping_report.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/inspector_shipping_report.cpp)
+target_include_directories(pulp-test-inspector-shipping-report PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include
+    ${choc_SOURCE_DIR})
+target_link_libraries(pulp-test-inspector-shipping-report PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-shipping-report
+    PROPERTIES LABELS "inspect;ship;cli")
+
 # CLI design binding tests
 add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/design_binding.cpp
@@ -145,6 +157,8 @@ endfunction()
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
     test_cli_audio_heritage.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-shellout PRIVATE
+    PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
@@ -177,12 +191,22 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-if(TARGET pulp::inspect)
+if(TARGET pulp::inspect-runtime AND TARGET pulp::inspect-client)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
         pulp::platform
-        pulp::inspect
+        pulp::inspect-runtime
+        pulp::inspect-client
         Catch2::Catch2WithMain)
+    if(TARGET pulp::inspect)
+        target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
+            pulp::inspect)
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=1)
+    else()
+        target_compile_definitions(pulp-test-cli-inspect-shellout PRIVATE
+            PULP_TEST_INSPECT_DOMAIN_HANDLER=0)
+    endif()
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
@@ -425,6 +449,7 @@ catch_discover_tests(pulp-test-cli-validator-discovery)
 add_executable(pulp-test-cli-mac-runtime-validators
     test_cli_mac_runtime_validators.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
 )
 target_include_directories(pulp-test-cli-mac-runtime-validators PRIVATE
     ${CMAKE_SOURCE_DIR}

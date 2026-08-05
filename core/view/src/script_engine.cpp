@@ -25,6 +25,15 @@ choc::value::Value ScriptEngine::evaluate(const std::string& code) {
     return engine_->evaluate(code);
 }
 
+bool ScriptEngine::supports_bounded_json_evaluation() const {
+    return engine_ && engine_->supports_bounded_json_evaluation();
+}
+
+std::string ScriptEngine::evaluate_bounded_json(const std::string& code,
+                                                std::size_t max_bytes) {
+    return engine_->evaluate_bounded_json(code, max_bytes);
+}
+
 void ScriptEngine::run_module(const std::string& code,
                               ModuleResolver resolver,
                               ModuleCompletionHandler completion) {
@@ -73,6 +82,10 @@ bool ScriptEngine::supports_interrupt() const {
 
 void ScriptEngine::request_interrupt() {
     if (engine_) engine_->request_interrupt();
+}
+
+bool ScriptEngine::clear_pending_interrupt() {
+    return engine_ ? engine_->clear_pending_interrupt() : true;
 }
 
 ScriptEngine::operator bool() const {

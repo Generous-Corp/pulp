@@ -45,11 +45,14 @@ export interface PulpTimelineAutomationTargetTrackMixer {
 
 /** `pulp.timeline.chord_scale_event` — domain Document, schema version 1. */
 export interface PulpTimelineChordScaleEvent {
+  chord_bass: number | string;
+  chord_extensions: number | string;
   chord_quality: string;
   chord_root: number | string;
   position: number | string;
   scale_mode: string;
   scale_root: number | string;
+  voicing: string;
 }
 
 /** `pulp.timeline.clip` — domain Document, schema version 3. */
@@ -235,7 +238,9 @@ export interface PulpTimelineCommandRemoveTrack {
 export interface PulpTimelineCommandReplaceNoteContent {
   clip_id: number | string;
   expected: readonly unknown[];
+  expected_modifiers?: readonly unknown[];
   replacement: readonly unknown[];
+  replacement_modifiers?: readonly unknown[];
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -284,6 +289,15 @@ export interface PulpTimelineCommandSetGroove {
 export interface PulpTimelineCommandSetMeterMap {
   expected: readonly unknown[];
   replacement: readonly unknown[];
+}
+
+/** `pulp.timeline.command.set_note_events` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetNoteEvents {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.set_note_velocity` — domain Command, schema version 1. */
@@ -398,7 +412,7 @@ export interface PulpTimelineMarker {
   position: number | string;
 }
 
-/** `pulp.timeline.project` — domain Document, schema version 2. */
+/** `pulp.timeline.project` — domain Document, schema version 3. */
 export interface PulpTimelineProject {
   assets: readonly unknown[];
   id: number | string;
@@ -410,6 +424,7 @@ export interface PulpTimelineProject {
   sequences: readonly unknown[];
   session_start?: Record<string, unknown>;
   tempo_map?: readonly unknown[];
+  tuning?: PulpTimelineTuning;
 }
 
 /** `pulp.timeline.region` — domain Document, schema version 1. */
@@ -419,6 +434,7 @@ export interface PulpTimelineRegion {
   id: number | string;
   name: string;
   position: number | string;
+  role: string;
 }
 
 /** `pulp.timeline.scene` — domain Document, schema version 1. */
@@ -428,7 +444,7 @@ export interface PulpTimelineScene {
   slots: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 6. */
+/** `pulp.timeline.sequence` — domain Document, schema version 7. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
@@ -469,7 +485,7 @@ export interface PulpTimelineTakeLane {
   takes: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 7. */
+/** `pulp.timeline.track` — domain Document, schema version 8. */
 export interface PulpTimelineTrack {
   active_take_lane_id: number | string;
   automation_lanes: readonly unknown[];
@@ -481,6 +497,15 @@ export interface PulpTimelineTrack {
   name: string;
   record_armed: boolean;
   take_lanes: readonly unknown[];
+  tuning?: PulpTimelineTuning;
+}
+
+/** `pulp.timeline.tuning` — domain Document, schema version 1. */
+export interface PulpTimelineTuning {
+  keyboard_map_content: string;
+  reference_pitch_millihertz: number | string;
+  scale_content: string;
+  system: string;
 }
 
 /** Every schema-type name registered in the timeline manifest. */
@@ -524,6 +549,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_clip_sequence_ref"
   | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
+  | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
   | "pulp.timeline.command.set_record_arm"
   | "pulp.timeline.command.set_take_comp"
@@ -546,7 +572,8 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.slot"
   | "pulp.timeline.take"
   | "pulp.timeline.take_lane"
-  | "pulp.timeline.track";
+  | "pulp.timeline.track"
+  | "pulp.timeline.tuning";
 
 /** Maps each schema-type name to its generated interface. */
 export interface TimelineSchemaTypeMap {
@@ -589,6 +616,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_clip_sequence_ref": PulpTimelineCommandSetClipSequenceRef;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
+  "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
   "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;
@@ -612,4 +640,5 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.take": PulpTimelineTake;
   "pulp.timeline.take_lane": PulpTimelineTakeLane;
   "pulp.timeline.track": PulpTimelineTrack;
+  "pulp.timeline.tuning": PulpTimelineTuning;
 }

@@ -30,7 +30,9 @@ jobs:
   # (compound with the supersede bug fixed in pulp #2238 and the Skia
   # gate fix in pulp #2281).
   resolve-macos-runner:
-    runs-on: ubuntu-latest
+    # Tag-push-only trusted control-plane work may use the MacPro Linux/X64
+    # pool. Unset both variables to fall back to GitHub-hosted Ubuntu.
+    runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
     steps:

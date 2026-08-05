@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260802-inspector-window-host-lifecycle",
+  "kind": "change",
+  "created_at": "2026-08-02T17:46:37Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's standalone Development Inspector needs explicit host lifecycle capabilities so stack-owned inspector state is not destroyed while a native event loop can still dispatch callbacks. WindowHost therefore gains conservative append-only virtual queries for deferred close, compositor capture, blocking-loop behavior, and post-stop exit draining. Existing virtual slots remain unchanged, base implementations fail closed, and only Pulp's inspector-aware standalone hosts opt into the new behavior. This is Pulp-specific developer-tool and host integration work with no counterpart framework behavior to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-inspector-hook-lifecycle",
+    "pulp-test-standalone-inspector",
+    "pulp-test-standalone-inspector-process"
+  ],
+  "disposition": "pulp-only"
+}

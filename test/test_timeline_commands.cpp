@@ -215,6 +215,327 @@ TEST_CASE("ReplaceNoteContent drops only the modifier whose note it removes") {
     check_lanes_intact(after);
 }
 
+namespace {
+
+// The note set before and after an edit that deletes note seven, the note the
+// fixture gives a modifier of its own.
+const std::vector<NoteEvent> kBothNotes{modifier_note(6, 0, 60),
+                                        modifier_note(7, kTicksPerQuarter / 2, 64)};
+const std::vector<NoteEvent> kFirstNoteOnly{modifier_note(6, 0, 60)};
+
+} // namespace
+
+// Restoring a deleted note means restoring a tombstoned identity, which the
+// public reducer refuses, so this drives a real DocumentSession's undo.
+TEST_CASE("Undoing a note removal restores the removed note's modifier") {
+    auto session = std::move(DocumentSession::create(make_authored_clip_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+
+    auto edit = session_transaction(
+        writer, session->revision(),
+        {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+    REQUIRE(midi_content(*session->snapshot()).notes().size() == 1);
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) == nullptr);
+
+    // The dropped modifier is unreachable from the edited clip, so the recorded
+    // inverse has to carry it: an inverse that only re-listed the notes would
+    // restore a note that has silently forgotten how it plays.
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(writer));
+
+    const auto& back = midi_content(*session->snapshot());
+    REQUIRE(back.notes().size() == 2);
+    CHECK(back.modifier_seed() == 0xABCDEF);
+    REQUIRE(back.modifiers().size() == 2);
+    REQUIRE(back.modifier_for({6}) != nullptr);
+    CHECK(back.modifier_for({6})->probability == 1024);
+    REQUIRE(back.modifier_for({7}) != nullptr);
+    CHECK(back.modifier_for({7})->probability == 4096);
+    CHECK(back.modifier_for({7})->condition == NoteConditionKind::Always);
+    CHECK(back.modifier_for({7})->ratchet_count == 1);
+    check_lanes_intact(back);
+
+    // Redo drops it again and a second undo brings it back, so the payload the
+    // inverse carries is recomputed rather than consumed once.
+    REQUIRE(session->redo(writer));
+    CHECK(midi_content(*session->snapshot()).modifier_for({7}) == nullptr);
+    REQUIRE(session->undo(writer));
+    REQUIRE(midi_content(*session->snapshot()).modifier_for({7}) != nullptr);
+    CHECK(midi_content(*session->snapshot()).modifier_for({7})->probability == 4096);
+}
+
+TEST_CASE("A shrinking note edit drops the orphaned modifier and keeps every lane") {
+    const auto original = make_authored_clip_project();
+    auto edit = transaction({1}, 1, 1, {},
+                            {ReplaceNoteContent{{3}, {4}, {5}, kBothNotes, kFirstNoteOnly}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+
+    // A modifier keys on a note id and a lane keys on a channel-voice address,
+    // so the same edit has to treat them differently: the orphaned modifier
+    // goes and both lanes stay whole. The inverse inherits that split — it
+    // restates the modifiers because they were filtered, and says nothing about
+    // lanes because nothing filtered them.
+    const auto& after = midi_content(changed->project);
+    CHECK(after.modifier_for({7}) == nullptr);
+    check_lanes_intact(after);
+
+    REQUIRE(changed->inverses.size() == 1);
+    const auto& inverse_command = std::get<ReplaceNoteContent>(changed->inverses[0]);
+    REQUIRE(inverse_command.replacement_modifiers.size() == 2);
+    CHECK(inverse_command.replacement_modifiers[0] == chance(6, 1024));
+    CHECK(inverse_command.replacement_modifiers[1] == chance(7, 4096));
+    REQUIRE(inverse_command.expected_modifiers.size() == 1);
+    CHECK(inverse_command.expected_modifiers[0] == chance(6, 1024));
+}
+
+TEST_CASE("Two note-content transactions differing only in modifiers are not equivalent") {
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
+
+    ReplaceNoteContent quiet{{3}, {4}, {5}, expected, replacement, {}, {chance(6, 1024)}};
+    ReplaceNoteContent loud = quiet;
+    loud.replacement_modifiers = {chance(6, 4096)};
+
+    // The idempotency cache answers a repeated transaction id with the first
+    // result it saw, so calling these equivalent would apply one payload's
+    // modifiers and report the other's outcome.
+    auto first = transaction({1}, 1, 1, {}, {quiet});
+    auto retry = transaction({1}, 1, 1, {}, {loud});
+    CHECK_FALSE(equivalent(first, retry));
+
+    auto gated = transaction({1}, 1, 1, {}, {quiet});
+    gated.commands[0].command = ReplaceNoteContent{{3},  {4}, {5}, expected, replacement,
+                                                   {chance(6, 1024)}, {chance(6, 1024)}};
+    CHECK_FALSE(equivalent(first, gated));
+    CHECK(equivalent(first, transaction({1}, 1, 1, {}, {quiet})));
+}
+
+TEST_CASE("Note-content retained size counts the modifiers the payload carries") {
+    const std::vector<NoteEvent> expected{modifier_note(6, 0, 60),
+                                          modifier_note(7, kTicksPerQuarter / 2, 64)};
+    const std::vector<NoteEvent> replacement{modifier_note(6, 0, 60)};
+
+    const Command bare{ReplaceNoteContent{{3}, {4}, {5}, expected, replacement}};
+    const Command carrying{ReplaceNoteContent{
+        {3}, {4}, {5}, expected, replacement, {chance(6, 1024)}, {chance(6, 1024), chance(7, 4096)}}};
+
+    // The journal budgets a command by this number and the fallthrough answers
+    // `sizeof(T)` for a payload it does not know, so a field it forgets is
+    // under-counted rather than refused.
+    CHECK(retained_size(carrying) == retained_size(bare) + 3 * sizeof(NoteModifier));
+}
+
+namespace {
+
+// One note of the fixture's two, moved a quarter later and up an octave, so a
+// check that reads the wrong note or the wrong field cannot pass.
+const std::vector<NoteEvent> kNoteSixNow{modifier_note(6, 0, 60)};
+const std::vector<NoteEvent> kNoteSixMoved{modifier_note(6, kTicksPerQuarter, 72)};
+
+SetNoteEvents move_note_six() {
+    return {{3}, {4}, {5}, kNoteSixNow, kNoteSixMoved};
+}
+
+} // namespace
+
+TEST_CASE("SetNoteEvents rewrites only the notes it names and keeps everything else") {
+    const auto original = make_authored_clip_project();
+    // The fixture builds under NDEBUG, where its asserts vanish: state what the
+    // clip carries before the edit so the checks below cannot pass vacuously.
+    REQUIRE(midi_content(original).notes().size() == 2);
+    REQUIRE(midi_content(original).modifiers().size() == 2);
+    REQUIRE(midi_content(original).modifier_seed() == 0xABCDEF);
+    check_lanes_intact(midi_content(original));
+
+    auto edit = transaction({1}, 1, 1, {}, {move_note_six()});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+
+    const auto& after = midi_content(changed->project);
+    REQUIRE(after.notes().size() == 2);
+    // Notes are ordered by (start, id) and the edit moves note six past note
+    // seven, so the two swap places — read each by identity rather than by slot.
+    const auto find = [&](ItemId id) {
+        const auto found = std::find_if(after.notes().begin(), after.notes().end(),
+                                        [&](const NoteEvent& note) { return note.id == id; });
+        REQUIRE(found != after.notes().end());
+        return *found;
+    };
+    const auto six = find({6});
+    CHECK(six.pitch == 72);
+    CHECK(six.start.value == kTicksPerQuarter);
+    // The note the payload never named keeps every field it had.
+    const auto seven = find({7});
+    CHECK(seven.pitch == 64);
+    CHECK(seven.start.value == kTicksPerQuarter / 2);
+    CHECK(seven.velocity == 1000);
+
+    // Rebuilding the content from the notes alone would take all three of these
+    // with it, and none of them is reachable from the payload.
+    CHECK(after.modifier_seed() == 0xABCDEF);
+    REQUIRE(after.modifiers().size() == 2);
+    REQUIRE(after.modifier_for({6}) != nullptr);
+    CHECK(after.modifier_for({6})->probability == 1024);
+    REQUIRE(after.modifier_for({7}) != nullptr);
+    CHECK(after.modifier_for({7})->probability == 4096);
+    check_lanes_intact(after);
+
+    // No note entered or left, so the clip owns exactly the identities it did.
+    CHECK(changed->project.next_item_id() == original.next_item_id());
+    CHECK(changed->project.locate({6})->active);
+    CHECK(changed->project.locate({7})->active);
+
+    REQUIRE(changed->inverses.size() == 1);
+    const auto& inverse_command = std::get<SetNoteEvents>(changed->inverses[0]);
+    REQUIRE(inverse_command.expected.size() == 1);
+    REQUIRE(inverse_command.replacement.size() == 1);
+    CHECK(inverse_command.expected[0].pitch == 72);
+    CHECK(inverse_command.replacement[0].pitch == 60);
+
+    auto inverse = transaction({1}, 2, 2, {}, changed->inverses);
+    auto restored = reduce_transaction(changed->project, inverse);
+    REQUIRE(restored);
+    CHECK(same_project(original, restored->project));
+    check_lanes_intact(midi_content(restored->project));
+}
+
+TEST_CASE("Undoing a SetNoteEvents restores the values the notes held before it") {
+    auto session = std::move(DocumentSession::create(make_authored_clip_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    REQUIRE(midi_content(*session->snapshot()).notes().size() == 2);
+
+    auto edit = session_transaction(writer, session->revision(), {move_note_six()});
+    REQUIRE(session->submit(writer, std::move(edit)));
+    {
+        const auto& after = midi_content(*session->snapshot());
+        REQUIRE(after.notes().size() == 2);
+        CHECK(after.notes()[0].id == ItemId{7});
+        CHECK(after.notes()[1].id == ItemId{6});
+        CHECK(after.notes()[1].pitch == 72);
+    }
+
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(writer));
+    {
+        const auto& back = midi_content(*session->snapshot());
+        REQUIRE(back.notes().size() == 2);
+        CHECK(back.notes()[0].id == ItemId{6});
+        CHECK(back.notes()[0].pitch == 60);
+        CHECK(back.notes()[0].start.value == 0);
+        CHECK(back.notes()[1].id == ItemId{7});
+        CHECK(back.notes()[1].pitch == 64);
+        CHECK(back.modifier_seed() == 0xABCDEF);
+        CHECK(back.modifiers().size() == 2);
+        check_lanes_intact(back);
+    }
+
+    // Redo re-applies it and a second undo takes it back again, so the recorded
+    // inverse is recomputed on each pass rather than consumed once.
+    REQUIRE(session->redo(writer));
+    CHECK(midi_content(*session->snapshot()).notes()[1].pitch == 72);
+    REQUIRE(session->undo(writer));
+    CHECK(midi_content(*session->snapshot()).notes()[0].pitch == 60);
+}
+
+TEST_CASE("SetNoteEvents refuses a payload it cannot pair or apply") {
+    const auto original = make_authored_clip_project();
+    const auto reject = [&](SetNoteEvents command) {
+        auto rejected = reduce_transaction(original, transaction({1}, 1, 1, {}, {command}));
+        REQUIRE_FALSE(rejected);
+        return rejected.error().code;
+    };
+
+    CHECK(reject({{3}, {4}, {5}, {}, {}}) == ConflictCode::ModelInvariant);
+    CHECK(reject({{3}, {4}, {5}, kNoteSixNow, {}}) == ConflictCode::ModelInvariant);
+    // Same length, but entry zero names a different note on each side, so the
+    // inverse would describe a note the forward edit never touched.
+    CHECK(reject({{3}, {4}, {5}, kNoteSixNow, {modifier_note(7, 0, 72)}}) ==
+          ConflictCode::ModelInvariant);
+    // The pairing that matters: the two arrays hold the same identities in
+    // different orders, so every note the payload names does exist and every
+    // gate it states is true. Nothing downstream refuses it — the id set stays
+    // unique and the content rebuilds — and the clip quietly ends up with each
+    // note wearing the other's value. Only the pairwise identity check sees it.
+    CHECK(reject({{3},
+                  {4},
+                  {5},
+                  {modifier_note(6, 0, 60), modifier_note(7, kTicksPerQuarter / 2, 64)},
+                  {modifier_note(7, kTicksPerQuarter / 2, 64), modifier_note(6, 0, 60)}}) ==
+          ConflictCode::ModelInvariant);
+    // One note named twice: both entries would apply and the inverse could not
+    // say which value to restore.
+    CHECK(reject({{3},
+                  {4},
+                  {5},
+                  {modifier_note(6, 0, 60), modifier_note(6, 0, 60)},
+                  {modifier_note(6, 0, 72), modifier_note(6, 0, 65)}}) ==
+          ConflictCode::ModelInvariant);
+    // A well-formed pair naming a note the clip does not carry.
+    CHECK(reject({{3}, {4}, {5}, {modifier_note(99, 0, 60)}, {modifier_note(99, 0, 72)}}) ==
+          ConflictCode::TargetMissing);
+    // The gate is every field, not just identity: this names note six correctly
+    // and states a pitch it does not have.
+    CHECK(reject({{3}, {4}, {5}, {modifier_note(6, 0, 61)}, kNoteSixMoved}) ==
+          ConflictCode::ExpectedValueMismatch);
+
+    // Every rejection leaves the clip exactly as it was.
+    CHECK(midi_content(original).notes()[0].pitch == 60);
+    CHECK(midi_content(original).modifiers().size() == 2);
+    check_lanes_intact(midi_content(original));
+}
+
+TEST_CASE("SetNoteEvents costs the notes under the gesture rather than the clip") {
+    // A clip far larger than the edit, which is the case the command exists for.
+    std::vector<NoteEvent> clip_notes;
+    clip_notes.reserve(200);
+    for (std::uint64_t index = 0; index < 200; ++index)
+        clip_notes.push_back(modifier_note(6 + index,
+                                           static_cast<std::int64_t>(index) * kTicksPerQuarter / 8,
+                                           60));
+
+    const std::vector<NoteEvent> one_note{clip_notes[0]};
+    const std::vector<NoteEvent> one_note_moved{modifier_note(6, 0, 72)};
+    const Command narrow{SetNoteEvents{{3}, {4}, {5}, one_note, one_note_moved}};
+
+    std::vector<NoteEvent> hundred_moved;
+    for (std::size_t index = 0; index < 101; ++index)
+        hundred_moved.push_back(clip_notes[index]);
+    const Command wide{SetNoteEvents{{3}, {4}, {5}, hundred_moved, hundred_moved}};
+
+    // The journal budgets a command by this number, and the dispatch answers a
+    // flat `sizeof(T)` for a payload it has no arm for — so a missing arm reads
+    // as a hundred-note edit costing the same as a one-note edit. Assert the
+    // growth, not that the figure is merely non-zero.
+    CHECK(retained_size(wide) >= retained_size(narrow) + 200 * sizeof(NoteEvent));
+
+    // And the point of the shape: the same one-note edit expressed as
+    // ReplaceNoteContent has to gate on the clip's entire note array.
+    const Command whole_clip{ReplaceNoteContent{{3}, {4}, {5}, clip_notes, clip_notes}};
+    CHECK(retained_size(narrow) + 398 * sizeof(NoteEvent) <= retained_size(whole_clip));
+}
+
+TEST_CASE("Two SetNoteEvents differing only in the value they start from are not equivalent") {
+    const SetNoteEvents from_sixty{{3}, {4}, {5}, kNoteSixNow, kNoteSixMoved};
+    SetNoteEvents from_sixty_one = from_sixty;
+    from_sixty_one.expected = {modifier_note(6, 0, 61)};
+
+    // The idempotency cache answers a repeated transaction id with the first
+    // result it saw. These two agree on where the note ends up and disagree on
+    // where it started, so they have different inverses: treating them as one
+    // would undo to a pitch the clip never held.
+    auto first = transaction({1}, 1, 1, {}, {from_sixty});
+    CHECK_FALSE(equivalent(first, transaction({1}, 1, 1, {}, {from_sixty_one})));
+
+    SetNoteEvents elsewhere = from_sixty;
+    elsewhere.replacement = {modifier_note(6, kTicksPerQuarter, 71)};
+    CHECK_FALSE(equivalent(first, transaction({1}, 1, 1, {}, {elsewhere})));
+    CHECK(equivalent(first, transaction({1}, 1, 1, {}, {from_sixty})));
+}
+
 TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
     const ClipPlaybackProperties playback{0.375f, 120, 240};
     const ClipPlaybackProperties replacement{0.75f, 60, 90};

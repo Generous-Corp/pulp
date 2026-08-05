@@ -45,6 +45,10 @@ bool is_sampling_hazard(const View& v) {
     if (v.filter_blur() > 0.0f) return true;
     if (!v.mask_image().empty() && v.mask_image() != "none") return true;
     if (v.effect() && v.effect()->needs_layer()) return true;
+    // A backdrop-filter chain needs no case of its own: its blur (the only
+    // spatial part) is also stored as `backdrop_blur`, tested above, and its
+    // colour ops are point-wise on the pixels already inside the damage rect.
+    //
     // A filter chain is a hazard only when it carries a spatial (sampling) op; a
     // colour-only chain (brightness/contrast/grayscale/…) is point-wise + safe.
     for (const auto& op : v.filter_chain()) {

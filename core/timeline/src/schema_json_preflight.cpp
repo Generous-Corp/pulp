@@ -227,6 +227,23 @@ class StructuralScanner {
         return false;
     }
 
+    // Rejects a payload that carries a member its declared version predates.
+    bool forbid_members(Span object, std::initializer_list<std::string_view> names,
+                        const std::string& path) {
+        for (const auto name : names) {
+            Span value;
+            bool found = false;
+            if (!member(object, name, value, found))
+                return false;
+            if (found) {
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0,
+                          path + "/" + std::string(name));
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool require_shape(const detail::JsonSpanMember& member, std::uint8_t allowed,
                        std::size_t object_offset, const std::string& path,
                        PersistenceErrorCode missing_code = PersistenceErrorCode::InvalidSchema) {
@@ -296,6 +313,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"root_sequence_id"},
             detail::JsonSpanMember{"sequences"},
             detail::JsonSpanMember{"session_start"},
+            detail::JsonSpanMember{"tuning"},
         };
         if (!members(data, requested))
             return false;
@@ -333,6 +351,16 @@ class StructuralScanner {
                 set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                           "/data/session_start");
             return false;
+        }
+        // The tuning is optional on the same terms as the session origin above.
+        if (requested[7].found) {
+            if (!detail::project_schema_policy.supports_tuning(version)) {
+                set_error(PersistenceErrorCode::InvalidSchema, requested[7].span.begin, 0, 0,
+                          "/data/tuning");
+                return false;
+            }
+            if (!walk_tuning(requested[7].span, "/data/tuning"))
+                return false;
         }
         if (has_assets &&
             !governed_array(assets, counts_.assets, limits_.max_assets, "/data/assets",
@@ -558,6 +586,10 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
             return false;
         }
+        const auto requires_section_role =
+            detail::sequence_schema_policy.requires_section_role(version);
+        const auto requires_chord_detail =
+            detail::sequence_schema_policy.requires_chord_detail(version);
         const auto requires_track_order =
             detail::sequence_schema_policy.requires_track_order(version);
         if (requires_track_order != requested[9].found ||
@@ -574,6 +606,7 @@ class StructuralScanner {
             !governed_array(markers, counts_.markers, limits_.max_markers, data_path + "/markers",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.marker", false,
+                                                       false,
                                                        data_path + "/markers/" +
                                                            std::to_string(index));
                             }))
@@ -582,6 +615,7 @@ class StructuralScanner {
             !governed_array(regions, counts_.regions, limits_.max_regions, data_path + "/regions",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.region", true,
+                                                       requires_section_role,
                                                        data_path + "/regions/" +
                                                            std::to_string(index));
                             }))
@@ -592,11 +626,23 @@ class StructuralScanner {
                 data_path + "/chord_scale_lane", [&](Span event, std::size_t index) {
                     const auto event_path =
                         data_path + "/chord_scale_lane/" + std::to_string(index);
-                    return require_member(event, "chord_quality", StringShape, event_path) &&
-                           require_member(event, "chord_root", NumberShape, event_path) &&
-                           require_member(event, "position", StringShape, event_path) &&
-                           require_member(event, "scale_mode", StringShape, event_path) &&
-                           require_member(event, "scale_root", NumberShape, event_path);
+                    if (!require_member(event, "chord_quality", StringShape, event_path) ||
+                        !require_member(event, "chord_root", NumberShape, event_path) ||
+                        !require_member(event, "position", StringShape, event_path) ||
+                        !require_member(event, "scale_mode", StringShape, event_path) ||
+                        !require_member(event, "scale_root", NumberShape, event_path))
+                        return false;
+                    if (requires_chord_detail)
+                        return require_member(event, "chord_bass", NumberShape | NullShape,
+                                              event_path) &&
+                               require_member(event, "chord_extensions", NumberShape,
+                                              event_path) &&
+                               require_member(event, "voicing", StringShape | NullShape,
+                                              event_path);
+                    // An older version carrying the detail is a contradiction,
+                    // not a document to read the detail out of.
+                    return forbid_members(event, {"chord_bass", "chord_extensions", "voicing"},
+                                          event_path);
                 }))
             return false;
         if (requested[8].found &&
@@ -690,10 +736,24 @@ class StructuralScanner {
             });
     }
 
+    // The four members a tuning object always carries. The two payload hashes
+    // are written as null when unused rather than omitted, so both are required
+    // members whose shape admits null.
+    bool walk_tuning(Span value, const std::string& path) {
+        if (!has_shape(value, ObjectShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        return require_member(value, "keyboard_map_content", StringShape | NullShape, path) &&
+               require_member(value, "reference_pitch_millihertz", NumberShape, path) &&
+               require_member(value, "scale_content", StringShape | NullShape, path) &&
+               require_member(value, "system", StringShape, path);
+    }
+
     // Markers and regions share an envelope shape; a region additionally carries
-    // its span length.
+    // its span length and, from the sequence version that introduced it, a role.
     bool walk_annotation(Span value, std::string_view expected_type, bool has_duration,
-                         const std::string& path) {
+                         bool requires_role, const std::string& path) {
         EnvelopeView annotation;
         if (!structural_envelope(value, expected_type, path, annotation))
             return false;
@@ -709,6 +769,15 @@ class StructuralScanner {
             return false;
         if (has_color && !has_shape(color, NumberShape)) {
             set_error(PersistenceErrorCode::InvalidSchema, color.begin, 0, 0, data_path + "/color");
+            return false;
+        }
+        Span role;
+        bool has_role = false;
+        if (!member(annotation.data, "role", role, has_role))
+            return false;
+        if (requires_role != has_role || (has_role && !has_shape(role, StringShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, annotation.data.begin, 0, 0,
+                      data_path + "/role");
             return false;
         }
         return true;
@@ -733,6 +802,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"record_armed"},
             detail::JsonSpanMember{"take_lanes"},
+            detail::JsonSpanMember{"tuning"},
         };
         if (!members(data, requested))
             return false;
@@ -758,6 +828,17 @@ class StructuralScanner {
         const auto requires_takes = detail::track_schema_policy.requires_takes(version);
         const auto supports_freeze = detail::track_schema_policy.supports_freeze(version);
         const auto supports_mixer = detail::track_schema_policy.supports_mixer(version);
+        // The tuning is optional at and above its introducing version, and
+        // forbidden below it.
+        if (requested[9].found) {
+            if (!detail::track_schema_policy.supports_tuning(version)) {
+                set_error(PersistenceErrorCode::InvalidSchema, requested[9].span.begin, 0, 0,
+                          data_path + "/tuning");
+                return false;
+            }
+            if (!walk_tuning(requested[9].span, data_path + "/tuning"))
+                return false;
+        }
         if (!has_clips || requires_devices != has_devices ||
             requires_automation != has_automation || requires_takes != has_take_lanes ||
             requires_takes != has_record_armed || (!supports_freeze && has_freeze) ||

@@ -163,19 +163,26 @@ public:
             if (!accepts_original()) return;
 
             View& root = host_.input_root();
-            drag_target_ = root.hit_test(pt);
+            drag_target_.set(root.hit_test(pt));
+            View* drag_target = drag_target_.live_in(root);
             if (button == MouseButton::left)
-                ComboBox::notify_global_click(drag_target_);
+                ComboBox::notify_global_click(drag_target);
             if (!accepts_original()) return;
-            if (!drag_target_) {
+            drag_target = drag_target_.live_in(root);
+            if (!drag_target) {
                 cancel_gesture();
                 return;
             }
             host_.input_take_keyboard_focus();
             if (!accepts_original()) return;
-            if (!transfer_input_focus(root, drag_target_)) {
+            drag_target = drag_target_.live_in(root);
+            if (!drag_target) {
+                cancel_gesture();
+                return;
+            }
+            if (!transfer_input_focus(root, drag_target)) {
                 if (accepts_original()) {
-                    drag_target_ = nullptr;
+                    drag_target_.reset();
                     cancel_gesture();
                 }
                 return;
@@ -186,12 +193,12 @@ public:
             MouseDownHost down_host;
             down_host.should_continue = accepts_original;
             const bool target_alive =
-                deliver_mouse_down(root, drag_target_, pt, modifiers, 1, true,
+                deliver_mouse_down(root, drag_target_.live_in(root), pt, modifiers, 1, true,
                                    button, down_host);
             // Only this generation may mutate its captured target. A modern
             // callback may have synchronously cancelled/replaced the session.
             if (!accepts_original()) return;
-            if (!target_alive) drag_target_ = nullptr;
+            if (!target_alive) drag_target_.reset();
             if (button == MouseButton::right) dispatch_context_menu(root, pt);
             if (!accepts_original()) return;
             host_.input_request_repaint();
@@ -229,10 +236,15 @@ public:
             gesture_event.modifiers = modifiers;
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::drag;
+            if (!drag_target_.live_in(root)) drag_target_.reset();
             const bool gesture_yielded = yield_to_gesture(gesture_event);
-            if (!gesture_yielded && drag_target_)
-                deliver_mouse_drag(root, drag_target_, pt, modifiers, 1,
-                                   PointerType::mouse, 0.5f, session_.button());
+            if (!gesture_yielded) {
+                View* target = drag_target_.live_in(root);
+                if (target)
+                    deliver_mouse_drag(root, target, pt, modifiers, 1,
+                                       PointerType::mouse, 0.5f,
+                                       session_.button());
+            }
             host_.input_request_repaint();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginInputRouter: mouse move handler threw: {}",
@@ -252,6 +264,7 @@ public:
             const auto terminal = session_.terminalize();
             last_point_ = pt;
             View& root = host_.input_root();
+            if (!drag_target_.live_in(root)) drag_target_.reset();
             MouseEvent gesture_event;
             gesture_event.position = pt;
             gesture_event.window_position = pt;
@@ -265,8 +278,8 @@ public:
             if (session_.phase() != PointerSession::Phase::terminal ||
                 session_.generation() != terminal.generation)
                 return;
-            View* target = drag_target_;
-            drag_target_ = nullptr;
+            View* target = drag_target_.live_in(root);
+            drag_target_.reset();
             if (gesture_yielded) {
                 if (target)
                     deliver_gesture_handoff(root, target, pt, modifiers, 1);
@@ -384,14 +397,18 @@ public:
     /// `noexcept` because detach/destroy call it and a throw there would cross
     /// a host boundary.
     void cancel_gesture() noexcept {
-        View* target = drag_target_;
         const auto terminal = session_.terminalize();
-        if (!target && !terminal.cancel_gesture && !terminal.owns_terminal)
-            return;
-
-        drag_target_ = nullptr;
         try {
             View& root = host_.input_root();
+            // Unpublish the cancelled generation before any gesture/user
+            // callback. PointerSession remains terminal until those callbacks
+            // return, so a nested button-down cannot overwrite this bracket;
+            // the local capture also survives removal/replacement of the view.
+            ViewCapture cancelled_target = drag_target_;
+            drag_target_.reset();
+            View* target = cancelled_target.live_in(root);
+            if (!target && !terminal.cancel_gesture && !terminal.owns_terminal)
+                return;
             if (terminal.cancel_gesture) {
                 MouseEvent event;
                 event.position = last_point_;
@@ -402,11 +419,10 @@ public:
                 event.is_cancelled = true;
                 root.dispatch_gesture_pointer_event(event);
             }
+            target = cancelled_target.live_in(root);
             if (target) {
-                // Empty fire_click deliberately suppresses click on cancellation,
-                // while still balancing legacy and modern press/release state.
-                deliver_mouse_up(root, target, last_point_, 0, 1, MouseUpHost{},
-                                 terminal.button);
+                deliver_mouse_cancel(root, target, last_point_, 0, 1,
+                                     terminal.button);
             }
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginInputRouter: pointer cancellation threw: {}",
@@ -427,7 +443,12 @@ public:
 
     bool gesture_active() const noexcept { return session_.active(); }
     MouseButton gesture_button() const noexcept { return session_.button(); }
-    const View* captured_target() const noexcept { return drag_target_; }
+    bool has_captured_target() const noexcept {
+        return drag_target_.has_value();
+    }
+    const View* captured_target() const noexcept {
+        return drag_target_.live_in(host_.input_root());
+    }
     Point last_point() const noexcept { return last_point_; }
     bool tracking_mouse_leave() const noexcept { return tracking_leave_; }
     bool has_pending_high_surrogate() const noexcept {
@@ -451,8 +472,8 @@ private:
 
         // Publish claimed and clear raw delivery BEFORE synchronous handoff.
         session_.mark_claimed();
-        View* handoff_target = drag_target_;
-        drag_target_ = nullptr;
+        View* handoff_target = drag_target_.live_in(root);
+        drag_target_.reset();
         if (event.phase != MousePhase::press)
             deliver_gesture_handoff(root, handoff_target, event.window_position,
                                     event.modifiers, 1);
@@ -461,7 +482,7 @@ private:
 
     InputRouterHost& host_;
     PointerSession session_;
-    View* drag_target_ = nullptr;
+    ViewCapture drag_target_;
     Point last_point_{};
     bool tracking_leave_ = false;
     char16_t pending_high_surrogate_ = 0;

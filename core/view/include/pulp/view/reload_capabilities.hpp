@@ -19,6 +19,7 @@
 // enforcement point and `format` may depend on `view`, not the reverse.
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,6 +83,22 @@ public:
     void grant(ReloadCapability c) { bits_ |= bit(c); }
     bool has(ReloadCapability c) const { return (bits_ & bit(c)) != 0; }
     bool empty() const { return bits_ == 0; }
+
+    /// Return the first granted effectful capability in stable declaration
+    /// order. All current reload capabilities expose native side effects, so a
+    /// live-realm evaluator must require this to be empty rather than trying to
+    /// hide selected globals inside the same realm.
+    std::optional<ReloadCapability> first_effectful() const noexcept {
+        for (const auto capability : {
+                 ReloadCapability::Exec, ReloadCapability::Clipboard,
+                 ReloadCapability::Filesystem, ReloadCapability::Storage,
+                 ReloadCapability::Ai, ReloadCapability::RuntimeImport,
+                 ReloadCapability::Network}) {
+            if (has(capability))
+                return capability;
+        }
+        return std::nullopt;
+    }
 
     /// Parse a declared-capability name list (from the signed manifest). Returns
     /// false if any token is unknown (fail closed — reject the whole set).

@@ -23,7 +23,9 @@
 
 add_library(pulp-timeline-editor
     src/edit_intent.cpp
+    src/gesture_budget.cpp
     src/snap_grid.cpp
+    src/track_edit_intent.cpp
     src/viewport_projection.cpp)
 add_library(pulp::timeline-editor ALIAS pulp-timeline-editor)
 
