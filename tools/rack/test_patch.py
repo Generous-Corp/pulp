@@ -3167,17 +3167,23 @@ def main():
     vp_bad, vp_ran = check_vendor_params_reach_model()
     mel_bad, mel_ran = check_melody_is_written()
     beh_bad, beh_ran = check_behaviour_is_measured()
+    # Lives in its own file (test_patch.py is far over the size ceiling), and
+    # is called HERE as well as from its own main() -- before the skip below,
+    # for the reason stated at the top of this function.
+    import test_affordances
+    aff_bad, aff_ran = test_affordances.check_affordances_are_classified()
+    beh_bad, beh_ran = test_affordances.check_behaviour_drives_the_check()
+    reg_bad, reg_ran = test_affordances.check_registered_before_the_skip()
+    aff_bad += reg_bad; aff_ran += reg_ran
     acq_bad += lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad + ship_bad + ver_bad
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
-    # UNION, not either side. Two lanes each added their own checks to this
-    # total; taking one side drops the other lane's checks while the suite
-    # still reports a healthy number, which is the failure this file has
-    # already been bitten by once.
-    acq_bad += (vp_bad + mel_bad + beh_bad +
+    # UNION of every lane's counters. Taking one side drops
+    # another lane's checks while the total still reads healthy.
+    acq_bad += (vp_bad + mel_bad + beh_bad + aff_bad +
                 ln_bad + rl_bad + ip_bad + sf_bad)
-    acq_ran += (vp_ran + mel_ran + beh_ran +
+    acq_ran += (vp_ran + mel_ran + beh_ran + aff_ran +
                 ln_ran + rl_ran + ip_ran + sf_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 

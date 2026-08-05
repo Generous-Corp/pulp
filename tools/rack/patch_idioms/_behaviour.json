@@ -1,0 +1,143 @@
+{
+  "$comment": [
+    "What each behaviour flag REQUIRES, and what settles it.",
+    "",
+    "The chain is adjective -> idiom -> behaviour -> required affordances ->",
+    "measurement, and every link but the last is data. This file is the third",
+    "link. The flags themselves already existed on the idioms in this",
+    "directory and nothing consumed them; this is what reads them.",
+    "",
+    "TWO KINDS OF ANSWER, AND MOST BEHAVIOURS GIVE THE SECOND ONE.",
+    "A `requires` entry is a fault that can be proved by READING the patch. An",
+    "empty `requires` is not an oversight: it is the statement that this",
+    "behaviour cannot be settled without hearing it, and that a static check",
+    "claiming to settle it would be inventing a verdict. Only three of these",
+    "eight are readable, because only three are carried by param VALUES --",
+    "the rest are properties of the sound, and a check that guessed at them",
+    "would reject correct patches, which is worse than the gap it filled.",
+    "",
+    "`any_of` IS ORDERED. The first word any module in the patch carries is",
+    "the one the patch is judged on; the rest are fallbacks for a patch that",
+    "holds nothing of the earlier kind. ['structure', 'pitch'] therefore",
+    "means: judge a melody on whatever holds the notes, and only reach for",
+    "pitch knobs when the patch has nothing that does. Read as an unordered",
+    "set instead, it told a patch with a dual oscillator to detune its two",
+    "frequencies against each other -- a chord, confidently offered as a",
+    "melody.",
+    "",
+    "`must` is one of:",
+    "  vary     at least two DISTINCT written values among the params",
+    "           carrying this affordance on one module. Only modules with two",
+    "           or more such params can satisfy it, and only those are asked:",
+    "           a single knob cannot vary, and demanding it would be a",
+    "           requirement no patch could ever meet.",
+    "  nonzero  a module's params carrying this affordance are not ALL",
+    "           written to exactly zero. Every one of them, because four",
+    "           zeroed rows of an eight-row attenuverter are four unused",
+    "           channels and a working patch. Fires ONLY on values the patch",
+    "           wrote itself; an unwritten param sits at its default, and a",
+    "           default nobody measured is not evidence of anything. Scoped",
+    "           to affordances that are",
+    "           AMOUNTS ('how much something wanders', 'how likely'), where",
+    "           zero means none by definition. Never applied to pitch, timbre",
+    "           or time, where zero is a position on a scale.",
+    "",
+    "`settled_by` says WHO can answer the flag. `reading` means a `requires`",
+    "entry above proves or disproves it from the patch text. `listening` means",
+    "only the rendered audio can, and this file deliberately holds NO threshold",
+    "for it: `patch_behaviour.evaluate()` owns the measurement names, the",
+    "predicates and the numbers, and takes an idiom's `behaviour` dict straight",
+    "as it is written here. A second copy of those thresholds in this file would",
+    "be a second source of truth for the same question, and the two would drift",
+    "-- with this one silently losing, since nothing here ever renders audio.",
+    "A flag can be BOTH: `melodic` is proved wrong by reading when the notes are",
+    "in params, and settled by listening when they are in module data."
+  ],
+  "behaviours": {
+    "melodic": {
+      "means": "the notes change",
+      "requires": [
+        {
+          "any_of": [
+            "structure",
+            "pitch"
+          ],
+          "must": "vary",
+          "remedy": "Every step therefore sits at the same voltage and plays as one held note. Write the melody into those values and make them differ from each other."
+        }
+      ],
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
+    },
+    "rhythmic": {
+      "means": "events land in a pattern in time",
+      "requires": [],
+      "settled_by": [
+        "listening"
+      ]
+    },
+    "keeps_going": {
+      "means": "it is still playing at the end",
+      "requires": [],
+      "settled_by": [
+        "listening"
+      ]
+    },
+    "sustained": {
+      "means": "it holds rather than articulates",
+      "requires": [],
+      "settled_by": [
+        "listening"
+      ]
+    },
+    "spectrally_varying": {
+      "means": "the colour moves while it plays",
+      "requires": [
+        {
+          "any_of": [
+            "motion"
+          ],
+          "must": "nonzero",
+          "remedy": "the amount of modulation is set to zero, so nothing moves; raise it"
+        }
+      ],
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
+    },
+    "varies_timing": {
+      "means": "the gaps between events are not all the same",
+      "requires": [
+        {
+          "any_of": [
+            "chance",
+            "motion"
+          ],
+          "must": "nonzero",
+          "remedy": "the amount that would make the timing wander is set to zero, so every event lands on the grid; raise it"
+        }
+      ],
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
+    },
+    "accelerating": {
+      "means": "events get closer together",
+      "requires": [],
+      "settled_by": [
+        "listening"
+      ]
+    },
+    "unmetered": {
+      "means": "there is no steady pulse to find",
+      "requires": [],
+      "settled_by": [
+        "listening"
+      ]
+    }
+  }
+}

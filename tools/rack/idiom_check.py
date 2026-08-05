@@ -314,9 +314,35 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
     return problems
 
 
+# --------------------------------------------------------------------------
+# what a behaviour requires, and whether the patch wrote it
+
+
+BEHAVIOUR_PATH = os.path.join(IDIOM_DIR, "_behaviour.json")
+
+
+def load_behaviours() -> dict:
+    """Every behaviour flag's requirements, keyed by flag."""
+    with open(BEHAVIOUR_PATH) as f:
+        return json.load(f).get("behaviours", {})
+
+
 # The words that mark a sequencer param as part of its PATTERN rather than
 # its transport: the values a person would program a melody into. Matched
 # against the names CARTOG measured, so a vendor's own spelling decides.
+#
+# A STOPGAP, and scoped like one. Matching names cannot work in general
+# because one name means different things on different modules -- "frequency"
+# is pitch on an oscillator, time on an LFO, timbre on a filter's cutoff, all
+# three confidently labelled on this machine -- which is why
+# `affordances.py` reads each module once instead, and why this list may
+# answer `structure` and nothing else. It survives for the case where a name
+# really does settle
+# it (a param called "Step 3" on a module the library tags as a Sequencer),
+# and only until that module has been classified: a classification supersedes
+# it entirely, per module, as the background pass reaches them. Deleting it
+# today would leave every unclassified machine with no melody check at all,
+# which is the bug this whole arc exists to have fixed.
 PATTERN_PARAM_WORDS = ("STEP", "PITCH", "NOTE", "SEMITONE", "DEGREE", "CV")
 
 
@@ -332,50 +358,274 @@ def pattern_param_ids(entry: dict) -> list:
     return out
 
 
-def check_written(patch: dict, inv: dict, idiom: dict,
-                  roles: dict | None = None) -> list[str]:
-    """The values the idiom's behaviour needs WRITTEN, and the patch omits.
+def _classified(entry: dict) -> bool:
+    """Whether this module has been READ, which is not the same as having
+    affordances. A module whose every knob is a page switch is read and
+    carries none, and the name-matching stopgap below must stay asleep
+    underneath an answer that already exists."""
+    if entry.get("classified"):
+        return True
+    return any(isinstance(q, dict) and q.get("affords")
+               for q in (entry.get("params") or []))
+
+
+def affording(entry: dict, words, roles: dict | None = None) -> list:
+    """The param ids on one module that CONFIDENTLY carry any of `words`.
+
+    Guesses are excluded here and nowhere else, because this is the function
+    every rejection is built on. A `guessed` affordance may suggest something
+    to the model and may never be the evidence a patch is refused on -- a
+    wrong guess that only costs a suggestion is free, and a wrong guess that
+    costs a rejection teaches the model to avoid the module.
+    """
+    wanted = {w.lower() for w in ([words] if isinstance(words, str) else words)}
+    if _classified(entry):
+        return [q["id"] for q in (entry.get("params") or [])
+                if isinstance(q, dict) and isinstance(q.get("id"), int)
+                and q.get("affords") in wanted
+                and q.get("affordance_confidence") == "known"]
+    # Unclassified: the one name-based reading that holds up, and only for
+    # the affordance it holds up for.
+    if "structure" in wanted:
+        roles = roles if roles is not None else load_roles()
+        if _module_matches("sequencer", entry, roles):
+            return pattern_param_ids(entry)
+    return []
+
+
+class Finding:
+    """One behaviour requirement a patch fails, WITH the numbers behind it.
+
+    A rejection that says "not melodic" gives a retry nothing to act on and
+    gives a person nothing to disagree with. `measured` carries what was
+    actually counted -- how many params afford the thing, how many the patch
+    wrote, how many distinct values it wrote -- so the next attempt can be
+    told which knob to move and a human reading the log can see the check was
+    wrong when it is.
+    """
+
+    def __init__(self, behaviour: str, affordances, module: str,
+                 must: str, measured: dict, text: str):
+        self.behaviour = behaviour
+        self.affordances = tuple(affordances)
+        self.module = module
+        self.must = must
+        self.measured = dict(measured)
+        self.text = text
+
+    def __str__(self) -> str:
+        return self.text
+
+    def __repr__(self) -> str:
+        return f"<Finding {self.behaviour}/{self.must} {self.module} {self.measured}>"
+
+
+class Deferral:
+    """A behaviour nothing here could settle, named so the gap is visible.
+
+    Distinct from a pass, and distinct from a failure. A sequencer that keeps
+    its pattern in module `data` rather than in params, or one nobody has
+    scanned, cannot be read -- and the silent version of that was how a patch
+    playing one held note passed every check it was given.
+
+    `behaviour` is the flag exactly as the idiom spells it, which is also what
+    `patch_behaviour.evaluate()` takes, so a caller hands a deferral straight
+    to the gate that renders audio. This class deliberately carries NO
+    measurement name and NO threshold: that lane owns the predicate set, and
+    two copies of it would drift with this one losing, since nothing here ever
+    renders a sample.
+    """
+
+    def __init__(self, behaviour: str, affordances, why: str):
+        self.behaviour = behaviour
+        self.affordances = tuple(affordances)
+        self.why = why
+
+    def __str__(self) -> str:
+        return f"{self.behaviour}: {self.why}"
+
+    def __repr__(self) -> str:
+        return f"<Deferral {self.behaviour}: {self.why}>"
+
+
+def _written(mod: dict) -> dict:
+    return {int(p["id"]): p.get("value")
+            for p in (mod.get("params") or [])
+            if isinstance(p, dict) and isinstance(p.get("id"), int)}
+
+
+def check_behaviour(patch: dict, inv: dict, idiom: dict,
+                    roles: dict | None = None,
+                    behaviours: dict | None = None) -> tuple[list, list]:
+    """(findings, deferrals) for every behaviour this idiom declares.
 
     Topology says the right modules are wired the right way. It cannot say
     whether the music exists: a sequencer can be clocked, reach the
     oscillator and fire the envelope with every step still sitting at its
     default, and the result is one held note through perfect wiring. That
     patch shipped, passed every check it was given, and a person had to
-    listen to find out. For an idiom whose behaviour says `melodic`, the
-    melody lives in the sequencer's step values, so those must be written
-    and must differ.
+    listen to find out.
 
-    Scoped honestly: a sequencer whose params nobody has measured, or whose
-    pattern lives in module data rather than params, proves nothing either
-    way and reports nothing here. The gate that listens to the rendered
-    signal is the layer that covers those.
+    So the idiom's `behaviour` flags -- data that has sat in these JSON files
+    unread since they were written -- each name the affordances that have to
+    be WRITTEN, and how. What can be proved by reading is proved here; what
+    cannot is returned as a deferral rather than as a pass, because a check
+    that reports nothing when it saw nothing is indistinguishable from a
+    check that reports nothing because everything was fine.
     """
-    if not (idiom.get("behaviour") or {}).get("melodic"):
-        return []
     roles = roles if roles is not None else load_roles()
-    problems: list[str] = []
+    behaviours = behaviours if behaviours is not None else load_behaviours()
+    flags = idiom.get("behaviour") or {}
+    findings: list = []
+    deferrals: list = []
+
+    for flag, on in sorted(flags.items()):
+        if not on:
+            continue
+        spec = behaviours.get(flag)
+        if spec is None:
+            continue                    # a flag nobody has given meaning yet
+        raised = False
+        why = None
+        for req in spec.get("requires", []):
+            words = req.get("any_of") or []
+            must = req.get("must")
+            # `any_of` IS ORDERED, and the order carries a judgement.
+            # "melodic" reads ["structure", "pitch"]: a patch holding anything
+            # that carries the notes themselves is judged on THAT, and only a
+            # patch with nothing of the kind falls through to pitch. Treating
+            # the list as a set instead told a patch containing a dual
+            # oscillator and a pattern-in-data sequencer to detune its two
+            # oscillators against each other, which is a chord and not a
+            # melody -- confident, specific, and the wrong instruction.
+            hits = []                   # (module name, ids, written) per module
+            for word in words:
+                hits = _carriers(patch, inv, [word], must, roles)
+                if hits:
+                    words = [word]
+                    break
+            if not hits:
+                why = (f"nothing in this patch has measured params that "
+                       f"{'vary' if must == 'vary' else 'carry'} "
+                       f"{' or '.join(words)}, so reading cannot settle it "
+                       f"— the gate that listens has to")
+                continue
+            broke = _judge(flag, words, req, must, hits)
+            if broke:
+                findings.extend(broke)
+                raised = True
+            else:
+                why = why or ("reading found nothing wrong, which is not the "
+                              "same as finding it right")
+
+        # READING CAN ONLY EVER REJECT. A requirement that was not violated
+        # has not been SATISFIED -- it has failed to be disproved, and those
+        # are different facts. A krell whose modulation amounts happen to be
+        # non-zero has proved nothing about whether its timing wanders: what
+        # makes it wander is a sample-and-hold feeding an envelope, which is
+        # topology, and no param value can stand in for it.
+        #
+        # This was live for one commit and a machine that had classified its
+        # modules found it: the same patch that correctly deferred on an
+        # unclassified machine came back silently settled once its modules
+        # were read, because a value that was merely not-zero looked like an
+        # answer. Silence bought with a precondition is exactly the defect
+        # this whole layer exists to end.
+        if not raised and "listening" in (spec.get("settled_by") or
+                                          ["listening"]):
+            deferrals.append(Deferral(
+                flag, [],
+                why or "settled by listening, not by reading"))
+    return findings, deferrals
+
+
+def _carriers(patch: dict, inv: dict, words, must: str, roles: dict) -> list:
+    """(name, ids, written) for every module that could satisfy a requirement."""
+    out = []
     for m in patch.get("modules", []):
         entry = _entry(inv, m)
-        if not _module_matches("sequencer", entry, roles):
+        ids = affording(entry, words, roles)
+        if not ids:
             continue
-        steps = pattern_param_ids(entry)
-        if len(steps) < 2:
-            continue                # no measured pattern; nothing provable
-        written = {int(p.get("id", -1)): p.get("value")
-                   for p in (m.get("params") or []) if isinstance(p, dict)}
-        values = [written[i] for i in steps if i in written]
-        distinct = {round(float(v), 6) for v in values
-                    if isinstance(v, (int, float))}
-        if len(distinct) >= 2:
+        if must == "vary" and len(ids) < 2:
+            # One knob cannot differ from itself. Asking it to would be a
+            # requirement no patch could ever satisfy, which is not a check
+            # -- it is a wall.
             continue
-        name = entry.get("name") or m.get("model") or "the sequencer"
-        what = ("writes none of them" if not values else
-                "writes them all to one value")
-        problems.append(
-            f"{name} has step params and the patch {what}, so every step "
-            f"sits at the same voltage and plays as one held note. Write "
-            f"the melody into its step values and make them differ.")
-    return problems
+        out.append((entry.get("name") or m.get("model") or "a module",
+                    ids, _written(m)))
+    return out
+
+
+def _judge(flag: str, words, req: dict, must: str, hits: list) -> list:
+    """The findings for one requirement over the modules that could satisfy it."""
+    remedy = req.get("remedy") or ""
+    named = " or ".join(words)
+
+    if must == "vary":
+        candidates = []
+        for name, ids, written in hits:
+            values = [written[i] for i in ids if i in written]
+            distinct = {round(float(v), 6) for v in values
+                        if isinstance(v, (int, float))}
+            candidates.append((name, ids, values, distinct))
+        # ANY module carrying the variation satisfies the intent. A patch
+        # with a written melody on one sequencer and a second sequencer left
+        # at its defaults is still a melodic patch, and rejecting it would
+        # punish the arrangement rather than the fault.
+        if any(len(d) >= 2 for _, _, _, d in candidates):
+            return []
+        out = []
+        for name, ids, values, distinct in candidates:
+            measured = {"params": len(ids), "written": len(values),
+                        "distinct": len(distinct)}
+            what = ("writes none of them" if not values else
+                    f"writes {len(values)} of them, all to the same value")
+            out.append(Finding(
+                flag, words, name, must, measured,
+                f"{name} has {len(ids)} params that carry {named} "
+                f"({'the notes themselves' if 'structure' in words else named}) "
+                f"and the patch {what} — measured: {len(ids)} params, "
+                f"{len(values)} written, {len(distinct)} distinct value(s). "
+                + remedy))
+        return out
+
+    if must == "nonzero":
+        out = []
+        for name, ids, written in hits:
+            zeros = [i for i in ids
+                     if isinstance(written.get(i), (int, float))
+                     and float(written[i]) == 0.0]
+            # EVERY one of them, not any of them. An eight-row attenuverter
+            # with four rows deliberately zeroed is four unused channels and
+            # a working patch; the fault this names is a module with no route
+            # left to move at all. Requiring only one zero would reject the
+            # ordinary arrangement and teach the model to avoid the module.
+            if not zeros or len(zeros) != len(ids):
+                continue
+            out.append(Finding(
+                flag, words, name, must,
+                {"params": len(ids), "zeroed": len(zeros), "ids": zeros},
+                f"{name}'s {named} params are all written to exactly zero "
+                f"(param{'s' if len(zeros) > 1 else ''} "
+                + ", ".join(str(i) for i in zeros) +
+                f") — measured: {len(zeros)} of {len(ids)} at zero. "
+                + remedy))
+        return out
+
+    return []
+
+
+def check_written(patch: dict, inv: dict, idiom: dict,
+                  roles: dict | None = None) -> list[str]:
+    """`check_behaviour`'s findings as sentences, for callers that want prose.
+
+    Deferrals are deliberately dropped here: a caller taking a list of
+    strings is deciding whether to REJECT, and a thing nobody could measure
+    is not grounds to reject anything.
+    """
+    findings, _ = check_behaviour(patch, inv, idiom, roles)
+    return [str(f) for f in findings]
 
 
 # --------------------------------------------------------------------------

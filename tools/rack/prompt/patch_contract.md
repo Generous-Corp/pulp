@@ -103,6 +103,20 @@ rejection will name the connection you left out.
    in that knob's native units; stay conservative and prefer values near the
    scale its name suggests.
 
+9. **Some modules say what their knobs can EXPRESS.** Where a module lists
+   `affords:`, those params have been read against the maker's own
+   description, and the word is reliable: `pitch` (what note sounds), `time`
+   (when things happen), `shape` (how a sound evolves), `timbre` (its
+   colour), `level` (how loud), `space` (where it sits), `motion` (how much
+   something wanders), `chance` (how likely), `structure` (the notes
+   themselves). Use it to find the knob the request is actually about — a
+   request for a melody is a request to write the `structure` params; a
+   request for something evolving is a request to raise a `motion` amount.
+   A `possibly:` line is an unconfirmed reading: take it as a hint, and
+   never as a reason to avoid a module. A module with neither line has not
+   been read yet, which says nothing about it — use its param names and
+   ranges exactly as you would otherwise.
+
 ## Available modules
 
 Only these. Where port indices are listed, they are exact — use them. Where a

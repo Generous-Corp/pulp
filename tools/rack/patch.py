@@ -146,6 +146,11 @@ def inventory() -> dict:
     _add_port_names(inv)
     _add_portmap(inv)
     _infer_port_roles(inv)
+    try:
+        import affordances                                  # noqa: PLC0415
+        affordances.annotate(inv)   # additive, best-effort; see its docstring
+    except Exception:                                       # noqa: BLE001
+        pass
     return inv
 
 
@@ -1287,6 +1292,11 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                                "knob's native units; pitch and step values are "
                                "volts on a 1V/oct scale unless the panel says "
                                "otherwise)")
+                try:
+                    import affordances                      # noqa: PLC0415
+                    out.extend(affordances.render_lines(m))
+                except Exception:                           # noqa: BLE001
+                    pass
         out.append("")
     return "\n".join(out)
 
@@ -3327,8 +3337,15 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 # envelope with every step still sitting at its default —
                 # one held note through perfect wiring, which is the shipped
                 # bug this check exists to catch before anyone listens.
-                unwritten = idiom_check.check_written(patch, inv,
-                                                      idioms[claimed])
+                unwritten, deferred = idiom_check.check_behaviour(
+                    patch, inv, idioms[claimed])
+                # SAY what could not be read, rather than counting it as a
+                # pass. A behaviour nobody measured and a behaviour that held
+                # produce the same silence otherwise, and that silence is
+                # exactly how a patch playing one held note passed every
+                # check it was given.
+                for d in deferred:
+                    print(f"  not settled by reading — {d}", flush=True)
                 if unwritten:
                     print(f"  wired as a {claimed}, but the music is not "
                           f"written:")
