@@ -1933,6 +1933,11 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
 GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
+#: The headers that come with the gate, so a change to the measurement rebuilds
+#: it. Comparing the binary against patch_gate.cpp alone left an edited
+#: measurement running as its predecessor until something else touched the .cpp.
+GATE_HEADERS = [os.path.join(HERE, n) for n in
+                ("patch_behaviour.hpp", "patch_behaviour_json.hpp")]
 # Resolved by the one resolver every component shares (fetch_sdk.py), never
 # by a private path -- patch.py once looked only at ~/SDKs/Rack-SDK, so an
 # SDK fetch_sdk.py had installed was an SDK this gate could not see. Patch
@@ -1967,20 +1972,35 @@ def _plugin_dir() -> str | None:
     return None
 
 
-def _build_gate() -> str | None:
+def build_gate() -> tuple[str | None, str]:
+    """The gate binary, or None and the reason there isn't one.
+
+    The reason is returned rather than swallowed. A compile error and a missing
+    SDK both used to produce a bare None, and the one message downstream --
+    "no SDK; audibility not checked" -- was a lie in the first case: the SDK was
+    right there and the gate had failed to build. A check that reports the wrong
+    cause sends the next hour to the wrong place.
+    """
     import subprocess
-    if os.path.exists(GATE_BIN) and \
-            os.path.getmtime(GATE_BIN) > os.path.getmtime(GATE_SRC):
-        return GATE_BIN
+    newest_src = max(os.path.getmtime(p) for p in [GATE_SRC] + GATE_HEADERS
+                     if os.path.exists(p))
+    if os.path.exists(GATE_BIN) and os.path.getmtime(GATE_BIN) > newest_src:
+        return GATE_BIN, ""
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
-        return None
+        return None, f"no Rack SDK at {SDK}"
     os.makedirs(CACHE_DIR, exist_ok=True)
+    # Still one file against the SDK and nothing else. The behaviour headers sit
+    # beside this one, which is what -I{HERE} finds; they pull in no library, so
+    # the gate keeps the property that the ONLY thing standing between it and a
+    # machine that can build it is the Rack SDK.
     r = subprocess.run(
         ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
-         f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
+         f"-I{HERE}", f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
          os.path.join(SDK, "libRack.dylib")],
         capture_output=True, text=True)
-    return GATE_BIN if r.returncode == 0 else None
+    if r.returncode == 0:
+        return GATE_BIN, ""
+    return None, "the gate did not compile:\n" + (r.stderr or r.stdout).strip()
 
 
 # Devices that exist to carry audio somewhere else -- screen sharing, remote
@@ -2134,8 +2154,24 @@ def gate_crash_report(signal: int, patch: dict) -> str:
             f"{PLUGIN_DIRS[0] if PLUGIN_DIRS else '<plugin dir>'}")
 
 
-def sounds(patch: dict) -> tuple[bool, str]:
-    """Does this patch actually make a sound? Returns (ok, report).
+#: The three things the audibility check can say. Three, not two, because
+#: "could not run" is not a verdict and must never be spelled the same way as
+#: "ran and was fine". A boolean forced that choice and got it wrong: on a
+#: machine with no SDK the check returned True and the run read "audibility
+#: passed" having measured nothing at all -- the same shape as a gate that
+#: measures presence, one layer up.
+#:
+#: UNMEASURED is deliberately NOT falsy-or-truthy anything. `audibility()`
+#: returns it in place of the old boolean and the function was RENAMED, so a
+#: caller written against the boolean fails loudly instead of quietly reading
+#: a non-empty string as success.
+AUDIBLE = "audible"        # ran, and something reached the audio interface
+SILENT = "silent"          # ran, and nothing did
+UNMEASURED = "unmeasured"  # did not run; this is not a verdict about the patch
+
+
+def audibility(patch: dict) -> tuple[str, str]:
+    """Did this patch make a sound? Returns (AUDIBLE|SILENT|UNMEASURED, report).
 
     Structure is not audibility. A patch can name real modules, land every
     cable on a real port and reach an audio interface while producing
@@ -2143,15 +2179,21 @@ def sounds(patch: dict) -> tuple[bool, str]:
     envelope has nothing to start it. Both happened in the first spread, and
     neither is visible to anything short of running the DSP.
 
-    Skipped rather than failed when the SDK is absent, so the generator still
-    works on a machine that cannot build the harness.
+    NOT RUNNING IS ITS OWN ANSWER. A missing SDK, an unbuilt gate, a gate that
+    died, a run that never finished and a gate refused its own configuration
+    are all UNMEASURED: the patch was never judged, so nothing here is entitled
+    to say it passed OR that it is silent. The caller keeps such a patch and
+    says the doubt out loud, which is worth more than a verdict nobody made.
     """
     import subprocess
     import tempfile
-    gate = _build_gate()
+    gate, why = build_gate()
     pdir = _plugin_dir()
-    if not gate or not pdir:
-        return True, "(no SDK; audibility not checked)"
+    if not gate:
+        return UNMEASURED, f"the audibility check did not run: {why}"
+    if not pdir:
+        return UNMEASURED, ("the audibility check did not run: no unpacked "
+                            "plugin directory to load modules from")
     with tempfile.NamedTemporaryFile("w", suffix=".vcv", delete=False) as f:
         json.dump(patch, f)
         tmp = f.name
@@ -2171,10 +2213,22 @@ def sounds(patch: dict) -> tuple[bool, str]:
         # ended in "gave up after 3 attempts" with nothing anywhere saying a
         # process had died. Six generations were spent on that reading.
         if r.returncode < 0:
-            return False, gate_crash_report(-r.returncode, patch)
-        return r.returncode == 0, r.stdout + r.stderr
+            return UNMEASURED, gate_crash_report(-r.returncode, patch)
+        # 2 is the gate refusing its own configuration -- a bad
+        # PATCH_GATE_SET name, say. It never looked at the patch, so it has no
+        # opinion about it, and reading that as silence would reject a good
+        # patch over a typo in an environment variable.
+        if r.returncode == 2:
+            return UNMEASURED, ("the audibility check refused its own "
+                                "settings and never judged this patch:\n" +
+                                r.stdout + r.stderr)
+        return (AUDIBLE if r.returncode == 0 else SILENT), r.stdout + r.stderr
     except subprocess.TimeoutExpired:
-        return False, "the patch did not finish running within 300 s"
+        # Not silence either: a run that never finished measured nothing. It
+        # usually means the patch is pathological rather than quiet, and the
+        # caller says so rather than inventing a verdict.
+        return UNMEASURED, ("the audibility check did not finish within 300 s, "
+                            "so this patch was never judged")
     finally:
         os.unlink(tmp)
 
@@ -3192,7 +3246,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         if device:
             print(f"  audio out: {device}", flush=True)
 
-        ok, report = sounds(patch)
+        verdict, report = audibility(patch)
         # A CHECK THAT COULD NOT RUN IS NOT A VERDICT, AND NOT A REASON TO
         # THROW A PATCH AWAY. The crash was named here before it was fixed, and
         # naming it was still not enough: the retry context said "structurally
@@ -3201,16 +3255,22 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # run ended "gave up after 3 attempts" with the patch discarded. A
         # patch that lints clean and whose audibility is UNKNOWN is worth more
         # than no patch at all, so it is kept and the doubt is said out loud.
-        crashed = (not ok) and GATE_CRASHED in report
+        #
+        # Which cases those are is `audibility()`'s to decide and no longer
+        # read out of the report's wording here. Sniffing for a sentence
+        # covered the crash and nothing else, so a machine with no SDK -- where
+        # the check equally never ran -- took the OTHER branch and printed
+        # nothing at all, and the run read as though audibility had passed.
+        crashed = verdict == UNMEASURED
         if crashed:
-            keep_attempt(patch, report, attempt + 1, "gate-crashed")
+            keep_attempt(patch, report, attempt + 1, "unmeasured")
             print(f"  the audibility check could not run (attempt "
                   f"{attempt + 1}):", flush=True)
             for line in report.splitlines():
                 print(f"    {line.strip()}", flush=True)
             print("    keeping the patch anyway: it is structurally sound, "
                   "and nothing here says it is silent.", flush=True)
-        if ok or crashed:
+        if verdict == AUDIBLE or crashed:
             if claimed:
                 missing = idiom_check.check(patch, inv, idioms[claimed])
                 if missing:

@@ -375,13 +375,46 @@ std::string format_elapsed(std::chrono::steady_clock::time_point since) {
 
 /// Leading whitespace off, and long lines cut. The status card is one or two
 /// lines tall; a 200-character compiler path pushes everything else out of it.
+/// `text` cut to at most `max_chars` CHARACTERS, saying so when it cut.
+///
+/// A BYTE offset is the trap, and it is subtle enough to have survived here in
+/// three places. `substr(0, N)` on UTF-8 cuts wherever byte N lands, so the
+/// same field stops at a different number of visible characters depending on
+/// what was typed -- 200 ASCII, 100 accented, 66 CJK, 50 emoji -- and the last
+/// glyph survives or breaks depending on whether N happens to divide its
+/// width. Pure runs are accidentally safe when it does, which is why 120 and
+/// 200 looked fine: both divide by 2 and by 4. Mixed text has no such luck.
+/// Seven ASCII characters then an emoji split a character at every prefix
+/// length tested, at both offsets.
+///
+/// Counting characters rather than bytes is the whole of the fix. The ellipsis
+/// is the other half: a shortened line that does not look shortened reads as
+/// text the app lost rather than text it is not showing.
+///
+/// Code points, not grapheme clusters. A ZWJ emoji sequence can still be cut
+/// between its parts -- rarer, and far less visible than the replacement glyph
+/// a split code point produces. `text_edit::truncate_to_cluster_count` does the
+/// stronger thing but lives in core/view's private src headers and is shaped
+/// for clamping an insertion, not for shortening a line to show someone.
+std::string shortened(std::string text, std::size_t max_chars) {
+    std::size_t chars = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        // Every byte that is not a UTF-8 continuation byte (10xxxxxx) starts a
+        // character, so this counts characters while walking bytes.
+        if ((static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) continue;
+        if (chars == max_chars) {
+            text.resize(i);          // i is a character START: never mid-glyph
+            return text + "\u2026";
+        }
+        ++chars;
+    }
+    return text;
+}
+
 std::string trimmed(std::string text) {
     const auto first = text.find_first_not_of(" \t");
     if (first == std::string::npos) return {};
-    text = text.substr(first);
-    constexpr std::size_t kMax = 120;
-    if (text.size() > kMax) text = text.substr(0, kMax) + "\u2026";
-    return text;
+    return shortened(text.substr(first), 120);
 }
 
 // The prototype names --accent-soft but never defines it, so its selected pill
@@ -1474,7 +1507,12 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     pulp::runtime::log_info("Forge Modular: Build pressed; mode is now {}",
                             c->mode() == forge::ForgeChrome::Mode::Build
                                 ? "Build" : "NOT Build");
-    c->narrate(prompt.substr(0, 200));
+    // The rail is meant to show what the person typed, so it shortens on a
+    // character boundary and says that it shortened. A raw `substr(0, 200)`
+    // here cut mid-glyph and gave no sign it had cut at all, which is what
+    // "long prompts truncate inconsistently" turned out to be: the prompt
+    // itself survives every boundary byte for byte.
+    c->narrate(shortened(prompt, 200));
     // Kept so the explanation can show what was asked for, above what was
     // built. The chat rail has it too, but that is a different panel and is
     // usually scrolled away by the time the rack is on screen.
@@ -1732,7 +1770,12 @@ std::string ForgeModularShell::ask() {
     // Deliberately never generates: Ask must not rewrite the artifact, and the
     // difference between the two is carried, not inferred.
     c->enter_build();
-    c->narrate(prompt.substr(0, 200));
+    // The rail is meant to show what the person typed, so it shortens on a
+    // character boundary and says that it shortened. A raw `substr(0, 200)`
+    // here cut mid-glyph and gave no sign it had cut at all, which is what
+    // "long prompts truncate inconsistently" turned out to be: the prompt
+    // itself survives every boundary byte for byte.
+    c->narrate(shortened(prompt, 200));
     if (input) input->set_text("");
 
     // Point at the picture, not only at the words. A question that names a
