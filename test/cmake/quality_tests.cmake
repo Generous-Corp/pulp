@@ -6,7 +6,20 @@ add_executable(pulp-test-build-check test_build_check.cpp)
 target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime)
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
+# Installed agent capability manifest: curated snapshot, negative validation,
+# and compile proof for every advertised include/symbol pair.
+add_executable(pulp-test-agent-capability-compile test_agent_capability_compile.cpp)
+target_link_libraries(pulp-test-agent-capability-compile PRIVATE pulp::sequence)
+add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
+
 if(Python3_Interpreter_FOUND)
+    add_test(NAME agent-capability-manifest-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
+    add_test(NAME agent-capability-manifest-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_manifest.py")
+
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
     add_test(NAME inspector-protocol-registry-complete

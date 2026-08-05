@@ -539,6 +539,32 @@ The `pulp` CLI wraps common development workflows.
 
 ---
 
+## Agent capability manifest
+
+SDK installs include `share/pulp/agent-capabilities.json`, a versioned,
+multi-domain inventory of public APIs intended for generators and agents. Each
+curated row provides a stable key, public include and symbol, RT class,
+lifecycle, state and seed model, data domains, units, and latency/tail/scheduling
+categories. Signal rows may reference a semantic node key in
+`forge-catalog.json`; they never copy that catalog's numeric ranges, defaults,
+choices, or product policy.
+
+The first inventory covers representative public signal processing, instrument
+voice allocation, MPE note ownership, exact tick/swing timebase types, and host
+transport projection. A checked C++ fixture includes and instantiates every
+advertised symbol. Maintainers validate or regenerate both artifacts with:
+
+```bash
+python3 tools/scripts/agent_capability_manifest.py --check
+python3 tools/scripts/agent_capability_manifest.py --json
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+`tools/dsp_vocabulary.py` remains available with its existing signal-only JSON
+and Markdown output while consumers migrate to the installed manifest.
+
+---
+
 ## Shipping / Release
 
 | Capability | Status | Module | Docs |

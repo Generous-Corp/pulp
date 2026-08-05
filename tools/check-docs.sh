@@ -291,6 +291,16 @@ headers. Regenerate with: pulp dsp capabilities --write"
     fi
 fi
 
+# ── Installed agent capability manifest (curated exports ⇔ checked snapshot) ─
+if [ -f "$ROOT/tools/scripts/agent_capability_manifest.py" ]; then
+    echo "Checking installed agent capability manifest is valid and in sync..."
+    if ! python3 "$ROOT/tools/scripts/agent_capability_manifest.py" --check; then
+        error "The installed agent capability manifest has a collision, invalid \
+reference, or stale snapshot/compile fixture. Regenerate with: \
+python3 tools/scripts/agent_capability_manifest.py --write"
+    fi
+fi
+
 # ── Skills catalog sync (docs/reference/skills.md ⇔ every SKILL.md) ────────────
 if [ -f "$ROOT/tools/scripts/skills_doc_check.py" ]; then
     echo "Checking skills catalog (docs/reference/skills.md) is in sync..."

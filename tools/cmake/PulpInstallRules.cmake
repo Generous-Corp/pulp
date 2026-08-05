@@ -388,6 +388,20 @@ endif()
 install(FILES "${_pulp_forge_catalog_snapshot}" DESTINATION "share/pulp")
 unset(_pulp_forge_catalog_snapshot)
 
+# Public multi-domain capabilities for agents and downstream generators. This
+# is intentionally separate from forge-catalog.json: it owns public symbols,
+# lifecycle, and RT facts while the Forge catalog remains the numeric node
+# realization authority.
+set(_pulp_agent_capability_snapshot
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/agent-capabilities.json")
+if(NOT EXISTS "${_pulp_agent_capability_snapshot}")
+    message(FATAL_ERROR
+        "Required agent capability snapshot is missing: ${_pulp_agent_capability_snapshot}\n"
+        "Regenerate it with `python3 tools/scripts/agent_capability_manifest.py --write`.")
+endif()
+install(FILES "${_pulp_agent_capability_snapshot}" DESTINATION "share/pulp")
+unset(_pulp_agent_capability_snapshot)
+
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
