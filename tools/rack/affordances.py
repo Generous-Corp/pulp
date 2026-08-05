@@ -370,6 +370,11 @@ def annotate(inv: dict, cache: dict | None = None) -> int:
     cache = cache if cache is not None else load()
     now = prompt_hash()
     done = 0
+    # `patch.inventory()` calls this inside a bare try/except for the same
+    # reason: a machine with no cache, a half-finished pass, or a module
+    # nobody has classified must all produce the inventory that existed
+    # before this function did. Names and ranges are the floor and nothing
+    # here may take a param away from the model.
     for pslug, p in inv.items():
         for mslug, m in (p.get("modules") or {}).items():
             record = (cache.get("modules") or {}).get(key(pslug, mslug))
@@ -407,6 +412,11 @@ def annotate(inv: dict, cache: dict | None = None) -> int:
 
 def render_lines(entry: dict) -> list:
     """The affordance lines for one module in the rendered inventory.
+
+    A name tells the model a knob exists; the affordance tells it which knob
+    the request is about, which is the difference between wiring a sequencer
+    and writing a melody into it. Empty for anything unclassified, so the
+    params line above it stands alone exactly as it did before.
 
     Known and guessed are printed as different KINDS of sentence rather than
     as the same sentence with a marker, because a marker is read as decoration

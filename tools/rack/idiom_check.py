@@ -420,18 +420,23 @@ class Finding:
 class Deferral:
     """A behaviour nothing here could settle, named so the gap is visible.
 
-    Distinct from a pass. A sequencer that keeps its pattern in module `data`
-    rather than in params, or one nobody has scanned, cannot be read -- and
-    the silent version of that was how a patch playing one held note passed
-    every check it was given. The listening gate consumes these: `measures`
-    is the measurement `_behaviour.json` names for the flag.
+    Distinct from a pass, and distinct from a failure. A sequencer that keeps
+    its pattern in module `data` rather than in params, or one nobody has
+    scanned, cannot be read -- and the silent version of that was how a patch
+    playing one held note passed every check it was given.
+
+    `behaviour` is the flag exactly as the idiom spells it, which is also what
+    `patch_behaviour.evaluate()` takes, so a caller hands a deferral straight
+    to the gate that renders audio. This class deliberately carries NO
+    measurement name and NO threshold: that lane owns the predicate set, and
+    two copies of it would drift with this one losing, since nothing here ever
+    renders a sample.
     """
 
-    def __init__(self, behaviour: str, affordances, why: str, measures):
+    def __init__(self, behaviour: str, affordances, why: str):
         self.behaviour = behaviour
         self.affordances = tuple(affordances)
         self.why = why
-        self.measures = list(measures)
 
     def __str__(self) -> str:
         return f"{self.behaviour}: {self.why}"
@@ -477,7 +482,6 @@ def check_behaviour(patch: dict, inv: dict, idiom: dict,
         spec = behaviours.get(flag)
         if spec is None:
             continue                    # a flag nobody has given meaning yet
-        listen = spec.get("listen") or []
         for req in spec.get("requires", []):
             words = req.get("any_of") or []
             must = req.get("must")
@@ -501,13 +505,13 @@ def check_behaviour(patch: dict, inv: dict, idiom: dict,
                     f"nothing in this patch has measured params that "
                     f"{'vary' if must == 'vary' else 'carry'} "
                     f"{' or '.join(words)}, so reading the patch cannot "
-                    f"settle it", listen))
+                    f"settle it — the gate that listens has to"))
                 continue
             findings.extend(_judge(flag, words, req, must, hits))
 
         if not spec.get("requires"):
             deferrals.append(Deferral(
-                flag, [], "settled by listening, not by reading", listen))
+                flag, [], "settled by listening, not by reading"))
     return findings, deferrals
 
 

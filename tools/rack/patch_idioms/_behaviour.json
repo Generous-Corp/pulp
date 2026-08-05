@@ -42,75 +42,102 @@
     "           zero means none by definition. Never applied to pitch, timbre",
     "           or time, where zero is a position on a scale.",
     "",
-    "`listen` names the measurement that settles the behaviour and the first",
-    "cut at its predicate. It is READ by the gate lane, not by this file's",
-    "checks. THE NUMBERS ARE GUESSES. They were written from what a melody or",
-    "a rhythm plausibly is, not from patches anybody has heard, and they are",
-    "here so the measured gate has one place to disagree with rather than",
-    "eight scattered constants. Tighten them against judged patches; do not",
-    "treat the first values as law."
+    "`settled_by` says WHO can answer the flag. `reading` means a `requires`",
+    "entry above proves or disproves it from the patch text. `listening` means",
+    "only the rendered audio can, and this file deliberately holds NO threshold",
+    "for it: `patch_behaviour.evaluate()` owns the measurement names, the",
+    "predicates and the numbers, and takes an idiom's `behaviour` dict straight",
+    "as it is written here. A second copy of those thresholds in this file would",
+    "be a second source of truth for the same question, and the two would drift",
+    "-- with this one silently losing, since nothing here ever renders audio.",
+    "A flag can be BOTH: `melodic` is proved wrong by reading when the notes are",
+    "in params, and settled by listening when they are in module data."
   ],
   "behaviours": {
     "melodic": {
       "means": "the notes change",
       "requires": [
         {
-          "any_of": ["structure", "pitch"],
+          "any_of": [
+            "structure",
+            "pitch"
+          ],
           "must": "vary",
           "remedy": "Every step therefore sits at the same voltage and plays as one held note. Write the melody into those values and make them differ from each other."
         }
       ],
-      "listen": [{"measure": "distinct_pitches", "at_least": 3},
-                 {"measure": "pitch_changes", "at_least": 4}]
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
     },
     "rhythmic": {
       "means": "events land in a pattern in time",
       "requires": [],
-      "listen": [{"measure": "onsets", "at_least": 4},
-                 {"measure": "onset_periodicity", "at_least": 0.5}]
+      "settled_by": [
+        "listening"
+      ]
     },
     "keeps_going": {
       "means": "it is still playing at the end",
       "requires": [],
-      "listen": [{"measure": "end_rms_over_peak_rms", "at_least": 0.1}]
+      "settled_by": [
+        "listening"
+      ]
     },
     "sustained": {
       "means": "it holds rather than articulates",
       "requires": [],
-      "listen": [{"measure": "onsets", "at_most": 3},
-                 {"measure": "end_rms_over_peak_rms", "at_least": 0.5}]
+      "settled_by": [
+        "listening"
+      ]
     },
     "spectrally_varying": {
       "means": "the colour moves while it plays",
       "requires": [
         {
-          "any_of": ["motion"],
+          "any_of": [
+            "motion"
+          ],
           "must": "nonzero",
           "remedy": "the amount of modulation is set to zero, so nothing moves; raise it"
         }
       ],
-      "listen": [{"measure": "centroid_spread_semitones", "at_least": 2.0}]
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
     },
     "varies_timing": {
       "means": "the gaps between events are not all the same",
       "requires": [
         {
-          "any_of": ["chance", "motion"],
+          "any_of": [
+            "chance",
+            "motion"
+          ],
           "must": "nonzero",
           "remedy": "the amount that would make the timing wander is set to zero, so every event lands on the grid; raise it"
         }
       ],
-      "listen": [{"measure": "onset_interval_spread", "at_least": 0.15}]
+      "settled_by": [
+        "reading",
+        "listening"
+      ]
     },
     "accelerating": {
       "means": "events get closer together",
       "requires": [],
-      "listen": [{"measure": "onset_interval_trend", "at_most": -0.1}]
+      "settled_by": [
+        "listening"
+      ]
     },
     "unmetered": {
       "means": "there is no steady pulse to find",
       "requires": [],
-      "listen": [{"measure": "onset_periodicity", "at_most": 0.4}]
+      "settled_by": [
+        "listening"
+      ]
     }
   }
 }

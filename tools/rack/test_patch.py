@@ -2876,17 +2876,18 @@ def check_behaviour_drives_the_check() -> tuple:
     if findings:
         bad += 1
         print(f"  WRONG  a patch with nothing readable was rejected: {findings}")
-    elif not mel or not mel[0].measures:
+    elif not mel or "listens" not in mel[0].why:
         bad += 1
-        print("  WRONG  an unreadable behaviour is passed silently, with no "
-              "measurement named for the gate that could settle it")
-    elif mel[0].measures[0].get("measure") != "distinct_pitches":
+        print("  WRONG  an unreadable behaviour is passed silently rather "
+              "than handed to the gate that could settle it")
+    elif getattr(mel[0], "measures", None) is not None:
         bad += 1
-        print(f"  WRONG  the deferral names no usable measurement: "
-              f"{mel[0].measures}")
+        print("  WRONG  the deferral carries its own measurement names — "
+              "patch_behaviour.evaluate() owns the predicate set, and a "
+              "second copy of it here will drift with this one losing")
     else:
-        print("  ok     what cannot be read is handed to the listening gate, "
-              "naming the measurement that settles it")
+        print("  ok     what cannot be read is handed on by flag name, and "
+              "the thresholds stay in the lane that renders audio")
 
     # A behaviour with no static half must ALSO defer rather than vanish.
     _, deferrals = I.check_behaviour(seq(tune), inv, melodic)
@@ -2991,6 +2992,81 @@ def check_behaviour_drives_the_check() -> tuple:
         print("  ok     a pattern kept in module data reaches the listening "
               "gate instead of being rejected on its param names")
 
+    # The name-matching stopgap is scoped to `structure` and must stay there.
+    # It is the one reading a param NAME can settle, and letting it answer
+    # "how much does this wander" or "how likely is this" would rebuild the
+    # 73%-ceiling word list this whole design exists to avoid — quietly, one
+    # affordance at a time.
+    named = _classified_inv()
+    named["CVfunk"]["modules"]["Ouros"]["params"] = [
+        {"id": 0, "name": "Step 1"}, {"id": 1, "name": "Step 2"}]
+    shut = [{"id": 0, "value": 0.0}, {"id": 1, "value": 0.0}]
+    findings, deferrals = I.check_behaviour(seq(shut), named, wander)
+    if findings:
+        bad += 1
+        print(f"  WRONG  param NAMES were allowed to answer an affordance "
+              f"other than structure, which is the word list coming back: "
+              f"{findings}")
+    elif not any(d.behaviour == "varies_timing" for d in deferrals):
+        bad += 1
+        print("  WRONG  an unanswerable amount is passed rather than handed on")
+    else:
+        print("  ok     names may only answer 'structure'; every other "
+              "affordance needs a classification or nothing")
+
+    # THE TRACKED REGRESSION CORPUS, whose author did not know this check
+    # existed. Three patches in it are known-bad and three are known-good, and
+    # the shape of each failure was chosen by somebody else — which is what
+    # makes it evidence rather than a fixture written to match the code.
+    #
+    # The honest result is that reading settles NONE of them: no idiom here
+    # is `melodic`, and nothing in them is classified, so no requirement can
+    # fire. What matters is the two ways that could go wrong. It must not
+    # reject the known-GOOD pair, which is what an over-eager static check
+    # does. And it must not pass the known-BAD ones silently: each has to come
+    # back naming the behaviours only the listening gate can settle, because a
+    # silent pass on `krell-plays-one-note` is this project's founding bug.
+    here = os.path.dirname(os.path.abspath(__file__))
+    corpus = [("bouncing-ball-correct.vcv", "bouncing-ball", True),
+              ("bouncing-ball-never-bounces.vcv", "bouncing-ball", False),
+              ("krell-plays-one-note.vcv", "krell", False),
+              ("krell-through-a-mult.vcv", "krell", True),
+              ("silent-envelope-never-gated.vcv", "subtractive-voice", False),
+              ("audible-envelope-gated.vcv", "subtractive-voice", True)]
+    inv_real = P.inventory()
+    wrong = []
+    for name, slug, _good in corpus:
+        path = os.path.join(here, "patch_idioms", "regressions", name)
+        if not os.path.exists(path):
+            wrong.append(f"{name} is missing from the tracked corpus")
+            continue
+        with open(path) as fh:
+            pch = json.load(fh)
+        fs, ds = I.check_behaviour(pch, inv_real, idioms[slug])
+        if fs:
+            wrong.append(f"{name} was rejected by reading alone: {fs[0]}")
+        elif not ds:
+            wrong.append(f"{name} was passed silently, with no behaviour "
+                         f"handed to the gate that listens")
+    if wrong:
+        bad += 1
+        print(f"  WRONG  {wrong[0]}")
+    else:
+        _, ds = I.check_behaviour(
+            json.load(open(os.path.join(
+                here, "patch_idioms", "regressions",
+                "krell-plays-one-note.vcv"))), inv_real, idioms["krell"])
+        if "varies_timing" not in {d.behaviour for d in ds}:
+            bad += 1
+            print(f"  WRONG  krell-plays-one-note does not hand on "
+                  f"varies_timing — the one flag here whose static half "
+                  f"EXISTS and could not fire, so its silence has to be said: "
+                  f"{[d.behaviour for d in ds]}")
+        else:
+            print(f"  ok     none of the {len(corpus)} tracked regression "
+                  f"patches is rejected by reading, and every one hands its "
+                  f"unread behaviours to the gate that listens")
+
     # A single knob cannot differ from itself, and demanding it would be a
     # requirement no patch could ever satisfy.
     one = _classified_inv()
@@ -3004,7 +3080,7 @@ def check_behaviour_drives_the_check() -> tuple:
     else:
         print("  ok     a lone param is never asked to differ from itself")
 
-    return bad, 13
+    return bad, 15
 
 
 def main():

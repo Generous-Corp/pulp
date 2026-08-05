@@ -146,24 +146,12 @@ def inventory() -> dict:
     _add_port_names(inv)
     _add_portmap(inv)
     _infer_port_roles(inv)
-    _add_affordances(inv)
-    return inv
-
-
-def _add_affordances(inv: dict) -> None:
-    """What each measured knob can EXPRESS, from the classification cache.
-
-    Purely additive, and best-effort by design: a machine with no cache, a
-    half-finished pass, or a module nobody has classified all produce the
-    inventory that existed before this line. Names and ranges are the floor
-    and this only ever builds on it -- the one thing an affordance must never
-    do is take a param away from the model.
-    """
     try:
         import affordances                                  # noqa: PLC0415
-        affordances.annotate(inv)
+        affordances.annotate(inv)   # additive, best-effort; see its docstring
     except Exception:                                       # noqa: BLE001
         pass
+    return inv
 
 
 PORTMAP = os.path.join(RACK_USER, "forge-portmap.json")
@@ -1304,12 +1292,6 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
                                "knob's native units; pitch and step values are "
                                "volts on a 1V/oct scale unless the panel says "
                                "otherwise)")
-                # What those params can EXPRESS, where a classifier has read
-                # the module. A name tells the model a knob exists; the
-                # affordance tells it which knob the request is about, which
-                # is the difference between wiring a sequencer and writing a
-                # melody into it. Absent for anything unclassified, and the
-                # params line above stands alone exactly as before.
                 try:
                     import affordances                      # noqa: PLC0415
                     out.extend(affordances.render_lines(m))
