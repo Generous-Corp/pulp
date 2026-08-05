@@ -367,6 +367,169 @@ quietly was not there.
 worktree lives in /tmp and macOS clears it; a test written there and not synced
 is simply gone.
 
+## How long a maker's name is is not something to guess at
+
+A mention has to be able to span spaces, because a maker's name usually has one
+in it. Both halves of this originally capped the span with a literal — the `@`
+list allowed two spaces, and `brand_mentions()` in `patch.py` tried phrases of
+three words, then two, then one — and both literals are wrong for the same six
+of the 375 makers in the real library: **Studio Six Plus One**, **The All
+Electric Smart Grid**, **Path Set x Omri Cohen**, **Mathematics and Music Lab
+(MML)**, **Jasmine & Olive Trees**, **Autodafe - REDs FREE**. Naming any of them
+resolved to nothing at all, in silence, from either surface.
+
+The two sides fix it differently on purpose, and neither adds a bigger number:
+
+- **`patch.py` reads the span from the library.** `brand_phrase_span()` is the
+  longest maker name in the directory, in words, so the scan is exactly as wide
+  as the data it is scanning for and stays correct when a maker with a longer
+  name publishes.
+- **The `@` list has no cap at all.** Only a newline ends the token. What ends
+  a mention is that it **stopped matching**, which the caller already asks and
+  which is strictly better evidence than a word count: right for
+  `@The All Electric Smart Grid`, and right for `@vco into a filter` where a
+  word count is only right by luck.
+
+Two more makers were unreachable for a different reason, and both surfaces had
+their own version of it:
+
+- **`patch.py` dropped every token containing a slash**, because
+  `@CVfunk/Sphinx` names a module. **Catro/Blanco** (8 modules) and **p.s.F/X**
+  (7) have one in their names, so neither could be named at all. The exemption
+  is checked against the brand directory, not guessed: a slashed token is a
+  module unless it *is* a maker's name.
+- **`fold()` in `module_catalog.cpp` removed a space, a hyphen and an
+  underscore and nothing else**, so those same two could be reached only by
+  typing their punctuation exactly. It now drops every ASCII non-alphanumeric,
+  which is the rule `fold_name` was already applying on the other side.
+  **Keep the non-ASCII code points**: `std::isalnum` in the C locale answers no
+  to a UTF-8 continuation byte, so a byte-wise test shortens `Instruō` to
+  `instru` and makes it collide with anything else starting that way.
+
+**The two folds are one behaviour, and "ASCII case-folding" is not enough to
+make them so.** `fold_name` is `str.lower()` plus `str.isalnum()`, both
+Unicode-aware. `fold` case-folded only ASCII, so `ÄSK` — a real maker — folded
+to `äsk` in a prompt and `Äsk` in the list, and **`@äsk` found nothing**. The
+other three non-ASCII makers (`Instruō`, `Hügelton Instruments`, `nozoïd`)
+agreed only by luck: all three are already lowercase, the one quadrant where
+the two rules cannot differ. A sweep that types every name the way its maker
+writes it will never see this — vary the case.
+
+`fold` now walks **code points, not bytes** (half of `Ä` is not a character) and
+case-folds Latin-1 Supplement, Latin Extended-A, Greek and Cyrillic. Every range
+was checked against Python's `str.lower()` code point by code point; the
+exclusions are the whole of the disagreement (`U+00D7` ×, `U+03A2` unassigned,
+`U+0130` whose lowercase is two code points). Outside those ranges a code point
+passes through in the case it was written, and **the guard for that is on the
+corpus, not the code**: `check_maker_names_as_written` sweeps the real index for
+an uppercase character outside the covered scripts, or any non-alphanumeric
+non-ASCII one (which Python drops and `fold` keeps). Widening the C++ side to
+full Unicode would mean a category table no maker needs yet.
+
+**It is case-folding, not transliteration.** `Instruo` and `Instruō` must stay
+two makers; merging them is worse than the bug being fixed because it is silent
+and it changes what an already-stored token resolves to. Assert that as a
+**count of maker rows**, never as which row leads — with the diacritic folded
+away both names match exactly and the winner is whichever the catalogue lists
+first, which an assertion about `hits[0]` passes straight through. That version
+was written, mutated, and did not fail.
+
+Pinned identically on both sides: `SEAM_FOLDS` in `test_patch.py` and the table
+in `test_chrome_no_leak.cpp`. Two implementations in two languages can only be
+held together by the same literals on both, never by a third implementation that
+could itself be wrong.
+
+Sweep the real index before believing a matcher change is complete. Every one of
+these was found by asking whether all 375 makers can be named, not by reading
+the code:
+
+```python
+brands = sorted({v["brand"] for v in cat.values()})
+[b for b in brands if b not in P.brand_mentions(f"a patch with @{b} in it", cat)]
+```
+
+What pays for the uncapped span is that **matching is monotone** — a query
+matches when its folded form is a substring of an entry's folded name, slug or
+maker, and every longer query contains the shorter one, so a token that matches
+nothing cannot grow into one that matches something. The overlay remembers the
+token it abandoned; anything that token grows into is dismissed with one string
+compare instead of a search. That is worth having: measured over a library the
+size of the real one, a 500-character dead token costs **24 ms a keystroke** to
+re-answer (2 chars: 1.1 ms, 120 chars: 6.6 ms), so deleting the cache is not an
+option and neither is capping the span by guessing.
+
+Rely on that property if you touch `matches()`: widening it to a fuzzy or
+subsequence match would break the proof and put an unbounded search on every
+keystroke.
+
+**And the proof is about a FIXED corpus, which this one is not.** `all()`
+reloads itself when the index changes, by design, because on a machine that has
+never had an index the file arrives about a minute after launch. A cached
+"nothing matched" therefore expires: somebody types `@Catro Blanco` into an
+empty library, the index lands carrying that very maker, and a guard with no
+invalidation keeps the list shut against it — silently, and recoverable only by
+deleting back past the abandonment, which nobody will guess. `abandoned_` is
+paired with `catalog_generation()`, which `all()` itself bumps on reload;
+deriving that number from a second stat of the same file would let the counter
+and the list disagree about when the change happened.
+
+The general shape, worth carrying past this file: **a cache of a negative
+answer needs the same invalidation as a cache of a positive one**, and an
+optimisation justified by a proof is only as durable as the proof's unstated
+assumptions. Write the assumption into the comment so the next reader can see
+what would break it.
+
+## The `@` list ranks two kinds of row on one scale, and installedness is not one of them
+
+Module rows and maker rows are merged into a single list, so one ordering
+decides both. The tiers are named in `module_catalog.cpp` (`kExactName`,
+`kAlias`, `kMakerNamed`, `kMakerPartial`, …) with `static_assert`s, because as
+bare integers "a partial maker name sits under the alias tier" was a
+relationship between a `3` in one function and a `2` in another that only
+somebody reading both would see.
+
+The trap is the **front tier**, not the ranks. It was "installed, an exact name,
+or a maker", and a maker row is always in it — so on a machine **without**
+Audible Instruments, `@br` put any maker starting with those two letters above
+Braids, whose alias match is a whole tier stronger. Being uninstalled is
+precisely the state a mention exists to remedy, so it cannot be the thing that
+decides which row leads. The front tier is now `is_identity_match` — the whole
+name typed out, **or the alias** — plus installed rows and maker rows.
+
+The old test for this rule installed Audible Instruments first, which is why the
+hole stayed open. **If a mention test flips `installed = true` on the fixture to
+make the assertion pass, that is the bug, not the setup.**
+
+**Widen that tier only against the real index, never by reasoning.** Adding the
+name-PREFIX tier is the obvious next step and it is wrong: measured over the
+4,735-module index, `@br` then answers with thirty modules that merely begin
+with those letters (Breakout, Branes, Broadcast) and Braids *and* every maker
+row fall out of the six visible rows. A prefix is too common to lead. Both
+directions are pinned by tests, so the decision fails loudly rather than drifts.
+
+The front tier deliberately **overrides rank** — an installed `kMakerPrefix` row
+leads an uninstalled `kNamePrefix` one — because it answers "what may lead the
+list", not "what matched best". That is by design and predates this work.
+
+The visible consequence, worth knowing before somebody reports it as a bug: an
+alias-tier module now leads a **partial** maker row, so at `@CV` the modules
+whose slugs begin CV (`Core/CV-Gate`, shown as "Gate to MIDI";
+`Autinn/CVConverter`, shown as "Conv") sit above the "CV funk, 43 modules" row.
+That is `kMakerPartial` sitting under `kAlias`, which is what the tiers have
+always said; it was simply never true for an uninstalled module before.
+
+## A maker token has to survive a reload, so it can only be a name
+
+Projects store the prompt (`prompts` in `project.json`), so whatever the `@`
+list inserts has to go on meaning the same maker against a library index rebuilt
+since. It does, and only because what is inserted is the maker's **own display
+name** and nothing else: no plugin slug, no id, no module count, no syntax we
+invented. `brand_mentions()` resolves it again from scratch each time, so the
+same token picks up plugins the maker has added since and drops ones that are
+gone. Anything that embeds a snapshot of the library in the token — the count,
+the slug it happened to come from — silently stops resolving the first time the
+index is rebuilt.
+
 ## A window-root key hook cannot have the arrows while somebody is typing
 
 AppKit offers every key-down to `performKeyEquivalent:` before `keyDown:`, and

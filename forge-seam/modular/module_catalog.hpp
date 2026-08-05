@@ -64,6 +64,22 @@ struct CatalogCounts {
 };
 CatalogCounts catalog_counts();
 
+/// A number that changes whenever the catalogue behind search_modules() has
+/// been reloaded, and never otherwise.
+///
+/// THE CORPUS IS NOT FIXED. The list reloads itself when the library index
+/// changes underneath it — that is deliberate, because on a machine that has
+/// never had an index the file arrives a minute after launch. Anything that
+/// caches a search RESULT is therefore only valid for one generation, and a
+/// cache with no invalidation outlives the answer it stored: a mention that
+/// matched nothing before the index landed would go on matching nothing after
+/// it, against a library that now contains exactly what was typed.
+///
+/// Reading this is as cheap as one stat, and it reloads the catalogue if that
+/// stat says it must — so it is safe to call on every keystroke and it cannot
+/// report a change the search would not also see.
+std::uint64_t catalog_generation();
+
 // ── the library index ────────────────────────────────────────────────────────
 //
 // The index is written by tools/rack/library_catalog.py and read by the search

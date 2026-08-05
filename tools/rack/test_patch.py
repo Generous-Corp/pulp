@@ -1248,6 +1248,345 @@ def check_brand_targeting() -> tuple:
     return bad, ran
 
 
+#: Real makers whose names are longer, or punctuated, in ways the scan did not
+#: allow for. Every one of them was unreachable by any spelling, from prose and
+#: from the @ list alike.
+LONG_NAME_CAT = {
+    "CatroBlanco": {"brand": "Catro/Blanco", "arches": ["mac-arm64"]},
+    "alto777_LFSR": {"brand": "p.s.F/X", "arches": ["mac-arm64"]},
+    "TheAllElectricSmartGrid": {"brand": "The All Electric Smart Grid",
+                                "arches": ["mac-arm64"]},
+    "StudioSixPlusOne": {"brand": "Studio Six Plus One",
+                         "arches": ["mac-arm64"]},
+    "PathSetOmriCohen": {"brand": "Path Set x Omri Cohen",
+                         "arches": ["mac-arm64"]},
+    "MathematicsAndMusicLab": {"brand": "Mathematics and Music Lab (MML)",
+                               "arches": ["mac-arm64"]},
+    "JasmineAndOliveTrees": {"brand": "Jasmine & Olive Trees",
+                             "arches": ["mac-arm64"]},
+    "Autodafe": {"brand": "Autodafe - REDs FREE", "arches": ["mac-arm64"]},
+    "CVfunk": {"brand": "CV funk", "arches": ["mac-arm64"]},
+}
+
+
+def check_maker_names_as_written() -> tuple:
+    """A maker's name is whatever its maker wrote, not what the scan allowed.
+
+    Two independent ceilings, and eight of the 375 makers in the real library
+    fell off one of them:
+
+      - THE PHRASE WAS THREE WORDS. Right for "CV funk" and "Audible
+        Instruments", wrong for six makers with four- and five-word names.
+      - A TOKEN WITH A SLASH WAS A MODULE. Right for "@CVfunk/Sphinx", wrong
+        for "Catro/Blanco" (8 modules) and "p.s.F/X" (7), whose names have one.
+
+    Both failed the same way: naming the maker resolved to NOTHING. No error,
+    no row, no modules in the brief, just a maker that quietly did not reach
+    the model.
+    """
+    bad, ran = 0, 0
+
+    ran += 1
+    span = P.brand_phrase_span(P.brand_directory(LONG_NAME_CAT))
+    if span != 5:
+        bad += 1
+        print(f"  WRONG  the phrase span is {span}, not the 5 words the "
+              f"longest maker in this library actually has")
+    else:
+        print("  ok     how far a maker's name may reach is read from the "
+              "library")
+
+    for slug, entry in LONG_NAME_CAT.items():
+        brand = entry["brand"]
+        # From prose and from a token, because they are meant to be one
+        # behaviour and each surface reached this ceiling separately.
+        for prompt in (f"use modules from {brand} for a drone",
+                       f"a drone patch with @{brand} in it"):
+            ran += 1
+            got = P.brand_mentions(prompt, LONG_NAME_CAT)
+            if brand not in got:
+                bad += 1
+                print(f"  WRONG  brand_mentions({prompt!r}) named {sorted(got)}, "
+                      f"not {brand!r}")
+    if not bad:
+        print(f"  ok     all {len(LONG_NAME_CAT)} makers are named from prose "
+              f"and from a token")
+
+    # A longer reach is not a licence to read a sentence as a maker.
+    for prompt in ("a slow evolving drone with a long filter sweep",
+                   "four bars of melody into a plate reverb"):
+        ran += 1
+        got = P.brand_mentions(prompt, LONG_NAME_CAT)
+        if got:
+            bad += 1
+            print(f"  WRONG  {prompt!r} was read as naming {sorted(got)}")
+
+    # And the qualifiers still attach to a long name, which is where a wider
+    # window could have started collecting the previous clause instead.
+    ran += 1
+    got = P.brand_mentions("use all modules from The All Electric Smart Grid",
+                           LONG_NAME_CAT)
+    state = got.get("The All Electric Smart Grid")
+    if not state or not state["exhaustive"]:
+        bad += 1
+        print(f"  WRONG  'all modules from' a five-word maker was not read as "
+              f"exhaustive: {got}")
+    else:
+        print("  ok     exhaustive and exclusive still attach to a long name")
+
+    # AND THE SLASH RULE STILL HOLDS THE OTHER WAY. Exempting a maker whose
+    # name has a slash must not let a module mention be read as its maker,
+    # which is the 43-module dump the rule was written to prevent.
+    ran += 1
+    module_cat = dict(LONG_NAME_CAT)
+    module_cat["CVfunkSands"] = {"brand": "CV funk", "arches": ["mac-arm64"]}
+    got = P.brand_mentions("@CVfunkSands/Dunes into a filter", module_cat)
+    if got:
+        bad += 1
+        print(f"  WRONG  a module mention was read as naming {sorted(got)}")
+    else:
+        print("  ok     a module mention is still a module, slash and all")
+
+    # ── the assumption the C++ fold is allowed to make, checked on the data ──
+    #
+    # module_catalog.cpp case-folds Latin-1 Supplement, Latin Extended-A, Greek
+    # and Cyrillic, and leaves every other script in the case it was written.
+    # That is enough for every maker in the library, and this is what says so
+    # rather than a comment claiming it. It reads the real index, because the
+    # claim IS about the real index; with none present there is nothing to
+    # check and it says that instead of passing quietly.
+    covered = ((0x00C0, 0x00DE), (0x0100, 0x017F),
+               (0x0391, 0x03A9), (0x0400, 0x042F))
+    index = os.path.expanduser(
+        "~/Library/Application Support/Forge Modular/library/index.json")
+    if not os.path.exists(index):
+        print(f"  ok     no library index on this machine, so the corpus "
+              f"assumption cannot be checked here ({index})")
+        return bad, ran
+    ran += 1
+    try:
+        idx = json.load(open(index))
+    except Exception as e:                       # noqa: BLE001 - reported, not raised
+        print(f"  ok     the library index is unreadable ({e}); nothing to check")
+        return bad, ran
+    outside, symbols = [], []
+    for slug, v in idx.items():
+        brand = v.get("brand") or v.get("name") or slug
+        for ch in brand:
+            if ord(ch) < 128:
+                continue
+            if not ch.isalnum():
+                # Python drops it, the C++ fold keeps it: the two would part.
+                symbols.append((brand, ch))
+            elif ch.lower() != ch and not any(lo <= ord(ch) <= hi
+                                              for lo, hi in covered):
+                outside.append((brand, ch, hex(ord(ch))))
+    if outside or symbols:
+        bad += 1
+        print(f"  WRONG  a maker's name needs folding the @ list cannot do: "
+              f"uppercase outside the covered scripts {outside}, "
+              f"non-alphanumeric {symbols}. Widen lower_code_point, or the "
+              f"two sides of the seam disagree about that maker.")
+    else:
+        print(f"  ok     all {len(idx)} plugins' makers fold identically on "
+              f"both sides of the seam")
+    return bad, ran
+
+
+#: What `fold_name` must produce, pinned identically in the C++ test
+#: ("a maker's case is not something anybody has to match either").
+#:
+#: The two sides of the seam are meant to be ONE behaviour, and they were not:
+#: `fold_name` is Unicode-aware in both halves while module_catalog.cpp's
+#: `fold` case-folded only ASCII, so `ÄSK` -- a real maker -- folded to "äsk"
+#: here and "Äsk" there, and "@äsk" named it in a prompt while finding nothing
+#: in the @ list. Neither side may drift from this table alone.
+SEAM_FOLDS = [
+    ("ÄSK", "äsk"),
+    ("äsk", "äsk"),
+    ("Instruō", "instruō"),
+    ("Hügelton Instruments", "hügeltoninstruments"),
+    ("nozoïd", "nozoïd"),
+    ("Ø", "ø"),
+    ("Σ", "σ"),
+    ("Ω", "ω"),
+    ("ŠKODA", "škoda"),
+    ("Łódź", "łódź"),
+    ("ДЕЛЬТА", "дельта"),
+    ("Catro/Blanco", "catroblanco"),
+    ("p.s.F/X", "psfx"),
+]
+
+
+def check_fold_agrees_across_the_seam() -> tuple:
+    """One rule for what a name is, on both sides of the seam.
+
+    This half pins `fold_name`; `test_chrome_no_leak.cpp` pins the same strings
+    for the C++ `fold` through `search_entries`. A change to either that is not
+    matched in the other fails one of the two, which is the only way two
+    implementations in two languages can be held together without a third that
+    could itself be wrong.
+    """
+    bad, ran = 0, 0
+    for text, want in SEAM_FOLDS:
+        ran += 1
+        got = P.fold_name(text)
+        if got != want:
+            bad += 1
+            print(f"  WRONG  fold_name({text!r}) = {got!r}, pinned as {want!r}")
+    if not bad:
+        print(f"  ok     {len(SEAM_FOLDS)} folded names match what the @ list "
+              f"folds them to")
+
+    # WHERE THE TWO RULES STILL PART, stated rather than left to be found. The
+    # C++ fold keeps every non-ASCII code point; this one drops the ones that
+    # are not alphanumeric. So a maker with a symbol in its name would fold
+    # differently on the two sides -- and the guard is on the CORPUS, because
+    # the fix for the code would be a Unicode category table on the C++ side
+    # and no maker needs one.
+    ran += 1
+    if P.fold_name("A×B") != "ab":
+        bad += 1
+        print("  WRONG  the boundary case moved; re-check the C++ fold with it")
+    else:
+        print("  ok     a non-alphanumeric symbol is dropped here (and kept in "
+              "the @ list) — no maker has one; the sweep below is what says so")
+    return bad, ran
+
+
+def check_brand_token_reload() -> tuple:
+    """A stored prompt still names the same maker when it is reopened.
+
+    A project keeps the PROMPT (`prompts` in project.json), so a maker token
+    has to go on meaning that maker against a library index rebuilt since:
+    plugins split, added, or gone. It does, because what the @ list inserts is
+    the maker's own NAME and the resolution happens again from scratch every
+    time. Both halves were structurally fine and neither was asserted.
+    """
+    bad, ran = 0, 0
+
+    at_insert = {"CVfunk": {"brand": "CV funk", "arches": ["mac-arm64"]},
+                 "CVfunkSands": {"brand": "CV funk", "arches": ["mac-arm64"]},
+                 "Valley": {"brand": "Valley", "arches": ["mac-arm64"]}}
+    # Taken from the same directory the @ list builds its rows from, rather
+    # than spelled out here, so a change on either side reaches this.
+    token = "@" + P.brand_directory(at_insert)[P.fold_name("CV funk")]["brand"]
+    prompt = f"a slow drone {token} into a long reverb"
+
+    ran += 1
+    # Through the store, byte for byte. A name with a space in it is the case
+    # any encoding worth worrying about would mangle.
+    stored = json.loads(json.dumps({"prompts": [{"revision": 1,
+                                                 "prompt": prompt}]}))
+    reloaded = stored["prompts"][0]["prompt"]
+    if reloaded != prompt:
+        bad += 1
+        print(f"  WRONG  the stored prompt came back as {reloaded!r}")
+    else:
+        print("  ok     a maker token round-trips through a project verbatim")
+
+    # A LATER LIBRARY: the maker now publishes across three plugins, one of
+    # which did not exist when the token was written.
+    later = {"CVfunk": {"brand": "CV funk", "arches": ["mac-arm64"]},
+             "CVfunkPercussion": {"brand": "CV funk", "arches": ["mac-arm64"]},
+             "CVfunkSands": {"brand": "CV funk", "arches": ["mac-arm64"]},
+             "Valley": {"brand": "Valley", "arches": ["mac-arm64"]}}
+    ran += 1
+    got = P.brand_mentions(reloaded, later)
+    want = ["CVfunk", "CVfunkPercussion", "CVfunkSands"]
+    if "CV funk" not in got:
+        bad += 1
+        print(f"  WRONG  a reloaded token named nothing: {sorted(got)}")
+    elif sorted(got["CV funk"]["slugs"]) != want:
+        bad += 1
+        print(f"  WRONG  a reloaded token resolved to a stale plugin list: "
+              f"{sorted(got['CV funk']['slugs'])}, wanted {want}")
+    else:
+        print("  ok     a reloaded token resolves against the CURRENT library")
+
+    # The honest negative: a maker nobody publishes any more names nothing,
+    # rather than something plausible.
+    ran += 1
+    if P.brand_mentions(reloaded, {"Valley": {"brand": "Valley",
+                                              "arches": ["mac-arm64"]}}):
+        bad += 1
+        print("  WRONG  a token for a maker gone from the library still "
+              "resolved to something")
+    else:
+        print("  ok     a maker gone from the library names nothing")
+    return bad, ran
+
+
+def check_installer_promises() -> tuple:
+    """The installer pane describes what the app does, not what we meant.
+
+    It told a new user the app "will offer to download the VCV Rack SDK ...
+    when you say yes". What exists is announce-and-fetch: fetch_sdk.ensure()
+    says what it is about to do and then does it. Nobody is asked, so nobody
+    says yes, and the first thing anybody was told about this product was a
+    consent step it does not have.
+
+    Both halves are asserted here, because softening the sentence is only
+    correct while the code is still announce-and-fetch: build the prompt later
+    and this check is what says the pane has to be rewritten with it.
+    """
+    bad, ran = 0, 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    pane = os.path.join(here, "..", "..", "examples", "forge-modular",
+                        "LICENSE-INSTALLER.txt")
+    if not os.path.exists(pane):
+        # Named rather than skipped in silence: this file only exists in a
+        # checkout, and an installed toolchain has nothing to check.
+        print(f"  ok     no installer pane in this tree ({pane})")
+        return 0, 0
+    text = open(pane).read()
+
+    # 1. WHAT THE CODE DOES, measured rather than read.
+    ran += 1
+    import importlib
+    fetch_sdk = importlib.import_module("fetch_sdk")
+    real_installed, real_fetch = fetch_sdk.installed_at, fetch_sdk.fetch
+    order = []
+    try:
+        fetch_sdk.installed_at = lambda: None
+        fetch_sdk.fetch = lambda quiet=True: order.append("fetch") or "/sdk"
+        fetch_sdk.ensure(may_fetch=True, announce=lambda _m: order.append("say"))
+    finally:
+        fetch_sdk.installed_at, fetch_sdk.fetch = real_installed, real_fetch
+    if order != ["say", "fetch"]:
+        bad += 1
+        print(f"  WRONG  the SDK path is no longer announce-then-fetch: {order}. "
+              f"If it now ASKS, the installer pane has to say so.")
+    else:
+        print("  ok     the SDK fetch announces what it is doing, then does it")
+
+    # 2. AND THE PANE SAYS THAT. Consent wording describes a step that would
+    #    have to exist for the sentence to be true.
+    ran += 1
+    promised = [p for p in ("when you say yes", "will offer to", "will ask",
+                            "asks you first", "if you agree", "your permission",
+                            "you approve", "you confirm")
+                if p in text.lower()]
+    if promised:
+        bad += 1
+        print(f"  WRONG  the installer promises an interaction nobody built: "
+              f"{promised}")
+    else:
+        print("  ok     the installer promises no consent step nobody built")
+
+    # 3. Softening must not have hidden the thing somebody needs to know.
+    ran += 1
+    for phrase in ("vcvrack.com", "GPLv3", "40 MB"):
+        if phrase not in text:
+            bad += 1
+            print(f"  WRONG  the installer no longer says {phrase!r}, which is "
+                  f"what somebody needs before they agree to install this")
+    if not bad:
+        print("  ok     the installer still says what is downloaded, from "
+              "where, and under what licence")
+    return bad, ran
+
+
 #: An invented library for the fetch planner, kept apart from BRAND_CAT so
 #: that adding a plugin here to test a bound cannot quietly change what the
 #: expansion tests above are counting.
@@ -2810,6 +3149,10 @@ def main():
     acq_bad, acq_ran = check_acquisition()
     lb_bad, lb_ran = check_library_brief()
     br_bad, br_ran = check_brand_targeting()
+    ln_bad, ln_ran = check_maker_names_as_written()
+    sf_bad, sf_ran = check_fold_agrees_across_the_seam()
+    rl_bad, rl_ran = check_brand_token_reload()
+    ip_bad, ip_ran = check_installer_promises()
     nf_bad, nf_ran = check_named_is_fetched()
     gc_bad, gc_ran = check_gate_crash_is_not_silence()
     gs_bad, gs_ran = check_gate_survives_third_party()
@@ -2828,8 +3171,14 @@ def main():
     acq_ran += lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran + ship_ran + ver_ran
     acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
     acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
-    acq_bad += vp_bad + mel_bad + beh_bad
-    acq_ran += vp_ran + mel_ran + beh_ran
+    # UNION, not either side. Two lanes each added their own checks to this
+    # total; taking one side drops the other lane's checks while the suite
+    # still reports a healthy number, which is the failure this file has
+    # already been bitten by once.
+    acq_bad += (vp_bad + mel_bad + beh_bad +
+                ln_bad + rl_bad + ip_bad + sf_bad)
+    acq_ran += (vp_ran + mel_ran + beh_ran +
+                ln_ran + rl_ran + ip_ran + sf_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()

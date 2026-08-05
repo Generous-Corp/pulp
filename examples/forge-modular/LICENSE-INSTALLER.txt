@@ -27,7 +27,7 @@ The Command Line Tools are needed for patches as well as modules, not only for m
 
 ABOUT BUILDING MODULES
 
-Generating a new module compiles real code on your Mac, so the first time you do it Forge Modular will offer to download the VCV Rack SDK. That SDK belongs to VCV and is licensed under the GPLv3. We do not ship a copy of it; your Mac downloads it from vcvrack.com when you say yes. If you never build a module, it is never downloaded.
+Generating a new module compiles real code on your Mac, and that needs the VCV Rack SDK, about 40 MB. The first time you build one, Forge Modular downloads it from vcvrack.com for you. It says so in the build progress before the download starts, and it happens once. That SDK belongs to VCV and is licensed under the GPLv3. We do not ship a copy of it. If you never build a module, it is never downloaded.
 
 A module you build links the Rack SDK, so it inherits the GPLv3. That is fine for your own use. If you ever share one, its licence follows from that.
 

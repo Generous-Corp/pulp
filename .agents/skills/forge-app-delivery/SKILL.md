@@ -302,7 +302,17 @@ been tested. State the mutation and its result when reporting.
   a path means nobody runs it.
 - **Do not promise an interaction you did not build.** The pane said the app
   "will offer to download… when you say yes"; what exists is announce-and-fetch
-  governed by a setting. Either build the prompt or soften the sentence.
+  — `fetch_sdk.ensure()` says what it is about to do and then does it, and
+  nobody is asked. The sentence now describes that. **Softening copy is only
+  half the fix**, because it is correct only while the code stays
+  announce-and-fetch: `check_installer_promises()` in `tools/rack/test_patch.py`
+  asserts BOTH halves, driving `ensure()` with stubs to prove the order is
+  announce-then-fetch and then scanning the pane for consent wording. Build the
+  prompt later and that check is what says the pane has to be rewritten with it.
+  Note the setting that governs it, `auto_fetch_sdk`, has **no control in
+  Settings** (`settings_choices()` exposes module source, downloads, the time
+  limit, the index refresh and the about pane, and not this one) — so do not
+  write copy telling anybody they can switch it off there.
 - **Mark the payload others depend on `required`** (`enabled="false"
   selected="true"`). For Forge Modular that is the app, because the Rack modules
   and the uninstaller live inside its bundle.
