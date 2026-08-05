@@ -338,8 +338,11 @@ TEST_CASE("a Settings panel that is not on screen asks for no frames at all",
           "[format][settings][idle-gate]") {
     MountedPanel m;
     // The standalone chrome parks the panel in a TabPanel, which hides every
-    // tab but the active one — the state an untouched app sits in.
+    // tab but the active one — the state an untouched app sits in. The hide is
+    // itself a change to what is on screen and repaints once, so the count that
+    // matters is taken after it: what the panel costs while it sits there.
     m.panel->set_visible(false);
+    const int parked = m.host.repaints;
 
     // A bus that is anything but silent: a fresh, different level every frame,
     // so a poll that reached the meters could not possibly find them still.
@@ -349,11 +352,47 @@ TEST_CASE("a Settings panel that is not on screen asks for no frames at all",
         m.output.push_meter(stereo_levels(level, level * 0.5f));
         m.panel->poll();
     }
-    CHECK(m.host.repaints == 0);
+    CHECK(m.host.repaints == parked);
 
     // Opening Settings puts it back on screen, and the meters resume.
     m.panel->set_visible(true);
+    const int shown = m.host.repaints;
     m.input.push_meter(stereo_levels(0.9f, 0.6f));
     m.panel->poll();
-    CHECK(m.host.repaints > 0);
+    CHECK(m.host.repaints > shown);
+}
+
+// MAKING A PANEL VISIBLE MUST REPAINT ON ITS OWN, with nothing else changing.
+//
+// It is tempting to prove this by showing the panel and pushing a level, but
+// that passes whether or not the transition repaints -- the moving needle
+// accounts for it. The transition has to be the ONLY thing that happened: a
+// settled meter, an unchanged bus, no poll at all. Before the off-screen gate
+// existed the next unconditional poll covered for this; now nothing does, and a
+// programmatic show (restoring window state, a deep link, a screenshot harness)
+// would render nothing at all.
+TEST_CASE("showing the Settings panel repaints even when nothing else changed",
+          "[format][settings][idle-gate]") {
+    MountedPanel m;
+    m.panel->set_visible(false);
+
+    // Settle a silent meter while hidden, then stop touching anything.
+    m.input.push_meter(stereo_levels(0.0f, 0.0f));
+    m.output.push_meter(stereo_levels(0.0f, 0.0f));
+    m.tick(300);
+    const int before = m.host.repaints;
+
+    // The transition alone, against an unchanged bus and with no poll after it.
+    m.panel->set_visible(true);
+    CHECK(m.host.repaints > before);
+
+    // And hiding it is equally a change to what is on screen.
+    const int shown = m.host.repaints;
+    m.panel->set_visible(false);
+    CHECK(m.host.repaints > shown);
+
+    // Setting the same value twice is not a transition and must not repaint.
+    const int hidden = m.host.repaints;
+    m.panel->set_visible(false);
+    CHECK(m.host.repaints == hidden);
 }

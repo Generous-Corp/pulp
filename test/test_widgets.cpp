@@ -1935,7 +1935,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     vertical.set_channel_count(20);
     REQUIRE(vertical.channel_count() == pulp::signal::kMaxMeterChannels);
 
-    vertical.update(data, 0.1f);
+    (void) vertical.update(data, 0.1f);
     REQUIRE(vertical.channel_count() == 3);
     REQUIRE(vertical.ballistics().channels[0].clip_indicator);
 
@@ -1949,7 +1949,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     MultiMeter horizontal;
     horizontal.set_bounds({0, 0, 120, 60});
     horizontal.set_layout(MultiMeter::Layout::horizontal);
-    horizontal.update(data, 0.1f);
+    (void) horizontal.update(data, 0.1f);
 
     RecordingCanvas horizontal_canvas;
     horizontal.paint(horizontal_canvas);
@@ -1963,7 +1963,7 @@ TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
     segmented.set_bounds({0, 0, 260, 48});
     segmented.set_layout(MultiMeter::Layout::horizontal);
     segmented.set_display_style(MultiMeter::DisplayStyle::segmented);
-    segmented.update(data, 0.1f);
+    (void) segmented.update(data, 0.1f);
 
     RecordingCanvas segmented_canvas;
     segmented.paint(segmented_canvas);
@@ -1991,7 +1991,7 @@ TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
     CorrelationMeter meter;
     meter.set_bounds({0, 0, 100, 20});
 
-    meter.update(2.0f, 1.0f);
+    (void) meter.update(2.0f, 1.0f);
     REQUIRE(meter.display_correlation() > 0.99f);
 
     RecordingCanvas positive_canvas;
@@ -2001,7 +2001,7 @@ TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
     REQUIRE(positive_canvas.count(DrawCommand::Type::stroke_line) == 3);
     REQUIRE(positive_canvas.count(DrawCommand::Type::fill_rect) == 1);
 
-    meter.update(-2.0f, 1.0f);
+    (void) meter.update(-2.0f, 1.0f);
     REQUIRE(meter.display_correlation() < -0.99f);
 
     RecordingCanvas negative_canvas;

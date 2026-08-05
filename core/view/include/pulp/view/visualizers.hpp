@@ -69,7 +69,7 @@ public:
     /// long as the app is open. `Meter::update` invalidates its own rect on the
     /// same rule; a MultiMeter can be laid out several ways, so the caller —
     /// which knows what the meter is part of — owns the invalidation.
-    bool update(const signal::MultiChannelMeterData& data, float dt);
+    [[nodiscard]] bool update(const signal::MultiChannelMeterData& data, float dt);
 
     void set_layout(Layout l) { layout_ = l; }
     Layout layout() const { return layout_; }
@@ -100,7 +100,12 @@ public:
     CorrelationMeter() { set_access_role(AccessRole::meter); }
 
     /// Update with new correlation value (-1 to +1). Call once per UI frame.
-    void update(float correlation, float dt);
+    ///
+    /// Returns true when the displayed needle moved; repaint only when it does,
+    /// for the reason spelled out on `MultiMeter::update`. Unlike the level
+    /// meters this one settles at a NON-ZERO resting value, so it snaps toward
+    /// its target rather than toward zero — a floor test would never fire.
+    [[nodiscard]] bool update(float correlation, float dt);
 
     float display_correlation() const { return display_correlation_; }
 

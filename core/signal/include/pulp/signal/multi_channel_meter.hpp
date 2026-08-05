@@ -65,8 +65,10 @@ struct MultiChannelBallistics {
     /// return value is what lets a still meter ask for nothing: repaint on true,
     /// and a settled meter costs zero composites instead of one per frame
     /// forever. Only the fields that reach the screen count — the hold counters
-    /// tick down invisibly.
-    bool update(const MultiChannelMeterData& data, float dt) {
+    /// tick down invisibly. `MeterBallistics::update` reports movement the same
+    /// way. If you are only advancing the ballistics and will never paint, say
+    /// so with `(void)`.
+    [[nodiscard]] bool update(const MultiChannelMeterData& data, float dt) {
         const int requested = std::clamp(data.num_channels, 0, kMaxMeterChannels);
         bool changed = requested != num_channels;
         num_channels = requested;
@@ -82,21 +84,33 @@ struct MultiChannelBallistics {
             const float prev_held = b.held_peak;
             const bool prev_clip = b.clip_indicator;
 
+            // ONE NON-FINITE SAMPLE WOULD DISABLE THE GATE PERMANENTLY. A NaN
+            // takes the release branch, poisons the display value, survives the
+            // snaps below (every comparison against NaN is false), and then
+            // compares unequal to itself forever — so `changed` would be true on
+            // every frame for the rest of the process. Sanitise the input, and
+            // self-heal state that arrived non-finite by another route.
+            const float in_peak = std::isfinite(d.peak) ? d.peak : 0.0f;
+            const float in_rms = std::isfinite(d.rms) ? d.rms : 0.0f;
+            if (!std::isfinite(b.display_peak)) b.display_peak = 0.0f;
+            if (!std::isfinite(b.display_rms)) b.display_rms = 0.0f;
+            if (!std::isfinite(b.held_peak)) b.held_peak = 0.0f;
+
             // Peak
-            if (d.peak > b.display_peak)
-                b.display_peak += (d.peak - b.display_peak) * attack_coeff;
+            if (in_peak > b.display_peak)
+                b.display_peak += (in_peak - b.display_peak) * attack_coeff;
             else
-                b.display_peak += (d.peak - b.display_peak) * release_coeff;
+                b.display_peak += (in_peak - b.display_peak) * release_coeff;
 
             // RMS
-            if (d.rms > b.display_rms)
-                b.display_rms += (d.rms - b.display_rms) * attack_coeff;
+            if (in_rms > b.display_rms)
+                b.display_rms += (in_rms - b.display_rms) * attack_coeff;
             else
-                b.display_rms += (d.rms - b.display_rms) * release_coeff;
+                b.display_rms += (in_rms - b.display_rms) * release_coeff;
 
             // Peak hold
-            if (d.peak >= b.held_peak) {
-                b.held_peak = d.peak;
+            if (in_peak >= b.held_peak) {
+                b.held_peak = in_peak;
                 b.hold_counter = peak_hold_time;
             } else {
                 // Floor the counters at zero. Left to run they decrement without
@@ -120,6 +134,12 @@ struct MultiChannelBallistics {
             // approaches zero without ever arriving: unsnapped they change by a
             // fraction of a bit every frame FOREVER, which is invisible on
             // screen but means the meter never reports a still frame.
+            //
+            // These three rest at ZERO, so a floor test is enough. A smoother
+            // whose resting value is NOT zero needs the general form —
+            // `if (std::abs(v - target) < eps) v = target` — because a floor
+            // test never fires for it. Copying these three lines to such a
+            // smoother silently does nothing; see CorrelationMeter::update.
             if (b.display_peak < 1e-6f) b.display_peak = 0;
             if (b.display_rms < 1e-6f) b.display_rms = 0;
             if (b.held_peak < 1e-6f) b.held_peak = 0;

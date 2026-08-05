@@ -234,7 +234,21 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; invalidate_subtree_caches_up(); }
+    /// Show or hide this view.
+    ///
+    /// A visibility change is a change to what is on screen, so it dirties the
+    /// surface. `invalidate_subtree_caches_up()` alone does NOT: it clears scene
+    /// caches up the parent chain, returns immediately when nothing anywhere
+    /// caches, and never reaches the host. Anything that shows a view
+    /// programmatically — restoring window state, a startup flag, a deep link, a
+    /// screenshot harness, switching a TabPanel tab — would otherwise render
+    /// nothing until some unrelated event happened to dirty the window.
+    void set_visible(bool v) {
+        const bool changed = visible_ != v;
+        visible_ = v;
+        invalidate_subtree_caches_up();
+        if (changed) request_repaint();
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
 

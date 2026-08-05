@@ -31,7 +31,7 @@ TEST_CASE("MultiChannelMeter process and ballistics are allocation-free after pr
         pulp::test::RtAllocationProbe probe;
         meter.process(channels, 2, static_cast<int>(left.size()));
         const auto& snapshot = meter.snapshot();
-        ballistics.update(snapshot, 0.016f);
+        (void) ballistics.update(snapshot, 0.016f);
         ballistics.clear_clips();
         meter.reset();
         REQUIRE_FALSE(probe.saw_allocation());
@@ -241,7 +241,7 @@ TEST_CASE("MultiChannelBallistics releases held values and clamps display floor"
     data.num_channels = 1;
     data.channels[0].peak = 0.75f;
     data.channels[0].rms = 0.5f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
 
     REQUIRE(ballistics.channels[0].display_peak > 0.0f);
     REQUIRE(ballistics.channels[0].display_rms > 0.0f);
@@ -249,7 +249,7 @@ TEST_CASE("MultiChannelBallistics releases held values and clamps display floor"
 
     data.channels[0].peak = 0.0f;
     data.channels[0].rms = 0.0f;
-    ballistics.update(data, 1.0f);
+    (void) ballistics.update(data, 1.0f);
 
     REQUIRE_THAT(ballistics.channels[0].display_peak, WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(ballistics.channels[0].display_rms, WithinAbs(0.0f, 1e-6f));
@@ -262,15 +262,15 @@ TEST_CASE("MultiChannelBallistics higher peak refreshes held peak", "[signal][me
     MultiChannelMeterData data;
     data.num_channels = 1;
     data.channels[0].peak = 0.5f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.5f, 1e-6f));
 
     data.channels[0].peak = 0.25f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.5f, 1e-6f));
 
     data.channels[0].peak = 0.8f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.8f, 1e-6f));
     REQUIRE_THAT(ballistics.channels[0].hold_counter, WithinAbs(ballistics.peak_hold_time, 1e-6f));
 }
@@ -283,21 +283,21 @@ TEST_CASE("MultiChannelBallistics clamps channel count and clears clip holds", "
     data.num_channels = kMaxMeterChannels + 8;
     data.channels[0].clipped = true;
     data.channels[0].peak = 1.0f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
 
     REQUIRE(ballistics.num_channels == kMaxMeterChannels);
     REQUIRE(ballistics.channels[0].clip_indicator);
     REQUIRE_THAT(ballistics.channels[0].clip_hold_counter, WithinAbs(0.5f, 1e-6f));
 
     data.channels[0].clipped = false;
-    ballistics.update(data, 0.25f);
+    (void) ballistics.update(data, 0.25f);
     REQUIRE(ballistics.channels[0].clip_indicator);
 
-    ballistics.update(data, 0.30f);
+    (void) ballistics.update(data, 0.30f);
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
 
     data.channels[0].clipped = true;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE(ballistics.channels[0].clip_indicator);
 
     ballistics.clear_clips();
@@ -446,7 +446,7 @@ TEST_CASE("MultiChannelBallistics releases peaks RMS and clip holds independentl
     data.channels[0].clipped = true;
     data.channels[1].peak = 0.2f;
     data.channels[1].rms = 0.1f;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
 
     REQUIRE(ballistics.num_channels == 2);
     REQUIRE(ballistics.channels[0].display_peak > ballistics.channels[1].display_peak);
@@ -461,7 +461,7 @@ TEST_CASE("MultiChannelBallistics releases peaks RMS and clip holds independentl
     data.channels[0].clipped = false;
     data.channels[1].peak = 0.0f;
     data.channels[1].rms = 0.0f;
-    ballistics.update(data, 0.2f);
+    (void) ballistics.update(data, 0.2f);
 
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
     REQUIRE(ballistics.channels[0].held_peak < 0.02f);
@@ -470,6 +470,30 @@ TEST_CASE("MultiChannelBallistics releases peaks RMS and clip holds independentl
     REQUIRE_THAT(ballistics.channels[1].display_rms, WithinAbs(0.0f, 1e-6f));
 
     data.num_channels = -4;
-    ballistics.update(data, 0.01f);
+    (void) ballistics.update(data, 0.01f);
     REQUIRE(ballistics.num_channels == 0);
+}
+
+// A non-finite sample must not disable the multi-channel idle gate forever, for
+// the same reason as its single-channel sibling: NaN survives the noise-floor
+// snaps and compares unequal to itself, so one bad sample would make the
+// ballistics report movement on every frame for the rest of the process.
+TEST_CASE("MultiChannelBallistics survives a non-finite sample",
+          "[signal][meter][idle-gate]") {
+    MultiChannelBallistics b;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    MultiChannelMeterData bad;
+    bad.num_channels = 2;
+    for (int ch = 0; ch < 2; ++ch) { bad.channels[ch].peak = nan; bad.channels[ch].rms = nan; }
+    (void) b.update(bad, 0.016f);
+    CHECK(std::isfinite(b.channels[0].display_peak));
+    CHECK(std::isfinite(b.channels[0].display_rms));
+
+    MultiChannelMeterData silent;
+    silent.num_channels = 2;
+    for (int i = 0; i < 600; ++i) (void) b.update(silent, 0.016f);
+    CHECK(b.channels[0].display_peak == 0.0f);
+    CHECK(b.channels[0].held_peak == 0.0f);
+    for (int i = 0; i < 120; ++i)
+        CHECK_FALSE(b.update(silent, 0.016f));
 }

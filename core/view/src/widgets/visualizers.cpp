@@ -352,26 +352,15 @@ void Meter::set_level(float rms, float peak) {
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
-    const float prev_rms = ballistics_.display_rms;
-    const float prev_peak = ballistics_.display_peak;
-    const float prev_held = ballistics_.held_peak;
-
-    ballistics_.update(raw_peak, raw_rms, dt);
-
     // ── Idle gate ────────────────────────────────────────────────────────────
     // A source-bound meter is a FrameClock subscriber, so update() runs every
     // vsync for as long as it is bound — including through silence, when the
     // ballistics have already decayed and the next frame would be pixel-for-pixel
-    // identical. Repainting anyway costs a composite per meter per vsync forever;
-    // on the plug-in-view-host path (a DAW) each of those is a FULL-surface
-    // repaint. Nothing moved, so ask for nothing: a silent plug-in settles to
-    // zero repaints per second instead of burning the editor's frame budget.
-    // Any real level change fails this compare on the very next frame, so the
-    // gate never swallows motion — only the still frames after it.
-    const bool unchanged = ballistics_.display_rms == prev_rms &&
-                           ballistics_.display_peak == prev_peak &&
-                           ballistics_.held_peak == prev_held;
-    if (unchanged) return;
+    // identical. The ballistics own the "did anything move" question (the same
+    // contract MultiChannelBallistics answers) so a widget cannot get it subtly
+    // wrong by snapshotting the wrong set of fields. Nothing moved, so ask for
+    // nothing.
+    if (!ballistics_.update(raw_peak, raw_rms, dt)) return;
 
     const auto b = local_bounds();
     request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
@@ -1258,10 +1247,31 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
 
 // ── CorrelationMeter ────────────────────────────────────────────────────────
 
-void CorrelationMeter::update(float correlation, float dt) {
-    float target = std::clamp(correlation, -1.0f, 1.0f);
-    float coeff = 1.0f - std::exp(-dt / 0.05f); // 50ms smoothing
+bool CorrelationMeter::update(float correlation, float dt) {
+    // A non-finite input would poison the display value and, because NaN
+    // compares unequal to itself, report movement on every frame forever.
+    const float target =
+        std::isfinite(correlation) ? std::clamp(correlation, -1.0f, 1.0f) : 0.0f;
+    if (!std::isfinite(display_correlation_)) display_correlation_ = 0.0f;
+
+    const float prev = display_correlation_;
+    const float coeff = 1.0f - std::exp(-dt / 0.05f); // 50ms smoothing
     display_correlation_ += (target - display_correlation_) * coeff;
+
+    // SNAP TOWARD THE TARGET, NOT TOWARD ZERO. This is an exponential approach,
+    // so it closes on its target without ever arriving — unsnapped it moves by a
+    // fraction of a bit every frame forever, and a caller gating a repaint on
+    // "did it move" would repaint forever with nothing to show.
+    //
+    // The meters next door snap with a floor test (`if (v < 1e-6f) v = 0`)
+    // because a silent meter rests AT zero. Correlation rests wherever the
+    // signal is — a steady mono source settles at +1 — so a floor test would
+    // never fire and copying it here would do nothing at all. The general form
+    // is the one that works for both.
+    if (std::abs(display_correlation_ - target) < 1e-6f)
+        display_correlation_ = target;
+
+    return display_correlation_ != prev;
 }
 
 void CorrelationMeter::paint(canvas::Canvas& canvas) {
