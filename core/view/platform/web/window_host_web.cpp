@@ -276,9 +276,11 @@ private:
 
         // Animations and live meters need the next frame without an external
         // trigger; an idle tree costs nothing because the loop is demand-driven.
+        // Cheapest question first: `has_active_subscribers` is a scan of one
+        // small vector, `needs_continuous_frames` walks the entire view tree.
         if (render_loop_owned_ &&
-            (surface_lost || needs_continuous_frames(&root_) ||
-             frame_clock_.has_active_subscribers())) {
+            (surface_lost || frame_clock_.has_active_subscribers() ||
+             needs_continuous_frames(&root_))) {
             render_loop_owned_->request_frame();
         }
     }

@@ -13,6 +13,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
@@ -126,6 +127,121 @@ TEST_CASE("a widget reports its own liveness", "[view][continuous-frames]") {
         eq.set_spectrum(bins.data(), bins.size());
         REQUIRE(eq.needs_frames_self());
     }
+}
+
+// EVERY BRANCH THAT KEEPS THE LOOP ALIVE NEEDS A POSITIVE TEST.
+//
+// `needs_frames_self()` replaced a chain of `dynamic_cast`s, and a replacement
+// is only equivalent if each branch it subsumed still answers yes when it
+// should. The idle-side coverage below ("idle widgets do not force frames") is
+// satisfied by a predicate that returns false unconditionally — so on its own it
+// would let a widget whose animation stopped pinning the loop sail through the
+// whole suite, and the symptom is a knob whose glow freezes mid-fade rather than
+// anything that fails a build. These drive each widget's own animation and
+// assert the live window between "started" and "settled", through the shared
+// tree walk as well as the widget itself.
+//
+// One host tick at 60 Hz is 16.7 ms into an 80-150 ms ease: far enough in to be
+// unambiguously moving, far short of arriving.
+//
+// Each predicate carries a DEADBAND, and the settled assertions below are
+// written against it rather than against the animation's arithmetic end: a
+// fader stops asking once its thumb is within 0.01 of rest, a toggle once its
+// thumb is past 0.99. So the last sub-1% of travel is never painted unless
+// something else is keeping the loop alive. That is the intended trade -- an
+// invisible sliver is not worth a frame -- and it is the reason `settle()` here
+// loops on `needs_frames_self()` rather than on the underlying value.
+namespace {
+constexpr float kTick = 1.0f / 60.0f;
+
+// Run the animation to completion the way a host does, with a bound so a
+// predicate that never settles fails as a hang-free assertion instead.
+void settle(View& v) {
+    for (int i = 0; i < 600 && v.needs_frames_self(); ++i) v.advance_animations(kTick);
+}
+}  // namespace
+
+TEST_CASE("a knob mid hover-glow keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Knob>();
+    Knob* knob = owned.get();
+    knob->set_bounds({0, 0, 60, 60});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    knob->on_mouse_enter();          // glow eases 0 -> 1
+    knob->advance_animations(kTick); // mid-ease
+    CHECK(knob->hover_glow() > 0.01f);
+    CHECK(knob->hover_glow() < 0.99f);
+    CHECK(knob->needs_frames_self());
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*knob);
+    CHECK(knob->hover_glow() == Catch::Approx(1.0f));
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a fader mid hover-scale keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Fader>();
+    Fader* fader = owned.get();
+    fader->set_bounds({0, 0, 40, 160});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    fader->on_mouse_enter();          // thumb grows 1.0 -> 1.3
+    fader->advance_animations(kTick);
+    CHECK(fader->hover_scale() > 1.01f);
+    CHECK(fader->needs_frames_self());
+    CHECK(needs_continuous_frames(&root));
+
+    // Leaving shrinks it back; once it reaches 1.0 the fader is idle again.
+    fader->on_mouse_leave();
+    settle(*fader);
+    CHECK(fader->hover_scale() <= 1.01f);   // inside the deadband, i.e. at rest
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a toggle mid thumb-travel keeps the tree live", "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<Toggle>();
+    Toggle* toggle = owned.get();
+    toggle->set_bounds({0, 0, 48, 24});
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    toggle->set_on(true, /*animate=*/true);  // thumb travels 0 -> 1
+    toggle->advance_animations(kTick);
+    CHECK(toggle->thumb_position() > 0.01f);
+    CHECK(toggle->thumb_position() < 0.99f);
+    CHECK(toggle->needs_frames_self());
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*toggle);
+    CHECK(toggle->thumb_position() >= 0.99f);  // inside the deadband, i.e. arrived
+    CHECK_FALSE(needs_continuous_frames(&root));
+}
+
+TEST_CASE("a scroll view mid offset-ease keeps the tree live",
+          "[view][continuous-frames]") {
+    View root;
+    auto owned = std::make_unique<ScrollView>();
+    ScrollView* scroll = owned.get();
+    scroll->set_bounds({0, 0, 200, 100});
+    scroll->set_content_size({200, 800});   // taller than the view, so it can scroll
+    root.add_child(std::move(owned));
+    REQUIRE_FALSE(needs_continuous_frames(&root));
+
+    // Programmatic scroll eases (wheel input passes animate=false and jumps,
+    // which is why this asks for the animated path explicitly).
+    scroll->scroll_by(0.0f, 120.0f, /*animate=*/true);
+    CHECK(scroll->scroll_animating());
+    CHECK(scroll->needs_frames_self());
+    CHECK(needs_continuous_frames(&root));
+
+    settle(*scroll);
+    CHECK(scroll->scroll_y() == Catch::Approx(120.0f));
+    CHECK_FALSE(needs_continuous_frames(&root));
 }
 
 TEST_CASE("idle widgets do not force frames", "[view][continuous-frames]") {
