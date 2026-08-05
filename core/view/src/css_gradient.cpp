@@ -7,6 +7,7 @@
 #include <sstream>
 #include <vector>
 
+#include <pulp/runtime/log.hpp>
 #include <pulp/view/view.hpp>
 
 // Shared CSS-gradient parser. The logic here was lifted verbatim from the JS
@@ -245,6 +246,15 @@ std::optional<float> eval_calc_position(const std::string& token,
     return position;
 }
 
+// The unit a stop position was WRITTEN in.
+//
+// A repeating gradient's band is its last stop, and px and % resolve against
+// different things: `... 1px, 7px` tiles every 7 CSS px whatever the box, while
+// `... 0%, 10%` tiles every tenth of the gradient line, whose length only the
+// painter knows. The value alone cannot tell the two apart once it is a float,
+// so the reader records the unit rather than the caller guessing from it.
+enum class StopUnit { none, fraction, pixels };
+
 // A stop position resolved to the gradient's own 0..1 parameter, or nullopt
 // when the token is not a position at all.
 //
@@ -255,22 +265,35 @@ std::optional<float> eval_calc_position(const std::string& token,
 // sweep rendered as one flat colour. Linear and radial gradients measure
 // lengths instead, where an angle is meaningless and is left alone.
 std::optional<float> parse_stop_position(const std::string& tail, bool angular,
-                                         std::optional<float> length_px) {
-    if (tail.compare(0, 5, "calc(") == 0) return eval_calc_position(tail, length_px);
+                                         std::optional<float> length_px,
+                                         StopUnit* unit_out = nullptr) {
+    const auto record = [&](StopUnit u) { if (unit_out) *unit_out = u; };
+    if (tail.compare(0, 5, "calc(") == 0) {
+        // calc() resolves its own px terms against the line, so whatever the
+        // expression was written in, what comes back is a fraction of it.
+        const auto value = eval_calc_position(tail, length_px);
+        if (value) record(StopUnit::fraction);
+        return value;
+    }
     const auto unit_at = [&](std::string_view unit) {
         return tail.size() > unit.size() &&
                tail.compare(tail.size() - unit.size(), unit.size(), unit) == 0;
     };
     std::string number = tail;
     float scale = 1.0f;  // bare number: already the 0..1 parameter
+    StopUnit unit = StopUnit::fraction;
     if (!tail.empty() && tail.back() == '%') {
         number = tail.substr(0, tail.size() - 1);
         scale = 1.0f / 100.0f;
     } else if (unit_at("px")) {
         // A pixel offset needs the box to resolve against, which this parser
         // does not have. Kept as the historical raw-number reading rather than
-        // silently becoming something else.
+        // silently becoming something else. A repeating gradient is the one
+        // caller that needs no box for it: its band is its own last stop, so it
+        // divides these raw pixel values by that band and gets a correct 0..1
+        // tile without ever measuring the line.
         number = tail.substr(0, tail.size() - 2);
+        unit = StopUnit::pixels;
     } else if (angular && unit_at("grad")) {
         number = tail.substr(0, tail.size() - 4);
         scale = 1.0f / 400.0f;
@@ -293,6 +316,7 @@ std::optional<float> parse_stop_position(const std::string& tail, bool angular,
         std::size_t consumed = 0;
         const float value = std::stof(number, &consumed);
         if (consumed != number.size()) return std::nullopt;
+        record(unit);
         return value * scale;
     } catch (...) {
         return std::nullopt;
@@ -313,12 +337,16 @@ std::optional<float> parse_stop_position(const std::string& tail, bool angular,
 // thing entirely, and spreading it evenly would put it somewhere the author
 // did not ask for while looking like an ordinary render. Refusing the gradient
 // is the loud answer, and it is what a browser does with the same declaration.
+// `units`, when given, receives one entry per EMITTED stop naming the unit that
+// stop's position was written in — see StopUnit. A two-position stop emits two
+// entries, and a stop with no position of its own emits StopUnit::none.
 bool parse_stops(const std::string& colorStr,
                  const CssColorParser& parseColor,
                  std::vector<canvas::Color>& colors,
                  std::vector<float>& positions,
                  bool angular = false,
-                 std::optional<float> length_px = std::nullopt) {
+                 std::optional<float> length_px = std::nullopt,
+                 std::vector<StopUnit>* units = nullptr) {
     std::vector<std::string> tokens;
     std::string cur; int paren = 0;
     for (char c : colorStr) {
@@ -360,11 +388,13 @@ bool parse_stops(const std::string& colorStr,
     // A stop that names calc() and cannot be evaluated makes the whole gradient
     // unreadable rather than merely position-less.
     bool refused = false;
-    const auto peel = [&](std::string& tok) -> std::optional<float> {
+    const auto peel = [&](std::string& tok,
+                          StopUnit& unit_out) -> std::optional<float> {
         const auto start = last_token_start(tok);
         if (start == std::string::npos) return std::nullopt;
         const auto tail = tok.substr(start);
-        const auto value = parse_stop_position(tail, angular, length_px);
+        const auto value =
+            parse_stop_position(tail, angular, length_px, &unit_out);
         if (!value) {
             if (tail.compare(0, 5, "calc(") == 0) refused = true;
             return std::nullopt;
@@ -380,19 +410,21 @@ bool parse_stops(const std::string& colorStr,
     struct Stop {
         canvas::Color color;
         std::optional<float> position;
+        StopUnit unit = StopUnit::none;
     };
     std::vector<Stop> stops;
     stops.reserve(tokens.size());
     for (auto& token : tokens) {
         std::string tok = token;
-        const auto second = peel(tok);
-        const auto first = second ? peel(tok) : std::nullopt;
+        StopUnit second_unit = StopUnit::none, first_unit = StopUnit::none;
+        const auto second = peel(tok, second_unit);
+        const auto first = second ? peel(tok, first_unit) : std::nullopt;
         const auto color = parseColor(tok);
         if (first) {
-            stops.push_back({color, first});
-            stops.push_back({color, second});
+            stops.push_back({color, first, first_unit});
+            stops.push_back({color, second, second_unit});
         } else {
-            stops.push_back({color, second});
+            stops.push_back({color, second, second_unit});
         }
     }
 
@@ -402,6 +434,7 @@ bool parse_stops(const std::string& colorStr,
         colors.push_back(stops[i].color);
         positions.push_back(stops[i].position.value_or(
             stops.size() > 1 ? static_cast<float>(i) / (stops.size() - 1) : 0));
+        if (units) units->push_back(stops[i].unit);
     }
     return true;
 }
@@ -532,9 +565,18 @@ bool parse_one_gradient(const std::string& gradient,
         return std::sqrt(dx * dx + dy * dy);
     };
 
-    // linear-gradient([<angle> | to <side-or-corner>,] stop, stop, ...)
-    if (gradient.substr(0, 16) == "linear-gradient(") {
-        auto inner = gradient.substr(16, gradient.size() - 17);
+    // linear-gradient([<angle> | to <side-or-corner>,] stop, stop, ...).
+    //
+    // `repeating-linear-gradient` differs from `linear-gradient` only in what
+    // happens past the last stop: the band tiles along the line instead of
+    // clamping, exactly as it does for a conic. Same prefix grammar, same
+    // stops, so the two share this branch and part ways at the band handed to
+    // the View.
+    const bool linear_repeats =
+        gradient.compare(0, 26, "repeating-linear-gradient(") == 0;
+    if (linear_repeats || gradient.substr(0, 16) == "linear-gradient(") {
+        const std::size_t open = linear_repeats ? 26 : 16;
+        auto inner = gradient.substr(open, gradient.size() - open - 1);
         float x0 = 0, y0 = 0, x1 = 0, y1 = 1;  // default: to bottom
         size_t color_start = 0;
         const size_t prefix_end = top_level_comma(inner);
@@ -604,12 +646,61 @@ bool parse_one_gradient(const std::string& gradient,
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
+        std::vector<StopUnit> units;
         if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
-                         /*angular=*/false, line_length(x0, y0, x1, y1)))
+                         /*angular=*/false, line_length(x0, y0, x1, y1),
+                         linear_repeats ? &units : nullptr))
             return false;
         if (!colors.empty()) {
+            // The band a repeating linear tiles runs from 0 to its LAST stop,
+            // and the shader wants that band expressed as 0..1 — the same
+            // rescaling a repeating conic does onto its sweep. The band's UNIT
+            // travels with it because only the painter can measure the line.
+            //
+            // Every stop has to agree on that unit, with one exception: an
+            // unpositioned FIRST stop resolves to 0, which is where CSS puts it
+            // anyway. An unpositioned MIDDLE stop is spread evenly across the
+            // WHOLE line by the reader above, and rescaling that onto the band
+            // would land it somewhere the author did not ask for.
+            //
+            // Where the band cannot be resolved this DEGRADES to a
+            // non-repeating gradient and says so. It must not refuse: a refusal
+            // takes the node's entire background-image stack with it, and a
+            // node with no stack is indistinguishable from a node that never
+            // had a background, so an unsupported gradient FORM reads as a
+            // tiling bug in the painter — and the search goes to the paint
+            // path, where there is nothing to find.
+            float repeat_span = 0.0f;
+            auto repeat_unit = View::BackgroundGradient::RepeatUnit::px;
+            if (linear_repeats) {
+                const StopUnit band_unit =
+                    units.empty() ? StopUnit::none : units.back();
+                bool uniform = band_unit != StopUnit::none;
+                for (std::size_t i = 0; i < units.size() && uniform; ++i) {
+                    if (i == 0 && units[i] == StopUnit::none) continue;
+                    uniform = units[i] == band_unit;
+                }
+                const float band =
+                    *std::max_element(positions.begin(), positions.end());
+                if (uniform && band > 0.0f) {
+                    repeat_span = band;
+                    repeat_unit =
+                        band_unit == StopUnit::pixels
+                            ? View::BackgroundGradient::RepeatUnit::px
+                            : View::BackgroundGradient::RepeatUnit::line_fraction;
+                    for (auto& p : positions) p /= band;
+                } else {
+                    pulp::runtime::log_warn(
+                        "css_gradient: repeating-linear-gradient has no single "
+                        "band to tile (its stop units differ, or a stop past "
+                        "the first has no position of its own); painting it "
+                        "once instead: {}", gradient);
+                }
+            }
             out = {}; out.type = 1;
             out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
+            out.linear_repeat = repeat_span;
+            out.linear_repeat_unit = repeat_unit;
             // The endpoints above are the best this box can give; when the
             // direction depends on the box, hand the painter the CSS intent so
             // it can redo the arithmetic once the view is laid out. Without
@@ -638,8 +729,19 @@ bool parse_one_gradient(const std::string& gradient,
     // the box's larger side, which is what this used to hand the painter — so
     // the geometry is recorded here and resolved against the laid-out box in
     // View::resolve_radial.
-    if (gradient.substr(0, 16) == "radial-gradient(") {
-        std::string inner = gradient.substr(16, gradient.size() - 17);
+    //
+    // `repeating-radial-gradient` shares this grammar. Its band is NOT tiled:
+    // a radial's ending shape is an ellipse resolved against the box, so the
+    // repetition is not the single shader tile mode a linear's or a conic's
+    // is, and building it is out of scope here. It therefore paints its stops
+    // once and clamps — a visibly incomplete render of a rare form, and
+    // strictly better than the prefix miss it replaces, which refused the
+    // value and took the node's whole background-image stack down with it.
+    const bool radial_repeats =
+        gradient.compare(0, 26, "repeating-radial-gradient(") == 0;
+    if (radial_repeats || gradient.substr(0, 16) == "radial-gradient(") {
+        const std::size_t open = radial_repeats ? 26 : 16;
+        std::string inner = gradient.substr(open, gradient.size() - open - 1);
         float cx = 0.5f, cy = 0.5f;
         using Radial = View::BackgroundGradient::RadialSize;
         // CSS defaults: farthest-corner, and ellipse unless `circle` is named
@@ -820,8 +922,17 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
             trimmed.find_first_not_of(" \t\r\n", 4) == std::string::npos)
             continue;
         View::BackgroundGradient layer;
-        if (!parse_one_gradient(layer_css, color_of, v.local_bounds(), layer))
+        if (!parse_one_gradient(layer_css, color_of, v.local_bounds(), layer)) {
+            // Name the layer that refused. Silence here is the expensive part:
+            // a dropped stack looks exactly like a node that never had a
+            // background, so an unsupported gradient FORM reads downstream as a
+            // painter defect, and the search goes to the paint path — where
+            // there is nothing to find.
+            pulp::runtime::log_warn(
+                "css_gradient: refusing background-image because this layer "
+                "did not parse: {} (whole value: {})", layer_css, css);
             return false;
+        }
         layers.push_back(std::move(layer));
     }
     if (layers.empty()) return false;

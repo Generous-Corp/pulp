@@ -740,10 +740,33 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                 lx1 = (w * 0.5f + dx * len * 0.5f) / (w != 0.0f ? w : 1.0f);
                 ly1 = (h * 0.5f + dy * len * 0.5f) / (h != 0.0f ? h : 1.0f);
             }
-            canvas.set_fill_gradient_linear(
-                lx0 * bounds_.width, ly0 * bounds_.height,
-                lx1 * bounds_.width, ly1 * bounds_.height,
-                grad_c, grad_p, grad_n);
+            // A repeating linear's stops span ONE BAND, so the shader gets
+            // the band's endpoints and tiles it along the line rather than
+            // being stretched across the box. The band arrives either as a CSS
+            // length or as a fraction of the line, and the line's length is
+            // only knowable here — which is the whole reason the parser hands
+            // the unit forward instead of collapsing it.
+            //
+            // A band that already covers the line has nothing to repeat and
+            // degrades to the plain form, mirroring the conic above.
+            const float px0 = lx0 * bounds_.width, py0 = ly0 * bounds_.height;
+            const float px1 = lx1 * bounds_.width, py1 = ly1 * bounds_.height;
+            const float line_dx = px1 - px0, line_dy = py1 - py0;
+            const float line_len =
+                std::sqrt(line_dx * line_dx + line_dy * line_dy);
+            const float band =
+                layer->linear_repeat_unit == BackgroundGradient::RepeatUnit::px
+                    ? layer->linear_repeat
+                    : layer->linear_repeat * line_len;
+            if (band > 0.0f && line_len > 0.0f && band < line_len) {
+                const float span = band / line_len;
+                canvas.set_fill_gradient_linear_repeating(
+                    px0, py0, px0 + line_dx * span, py0 + line_dy * span,
+                    grad_c, grad_p, grad_n);
+            } else {
+                canvas.set_fill_gradient_linear(px0, py0, px1, py1,
+                                                grad_c, grad_p, grad_n);
+            }
         }
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,

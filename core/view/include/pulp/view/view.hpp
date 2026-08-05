@@ -1862,6 +1862,20 @@ public:
         /// `right`, -1 for `left`; y is +1 for `bottom`, -1 for `top`.
         float corner_x = 1.0f, corner_y = 1.0f;
 
+        /// The band a `repeating-linear-gradient` tiles; 0 when the gradient
+        /// does not repeat. `positions` are rescaled ONTO this band — 0..1
+        /// across one tile — exactly as a repeating conic's are onto its
+        /// sweep, so the painter only has to place the band and let the shader
+        /// tile it.
+        float linear_repeat = 0.0f;
+        /// What `linear_repeat` is measured in. CSS lets the band be a length
+        /// (`... 1px, 7px` — 7 CSS px per tile whatever the box) or a fraction
+        /// of the gradient line (`... 0%, 10%`), and the line's length is a
+        /// function of the laid-out box, so the choice cannot be collapsed
+        /// before paint.
+        enum class RepeatUnit { px, line_fraction };
+        RepeatUnit linear_repeat_unit = RepeatUnit::px;
+
         /// How a radial gradient's radii are sized, per css-images-3.
         /// `max_side` is not a CSS keyword — it is the pre-existing
         /// `radius x max(w,h)` circle the explicit setter has always meant,

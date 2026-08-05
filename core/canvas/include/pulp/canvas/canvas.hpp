@@ -1788,6 +1788,26 @@ protected:
         set_fill_gradient_conic(cx, cy, start_angle, colors, positions, count);
     }
 
+    /// Set a REPEATING linear gradient (CSS `repeating-linear-gradient`). The
+    /// two points delimit ONE BAND rather than the whole box — positions are
+    /// normalized to 0..1 across that band — and the band tiles along the
+    /// gradient line in both directions.
+    ///
+    /// Declared after the conic form above and for the same two reasons: a
+    /// wider set_fill_gradient_linear would reorder this vtable under every
+    /// prebuilt SDK consumer, and the Canvas2D command recorders would have to
+    /// grow a field to carry the tile mode. The default paints the band ONCE
+    /// and clamps the rest, which is what a backend that cannot tile should
+    /// show — recognisably the right colours in the wrong places, rather than
+    /// nothing or a silent stretch across the box.
+    virtual void set_fill_gradient_linear_repeating(float x0, float y0,
+                                                     float x1, float y1,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+        set_fill_gradient_linear(x0, y0, x1, y1, colors, positions, count);
+    }
+
 };
 
 } // namespace pulp::canvas

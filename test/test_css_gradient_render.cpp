@@ -56,6 +56,26 @@ void require_same_render(const std::string& a, const std::string& b) {
     CHECK(cmp.similarity > 0.999f);
 }
 
+// Eight bands of red-then-green across the box, written one band at a time.
+// On a kSize box with the line running `to right`, that is what a 20px
+// repeating band means: 20px is 12.5% of 160, and the colour flips halfway.
+//
+// The reference is written in PERCENT deliberately. A bare `px` stop outside a
+// repeating gradient is still read as a raw 0..1 number, which is a separate
+// defect — using that spelling as the reference would compare this fix against
+// that bug and agree with both.
+std::string eight_explicit_bands() {
+    std::string css = "linear-gradient(to right";
+    for (int i = 0; i < 8; ++i) {
+        const double a = i * 12.5;
+        css += ", #ff0000 " + std::to_string(a) + "%";
+        css += ", #ff0000 " + std::to_string(a + 6.25) + "%";
+        css += ", #00ff00 " + std::to_string(a + 6.25) + "%";
+        css += ", #00ff00 " + std::to_string(a + 12.5) + "%";
+    }
+    return css + ")";
+}
+
 }  // namespace
 
 // A sweep covers the whole circle. Skia clamps angles outside the shader's
@@ -406,6 +426,108 @@ TEST_CASE("a corner keyword paints toward its corner",
                         "linear-gradient(135deg, #ff0000, #0000ff)");
     require_same_render("linear-gradient(to top left, #ff0000, #0000ff)",
                         "linear-gradient(315deg, #ff0000, #0000ff)");
+}
+
+// The repeat is Skia's, exactly as it is for the conic above: a linear shader
+// given a ONE-BAND span and a repeating tile mode tiles that band along the
+// line. Before this the `repeating-` prefix matched no branch at all, so the
+// value was refused — and a refusal takes the node's whole background-image
+// stack with it, so the element painted nothing rather than painting one band.
+TEST_CASE("repeating-linear-gradient tiles its band across the box",
+          "[view][gradient][linear]") {
+    // Two positions on each stop, in px, is the grid idiom this was found for.
+    require_same_render(
+        "repeating-linear-gradient(to right, #ff0000 0px 10px, "
+        "#00ff00 10px 20px)",
+        eight_explicit_bands());
+}
+
+// The same eight bands with the band stated as a FRACTION of the gradient line
+// rather than a length. Same pixels, different unit reaching the painter — and
+// only the painter can turn a fraction into a length, because the line is as
+// long as the laid-out box makes it.
+TEST_CASE("a repeating linear band may be a fraction of the gradient line",
+          "[view][gradient][linear]") {
+    require_same_render(
+        "repeating-linear-gradient(to right, #ff0000 0% 6.25%, "
+        "#00ff00 6.25% 12.5%)",
+        eight_explicit_bands());
+}
+
+// The declaration this cluster was found for, verbatim from the header of a
+// panel a design pass actually produced. Chrome draws a hairline every 7 CSS px
+// across that header; we drew nothing at all.
+//
+// It is pinned at the parse rather than in pixels because 160 is not a multiple
+// of 7, so there is no explicit equivalent to compare against without inventing
+// a partial last band — and its colour is 12.6%-alpha over a dark ground, which
+// is too faint for a coverage threshold to judge honestly. The band and the
+// rescaled stops ARE the whole contract with the painter, and the two cases
+// above already hold the pixels. Chrome's own 7px period is re-measured on the
+// real panel by tools/import-validation/replay-agent-panel.sh.
+TEST_CASE("the header pinstripe a design pass authored carries its band",
+          "[view][gradient][linear]") {
+    View v;
+    v.set_bounds({0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize)});
+    REQUIRE(apply_css_background_gradient(
+        v,
+        "repeating-linear-gradient(90deg, "
+        "oklab(0.322354 0.00371338 0.035201 / 0.126275) 0px, "
+        "oklab(0.322354 0.00371338 0.035201 / 0.126275) 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 7px)"));
+    REQUIRE(v.background_gradient_layers().size() == 1);
+    const auto& layer = v.background_gradient_layers().front();
+    CHECK(layer.linear_repeat == 7.0f);
+    CHECK(layer.linear_repeat_unit ==
+          View::BackgroundGradient::RepeatUnit::px);
+    // The stops are rescaled onto the band: the hairline occupies the first
+    // seventh of every tile, not the first seventh of the whole header.
+    REQUIRE(layer.positions.size() == 4);
+    CHECK(layer.positions[0] == 0.0f);
+    CHECK(std::abs(layer.positions[1] - 1.0f / 7.0f) < 1e-5f);
+    CHECK(std::abs(layer.positions[2] - 1.0f / 7.0f) < 1e-5f);
+    CHECK(layer.positions[3] == 1.0f);
+}
+
+// A repeating gradient whose band cannot be resolved must DEGRADE to a
+// non-repeating one, never refuse.
+//
+// This is the contract that matters more than the tiling itself. A refusal
+// discards the whole background-image stack, and a node with no stack is
+// indistinguishable from a node that never had a background — so an
+// unsupported gradient FORM reads downstream as a painter defect. These are
+// therefore asserted to PAINT, not to tile.
+TEST_CASE("an unresolvable repeating band degrades instead of dropping",
+          "[view][gradient][linear]") {
+    // Both spellings keep their stop positions monotonic on the degraded path.
+    // A degrade hands the shader the stops as the reader left them, so a case
+    // written to go BACKWARDS (`10px, 50%` — 10 then 0.5) would be testing
+    // Skia's tolerance for unsorted stops rather than this contract.
+    for (const char* css : {
+             // No single unit for the band: 20% and 30px measure different
+             // things and the last stop cannot speak for both.
+             "repeating-linear-gradient(to right, #ff0000 20%, #0000ff 30px)",
+             // A middle stop with no position of its own is spread across the
+             // WHOLE line, so rescaling it onto the band would move it.
+             "repeating-linear-gradient(to right, #ff0000 0%, #00ff00, "
+             "#0000ff 50%)"}) {
+        bool applied = false;
+        render_css(css, &applied);
+        INFO("css: " << css);
+        CHECK(applied);
+    }
+}
+
+// `repeating-radial-gradient` hits the same prefix miss and is admitted by the
+// same change. Its band is NOT tiled — see parse_one_gradient — so it is held
+// to the one case where tiled and clamped are the same picture: a band that
+// already spans the whole shape. What this pins is that the value PAINTS,
+// where before it took the node's entire background-image stack down with it.
+TEST_CASE("repeating-radial-gradient paints instead of refusing the stack",
+          "[view][gradient][radial]") {
+    require_same_render(
+        "repeating-radial-gradient(circle, #ff0000 0%, #0000ff 100%)",
+        "radial-gradient(circle, #ff0000 0%, #0000ff 100%)");
 }
 
 // Chromium serializes every modern colour syntax as oklab()/oklch(), so this is
