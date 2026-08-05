@@ -1736,6 +1736,23 @@ what makes it safe to pull unconditionally on a tick even though routing is
 auto-enabled for every bound imported design — do not "optimize" it into a
 re-emit.
 
+**The walk is not free once the view tree is an application shell.** The walk is
+deliberately over the LIVE tree — a cached `DesignFrameView*` list would dangle
+whenever a view is removed (an editor reload transplants children), and a dangling
+pointer here is a use-after-free inside a DAW's UI tick. But the original comment
+justified doing that identification with a `dynamic_cast` per node on the grounds
+that "a design tree is tens of views, not thousands." A plugin editor is; an
+application shell built on the same view tree is not. Sampled on an *idle* Forge
+Modular window, the `dynamic_cast` RTTI lookup alone — `libc++abi`'s
+`__dynamic_cast`, one question per node per frame — was **7% of the process**.
+
+Keep the live walk; drop the RTTI. `View::is_design_frame()` is set by
+`DesignFrameView`'s own constructor, so the `static_cast` that follows is asking a
+type that has already answered. If you add another "is it this kind of view?" test
+to a per-frame walk, add a flag the constructor sets rather than a `dynamic_cast` —
+and note that this cost is invisible in a plugin editor and only shows up when the
+same tree carries an app.
+
 **Testing that property: assert zero writes, not "it converges."** A
 settle/no-drift check over repeated pulls looks like the natural convergence
 proof and is nearly worthless here — a discrete parameter quantizes a small echo
