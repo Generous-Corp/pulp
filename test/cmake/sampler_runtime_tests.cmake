@@ -5,6 +5,7 @@ pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
 pulp_add_test_suite(pulp-test-timebase-continuous LIBRARIES pulp::timebase TIMEOUT 60)
 pulp_add_test_suite(pulp-test-timebase-groove-kernels
+    SOURCES test_timebase_groove_kernels.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timebase pulp::playback pulp::timeline
     TIMEOUT 60)
 
