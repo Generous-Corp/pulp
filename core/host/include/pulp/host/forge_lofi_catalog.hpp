@@ -57,6 +57,7 @@
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dither.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/noise_gate.hpp>
 #include <pulp/signal/phaser.hpp>
@@ -79,6 +80,9 @@ inline constexpr const char* kWaveshaperTypeId = "forge_lofi_waveshaper";
 inline constexpr const char* kDryWetTypeId     = "forge_lofi_drywet";
 inline constexpr const char* kNoiseTypeId      = "forge_lofi_noise";
 inline constexpr const char* kBitcrushTypeId   = "forge_lofi_bitcrush";
+inline constexpr const char* kBitcrushTpdfTypeId = "forge_lofi_bitcrush_tpdf";
+inline constexpr const char* kBitcrushTpdfFirstTypeId = "forge_lofi_bitcrush_tpdf_first";
+inline constexpr const char* kBitcrushTpdfSecondTypeId = "forge_lofi_bitcrush_tpdf_second";
 inline constexpr const char* kTrimTypeId       = "forge_lofi_trim";
 inline constexpr const char* kPingPongTypeId   = "forge_lofi_ping_pong";
 inline constexpr const char* kReverbTypeId     = "forge_lofi_reverb";
@@ -407,22 +411,40 @@ inline CustomNodeType make_noise_node() {
 struct BitcrushInstance {
     float held = 0.0f;   // last latched (decimated) sample
     float phase = 0.0f;  // sample-and-hold phase accumulator
+    signal::DitherQuantizer quantizer;
 };
 
-inline CustomNodeType make_bitcrush_node() {
+inline CustomNodeType make_bitcrush_node(
+    signal::DitherMode dither = signal::DitherMode::none,
+    signal::NoiseShapingOrder shaping = signal::NoiseShapingOrder::none) {
+    if (shaping != signal::NoiseShapingOrder::none)
+        dither = signal::DitherMode::tpdf;
     CustomNodeType t;
-    t.type_id = kBitcrushTypeId;
+    if (dither == signal::DitherMode::none && shaping == signal::NoiseShapingOrder::none)
+        t.type_id = kBitcrushTypeId;
+    else if (shaping == signal::NoiseShapingOrder::first)
+        t.type_id = kBitcrushTpdfFirstTypeId;
+    else if (shaping == signal::NoiseShapingOrder::second)
+        t.type_id = kBitcrushTpdfSecondTypeId;
+    else
+        t.type_id = kBitcrushTpdfTypeId;
     t.version = 1;
     t.num_input_ports = 1;
     t.num_output_ports = 1;
     t.default_name = "Crush";
     t.lowerable = true;
-    t.create = []() -> void* { return new BitcrushInstance{}; };
+    t.create = [dither, shaping]() -> void* {
+        auto* s = new BitcrushInstance{};
+        s->quantizer.set_dither_mode(dither);
+        s->quantizer.set_noise_shaping(shaping);
+        return s;
+    };
     t.destroy = [](void* p) { delete static_cast<BitcrushInstance*>(p); };
     t.reset = [](void* p) {
         auto* s = static_cast<BitcrushInstance*>(p);
         s->held = 0.0f;
         s->phase = 0.0f;
+        s->quantizer.reset();
     };
     // bit_depth: 16 (near-lossless) down to 1 (3-level) — default lossless.
     t.baked_params.push_back({kBitcrushBitDepth, 1.0f, 16.0f, 16.0f});
@@ -449,9 +471,15 @@ inline CustomNodeType make_bitcrush_node() {
                     s->held = i[static_cast<std::size_t>(k)];
                 }
 
-                // Mid-tread quantization to 2^bits levels across [-1, 1].
-                const float scale = std::exp2(bits - 1.0f);  // 2^(bits-1)
-                o[static_cast<std::size_t>(k)] = std::round(s->held * scale) / scale;
+                if (s->quantizer.dither_mode() == signal::DitherMode::none &&
+                    s->quantizer.noise_shaping() == signal::NoiseShapingOrder::none) {
+                    // Preserve the original realization's arithmetic exactly.
+                    const float scale = std::exp2(bits - 1.0f);  // 2^(bits-1)
+                    o[static_cast<std::size_t>(k)] = std::round(s->held * scale) / scale;
+                } else {
+                    s->quantizer.set_bits(bits);
+                    o[static_cast<std::size_t>(k)] = s->quantizer.process(s->held);
+                }
             }
         };
     return t;

@@ -2,7 +2,7 @@
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
     "catalogs": 30,
-    "type_ids": 103,
+    "type_ids": 106,
     "factories": 65,
     "baked_params": 393
   },
@@ -944,6 +944,18 @@
         {
           "constant": "kBitcrushTypeId",
           "value": "forge_lofi_bitcrush"
+        },
+        {
+          "constant": "kBitcrushTpdfTypeId",
+          "value": "forge_lofi_bitcrush_tpdf"
+        },
+        {
+          "constant": "kBitcrushTpdfFirstTypeId",
+          "value": "forge_lofi_bitcrush_tpdf_first"
+        },
+        {
+          "constant": "kBitcrushTpdfSecondTypeId",
+          "value": "forge_lofi_bitcrush_tpdf_second"
         },
         {
           "constant": "kTrimTypeId",
