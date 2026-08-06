@@ -110,6 +110,21 @@ installed_version() {
 }
 
 HAVE="$(installed_version)"
+if [ -n "$HAVE" ] && [ "$HAVE" = "$VERSION" ]; then
+    # Version alone cannot distinguish the stock pack from a pack rebuilt by
+    # the user: generated packs intentionally retain the plugin's compatible
+    # 2.0.0 version. Preserve that identity across installer upgrades.
+    if [ -f "$DEST_DIR/.ForgeModular-user-pack" ] || \
+       [ -f "$DEST_DIR/$SLUG/.forge-generated-pack" ]; then
+        echo "install_pack: keeping user-generated $SLUG $HAVE"
+        exit 0
+    fi
+    installed_archive="$DEST_DIR/$BASE"
+    if [ -f "$installed_archive" ] && ! cmp -s "$installed_archive" "$PACK"; then
+        echo "install_pack: keeping distinct same-version $SLUG $HAVE pack"
+        exit 0
+    fi
+fi
 if [ -n "$HAVE" ] && [ "$HAVE" != "$VERSION" ]; then
     # sort -V puts the lower version first, so "the newest is the one already
     # there and it is not ours" means leave it alone.
@@ -169,6 +184,7 @@ rm -f "$TMP"
 cp "$PACK" "$TMP" || { echo "install_pack: copy failed" >&2; rm -f "$TMP"; exit 1; }
 mv -f "$TMP" "$DEST_DIR/$BASE" || {
     echo "install_pack: could not place $BASE" >&2; rm -f "$TMP"; exit 1; }
+rm -f "$DEST_DIR/.ForgeModular-user-pack"
 
 # The app appends its @-mention install log to `runs/` with a shell redirect,
 # which fails outright if the directory is absent -- so on a fresh machine the

@@ -7,9 +7,8 @@
 # new machine -- the ONLY case that matters for a new machine -- was the one
 # never exercised. It failed, and would have failed on the M5.
 #
-# Both directions are asserted, because the two fixes pull against each other:
-# a fresh home must be SEEDED, and an existing one must be LEFT ALONE. Fixing
-# either alone re-creates the bug the other was written for.
+# Both directions are asserted: committed built-ins refresh as one release,
+# while explicitly generated modules and patches survive that refresh.
 #
 #   tools/rack/test_install_toolchain.sh
 
@@ -45,7 +44,14 @@ fi
 # The regression behind the exclusions: a module built from the app opened in
 # Rack once, and the next reinstall removed its .vcv.
 echo '{"generated":true}' > "$FRESH/examples/forge-modular/patches/probe.vcv"
-echo '{"slug":"PROBEMOD"}' > "$FRESH/examples/forge-modular/modules/probemod.json"
+sed '1a\
+  "forge_generated": true,' \
+    "$HERE/../../examples/forge-modular/modules/atten.json" \
+    | sed 's/"slug": "ATTEN"/"slug": "PROBEMOD"/' \
+    > "$FRESH/examples/forge-modular/modules/probemod.json"
+cp "$HERE/../../examples/forge-modular/src/ATTEN.cpp" \
+   "$FRESH/examples/forge-modular/src/PROBEMOD.cpp"
+printf '{"stale":true}\n' > "$FRESH/examples/forge-modular/modules/atten.json"
 FORGE_MODULAR_HOME="$FRESH" "$INSTALL" >/dev/null 2>&1
 code=$?
 if [ "$code" -ne 0 ]; then
@@ -62,6 +68,12 @@ if [ -f "$FRESH/examples/forge-modular/modules/probemod.json" ]; then
     ok "a reinstall keeps a generated module manifest"
 else
     bad "a reinstall keeps a generated module manifest — it was deleted"
+fi
+if cmp -s "$FRESH/examples/forge-modular/modules/atten.json" \
+          "$HERE/../../examples/forge-modular/modules/atten.json"; then
+    ok "a reinstall refreshes committed built-in manifests"
+else
+    bad "a stale built-in survived under the new toolchain version"
 fi
 
 # --- an interrupted first install still gets seeded ---------------------------

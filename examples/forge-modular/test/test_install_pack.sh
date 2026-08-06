@@ -49,6 +49,36 @@ else
 fi
 rm -rf "$W"
 
+# ── same-version generated content is user work, not stock ──────────────────
+ran=$((ran + 1))
+new_world 2.0.0 mac-arm64
+DEST="$W/home/Library/Application Support/Rack2/plugins-mac-arm64"
+mkdir -p "$DEST"
+printf 'user generated pack\n' > "$DEST/ForgeModular-2.0.0-mac-arm64.vcvplugin"
+printf 'ForgeModular-2.0.0-mac-arm64.vcvplugin\n' > "$DEST/.ForgeModular-user-pack"
+out="$("$PLACER" --source "$W/Forge Modular.app" --home "$W/home" 2>&1)"
+if grep -q 'user generated pack' "$DEST/ForgeModular-2.0.0-mac-arm64.vcvplugin" && \
+   echo "$out" | grep -q 'keeping user-generated'; then
+    ok "an installer upgrade preserves a same-version generated archive"
+else
+    fail "a same-version generated archive was replaced by stock: $out"
+fi
+rm -rf "$W"
+
+ran=$((ran + 1))
+new_world 2.0.0 mac-arm64
+DEST="$W/home/Library/Application Support/Rack2/plugins-mac-arm64"
+mkdir -p "$DEST/ForgeModular"
+printf '{"slug":"ForgeModular","version":"2.0.0"}\n' > "$DEST/ForgeModular/plugin.json"
+printf 'generated\n' > "$DEST/ForgeModular/.forge-generated-pack"
+out="$("$PLACER" --source "$W/Forge Modular.app" --home "$W/home" 2>&1)"
+if [ -d "$DEST/ForgeModular" ] && echo "$out" | grep -q 'keeping user-generated'; then
+    ok "an installer upgrade preserves an unpacked generated pack"
+else
+    fail "an unpacked generated pack was displaced: $out"
+fi
+rm -rf "$W"
+
 # ── the platform directory comes from the pack's name ────────────────────────
 # A pack built for Intel dropped into plugins-mac-arm64 is one Rack silently
 # will not load, and a hardcoded "arm64" would produce exactly that the day an

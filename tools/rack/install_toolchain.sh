@@ -98,23 +98,53 @@ for part in "${PARTS[@]}"; do
       printf '%s\n' VERSION >> "$exclude_file"
     fi
     if [ "$part" = "examples/forge-modular" ]; then
-      printf '%s\n' 'modules/' 'patches/' 'plugin.json' \
-        'src/generated_modules.hpp' 'src/*.cpp' 'res/' >> "$exclude_file"
-    fi
-    # A FRESH install has no generated state to protect, and the exclusions
-    # above would leave it with none at all: no manifests, so nothing to emit a
-    # panel from, so the verification below fails on a machine that has done
-    # nothing wrong. Seed it once from the committed set, which is internally
-    # consistent by construction because it was committed together.
-    #
-    # Keyed on the plugin-level manifest rather than on the directory: an
-    # interrupted first install can leave modules/ existing and empty, and
-    # seeding is exactly what that machine still needs.
-    if [ "$part" = "examples/forge-modular" ] &&
-       [ ! -f "$DEST/$part/modules/_plugin.json" ]; then
-      echo "  seeding the module pack (first install)"
-      rsync -a --exclude=__pycache__ --exclude='*.pyc' --exclude=build \
+      # Refresh every committed built-in as one coherent set. Generated modules
+      # explicitly identify themselves in their manifest and are overlaid only
+      # after that refresh; preserving the whole old pack made a new VERSION
+      # stamp claim stale built-ins were current.
+      preserve_root="$(mktemp -d)"
+      mkdir -p "$preserve_root/modules" "$preserve_root/src" \
+               "$preserve_root/res" "$preserve_root/patches" \
+               "$preserve_root/legacy"
+      if [ -d "$DEST/$part/patches" ]; then
+        rsync -a "$DEST/$part/patches/" "$preserve_root/patches/"
+      fi
+      for manifest in "$DEST/$part/modules"/*.json; do
+        [ -f "$manifest" ] || continue
+        base="$(basename "$manifest")"
+        [ "$base" = "_plugin.json" ] && continue
+        if grep -Eq '"forge_generated"[[:space:]]*:[[:space:]]*true' "$manifest"; then
+          cp "$manifest" "$preserve_root/modules/$base"
+          slug="$(sed -n 's/.*"slug"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1)"
+          [ -n "$slug" ] && [ -f "$DEST/$part/src/$slug.cpp" ] && \
+            cp "$DEST/$part/src/$slug.cpp" "$preserve_root/src/"
+          [ -n "$slug" ] && [ -f "$DEST/$part/res/$slug.svg" ] && \
+            cp "$DEST/$part/res/$slug.svg" "$preserve_root/res/"
+        elif [ ! -f "$SRC/$part/modules/$base" ]; then
+          # Old generators did not mark their output. Keep the only copy for
+          # recovery, but do not activate an unclassified file as a built-in
+          # under the new release stamp.
+          cp "$manifest" "$preserve_root/legacy/$base"
+        fi
+      done
+      printf '%s\n' 'patches/' 'user-module-backup/' >> "$exclude_file"
+      rsync -a --delete --exclude-from="$exclude_file" \
         "$SRC/$part/" "$DEST/$part/"
+      rsync -a "$preserve_root/modules/" "$DEST/$part/modules/"
+      rsync -a "$preserve_root/src/" "$DEST/$part/src/"
+      rsync -a "$preserve_root/res/" "$DEST/$part/res/"
+      rsync -a "$preserve_root/patches/" "$DEST/$part/patches/"
+      legacy_found=0
+      for legacy_file in "$preserve_root/legacy"/*; do
+        [ -f "$legacy_file" ] && legacy_found=1
+      done
+      if [ "$legacy_found" -eq 1 ]; then
+        legacy="$DEST/$part/user-module-backup/$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$legacy"
+        rsync -a "$preserve_root/legacy/" "$legacy/"
+        echo "  preserved unclassified legacy module manifests at $legacy"
+      fi
+      rm -rf "$preserve_root"
     else
       rsync -a --delete --exclude-from="$exclude_file" \
         "$SRC/$part/" "$DEST/$part/"
@@ -179,6 +209,14 @@ else
   echo "         Build it first:  tools/rack/build_shape_text.sh" >&2
   echo "         Without it the installed toolchain cannot letter a panel," >&2
   echo "         which surfaces as a failed generation after a model call." >&2
+  exit 1
+fi
+
+# Re-derive the plugin manifest, registrations, generated header and panels
+# from the refreshed built-ins plus the explicitly preserved generated set.
+# This is the atomic consistency boundary Rack requires.
+if ! (cd "$DEST/tools/rack" && python3 forge_modular.py all "$MODULES"/*.json >/dev/null 2>&1); then
+  echo "  FAILED to rebuild the merged module pack after upgrade" >&2
   exit 1
 fi
 
