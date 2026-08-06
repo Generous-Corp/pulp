@@ -282,6 +282,15 @@ Facts worth knowing before touching any of it:
 - **Do not carry `transform` onto a control node.** It is placed by its
   `paint_bounds`, which is already the transformed rectangle; re-applying the
   matrix transforms it twice, off its own artwork.
+- **A declared knob pointer has two geometry contracts.** `indicator_bounds`
+  remains its page-space painted footprint for sprite crop/erasure, while its
+  nested `intrinsic` box plus six-number `transform` preserve the pointer's own
+  width and orientation for lowering. Never derive rotated pointer thickness
+  from the axis-aligned footprint: a 4x38 needle at 38 degrees sweeps roughly
+  26.5x32.4 and becomes a slab. Keep unrotated, scaled-viewBox, fractional HTML,
+  CSS zoom, and `non-scaling-stroke` cases when changing this capture contract;
+  unsupported projective or motion-path transforms must decline oriented
+  geometry rather than publish a partial matrix.
 - **Do not carry a border colour without a border width.** Computed style
   reports `border-*-color` on every element whether or not one is drawn, so an
   ungated mapping paints borders the design never had.

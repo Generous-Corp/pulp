@@ -321,3 +321,47 @@ test("a declared knob indicator is carried into the candidate", () => {
   assert.match(expression, /opaque\(style.backgroundColor\)/);
   assert.match(expression, /if \(declared\) return declared;/);
 });
+
+test("the pointer is described in its own space as well as on the page", () => {
+  // A rotated needle's client rect is the box its diagonal sweeps, not the
+  // needle: 4x38 at 38 degrees measures 26.5x32.4, and a width read off that is
+  // roughly ten times the truth. So the candidate carries the element's own size
+  // and the matrix that places it, beside the rect rather than instead of it --
+  // the rect is the painted footprint, which is what the sprite pass has to
+  // erase.
+  //
+  // Asserted on the page-evaluated source for the same reason as the case above:
+  // the expression is a template literal, so a field that never reaches the
+  // emitted object is a silent no-op no CDP round trip can see.
+  const expression = semanticExpression([]);
+  assert.match(expression, /bounds.intrinsic = geometry.intrinsic;/);
+  assert.match(expression, /bounds.transform = geometry.transform;/);
+  // Two sources, because the two shapes answer to different APIs. An SVG shape
+  // has a geometry box in user units and a screen CTM; an HTML box has neither.
+  assert.match(expression, /marked\.getBBox\(\)/);
+  assert.match(expression, /marked\.getScreenCTM\(\)/);
+  assert.match(expression, /marked\.offsetWidth/);
+  // The stroke inflates the element's OWN box, with no scale applied, because
+  // computed stroke-width is in user units however firmly it says px.
+  assert.match(expression, /if \(!\(width > 0\)\) \{ x -= stroke \/ 2; width = stroke; \}/);
+  // Ancestor transforms scale this element too, and the dial it is measured
+  // against sits under the same ones.
+  assert.match(expression, /el = el\.parentElement/);
+  // Individual rotate's axis-angle grammar is parsed explicitly. Unsupported
+  // 3D axes refuse oriented geometry rather than publishing a partial matrix.
+  assert.match(expression, /const cssRotateDegrees = value/);
+  assert.match(expression, /if \(!local\) return null/);
+  assert.match(expression, /matrix\.scaleSelf\(zoom\)/);
+  assert.match(expression, /if \(!transformed\.is2D\) return null/);
+  assert.match(expression, /style\.offsetPath/);
+  assert.match(expression, /non-scaling-stroke/);
+  // The intrinsic origin and full transform place asymmetric SVG geometry;
+  // its painted footprint need not share the geometry box's centre.
+  assert.match(expression, /intrinsic: \{ x, y, width, height \}/);
+  // Fractional used CSS sizes win over integer-rounded offset dimensions.
+  assert.match(expression, /borderBoxExtent\('width', marked\.offsetWidth\)/);
+  // Sprite erasure uses a separate, conservative SVG stroke footprint; the
+  // intrinsic geometry above must not be widened to solve a paint problem.
+  assert.match(expression, /const svgStrokeFootprint = marked =>/);
+  assert.match(expression, /const strokeBox = svgStrokeFootprint\(marked\);/);
+});
