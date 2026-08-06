@@ -256,6 +256,14 @@ usually means the processor emitted (almost) nothing, which is the finding.
   losing NaN, infinity, overflow, underflow, and subnormal semantics. A
   replacement needs a repeatable Release benchmark over pitch and audio-rate FM
   domains as well as dense numerical and product-level error proofs.
+- **Grade discontinuity correctors against the shipped baseline.** A minBLEP
+  table needs a reproducible generator and a freshness check, but table
+  provenance alone does not prove audio quality. Render free-running and synced
+  product paths, measure their in-band alias residual with the shared projection
+  analyzer, and gate the improvement over the current polyBLEP path. Exercise
+  fractional endpoints, collisions, reset, block partitioning, and near-Nyquist
+  overload separately; a low ordinary-rate alias number says nothing about
+  bounded event storage.
 - **Analyzer Determinism Contract** — every spectral/estimator assertion declares
   its stimulus, window (rectangular for a bin-coherent tone or an impulse; Hann
   for broadband — a Hann window annihilates an impulse at n=0), warm-up trim,
