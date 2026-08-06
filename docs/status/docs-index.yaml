@@ -432,6 +432,11 @@ docs:
     kind: reference
     summary: Fixed-capacity chroma and onset-novelty front ends with offline compatibility adapters
 
+  - slug: nonlinear-shaping
+    path: reference/nonlinear-shaping.md
+    kind: reference
+    summary: Oversampled wavefolding, harmonic shaping, and ring-modulation primitives
+
   - slug: cli
     path: reference/cli.md
     kind: reference
