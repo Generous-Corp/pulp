@@ -226,6 +226,7 @@
 #include <pulp/signal/smoothed_value.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/units.hpp>
+#include <pulp/signal/velvet_noise.hpp>
 
 #include <algorithm>
 #include <array>
@@ -455,6 +456,41 @@ inline double pulse_density(double u, double density_pct, double gamma) {
     const double nd_min = kNdMin * (density_pct / kDensityRefPct);
     const double clamped = std::clamp(u, 0.0, 1.0);
     return nd_min + (kNdMax - nd_min) * std::pow(clamped, gamma);
+}
+
+/// Pure intermediate for one candidate in a velvet tap grid. Both immediate
+/// and incremental builders consume this result so their layouts cannot drift.
+struct VelvetTapDesign {
+    int delay = 0;
+    double magnitude = 0.0;
+    double gain = 0.0;
+    int segment = 0;
+    bool audible = false;
+};
+
+inline VelvetTapDesign design_velvet_tap(NonlinProgram program,
+                                         double position_samples,
+                                         double grid_samples,
+                                         int window_samples,
+                                         int predelay_samples,
+                                         double gate_hold,
+                                         double attack,
+                                         const VelvetNoiseDrawT<double>& draw) noexcept {
+    VelvetTapDesign result;
+    const int delay = std::clamp(
+        static_cast<int>(std::lround(position_samples +
+                                     draw.jitter * std::max(0.0, grid_samples - 1.0))),
+        0, window_samples - 1);
+    const double tau = static_cast<double>(delay) / static_cast<double>(window_samples);
+    const double env = program_envelope(program, tau, gate_hold, attack);
+    result.delay = predelay_samples + delay;
+    result.audible = env > 0.0;
+    if (!result.audible) return result;
+    result.magnitude = env * std::sqrt(grid_samples);
+    result.gain = static_cast<double>(draw.sign) * result.magnitude;
+    int segment = std::clamp(static_cast<int>(tau * kSegments), 0, kSegments - 1);
+    result.segment = program == NonlinProgram::reverse ? kSegments - 1 - segment : segment;
+    return result;
 }
 
 }  // namespace nonlin_ambience

@@ -28,6 +28,7 @@
 
 #include <pulp/signal/character_delay/primitives.hpp>
 #include <pulp/signal/character_delay/tables.hpp>
+#include <pulp/signal/dither.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -126,7 +127,8 @@ private:
     /// signal-dependent crunch an undithered quantizer produces (and which,
     /// re-quantized every repeat, would turn into a growing buzz).
     double quantize(double x) noexcept {
-        const double dither = (rng_.uniform() + rng_.uniform() - 1.0) * quantization_step_;
+        const double dither =
+            tpdf_centered_sum(rng_.uniform(), rng_.uniform()) * quantization_step_;
         const double q = std::round((x + dither) / quantization_step_) * quantization_step_;
         return std::clamp(q, -1.0, 1.0 - quantization_step_);
     }
