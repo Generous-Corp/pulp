@@ -124,13 +124,17 @@ are not part of the advertised real-time envelope.
 
 The detector reconstructs eight phases with a 129-tap, beta-10.5 Kaiser-windowed
 sinc interpolator. Its causal linear-phase delay is 64 base-rate samples. The
-limiter reserves a 0.50 dB detector guard. The test gate compares it with an
-independent 32x, 257-tap, beta-14 polyphase sinc oracle, a 64x confirmation,
-and an exact sine-fit
-oracle over the complete 8/44.1/48/96/192/384 kHz by 0/5/10 ms Forge-realization
-matrix, multiple frequencies and phases, near-Nyquist multitone, impulse, and
-planted sample-peak/grid-miss material. The reported
-host latency and tail are exactly `64 + ceil(lookahead_ms * sample_rate / 1000)`
+gain scheduler always retains a further 64-sample future horizon, equal to the
+detector radius, before releasing delayed samples. Thus `0 ms` means zero
+optional user look-ahead, not zero internal latency. This fixed horizon prevents
+sample-varying attack gain from manufacturing a new intersample peak at an
+onset. The limiter reserves a 0.50 dB detector guard. The test gate compares it
+with an independent 32x, 257-tap, beta-14 polyphase sinc oracle, a 64x
+confirmation, and an exact sine-fit oracle over the complete
+8/44.1/48/96/192/384 kHz by 0/5/10 ms Forge-realization matrix, multiple
+frequencies and phases, near-Nyquist multitone, impulse, and planted
+sample-peak/grid-miss material. The reported
+host latency and tail are exactly `128 + ceil(lookahead_ms * sample_rate / 1000)`
 base-rate samples. The ceiling is a reconstructed-signal contract over the
 documented detector/oracle domain, not merely a clamp on stored samples.
 
@@ -148,7 +152,7 @@ control-thread lookup table for sample-accurate Forge automation.
 - Controls: `set_ceiling_dbtp()`, `ceiling_dbtp()`, `lookahead_ms()`, `set_release_ms()`, `release_ms()`, `set_realtime_control_coefficients()`.
 - Processing: `process_frame()`, `process_interleaved()`.
 - Host and telemetry: `latency_samples()`, `tail_samples()`, `gain_reduction_db()`, `fault_count()`.
-- Detector inspection: `interpolation_factor()`, `interpolation_taps()`, `detector_latency_samples()`, `detector_guard_db()`, `maximum_supported_sample_rate()`, `maximum_supported_channels()`, `maximum_lookahead_ms()`, `detector_mac_count_per_channel()`, `detector_phases()`.
+- Detector inspection: `interpolation_factor()`, `interpolation_taps()`, `detector_latency_samples()`, `internal_gain_lookahead_samples()`, `detector_guard_db()`, `maximum_supported_sample_rate()`, `maximum_supported_channels()`, `maximum_lookahead_ms()`, `detector_mac_count_per_channel()`, `detector_phases()`.
 
 ### `FeedforwardCompressor`
 

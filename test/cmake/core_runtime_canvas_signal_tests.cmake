@@ -181,6 +181,8 @@ pulp_add_test_suite(pulp-test-oversampling-quality
 pulp_add_test_suite(pulp-test-true-peak-limiter
     SOURCES test_true_peak_limiter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+target_compile_definitions(pulp-test-true-peak-limiter
+    PRIVATE PULP_TRUE_PEAK_LIMITER_TEST_SEAMS=1)
 # Fundamental-frequency estimator for harmonically-dense oscillator output plus
 # the f0(t) trajectory extractor — proven accurate to well under a cent, and
 # proven to beat the shipped zero-crossing detector on dense material.

@@ -17,6 +17,15 @@
 
 using Catch::Matchers::WithinAbs;
 
+namespace pulp::signal {
+struct TruePeakLimiterTestAccess {
+    template <typename SampleType, std::size_t MaxChannels>
+    static void remove_internal_gain_horizon(TruePeakLimiterT<SampleType, MaxChannels>& limiter) {
+        limiter.internal_gain_lookahead_samples_ = 0;
+    }
+};
+} // namespace pulp::signal
+
 namespace {
 
 double sinc(double x) {
@@ -35,15 +44,14 @@ double bessel_i0(double x) {
     return sum;
 }
 
-// Independent, non-streaming Kaiser-sinc reconstruction oracle. Its 257 taps
-// and beta differ from the limiter's 8x/129-tap detector. The broad matrix uses
-// 32x, while a compact confirmation below doubles the phase density to 64x.
-double oracle_true_peak(std::span<const double> signal, std::size_t begin = 0, int factor = 32) {
-    constexpr int radius = 128;
-    constexpr double beta = 14.0;
+// Independent, non-streaming Kaiser-sinc reconstruction oracle. Its radius,
+// phase grid, and beta can all differ from the limiter's 8x/129-tap detector.
+double oracle_true_peak_config(std::span<const double> signal, std::size_t begin, std::size_t end,
+                               int radius, int factor, double beta) {
     const double denominator = bessel_i0(beta);
     double peak = 0.0;
-    for (std::size_t frame = begin; frame + 1 < signal.size(); ++frame) {
+    end = std::min(end, signal.size() - 1);
+    for (std::size_t frame = begin; frame < end; ++frame) {
         for (int phase = 0; phase < factor; ++phase) {
             const double position =
                 static_cast<double>(frame) + static_cast<double>(phase) / factor;
@@ -71,6 +79,12 @@ double oracle_true_peak(std::span<const double> signal, std::size_t begin = 0, i
         }
     }
     return peak;
+}
+
+// The broad matrix uses a 32x, 257-tap, beta-14 configuration. Compact
+// confirmations below raise the phase density and kernel radius independently.
+double oracle_true_peak(std::span<const double> signal, std::size_t begin = 0, int factor = 32) {
+    return oracle_true_peak_config(signal, begin, signal.size() - 1, 128, factor, 14.0);
 }
 
 // Exact least-squares amplitude oracle for a bandlimited single sine. This is
@@ -149,6 +163,32 @@ std::vector<double> adversarial_program(std::size_t frames, double sample_rate) 
     return result;
 }
 
+std::vector<double> reviewer_seven_tone_onset() {
+    constexpr std::array<double, 7> frequencies{
+        0.310638800480607, 0.385845561917364, 0.365863861932458, 0.452231820085630,
+        0.237103569804997, 0.449216482259758, 0.460756957432208};
+    constexpr std::array<double, 7> phases{0.490999600016866, 0.0455079404226953, 0.188087805636914,
+                                           0.212988183356754, 0.268204385746562,  0.793531003018681,
+                                           0.0149639789903342};
+    constexpr std::array<double, 7> amplitudes{
+        0.218387133277380, 0.164207650971954, 0.267594206288507, 0.159318706864006,
+        0.296680761575720, 0.187539222791681, 0.200485851321674};
+    std::vector<double> input(4096);
+    for (std::size_t frame = 0; frame < input.size(); ++frame) {
+        const double envelope = frame < 900    ? 0.0
+                                : frame < 1100 ? static_cast<double>(frame - 900) / 200.0
+                                : frame < 2600 ? 1.0
+                                               : 0.18;
+        for (std::size_t tone = 0; tone < frequencies.size(); ++tone) {
+            input[frame] +=
+                envelope * amplitudes[tone] *
+                std::sin(2.0 * std::numbers::pi *
+                         (frequencies[tone] * static_cast<double>(frame) + phases[tone]));
+        }
+    }
+    return input;
+}
+
 } // namespace
 
 TEST_CASE("True-peak limiter reports exact latency and delayed impulse",
@@ -157,7 +197,7 @@ TEST_CASE("True-peak limiter reports exact latency and delayed impulse",
     pulp::signal::TruePeakLimiter64::Params params;
     params.lookahead_ms = 3.0;
     REQUIRE(limiter.prepare(48000.0, 1, params));
-    REQUIRE(limiter.latency_samples() == 64 + 144);
+    REQUIRE(limiter.latency_samples() == 64 + 64 + 144);
     REQUIRE(limiter.tail_samples() == limiter.latency_samples());
 
     std::vector<double> input(1024, 0.0), output(1024, 0.0);
@@ -207,6 +247,100 @@ TEST_CASE("True-peak limiter beats a planted sample-peak clamp", "[signal][limit
     const double float_peak = oracle_true_peak(float_output, 1024);
     INFO("float limited true peak=" << float_peak << " ceiling=" << ceiling);
     REQUIRE(float_peak <= ceiling * 1.0025);
+}
+
+TEST_CASE("Fixed internal gain horizon contains the seven-tone zero-lookahead onset",
+          "[signal][limiter][oracle][onset][mutation]") {
+    constexpr double ceiling_db = -1.0;
+    const double ceiling = std::pow(10.0, ceiling_db / 20.0);
+    const auto input = reviewer_seven_tone_onset();
+    constexpr std::array<std::array<double, 3>, 3> oracle_configs{
+        {{192.0, 97.0, 17.25}, {256.0, 131.0, 18.75}, {384.0, 193.0, 20.5}}};
+
+    const auto exercise = [&](auto precision_tag) {
+        using Limiter = decltype(precision_tag);
+        Limiter limiter;
+        typename Limiter::Params params;
+        params.ceiling_dbtp = ceiling_db;
+        params.lookahead_ms = 0.0;
+        params.release_ms = 5.0;
+        REQUIRE(limiter.prepare(48000.0, 1, params));
+        REQUIRE(limiter.latency_samples() == 128);
+        const auto output = render(limiter, input, 97);
+        for (const auto& config : oracle_configs) {
+            const double peak =
+                oracle_true_peak_config(output, 768, 3200, static_cast<int>(config[0]),
+                                        static_cast<int>(config[1]), config[2]);
+            CAPTURE(config[0], config[1], config[2], peak, ceiling);
+            REQUIRE(peak <= ceiling * 1.0002);
+        }
+    };
+
+    exercise(pulp::signal::TruePeakLimiter64{});
+    exercise(pulp::signal::TruePeakLimiter{});
+
+    // Production-coupled mutation: remove only the fixed internal scheduling
+    // horizon while retaining the same detector, guard, queue, and gain code.
+    // This is the rejected zero-horizon algorithm and the exact onset must fail.
+    pulp::signal::TruePeakLimiter64 old_schedule;
+    pulp::signal::TruePeakLimiterTestAccess::remove_internal_gain_horizon(old_schedule);
+    pulp::signal::TruePeakLimiter64::Params old_params;
+    old_params.ceiling_dbtp = ceiling_db;
+    old_params.lookahead_ms = 0.0;
+    old_params.release_ms = 5.0;
+    REQUIRE(old_schedule.prepare(48000.0, 1, old_params));
+    const auto old_output = render(old_schedule, input, 97);
+    const double old_peak = oracle_true_peak_config(old_output, 768, 3200, 384, 193, 20.5);
+    INFO("zero-horizon mutation ratio=" << old_peak / ceiling);
+    REQUIRE(old_peak > ceiling * 1.02);
+}
+
+TEST_CASE("Near-Nyquist onsets stay below the reconstructed ceiling",
+          "[signal][limiter][oracle][onset][matrix]") {
+    constexpr std::array<double, 6> sample_rates{8000.0,  44100.0,  48000.0,
+                                                 96000.0, 192000.0, 384000.0};
+    constexpr std::array<double, 4> lookaheads{0.0, 5.0, 10.0, 20.0};
+    constexpr std::array<double, 3> phases{0.0, 0.19, 0.43};
+    constexpr double frequency = 0.498;
+    constexpr double ceiling_db = -1.0;
+    const double ceiling = std::pow(10.0, ceiling_db / 20.0);
+
+    const auto exercise = [&](auto precision_tag) {
+        using Limiter = decltype(precision_tag);
+        for (const double sample_rate : sample_rates) {
+            for (const double lookahead : lookaheads) {
+                for (const double phase : phases) {
+                    Limiter limiter;
+                    typename Limiter::Params params;
+                    params.ceiling_dbtp = ceiling_db;
+                    params.lookahead_ms = lookahead;
+                    params.release_ms = 5.0;
+                    REQUIRE(limiter.prepare(sample_rate, 1, params));
+                    const std::size_t onset = 256;
+                    const std::size_t frames =
+                        static_cast<std::size_t>(limiter.latency_samples()) + 1024;
+                    std::vector<double> input(frames);
+                    for (std::size_t frame = onset; frame < frames; ++frame) {
+                        const double ramp =
+                            std::min(1.0, static_cast<double>(frame - onset) / 64.0);
+                        input[frame] = 1.2 * ramp *
+                                       std::sin(2.0 * std::numbers::pi *
+                                                (frequency * static_cast<double>(frame) + phase));
+                    }
+                    const auto output = render(limiter, input, 113);
+                    const std::size_t output_onset =
+                        onset + static_cast<std::size_t>(limiter.latency_samples());
+                    const double peak = oracle_true_peak_config(output, output_onset - 128,
+                                                                output_onset + 384, 128, 64, 14.0);
+                    CAPTURE(sample_rate, lookahead, phase, peak, ceiling);
+                    REQUIRE(peak <= ceiling * 1.002);
+                }
+            }
+        }
+    };
+
+    exercise(pulp::signal::TruePeakLimiter64{});
+    exercise(pulp::signal::TruePeakLimiter{});
 }
 
 TEST_CASE("True-peak limiter contains adversarial high-frequency material",
