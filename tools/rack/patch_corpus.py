@@ -58,6 +58,9 @@ ROOT = os.path.expanduser(
 INDEX = os.path.join(ROOT, "index.json")
 PATCH_DIR = os.path.join(ROOT, "patches")
 
+# A patch's wiring is kilobytes; anything far past this is bundled audio.
+MAX_PATCH_BYTES = 8 * 1024 * 1024
+
 _last_request = 0.0
 
 
@@ -205,10 +208,33 @@ def fetch(limit: int) -> int:
                 continue
 
             f0 = files[0]
+
+            # A "patch" can be 87 MB, because people bundle samples and
+            # wavetables with one. We want the wiring, which is kilobytes, and
+            # a download that size is minutes of somebody's bandwidth for a
+            # file whose patch.json is no better than any other. Skipped by
+            # the size the API already reports, so it costs no request.
+            size = f0.get("filesize") or 0
+            if size and size > MAX_PATCH_BYTES:
+                print(f"  patch {pid}: {size/1048576:.0f} MB — too large, "
+                      f"skipped")
+                held[pid] = {"skipped": f"file is {size} bytes",
+                             "url": doc.get("url", "")}
+                continue
+
+            # ONE BAD PATCH MUST NOT END THE RUN. An IncompleteRead on entry
+            # 27 of 600 aborted the whole fetch and lost every entry after it,
+            # so an hour of crawl-delayed politeness produced 31 patches. A
+            # fetch over a few hundred strangers' uploads will meet truncated
+            # responses, odd encodings and things that are not patches at all;
+            # each is one skipped row, not the end.
             try:
                 blob = _get(f0["url"])
             except urllib.error.HTTPError as e:
                 print(f"  patch {pid} file: HTTP {e.code} — skipped")
+                continue
+            except Exception as e:                       # noqa: BLE001
+                print(f"  patch {pid} file: {type(e).__name__} — skipped")
                 continue
 
             name = f"{pid}.vcv"

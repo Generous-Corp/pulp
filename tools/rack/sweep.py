@@ -106,6 +106,34 @@ _SILENT = re.compile(r"makes no sound|every cable into the audio interface",
                      re.I)
 
 
+# The model call failing is not the generator failing, and a sweep that
+# conflates them reports a catastrophe. Twenty-one prompts once "failed" in
+# 3.1 seconds each -- identical to the tenth of a second, against 26 to 121
+# seconds for the three that ran -- because the account had hit its session
+# limit mid-sweep. Every row said `emitted: false` with no reason, which reads
+# exactly like the generator collapsing.
+_NO_MODEL = re.compile(
+    r"model call failed|session limit|rate limit|usage limit|"
+    r"Argument list too long|command not found|ECONNRESET|Connection reset",
+    re.I)
+
+
+def blocked(out: str, seconds: float, code: int) -> str | None:
+    """Why this run never reached the model, or None if it did.
+
+    Timing is the tell of last resort rather than the test: a real generation
+    is tens of seconds of network, so an exit inside a few seconds means
+    nothing was asked. But a slow machine could be slandered by a fixed
+    threshold, so the message is preferred and the clock only corroborates.
+    """
+    m = _NO_MODEL.search(out)
+    if m:
+        return m.group(0).lower()
+    if code != 0 and seconds < 5.0 and "the model is answering" not in out:
+        return "exited before the model answered"
+    return None
+
+
 def read_outcome(out: str) -> dict:
     gave_up = _GAVE_UP.search(out)
     attempts = 1
@@ -148,10 +176,17 @@ def run_one(case: dict, timeout: float) -> dict:
         out, code = "", -1
     row = {"id": case["id"], "prompt": case["prompt"], "exit": code,
            "seconds": round(time.time() - started, 1)}
-    row.update(read_outcome(out) if code >= 0
-               else {"emitted": False, "attempts": 0, "idiom": None,
-                     "also_matched": [], "silent": False,
-                     "failed": ["TIMED OUT"]})
+    if code < 0:
+        row.update({"emitted": False, "attempts": 0, "idiom": None,
+                    "also_matched": [], "silent": False,
+                    "blocked": "timed out", "failed": ["TIMED OUT"]})
+        return row
+    why = blocked(out, row["seconds"], code)
+    row.update(read_outcome(out))
+    row["blocked"] = why
+    if why:
+        # Not a verdict about the generator: it was never asked.
+        row["failed"] = []
     return row
 
 
@@ -174,14 +209,21 @@ def newest_runs(n: int = 2) -> list:
 def table(run: dict) -> None:
     rows = run["rows"]
     good = sum(1 for r in rows if r["emitted"])
+    stopped = [r for r in rows if r.get("blocked")]
     cov = run.get("coverage", {})
     print(f"  {run['stamp']}   code {run['fingerprint']}   "
           f"ports {cov.get('with_ports', 0)}/{cov.get('modules', 0)}")
-    print(f"  emitted {good}/{len(rows)}\n")
+    if stopped:
+        print(f"  ** {len(stopped)} run(s) never reached the model — "
+              f"NOT generator failures **")
+    judged = len(rows) - len(stopped)
+    print(f"  emitted {good}/{judged} judged"
+          + (f"  ({len(rows)} attempted)" if stopped else "") + "\n")
     print(f"  {'id':22s} {'ok':3s} {'try':4s} {'idiom':22s} why")
     for r in sorted(rows, key=lambda r: (r["emitted"], r["id"])):
-        why = "silent" if r["silent"] else (r["failed"][0][:44] if r["failed"]
-                                            else "")
+        why = (f'BLOCKED: {r["blocked"]}' if r.get("blocked")
+               else "silent" if r["silent"]
+               else (r["failed"][0][:44] if r["failed"] else ""))
         print(f"  {r['id'][:22]:22s} {'y' if r['emitted'] else 'n':3s} "
               f"{r['attempts']:<4d} {(r['idiom'] or '')[:22]:22s} {why}")
     # A histogram over the corpus points at a cause; one row points at a symptom.
