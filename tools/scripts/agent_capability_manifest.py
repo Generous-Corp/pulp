@@ -88,6 +88,13 @@ FORBIDDEN_RUNTIME_CONTROL_FIELDS = {
 REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
+    "pulp/music/chord.hpp": "Pulp::music",
+    "pulp/music/harmony.hpp": "Pulp::music",
+    "pulp/music/music.hpp": "Pulp::music",
+    "pulp/music/pitch.hpp": "Pulp::music",
+    "pulp/music/spelling.hpp": "Pulp::music",
+    "pulp/music/voicing.hpp": "Pulp::music",
+     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
@@ -510,6 +517,287 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="music.chord-spelling",
+        domain="music",
+        summary=(
+            "Fixed-capacity pitch-class and chord spelling under an explicit "
+            "accidental policy."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure fixed-capacity value transforms with no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="12-TET pitch classes, chord formulas, and accidental policy",
+        output_domain="spelled pitch classes, chord tones, and names",
+        units=["pitch class", "semitones", "note letter"],
+        latency="zero",
+        tail="none",
+        scheduling="pure",
+        status="experimental",
+        bindings=[
+            binding(
+                role="pitch-class-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_pitch_class",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+            ),
+            binding(
+                role="name-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spelling_name",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+            ),
+            binding(
+                role="formula-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::SpelledChord> (*)("
+                    "pulp::music::PitchClass, const pulp::music::ChordFormula&, "
+                    "pulp::music::AccidentalPolicy) noexcept>("
+                    "&pulp::music::spell_chord)"
+                ),
+            ),
+            binding(
+                role="chord-operation",
+                kind="cpp_function",
+                include="pulp/music/spelling.hpp",
+                qualified_name="pulp::music::spell_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::SpelledChord> (*)("
+                    "const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>("
+                    "&pulp::music::spell_chord)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "pitch-class-operation",
+                "binding": "pulp::music::spell_pitch_class",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::music::PitchClass::c_sharp, "
+                    "pulp::music::AccidentalPolicy::prefer_flats"
+                ),
+            },
+            {
+                "role": "name-operation",
+                "binding": "pulp::music::spelling_name",
+                "operation": "function_call",
+                "arguments": "pulp::music::SpelledPitchClass{}",
+            },
+            {
+                "role": "formula-operation",
+                "binding": "pulp::music::spell_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::music::PitchClass::c, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), "
+                    "pulp::music::AccidentalPolicy::prefer_sharps"
+                ),
+            },
+            {
+                "role": "chord-operation",
+                "binding": "pulp::music::spell_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "*pulp::music::Chord::construct(60, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major)), "
+                    "pulp::music::AccidentalPolicy::prefer_sharps"
+                ),
+            },
+        ],
+    ),
+    capability(
+        key="music.chord-recognition",
+        domain="music",
+        summary=(
+            "Ranked recognition over Pulp's stable 12-quality chord catalog with "
+            "explicit ambiguity and inversion evidence."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "control-or-offline",
+            "prepare": "none",
+            "process": "control-or-offline",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure bounded candidate ranking with no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="12-TET pitch-class sets or bounded MIDI-note collections",
+        output_domain="ranked named-chord candidates and inversion evidence",
+        units=["pitch class", "MIDI note", "candidate count"],
+        latency="request-bound",
+        tail="none",
+        scheduling="request-synchronous",
+        status="partial",
+        bindings=[
+            binding(
+                role="pitch-class-operation",
+                kind="cpp_function",
+                include="pulp/music/harmony.hpp",
+                qualified_name="pulp::music::recognize_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
+                    "pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) "
+                    "noexcept>(&pulp::music::recognize_chord)"
+                ),
+            ),
+            binding(
+                role="midi-operation",
+                kind="cpp_function",
+                include="pulp/music/harmony.hpp",
+                qualified_name="pulp::music::recognize_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
+                    "std::span<const int>) noexcept>(&pulp::music::recognize_chord)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "pitch-class-operation",
+                "binding": "pulp::music::recognize_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "*pulp::music::PitchClassSet::from_mask(0x091u), "
+                    "pulp::music::PitchClass::c"
+                ),
+            },
+            {
+                "role": "midi-operation",
+                "binding": "pulp::music::recognize_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "[]() { static constexpr int pitches[]{60, 64, 67}; "
+                    "return std::span<const int>{pitches}; }()"
+                ),
+            },
+        ],
+    ),
+    capability(
+        key="music.chord-voicing",
+        domain="music",
+        summary=(
+            "Constrained chord voicing and deterministic minimum-motion voice "
+            "leading over the bounded MIDI domain."
+        ),
+        rt_class="control",
+        lifecycle={
+            "construction": "control-or-offline",
+            "prepare": "none",
+            "process": "control-or-offline",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure bounded search with fixed local work tables and no retained state.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="chord formulas, prior voices, MIDI range, and voicing constraints",
+        output_domain="ordered MIDI-note voicings and summed semitone motion",
+        units=["MIDI note", "semitones", "voice count"],
+        latency="request-bound",
+        tail="none",
+        scheduling="request-synchronous",
+        status="experimental",
+        bindings=[
+            binding(
+                role="voicing-operation",
+                kind="cpp_function",
+                include="pulp/music/voicing.hpp",
+                qualified_name="pulp::music::voice_chord",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
+                ),
+            ),
+            binding(
+                role="voice-leading-operation",
+                kind="cpp_function",
+                include="pulp/music/voicing.hpp",
+                qualified_name="pulp::music::minimum_motion_voice_leading",
+                target="Pulp::music",
+                header_fingerprint=(
+                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "voicing-operation",
+                "binding": "pulp::music::voice_chord",
+                "operation": "function_call",
+                "arguments": (
+                    "60, *pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), pulp::music::VoicingConstraints{}"
+                ),
+            },
+            {
+                "role": "voice-leading-operation",
+                "binding": "pulp::music::minimum_motion_voice_leading",
+                "operation": "function_call",
+                "arguments": (
+                    "[]() { static constexpr int pitches[]{60, 64, 67}; "
+                    "return std::span<const int>{pitches}; }(), "
+                    "pulp::music::PitchClass::f, "
+                    "*pulp::music::ChordFormula::for_quality("
+                    "pulp::music::ChordQuality::major), pulp::music::MidiRange{}"
+                ),
+            },
+        ],
+    ),
++    capability(
         key="timebase.tick",
         contract_version={"major": 1, "minor": 1},
         domain="timebase",
@@ -708,6 +996,45 @@ EXPORTS = [
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/music/chord.hpp",
+        "fingerprint": "sha256:24dd445d17537d186ecdfd4181102b4cb0d3409363d7ab62c5f700736969a222",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "music.chord-recognition",
+            "music.chord-spelling",
+            "music.chord-voicing",
+        ],
+        "rationale": (
+            "Shared fixed-capacity chord values and named-quality formulas support "
+            "the curated spelling, recognition, and voicing operations."
+        ),
+    },
+    {
+        "include": "pulp/music/music.hpp",
+        "fingerprint": "sha256:7afe6a1c5c2bcbc5de65eac6290a8e0e4c92215bcb940558f18caec3177c227d",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Convenience umbrella include only; consumers use the operation-owning "
+            "headers named by each typed capability binding."
+        ),
+    },
+    {
+        "include": "pulp/music/pitch.hpp",
+        "fingerprint": "sha256:2b26eed1a1e6ecfe6357ebbcf95c7ac0d94cd73d6416723144015125cda3e660",
+        "disposition": "capability_support",
+        "capability_keys": [
+            "music.chord-recognition",
+            "music.chord-spelling",
+            "music.chord-voicing",
+        ],
+        "rationale": (
+            "Checked 12-TET pitch-class values and sets are shared inputs to the "
+            "curated spelling, recognition, and voicing operations."
+        ),
+    },
+     {
     {
         "include": "pulp/signal/interpolator.hpp",
         "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",

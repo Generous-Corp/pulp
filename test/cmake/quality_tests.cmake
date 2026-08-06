@@ -12,6 +12,7 @@ add_executable(pulp-test-agent-capability-compile test_agent_capability_compile.
 target_link_libraries(pulp-test-agent-capability-compile PRIVATE
     pulp::audio
     pulp::midi
+    pulp::music
     pulp::sequence
     pulp::signal
     pulp::timebase)

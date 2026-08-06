@@ -39,6 +39,11 @@ PUBLIC_ROOTS = (
         "install_prefix": "pulp/midi",
     },
     {
+        "domain": "music",
+        "source": "core/music/include/pulp/music",
+        "install_prefix": "pulp/music",
+    },
+    {
         "domain": "sequence",
         "source": "core/sequence/include/pulp/sequence",
         "install_prefix": "pulp/sequence",
