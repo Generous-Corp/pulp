@@ -13,8 +13,10 @@
 #include <pulp/signal/vca_compressor.hpp>
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <vector>
@@ -28,7 +30,8 @@ constexpr double kFollowerTolerance = 1e-8;
 constexpr double kTimeToleranceSamples = 2.0;
 
 double reference_coefficient(double milliseconds, double sample_rate) {
-    return 1.0 - std::exp(-2.2 / (milliseconds * 0.001 * sample_rate));
+    const double interval_samples = milliseconds * 0.001 * sample_rate;
+    return 1.0 - std::exp(-std::log(9.0) / interval_samples);
 }
 
 int crossing_sample(EnvelopeFollower64& follower, double input, double threshold,
@@ -45,6 +48,26 @@ template <typename Fn> void require_no_allocation(Fn&& fn) {
     pulp::test::RtAllocationProbe probe;
     fn();
     REQUIRE(probe.allocation_count() == 0);
+}
+
+void require_unity_meter(const GainReduction& meter) {
+    REQUIRE(meter.db() == 0.0);
+    REQUIRE(meter.signed_db() == 0.0);
+    REQUIRE(meter.linear_gain() == 1.0);
+}
+
+void require_signed_legacy_meter(const GainReduction& meter, double legacy_db) {
+    REQUIRE(legacy_db < 0.0);
+    REQUIRE(meter.db() > 0.0);
+    REQUIRE(meter.db() == -legacy_db);
+    REQUIRE_THAT(meter.linear_gain(), WithinAbs(std::pow(10.0, legacy_db / 20.0), 1e-14));
+}
+
+void require_magnitude_legacy_meter(const GainReduction& meter, double legacy_db) {
+    REQUIRE(legacy_db > 0.0);
+    REQUIRE(meter.db() > 0.0);
+    REQUIRE(meter.db() == legacy_db);
+    REQUIRE_THAT(meter.linear_gain(), WithinAbs(std::pow(10.0, -legacy_db / 20.0), 1e-14));
 }
 
 } // namespace
@@ -64,64 +87,109 @@ TEST_CASE("Envelope follower publishes its 10-to-90-percent coefficient", "[sign
                          WithinAbs(expected, kFollowerTolerance));
         }
     }
+    REQUIRE(EnvelopeFollower64::coefficient_for_time_ms(
+                10.0, std::numeric_limits<double>::infinity()) == 0.0);
+    REQUIRE(EnvelopeFollower64::coefficient_for_time_ms(std::numeric_limits<double>::quiet_NaN(),
+                                                        48000.0) == 0.0);
 }
 
 TEST_CASE("Peak envelope attack and release use stated time-to-target semantics",
           "[signal][dynamics]") {
-    for (double sample_rate : {44100.0, 48000.0, 96000.0}) {
-        constexpr double milliseconds = 12.5;
-        EnvelopeFollower64 follower;
-        follower.prepare(sample_rate);
-        follower.set_attack_ms(milliseconds);
-        follower.set_release_ms(milliseconds);
+    for (double sample_rate : {44100.0, 48000.0, 96000.0, 192000.0}) {
+        for (double milliseconds : {12.5, 250.0}) {
+            EnvelopeFollower64 follower;
+            follower.prepare(sample_rate);
+            follower.set_attack_ms(milliseconds);
+            follower.set_release_ms(milliseconds);
 
-        const int at_10 = crossing_sample(follower, 1.0, 0.1, 100000, true);
-        const int at_90 = crossing_sample(follower, 1.0, 0.9, 100000, true);
-        REQUIRE(at_10 >= 0);
-        REQUIRE(at_90 >= 0);
-        const double attack_samples = static_cast<double>(at_90 + 1);
-        const double expected_samples = milliseconds * 0.001 * sample_rate;
-        REQUIRE(std::abs(attack_samples - expected_samples) <= kTimeToleranceSamples);
+            const int at_10 = crossing_sample(follower, 1.0, 0.1, 100000, true);
+            const int at_90 = crossing_sample(follower, 1.0, 0.9, 100000, true);
+            REQUIRE(at_10 >= 0);
+            REQUIRE(at_90 >= 0);
+            const double attack_samples = static_cast<double>(at_90 + 1);
+            const double expected_samples = milliseconds * 0.001 * sample_rate;
+            REQUIRE(std::abs(attack_samples - expected_samples) <= kTimeToleranceSamples);
 
-        for (int i = 0; i < static_cast<int>(sample_rate); ++i)
-            follower.process(1.0);
-        const int release_at_90 = crossing_sample(follower, 0.0, 0.9, 100000, false);
-        const int release_at_10 = crossing_sample(follower, 0.0, 0.1, 100000, false);
-        REQUIRE(release_at_90 >= 0);
-        REQUIRE(release_at_10 >= 0);
-        const double release_samples = static_cast<double>(release_at_10 + 1);
-        REQUIRE(std::abs(release_samples - expected_samples) <= kTimeToleranceSamples);
+            for (int i = 0; i < static_cast<int>(sample_rate); ++i)
+                follower.process(1.0);
+            const int release_at_90 = crossing_sample(follower, 0.0, 0.9, 100000, false);
+            const int release_at_10 = crossing_sample(follower, 0.0, 0.1, 100000, false);
+            REQUIRE(release_at_90 >= 0);
+            REQUIRE(release_at_10 >= 0);
+            const double release_samples = static_cast<double>(release_at_10 + 1);
+            REQUIRE(std::abs(release_samples - expected_samples) <= kTimeToleranceSamples);
+        }
     }
 }
 
 TEST_CASE("RMS envelope timing applies to its mean-square power state", "[signal][dynamics]") {
-    for (double sample_rate : {44100.0, 48000.0, 96000.0}) {
-        constexpr double milliseconds = 12.5;
-        EnvelopeFollower64 follower;
-        follower.prepare(sample_rate);
-        follower.set_attack_ms(milliseconds);
-        follower.set_release_ms(milliseconds);
-        follower.set_mode(EnvelopeFollower64::Mode::rms);
+    for (double sample_rate : {44100.0, 48000.0, 96000.0, 192000.0}) {
+        for (double milliseconds : {12.5, 250.0}) {
+            EnvelopeFollower64 follower;
+            follower.prepare(sample_rate);
+            follower.set_attack_ms(milliseconds);
+            follower.set_release_ms(milliseconds);
+            follower.set_mode(EnvelopeFollower64::Mode::rms);
 
-        const int at_10_power = crossing_sample(follower, 1.0, std::sqrt(0.1), 100000, true);
-        const int at_90_power = crossing_sample(follower, 1.0, std::sqrt(0.9), 100000, true);
-        REQUIRE(at_10_power >= 0);
-        REQUIRE(at_90_power >= 0);
-        const double expected_samples = milliseconds * 0.001 * sample_rate;
-        REQUIRE(std::abs(static_cast<double>(at_90_power + 1) - expected_samples) <=
-                kTimeToleranceSamples);
+            const int at_10_power = crossing_sample(follower, 1.0, std::sqrt(0.1), 100000, true);
+            const int at_90_power = crossing_sample(follower, 1.0, std::sqrt(0.9), 100000, true);
+            REQUIRE(at_10_power >= 0);
+            REQUIRE(at_90_power >= 0);
+            const double expected_samples = milliseconds * 0.001 * sample_rate;
+            REQUIRE(std::abs(static_cast<double>(at_90_power + 1) - expected_samples) <=
+                    kTimeToleranceSamples);
 
-        for (int i = 0; i < static_cast<int>(sample_rate); ++i)
-            follower.process(1.0);
-        const int release_at_90_power =
-            crossing_sample(follower, 0.0, std::sqrt(0.9), 100000, false);
-        const int release_at_10_power =
-            crossing_sample(follower, 0.0, std::sqrt(0.1), 100000, false);
-        REQUIRE(release_at_90_power >= 0);
-        REQUIRE(release_at_10_power >= 0);
-        REQUIRE(std::abs(static_cast<double>(release_at_10_power + 1) - expected_samples) <=
-                kTimeToleranceSamples);
+            for (int i = 0; i < static_cast<int>(sample_rate); ++i)
+                follower.process(1.0);
+            const int release_at_90_power =
+                crossing_sample(follower, 0.0, std::sqrt(0.9), 100000, false);
+            const int release_at_10_power =
+                crossing_sample(follower, 0.0, std::sqrt(0.1), 100000, false);
+            REQUIRE(release_at_90_power >= 0);
+            REQUIRE(release_at_10_power >= 0);
+            REQUIRE(std::abs(static_cast<double>(release_at_10_power + 1) - expected_samples) <=
+                    kTimeToleranceSamples);
+        }
     }
+}
+
+TEST_CASE("Legacy BallisticsFilter valid-input render hash remains bit-identical",
+          "[signal][dynamics][compat]") {
+    constexpr double sample_rate = 192000.0;
+    constexpr double attack_ms = 7.5;
+    constexpr double release_ms = 123.0;
+    const auto legacy_coefficient = [](double milliseconds) {
+        return 1.0 - std::exp(static_cast<double>(-2.2f) /
+                              (milliseconds * static_cast<double>(0.001f) * sample_rate));
+    };
+
+    BallisticsFilter64 follower;
+    follower.prepare(sample_rate);
+    follower.set_attack_ms(attack_ms);
+    follower.set_release_ms(release_ms);
+
+    Xorshift32 rng(0x8f3a21c7u);
+    double reference_state = 0.0;
+    std::uint64_t subject_hash = 1469598103934665603ull;
+    std::uint64_t reference_hash = subject_hash;
+    for (int i = 0; i < 16384; ++i) {
+        const bool rms = i >= 8192;
+        if (i == 8192)
+            follower.set_mode(BallisticsFilter64::Mode::rms);
+        const double input = rng.next_bipolar<double>();
+        const double value = rms ? input * input : std::abs(input);
+        const double coefficient = value > reference_state ? legacy_coefficient(attack_ms)
+                                                           : legacy_coefficient(release_ms);
+        reference_state = reference_state + coefficient * (value - reference_state);
+        const double expected = rms ? std::sqrt(reference_state) : reference_state;
+        const double actual = follower.process(input);
+
+        const auto actual_bits = std::bit_cast<std::uint64_t>(actual);
+        const auto expected_bits = std::bit_cast<std::uint64_t>(expected);
+        subject_hash = (subject_hash ^ actual_bits) * 1099511628211ull;
+        reference_hash = (reference_hash ^ expected_bits) * 1099511628211ull;
+    }
+    REQUIRE(subject_hash == reference_hash);
 }
 
 TEST_CASE("Envelope follower modes report linear and dB domains", "[signal][dynamics]") {
@@ -150,6 +218,28 @@ TEST_CASE("Envelope follower modes report linear and dB domains", "[signal][dyna
     rms.reset();
     REQUIRE(rms.current() == 0.0);
     REQUIRE(rms.current_db() == -160.0);
+}
+
+TEST_CASE("RMS envelope bounds finite square overflow and sanitizes dB floors",
+          "[signal][dynamics]") {
+    EnvelopeFollower64 follower;
+    follower.prepare(192000.0);
+    follower.set_attack_ms(0.0);
+    follower.set_release_ms(250.0);
+    follower.set_mode(EnvelopeFollower64::Mode::rms);
+
+    const double huge = follower.process(std::numeric_limits<double>::max());
+    REQUIRE(std::isfinite(huge));
+    REQUIRE(huge > 0.0);
+    REQUIRE(std::isfinite(follower.current()));
+    REQUIRE(std::isfinite(follower.current_db()));
+    REQUIRE(std::isfinite(follower.process(0.0)));
+
+    follower.reset();
+    REQUIRE(follower.current_db(12.0) == -160.0);
+    REQUIRE(follower.current_db(std::numeric_limits<double>::quiet_NaN()) == -160.0);
+    REQUIRE(follower.current_db(-std::numeric_limits<double>::infinity()) == -160.0);
+    REQUIRE(follower.current_db(-96.0) == -96.0);
 }
 
 TEST_CASE("Envelope follower handles silence DC bursts and invalid control values",
@@ -226,6 +316,13 @@ TEST_CASE("Stereo envelope linking preserves detector energy and channel indepen
     REQUIRE_THAT(independent[0], WithinAbs(1.0, 1e-12));
     REQUIRE_THAT(independent[1], WithinAbs(0.25, 1e-12));
 
+    linked.set_link(1.0);
+    const auto transitioned = linked.process(0.1, 0.1);
+    REQUIRE(transitioned[0] == transitioned[1]);
+    REQUIRE(linked.current()[0] == linked.current()[1]);
+
+    linked.set_link(0.0);
+
     const auto isolated_fault = linked.process(std::numeric_limits<double>::quiet_NaN(), -0.5);
     REQUIRE(isolated_fault[0] == 0.0);
     REQUIRE(isolated_fault[1] > independent[1]);
@@ -235,6 +332,28 @@ TEST_CASE("Stereo envelope linking preserves detector energy and channel indepen
     constexpr std::array<double, 2> silent{0.0, 0.0};
     REQUIRE(shared_fault == silent);
     REQUIRE(linked.current() == silent);
+}
+
+TEST_CASE("Stereo RMS supports partial detector links and finite extreme input",
+          "[signal][dynamics]") {
+    StereoEnvelopeFollower64 follower;
+    follower.prepare(192000.0);
+    follower.set_attack_ms(0.0);
+    follower.set_release_ms(250.0);
+    follower.set_mode(StereoEnvelopeFollower64::Mode::rms);
+    follower.set_link(0.5);
+
+    const auto partial = follower.process(1.0, -0.25);
+    REQUIRE_THAT(partial[0], WithinAbs(1.0, 1e-15));
+    REQUIRE_THAT(partial[1], WithinAbs(0.625, 1e-15));
+
+    const auto extreme = follower.process(1.0, std::numeric_limits<double>::max());
+    REQUIRE(std::isfinite(extreme[0]));
+    REQUIRE(std::isfinite(extreme[1]));
+    REQUIRE(extreme[0] > 0.0);
+    REQUIRE(extreme[1] > 0.0);
+    REQUIRE(std::isfinite(follower.current()[0]));
+    REQUIRE(std::isfinite(follower.current()[1]));
 }
 
 TEST_CASE("Envelope follower recovers deterministically from non-finite detector input",
@@ -267,49 +386,87 @@ TEST_CASE("Gain-reduction telemetry has one sign and unit across dynamics lineag
     REQUIRE(signed_meter.signed_db() == -6.0);
     REQUIRE_THAT(signed_meter.linear_gain(), WithinAbs(std::pow(10.0, -6.0 / 20.0), 1e-15));
     REQUIRE(GainReduction::from_signed_db(std::numeric_limits<double>::infinity()).db() == 0.0);
+    const auto signed_mute =
+        GainReduction::from_signed_db(-std::numeric_limits<double>::infinity());
+    const auto magnitude_mute =
+        GainReduction::from_magnitude_db(std::numeric_limits<double>::infinity());
+    REQUIRE(signed_mute.db() == std::numeric_limits<double>::infinity());
+    REQUIRE(magnitude_mute.db() == std::numeric_limits<double>::infinity());
+    REQUIRE(signed_mute.linear_gain() == 0.0);
+    REQUIRE(magnitude_mute.linear_gain() == 0.0);
+    REQUIRE(GainReduction::from_signed_db(std::numeric_limits<double>::quiet_NaN()).db() == 0.0);
 
     FeedforwardCompressor64 feedforward;
     feedforward.prepare(48000.0);
+    require_unity_meter(feedforward.gain_reduction());
     feedforward.set_auto_makeup(false);
+    feedforward.set_threshold_db(-30.0);
+    feedforward.set_ratio(10.0);
     feedforward.set_attack_ms(0.05);
     for (int i = 0; i < 48000; ++i)
         feedforward.process(1.0);
-    REQUIRE(feedforward.gain_reduction().db() == feedforward.gain_reduction_db());
+    require_magnitude_legacy_meter(feedforward.gain_reduction(), feedforward.gain_reduction_db());
 
     VcaCompressor64 vca;
     vca.prepare(48000.0);
+    require_unity_meter(vca.gain_reduction());
+    vca.set_threshold_db(-30.0);
+    vca.set_ratio(10.0);
     for (int i = 0; i < 48000; ++i)
         vca.process(1.0);
-    REQUIRE(vca.gain_reduction().db() == -vca.gain_reduction_db());
+    require_signed_legacy_meter(vca.gain_reduction(), vca.gain_reduction_db());
+    REQUIRE_THAT(vca.gain_reduction().linear_gain(), WithinAbs(vca.current_gain_linear(), 1e-14));
 
     FetCompressor64 fet;
     fet.prepare(48000.0);
+    require_unity_meter(fet.gain_reduction());
+    fet.set_input_gain_db(20.0);
     for (int i = 0; i < 48000; ++i)
         fet.process(1.0);
-    REQUIRE(fet.gain_reduction().db() == fet.gain_reduction_db());
+    require_magnitude_legacy_meter(fet.gain_reduction(), fet.gain_reduction_db());
 
     DiodeBridgeCompressor64 diode;
     diode.prepare(48000.0);
-    for (int i = 0; i < 48000; ++i)
-        diode.process(1.0);
-    REQUIRE(diode.gain_reduction().db() == -diode.gain_reduction_db());
+    require_unity_meter(diode.gain_reduction());
+    diode.set_threshold_db(-30.0);
+    diode.set_ratio(10.0);
+    for (int i = 0; i < 96000; ++i)
+        diode.process(std::sin(2.0 * std::numbers::pi * 1000.0 * i / 48000.0));
+    require_signed_legacy_meter(diode.gain_reduction(), diode.gain_reduction_db());
 
     Compressor64 legacy;
+    require_unity_meter(legacy.gain_reduction());
     Compressor64::Params params;
     params.threshold_db = -30.0;
+    params.ratio = 10.0;
+    params.knee_db = 0.0;
+    params.attack_ms = 0.0;
     legacy.set_params(params);
     legacy.set_sample_rate(48000.0);
-    for (int i = 0; i < 48000; ++i)
-        legacy.process(1.0);
-    REQUIRE(legacy.gain_reduction().db() == -legacy.gain_reduction_db());
+    const double compressed = legacy.process(1.0);
+    require_signed_legacy_meter(legacy.gain_reduction(), legacy.gain_reduction_db());
+    REQUIRE_THAT(legacy.gain_reduction().linear_gain(), WithinAbs(compressed, 1e-14));
+
+    Limiter64 limiter;
+    require_unity_meter(limiter.gain_reduction());
+    limiter.set_threshold_db(-12.0);
+    const double limited = limiter.process(1.0);
+    REQUIRE(limiter.gain_reduction().db() > 0.0);
+    REQUIRE_THAT(limiter.gain_reduction().linear_gain(), WithinAbs(limited, 1e-14));
 
     NoiseGate64 gate;
+    require_unity_meter(gate.gain_reduction());
     NoiseGate64::Params gate_params;
     gate_params.threshold_db = -20.0;
+    gate_params.ratio = 10.0;
+    gate_params.attack_ms = 0.0;
+    gate_params.release_ms = 0.0;
     gate.set_params(gate_params);
-    for (int i = 0; i < 48000; ++i)
-        gate.process(0.001);
-    REQUIRE(gate.gain_reduction().db() >= 0.0);
+    const double gate_input = 0.001;
+    const double gated = gate.process(gate_input);
+    REQUIRE(gate.gain_reduction().db() > 0.0);
+    const double actual_gate_gain = std::abs(gated / gate_input);
+    REQUIRE_THAT(gate.gain_reduction().linear_gain(), WithinAbs(actual_gate_gain, 1e-14));
 }
 
 TEST_CASE("External sidechain remains detector-domain input", "[signal][dynamics]") {

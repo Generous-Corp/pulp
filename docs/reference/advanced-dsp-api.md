@@ -41,12 +41,15 @@ processing call.
 `StereoEnvelopeFollowerT`, and `GainReduction`. Followers consume raw signed
 samples in the linear amplitude domain. Peak mode rectifies; RMS mode squares,
 smooths, and square-roots. Their attack and release controls are milliseconds
-measured from 10 to 90 percent of the smoothed state: amplitude in peak mode and
-mean-square power in RMS mode. `current()` returns linear amplitude,
+measured exactly from 10 to 90 percent of the smoothed state: amplitude in peak
+mode and mean-square power in RMS mode. `BallisticsFilterT` retains its legacy
+nominal 2.2 exponent for render compatibility; `EnvelopeFollowerT` selects the
+exact ln(9) convention. `current()` returns linear amplitude,
 `current_db()` returns dBFS with a configurable floor, and the coefficient
 accessors expose the exact pure ballistics intermediate used by processing.
 
-`GainReduction::db()` is always a non-negative attenuation magnitude.
+`GainReduction::db()` is always a non-negative attenuation magnitude; positive
+infinity represents a complete mute and has zero linear gain.
 `from_signed_db()` adapts processors whose legacy meter is a negative gain;
 `from_magnitude_db()` adapts positive attenuation meters. Every compressor
 lineage exposes `gain_reduction()` using this convention without changing the

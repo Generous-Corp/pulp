@@ -19,7 +19,7 @@ namespace pulp::signal {
 /// contracts. Dynamics processors expose this type through `gain_reduction()`
 /// so meters can consume every lineage without knowing its internal sign.
 ///
-/// RT contract: construction and inspection are pure scalar arithmetic over
+/// RT contract: construction and inspection are pure scalar arithmetic over a
 /// scalar value. They allocate no memory, lock nothing, and perform no I/O.
 class GainReduction {
   public:
@@ -27,12 +27,12 @@ class GainReduction {
 
     /// Adapt a signed gain value, where attenuation is negative dB.
     static GainReduction from_signed_db(double signed_db) noexcept {
-        return GainReduction{std::isfinite(signed_db) ? std::max(0.0, -signed_db) : 0.0};
+        return GainReduction{std::isnan(signed_db) ? 0.0 : std::max(0.0, -signed_db)};
     }
 
     /// Adapt an attenuation magnitude, where reduction is positive dB.
     static GainReduction from_magnitude_db(double magnitude_db) noexcept {
-        return GainReduction{std::isfinite(magnitude_db) ? std::max(0.0, magnitude_db) : 0.0};
+        return GainReduction{std::isnan(magnitude_db) ? 0.0 : std::max(0.0, magnitude_db)};
     }
 
     /// Non-negative attenuation magnitude in decibels.
@@ -45,7 +45,8 @@ class GainReduction {
         return -db_;
     }
 
-    /// The equivalent linear amplitude multiplier in `[0, 1]`.
+    /// The equivalent linear amplitude multiplier in `[0, 1]`; infinite
+    /// attenuation maps to zero.
     double linear_gain() const noexcept {
         return std::pow(10.0, -db_ / 20.0);
     }
@@ -60,11 +61,23 @@ class GainReduction {
 ///
 /// Input is a raw signed audio sample in the linear amplitude domain. Peak mode
 /// rectifies it; RMS mode squares before smoothing and square-roots the result.
-/// Attack and release are 10-to-90-percent times in milliseconds in the
+/// Attack and release are exact 10-to-90-percent times in milliseconds in the
 /// smoothed-state domain: amplitude for peak mode and mean-square power for RMS
-/// mode. The existing `BallisticsFilterT` name remains a compatibility spelling
-/// of this same type, not a second implementation.
-template <typename SampleType = float> using EnvelopeFollowerT = BallisticsFilterT<SampleType>;
+/// mode. `BallisticsFilterT` remains the legacy-compatible spelling with its
+/// historical nominal 2.2 exponent; this type selects the exact ln(9) contract
+/// without changing existing BallisticsFilter output.
+template <typename SampleType = float>
+class EnvelopeFollowerT : public BallisticsFilterT<SampleType> {
+  public:
+    using Base = BallisticsFilterT<SampleType>;
+    using Mode = typename Base::Mode;
+
+    EnvelopeFollowerT() : Base(Base::TimeConvention::exact_10_to_90) {}
+
+    static SampleType coefficient_for_time_ms(SampleType ms, SampleType sample_rate) {
+        return Base::exact_coefficient_for_time_ms(ms, sample_rate);
+    }
+};
 
 using EnvelopeFollower = EnvelopeFollowerT<float>;
 using EnvelopeFollower64 = EnvelopeFollowerT<double>;
@@ -123,11 +136,23 @@ template <typename SampleType = float> class StereoEnvelopeFollowerT {
         const SampleType shared = std::max(left_magnitude, right_magnitude);
         const SampleType left_detector = left_magnitude + link_ * (shared - left_magnitude);
         const SampleType right_detector = right_magnitude + link_ * (shared - right_magnitude);
-        return {left_.process(left_detector), right_.process(right_detector)};
+        const SampleType left_envelope = left_.process(left_detector);
+        const SampleType right_envelope = right_.process(right_detector);
+        if (link_ == SampleType{1}) {
+            const SampleType linked_envelope = std::max(left_envelope, right_envelope);
+            return {linked_envelope, linked_envelope};
+        }
+        return {left_envelope, right_envelope};
     }
 
     std::array<SampleType, 2> current() const {
-        return {left_.current(), right_.current()};
+        const SampleType left = left_.current();
+        const SampleType right = right_.current();
+        if (link_ == SampleType{1}) {
+            const SampleType linked = std::max(left, right);
+            return {linked, linked};
+        }
+        return {left, right};
     }
 
     void reset() {

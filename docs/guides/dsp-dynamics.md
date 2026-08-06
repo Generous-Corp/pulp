@@ -8,17 +8,19 @@ aliases shown below; every class also has a `64` double-precision alias.
 `<pulp/signal/dynamics_contract.hpp>` supplies the common vocabulary around
 those intentionally different processors:
 
-- `EnvelopeFollower` is the discoverable spelling of the established
-  `BallisticsFilter`. It accepts raw linear-amplitude samples, supports peak and
-  RMS modes, and reports linear or dBFS envelopes. Attack and release are
-  10-to-90-percent times in the smoothed-state domain: amplitude for peak mode
-  and mean-square power for RMS mode.
+- `EnvelopeFollower` builds on the established `BallisticsFilter`. It accepts
+  raw linear-amplitude samples, supports peak and RMS modes, and reports linear
+  or dBFS envelopes. Attack and release are exact 10-to-90-percent times in the
+  smoothed-state domain: amplitude for peak mode and mean-square power for RMS
+  mode. The older `BallisticsFilter` name retains its historical nominal 2.2
+  exponent so existing renders remain bit-identical.
 - `StereoEnvelopeFollower` composes two followers and links them in the
   detector-magnitude domain. Link zero is dual mono; link one follows the louder
   channel on both sides without opposite-polarity cancellation.
 - `GainReduction` is the shared meter contract. Its `db()` value is always a
   non-negative attenuation magnitude; `signed_db()` and `linear_gain()` expose
-  the equivalent gain-domain values.
+  the equivalent gain-domain values. Positive infinite attenuation represents
+  a complete mute and maps to zero linear gain.
 
 | Processor | Header | Choose it for |
 |---|---|---|
