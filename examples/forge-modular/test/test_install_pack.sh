@@ -158,6 +158,26 @@ else
 fi
 rm -rf "$W"
 
+# An unpacked stock pack is moved out of Rack's executable search path before
+# the replacement archive lands. It remains recoverable as user work and the
+# ordinary uninstaller keeps it unless --all is explicitly requested.
+ran=$((ran + 1))
+new_world 2.0.0 mac-arm64
+DEST="$W/home/Library/Application Support/Rack2/plugins-mac-arm64"
+BACKUPS="$W/home/Library/Application Support/Forge Modular/replaced-rack-packs"
+mkdir -p "$DEST/ForgeModular"
+printf '{"slug":"ForgeModular","version":"1.0.0"}\n' > "$DEST/ForgeModular/plugin.json"
+"$PLACER" --source "$W/Forge Modular.app" --home "$W/home" >/dev/null 2>&1
+if [ ! -d "$DEST/ForgeModular" ] && \
+   [ -f "$DEST/ForgeModular-2.0.0-mac-arm64.vcvplugin" ] && \
+   find "$BACKUPS" -mindepth 1 -maxdepth 1 -type d -name 'ForgeModular-*' \
+        | grep -q .; then
+    ok "replaced unpacked packs leave Rack's search path but remain recoverable"
+else
+    fail "a replaced unpacked pack stayed executable or was destroyed"
+fi
+rm -rf "$W"
+
 # ── a path with spaces survives ──────────────────────────────────────────────
 # Every path in this product contains one: "Forge Modular.app" and
 # "Application Support". The first version of the placer split on them and
@@ -305,6 +325,14 @@ if grep -q -- '--rack-plugin is required' "$FM/package.sh" && \
     ok "package requires a named current pack and one target architecture"
 else
     fail "package can discover stale packs or mix target architectures"
+fi
+
+ran=$((ran + 1))
+if [ "$(grep -c '^trap ' "$FM/package.sh")" -eq 1 ] && \
+   grep -q 'STAGED_ROOT.*STAGE.*CHECK' "$FM/package.sh"; then
+    ok "one packaging exit trap cleans every staging directory"
+else
+    fail "a later packaging trap can strand an earlier staging directory"
 fi
 
 # Signing identities may live only in the standard keychain environment file.

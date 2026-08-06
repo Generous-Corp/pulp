@@ -159,7 +159,10 @@ find "$DEST_DIR" -maxdepth 1 -name "$SLUG-*.vcvplugin" 2>/dev/null \
 # the app has it in exactly this form, and silently destroying it would be the
 # other failure. They get it back under a dated name and are told where.
 if [ -d "$DEST_DIR/$SLUG" ]; then
-    ASIDE="$DEST_DIR/.$SLUG.replaced-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_ROOT="$DEST_HOME/Library/Application Support/Forge Modular/replaced-rack-packs"
+    mkdir -p "$BACKUP_ROOT" || {
+        echo "install_pack: could not create $BACKUP_ROOT" >&2; exit 1; }
+    ASIDE="$BACKUP_ROOT/$SLUG-$(date +%Y%m%d-%H%M%S)"
     if mv "$DEST_DIR/$SLUG" "$ASIDE" 2>/dev/null; then
         echo "install_pack: moved the previously unpacked $SLUG aside to $ASIDE"
         echo "              (Rack loads the unpacked directory, so leaving it"

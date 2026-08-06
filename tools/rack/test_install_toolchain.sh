@@ -22,6 +22,28 @@ fail=0
 ok()   { printf '  ok     %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  WRONG  %s\n' "$1"; fail=$((fail + 1)); }
 
+# --- broad and redirected destinations fail before recursive mutation --------
+UNSAFE="$(mktemp -d)"
+mkdir -p "$UNSAFE/home" "$UNSAFE/target"
+if HOME="$UNSAFE/home" FORGE_MODULAR_HOME="$UNSAFE/home" \
+       "$INSTALL" >/dev/null 2>&1; then
+    bad "the user's home cannot become the recursive toolchain destination"
+else
+    ok "the user's home cannot become the recursive toolchain destination"
+fi
+ln -s "$UNSAFE/target" "$UNSAFE/link"
+if FORGE_MODULAR_HOME="$UNSAFE/link" "$INSTALL" >/dev/null 2>&1; then
+    bad "a symlink cannot become the recursive toolchain destination"
+else
+    ok "a symlink cannot become the recursive toolchain destination"
+fi
+if [ -z "$(find "$UNSAFE/target" -mindepth 1 -print -quit)" ]; then
+    ok "rejected destinations are untouched"
+else
+    bad "a rejected destination was mutated"
+fi
+rm -rf "$UNSAFE"
+
 # --- a fresh home installs and can emit a panel -------------------------------
 FRESH="$(mktemp -d)"
 out="$(FORGE_MODULAR_HOME="$FRESH" "$INSTALL" 2>&1)"

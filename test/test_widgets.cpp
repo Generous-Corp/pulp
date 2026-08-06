@@ -1612,6 +1612,24 @@ TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget p
     REQUIRE(off_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
     REQUIRE(commands_of(off_canvas, DrawCommand::Type::fill_text).front().text == "Latch");
 
+    ToggleButton asymmetric_button;
+    asymmetric_button.set_bounds({0, 0, 96, 32});
+    asymmetric_button.set_corner_radius_tl(2.0f);
+    asymmetric_button.set_corner_radius_tr(4.0f);
+    asymmetric_button.set_corner_radius_br(6.0f);
+    asymmetric_button.set_corner_radius_bl(8.0f);
+    RecordingCanvas asymmetric_canvas;
+    asymmetric_button.paint(asymmetric_canvas);
+    const auto asymmetric_round_rects =
+        commands_of(asymmetric_canvas, DrawCommand::Type::round_rect);
+    REQUIRE(asymmetric_round_rects.size() == 2);
+    for (const auto& rr : asymmetric_round_rects) {
+        CHECK(rr.f[4] == 2.0f);
+        CHECK(rr.floats[0] == 4.0f);
+        CHECK(rr.floats[2] == 6.0f);
+        CHECK(rr.floats[4] == 8.0f);
+    }
+
     int toggle_count = 0;
     bool toggle_state = false;
     button.on_toggle = [&](bool on) {

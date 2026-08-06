@@ -20,6 +20,28 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEST="${FORGE_MODULAR_HOME:-$HOME/Library/Application Support/Forge Modular}"
 
+# This tree is recursively chmodded and receives rsync --delete below. Resolve
+# it once and reject targets where either operation could escape the product's
+# own directory. In particular, an environment typo must never turn "$HOME" or
+# "/" into the toolchain, and an existing symlink is not a destination at all.
+DEST="$(python3 - "$DEST" "$HOME" "$SRC" <<'PY'
+import os
+import pathlib
+import sys
+
+raw = os.path.abspath(os.path.expanduser(sys.argv[1]))
+home = os.path.realpath(os.path.abspath(os.path.expanduser(sys.argv[2])))
+source = os.path.realpath(os.path.abspath(sys.argv[3]))
+if os.path.islink(raw):
+    raise SystemExit(f"unsafe Forge Modular destination is a symlink: {raw}")
+resolved = os.path.realpath(raw)
+parts = pathlib.Path(resolved).parts
+if resolved in ("/", home, source) or len(parts) < 4:
+    raise SystemExit(f"unsafe Forge Modular destination is too broad: {resolved}")
+print(resolved)
+PY
+)"
+
 # Everything the generator reaches for, relative to the repo root.
 PARTS=(
   "tools/rack"                 # the generator itself

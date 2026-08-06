@@ -708,6 +708,14 @@ TEST_CASE("WidgetBridge exposes a ToggleButton's on/off colour pairs",
     CHECK(near(t->off_background_color_override()->r, chan(0x16)));
     CHECK(near(t->on_background_color_override()->r, 1.0f));
 
+    bridge.load_script(
+        "setCornerRadius('t', 'All', 10);"
+        "setCornerRadius('t', 'TopLeft', 2);");
+    REQUIRE(t->corner_radius_override().has_value());
+    CHECK(*t->corner_radius_override() == 10.0f);
+    CHECK(t->corner_radius_tl() == 2.0f);
+    CHECK(t->corner_radius_tr() == 10.0f);
+
     // A non-toggle target is ignored rather than crashing: the same script may
     // style a mixed tree.
     bridge.load_script("createRow('r'); setToggleBackground('r', '#FFFFFF', '#000000')");

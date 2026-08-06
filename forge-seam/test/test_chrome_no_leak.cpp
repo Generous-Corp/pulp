@@ -9284,6 +9284,29 @@ TEST_CASE("process engines atomically share the launch window",
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("a generation does not launch when its log cannot be claimed",
+          "[build][lock]") {
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-log-refusal";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    for (const char* t : {"generate.py", "patch.py"}) {
+        std::ofstream f(dir / t);
+        f << "import sys; sys.exit(0)\n";
+    }
+
+    forge_modular::ProcessEngine engine(
+        dir.string(), "/dev/null/cannot-have-a-child/last-run.log");
+    REQUIRE(engine.try_claim_generation());
+    engine.submit("a build whose transcript has nowhere to go", true);
+
+    CHECK_FALSE(engine.last_error().empty());
+    CHECK(engine.log_path() == "/dev/null/cannot-have-a-child/last-run.log");
+    CHECK(engine.try_claim_generation());
+    engine.release_generation_claim();
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("a port map that will not parse says so, and is not silent",
           "[portmap][unreadable]") {
     // What the user saw: every module Rack owns drawn with hollow knobs and an

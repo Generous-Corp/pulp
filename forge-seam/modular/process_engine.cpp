@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -162,6 +163,11 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
         std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm);
         std::error_code ec;
         std::filesystem::create_directories(log_base_, ec);
+        if (ec) {
+            error_ = "could not create the generation log directory: " + ec.message();
+            release_generation_claim();
+            return;
+        }
         // The name is CLAIMED, not merely checked.
         //
         // Testing exists() and taking the name is not enough: the file does
@@ -185,8 +191,10 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
                 break;
             }
             if (errno != EEXIST) {          // out of room, no permission, …
-                log_path_ = candidate.string();   // best effort; say nothing false
-                break;
+                error_ = "could not claim a generation log: " +
+                         std::string(std::strerror(errno));
+                release_generation_claim();
+                return;
             }
         }
     }

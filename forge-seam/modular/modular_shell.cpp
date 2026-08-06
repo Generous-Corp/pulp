@@ -1576,6 +1576,10 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     if (explanation_) explanation_->set_request(last_request_);
     if (input) input->set_text("");
     engine_->submit(prompt, artifact_ == Artifact::patch);
+    if (const auto why = engine_->last_error(); !why.empty()) {
+        engine_->release_generation_claim();
+        return why;
+    }
     in_flight_ = true;
     // Follow the file this run actually chose. The engine gives every run its
     // own, so a shell still tailing the previous one would report the previous

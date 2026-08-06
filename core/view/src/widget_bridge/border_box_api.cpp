@@ -62,7 +62,8 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
         // A ToggleButton paints its own rounded rect from its own radius and
         // ignores the View's, defaulting to 6px -- so buttons and tabs stayed
         // stubbornly square whatever the View was told.
-        if (auto* t = dynamic_cast<ToggleButton*>(v)) t->set_corner_radius(r);
+        if (corner == "All")
+            if (auto* t = dynamic_cast<ToggleButton*>(v)) t->set_corner_radius(r);
         if (v) {
             if (corner == "All") v->set_border_radius(r);
             else if (corner == "TopLeft") v->set_corner_radius_tl(r);

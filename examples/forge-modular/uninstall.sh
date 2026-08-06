@@ -71,6 +71,7 @@ WORK=(
     "$SUPPORT/Forge Modular/projects"
     "$SUPPORT/Forge Modular/examples"
     "$SUPPORT/Forge Modular/patches"
+    "$SUPPORT/Forge Modular/replaced-rack-packs"
 )
 
 gone=0

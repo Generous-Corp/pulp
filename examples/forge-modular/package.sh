@@ -83,7 +83,7 @@ echo "[installer] app: $APP"
 # Staged into a COPY of the bundle, before signing, so the signature covers
 # them and the source tree is never mutated by packaging.
 STAGED_ROOT="$(mktemp -d)"
-trap 'rm -rf "$STAGED_ROOT"' EXIT
+trap 'rm -rf "$STAGED_ROOT" "${STAGE:-}" "${CHECK:-}"' EXIT
 ditto "$APP" "$STAGED_ROOT/$(basename "$APP")"
 APP="$STAGED_ROOT/$(basename "$APP")"
 TOOLS_DEST="$APP/Contents/Resources/tools/rack"
@@ -366,7 +366,6 @@ if [[ $DO_SIGN -eq 0 ]]; then
     # proven without credentials. macOS will refuse to open it without a
     # right-click, which is correct and expected for an unsigned build.
     STAGE="$(mktemp -d)"
-    trap 'rm -rf "$STAGE"' EXIT
 
     mkdir -p "$STAGE/Applications" \
              "$STAGE/Library/Audio/Plug-Ins/Components" \
