@@ -558,10 +558,14 @@ TEST_CASE("The evaluated realm is discarded at the frame boundary",
 
     REQUIRE(session.script_inspector()->evaluate("globalThis.planted = 7; 1").ok);
     REQUIRE(session.script_inspector()->post_evaluation_reset_pending());
-    // Still the caller's realm: the pointer it holds is the live one and the
-    // mutation is still visible, because no frame has run yet.
+    // Still the caller's realm: the pointer it holds is the live one, and a
+    // global the evaluation planted is still visible to the next evaluation,
+    // because no frame has run to discard the realm they share.
     REQUIRE(session.bridge()->widget("scrub") == before_eval);
-    REQUIRE(session.script_inspector()->evaluate("typeof globalThis.planted").ok);
+    const auto shared_realm =
+        session.script_inspector()->evaluate("typeof globalThis.planted");
+    REQUIRE(shared_realm.ok);
+    CHECK(shared_realm.json == "\"number\"");
 
     session.poll();
 
@@ -609,3 +613,4 @@ TEST_CASE("ScriptedUiSession destruction contains throwing descendant detach hoo
     std::error_code cleanup_error;
     fs::remove_all(temp, cleanup_error);
 }
+

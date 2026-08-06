@@ -256,14 +256,37 @@ TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refu
         "Runtime.evaluate",
         R"({"code":"globalThis.transientMarker = 99; setTimeout(() => { globalThis.deferredRan = true; }, 0); Promise.resolve().then(() => { globalThis.deferredRan = true; }); 1"})");
     REQUIRE_FALSE(evaluated.is_error);
-    evaluated = request(
-        "Runtime.evaluate",
-        R"json({"code":"({ deferredRan: globalThis.deferredRan, hasMarker: typeof globalThis.transientMarker !== 'undefined' })"})json");
-    REQUIRE_FALSE(evaluated.is_error);
-    const auto reset_response = choc::json::parse(evaluated.params_json);
-    const auto reset_probe = reset_response["result"];
-    REQUIRE_FALSE(reset_probe["deferredRan"].getWithDefault(true));
-    REQUIRE_FALSE(reset_probe["hasMarker"].getWithDefault(true));
+    // Returns the whole parsed response: `choc` indexing yields a view into the
+    // parsed value, so the parse result has to outlive the probe's reads.
+    const auto probe_realm = [&] {
+        evaluated = request(
+            "Runtime.evaluate",
+            R"json({"code":"({ deferredRan: globalThis.deferredRan, hasMarker: typeof globalThis.transientMarker !== 'undefined' })"})json");
+        REQUIRE_FALSE(evaluated.is_error);
+        return choc::json::parse(evaluated.params_json);
+    };
+
+    // No frame has run between the two evaluations, so they share a realm and
+    // the marker is still visible. That is what makes the deferred-work
+    // assertion mean something: the timer and the Promise job are queued in a
+    // realm that is demonstrably still live, and they still have not run.
+    {
+        const auto response = probe_realm();
+        const auto probe = response["result"];
+        REQUIRE_FALSE(probe["deferredRan"].getWithDefault(true));
+        REQUIRE(probe["hasMarker"].getWithDefault(false));
+    }
+
+    // The host's frame boundary discards that realm — ahead of the same poll's
+    // frame pump, so the queued timer and Promise job never get one. The marker
+    // going with them is the proof the realm was actually replaced.
+    processor.active_scripted_ui()->poll();
+    {
+        const auto response = probe_realm();
+        const auto probe = response["result"];
+        REQUIRE_FALSE(probe["deferredRan"].getWithDefault(true));
+        REQUIRE_FALSE(probe["hasMarker"].getWithDefault(true));
+    }
 
     {
         std::ofstream source(script);
