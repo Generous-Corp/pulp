@@ -558,9 +558,10 @@ voice allocation, MPE note ownership, exact tick/swing timebase types, and host
 transport projection. Swing projection uses an exact rational ratio; inverse
 recovery is bounded by integer-tick rounding rather than exact. A checked C++
 fixture mechanically references every advertised type or function. A separate
-acceptance test installs the SDK, configures an outside consumer, reads the
-installed manifest and schemas, and compiles/links against every advertised
-exported target.
+acceptance test installs the SDK, configures outside consumers, reads the
+installed manifest and schema, and independently compiles, links, and runs each
+capability and each binding against only its declared minimal exported target.
+The maintenance surface ledger and its schema are intentionally not installed.
 
 Coverage is explicitly `partial`. An absent key means **unknown**, not
 unsupported. A live row's `status` is the positive support claim; an
@@ -587,6 +588,21 @@ Any installed-manifest change also increases `manifest_revision`; any ledger
 change increases its `inventory_version`. Removed keys and headers leave
 permanent tombstones, so consumers can distinguish removal from an incomplete
 inventory and stable keys cannot be silently reused.
+
+Capability removal has a published-window rule: a live capability must first
+ship with both `status: deprecated` and `evolution.state: deprecated` in the
+protected base revision. Its introduction and deprecation versions must be
+ordered within its last contract version. Only a later manifest revision may
+replace it with a `status: removed` tombstone. Replacement keys must name live
+capabilities and may not form self-references or cycles.
+
+`tools/agent-capabilities/contract-history.json` is the append-only maintenance
+history. Normal `--check` validates every recorded transition and compares its
+prefix plus the current manifest and ledger directly with the protected Git tip
+(fetching the immutable GitHub base SHA in shallow CI checkouts).
+Editing generator source, current snapshots, and local history together cannot
+bypass a published tombstone, key-reuse prohibition, version increase, or
+deprecation-window rule.
 
 This is a design-time discovery contract. Runtime operations, grants, policy,
 risk decisions, instances, activation, sessions, revocation, and receipts remain

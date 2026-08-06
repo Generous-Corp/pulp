@@ -5,13 +5,20 @@ description: Maintain Pulp's installed design-time agent capability manifest and
 
 # Agent Capabilities
 
-Maintain two related artifacts:
+Maintain three related artifacts:
 
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
   versions, digests, status, evolution, typed C++ bindings, and partial-coverage
   semantics.
 - `agent-capability-surface.json` is the maintenance ledger: every public header
   in the covered roots, its byte fingerprint, and its reviewed disposition.
+- `tools/agent-capabilities/contract-history.json` is the repository-only,
+  append-only evolution history checked against the protected Git tip. Shallow
+  GitHub Actions checkouts fetch the immutable event base SHA when necessary.
+
+Only the consumer manifest and its schema install into the SDK. The surface
+ledger, surface schema, legacy baseline, and contract history are maintenance
+artifacts and must not be installed.
 
 Keep both separate from the unified runtime control platform. This contract may
 describe what an SDK can design or generate; it must never contain runtime
@@ -27,7 +34,8 @@ For a new public header or symbol:
 2. If yes, add an explicit row to `EXPORTS` in
    `tools/scripts/agent_capability_manifest.py`, add typed bindings for every
    advertised entrypoint/operation, and record the current header fingerprint.
-   Start a new key at contract version `1.0`.
+   Add a nonempty `_link_probe` that constructs or invokes the real API rather
+   than merely taking `sizeof`, and start a new key at contract version `1.0`.
 3. If no, add a reviewed header classification instead:
    `capability_support`, `infrastructure`, or `unsupported_capability`. Give a
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
@@ -55,18 +63,24 @@ For an existing capability change:
 
 For removal:
 
-1. Add a capability tombstone with the last version and digest before deleting
-   the row. Never reuse a tombstoned key.
-2. Add a surface tombstone with the last header fingerprint before deleting a
+1. First publish the live capability as `status: deprecated` with a matching
+   deprecated evolution state and ordered lifecycle versions. A capability that
+   is active in the protected base may not be removed in the current change.
+2. In a later published revision, add a `status: removed` capability tombstone
+   with its introduction/deprecation versions, last version, and digest before
+   deleting the row. Never reuse a tombstoned key.
+3. Add a surface tombstone with the immediately prior reviewed header
+   fingerprint before deleting a
    covered public header.
-3. Increase the manifest and surface inventory revisions as applicable.
-4. Preserve tombstones permanently; do not rewrite history.
+4. Increase the manifest and surface inventory revisions as applicable.
+5. Preserve tombstones permanently; do not rewrite history. Replacement keys
+   must exist, may not reference themselves, and may not form cycles.
 
 ## Interpret support honestly
 
 - A live capability row's `status` is the explicit support claim. Use only
-  `stable`, `usable`, `experimental`, `partial`, or `unsupported`; never publish
-  planned work.
+  `stable`, `usable`, `experimental`, `partial`, `unsupported`, or `deprecated`;
+  never publish planned work.
 - A header classified `unsupported_capability` is an explicit negative claim.
 - `legacy_unreviewed` means only that no machine-readable claim has been
   reviewed yet.
@@ -86,9 +100,11 @@ cmake --build build --config Release --target pulp-test-agent-capability-compile
 ctest --test-dir build -C Release -R '^agent-capability-' --output-on-failure
 ```
 
-The installed-SDK test must install to an isolated prefix, read the installed
-schema/manifest/surface files, compile every typed binding, link every advertised
-target, and reject checkout-path leakage.
+The installed-SDK test must install to an isolated prefix, verify maintenance
+artifacts are absent, read the installed schema and manifest, and independently
+compile/link/run every capability and every typed binding against only its
+declared minimal target. It must reject wrong-target declarations and checkout-
+path leakage, and use configuration-aware build/install and executable paths.
 
 The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST

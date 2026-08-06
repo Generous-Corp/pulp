@@ -433,30 +433,20 @@ unset(_pulp_forge_catalog_snapshot)
 # realization authority.
 set(_pulp_agent_capability_snapshot
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/agent-capabilities.json")
-set(_pulp_agent_capability_surface
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/agent-capability-surface.json")
 set(_pulp_agent_capability_schema
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/agent-capabilities.schema.json")
-set(_pulp_agent_capability_surface_schema
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/agent-capability-surface.schema.json")
 if(NOT EXISTS "${_pulp_agent_capability_snapshot}"
-        OR NOT EXISTS "${_pulp_agent_capability_surface}"
-        OR NOT EXISTS "${_pulp_agent_capability_schema}"
-        OR NOT EXISTS "${_pulp_agent_capability_surface_schema}")
+        OR NOT EXISTS "${_pulp_agent_capability_schema}")
     message(FATAL_ERROR
         "Required agent capability contract artifact is missing.\n"
         "Regenerate it with `python3 tools/scripts/agent_capability_manifest.py --write`.")
 endif()
 install(FILES
     "${_pulp_agent_capability_snapshot}"
-    "${_pulp_agent_capability_surface}"
     "${_pulp_agent_capability_schema}"
-    "${_pulp_agent_capability_surface_schema}"
     DESTINATION "share/pulp")
 unset(_pulp_agent_capability_snapshot)
-unset(_pulp_agent_capability_surface)
 unset(_pulp_agent_capability_schema)
-unset(_pulp_agent_capability_surface_schema)
 
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")

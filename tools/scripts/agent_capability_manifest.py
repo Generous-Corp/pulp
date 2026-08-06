@@ -11,8 +11,10 @@ import argparse
 import copy
 import importlib.util
 import json
+import os
 import pathlib
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -29,6 +31,8 @@ SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 0
 MANIFEST_REVISION = 1
 SURFACE_INVENTORY_VERSION = 1
+HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
+HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
 MANIFEST_SCHEMA_FILE = pathlib.Path(
     "docs/status/agent-capabilities.schema.json"
@@ -37,7 +41,14 @@ COMPILE_FIXTURE = pathlib.Path("test/test_agent_capability_compile.cpp")
 DOMAINS = {"signal", "music", "midi", "audio", "timebase", "sequence", "offline"}
 ROOT_DOMAINS = {item["domain"] for item in surface.PUBLIC_ROOTS}
 RT_CLASSES = {"audio", "control", "any", "offline", "mixed"}
-STATUSES = {"stable", "usable", "experimental", "partial", "unsupported"}
+STATUSES = {
+    "stable",
+    "usable",
+    "experimental",
+    "partial",
+    "unsupported",
+    "deprecated",
+}
 BINDING_KINDS = {"cpp_type", "cpp_function"}
 EVOLUTION_STATES = {"active", "deprecated"}
 REQUIRED_FEATURES = [
@@ -103,7 +114,9 @@ def binding(
 def capability(**row: Any) -> dict[str, Any]:
     row.setdefault("contract_version", {"major": 1, "minor": 0})
     row.setdefault("status", "usable")
-    row.setdefault("evolution", {"state": "active"})
+    row.setdefault(
+        "evolution", {"state": "active", "introduced_in": {"major": 1, "minor": 0}}
+    )
     return row
 
 
@@ -147,6 +160,12 @@ EXPORTS = [
             )
         ],
         forge_descriptor={"catalog": "forge-catalog.json", "node_key": "saturator"},
+        _link_probe={
+            "binding": "pulp::signal::SaturatorT<float>",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "48000.0",
+        },
     ),
     capability(
         key="audio.instrument-voice-allocator",
@@ -186,10 +205,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe=(
-            "pulp::audio::InstrumentVoiceAllocator allocator; "
-            "(void)allocator.prepare(1);"
-        ),
+        _link_probe={
+            "binding": "pulp::audio::InstrumentVoiceAllocator",
+            "operation": "member_call",
+            "member": "prepare",
+            "arguments": "1",
+        },
     ),
     capability(
         key="midi.mpe-voice-tracker",
@@ -229,7 +250,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe="pulp::midi::MpeVoiceTracker tracker; tracker.reset();",
+        _link_probe={
+            "binding": "pulp::midi::MpeVoiceTracker",
+            "operation": "member_call",
+            "member": "reset",
+            "arguments": "",
+        },
     ),
     capability(
         key="timebase.tick",
@@ -266,6 +292,11 @@ EXPORTS = [
                 ),
             )
         ],
+        _link_probe={
+            "binding": "pulp::timebase::TickPosition",
+            "operation": "construct",
+            "arguments": "1",
+        },
     ),
     capability(
         key="timebase.swing",
@@ -325,6 +356,14 @@ EXPORTS = [
                 ),
             ),
         ],
+        _link_probe={
+            "binding": "pulp::timebase::swing_position",
+            "operation": "function_call",
+            "arguments": (
+                "pulp::timebase::TickPosition{1}, "
+                "pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing"
+            ),
+        },
     ),
     capability(
         key="sequence.host-transport-projector",
@@ -364,9 +403,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe=(
-            "pulp::sequence::HostTransportProjector projector; projector.reset();"
-        ),
+        _link_probe={
+            "binding": "pulp::sequence::HostTransportProjector",
+            "operation": "member_call",
+            "member": "reset",
+            "arguments": "",
+        },
     ),
 ]
 
@@ -445,34 +487,15 @@ def build_surface(root: pathlib.Path) -> tuple[dict[str, Any], list[str]]:
 def coverage_from_surface(
     surface_document: dict[str, Any], rows: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    surface_domains = surface_document["counts"]["by_domain"]
     domains: dict[str, dict[str, Any]] = {}
     for domain in sorted(DOMAINS):
-        counts = surface_domains.get(
-            domain,
-            {
-                "public_headers": 0,
-                "reviewed_headers": 0,
-                "legacy_unreviewed_headers": 0,
-                "unsupported_headers": 0,
-            },
-        )
         domains[domain] = {
             "state": "partial" if domain in ROOT_DOMAINS else "not_inventoried",
-            **counts,
             "capabilities": sum(row["domain"] == domain for row in rows),
         }
     return {
         "state": "partial",
         "absence_semantics": "unknown",
-        "surface_schema": surface.SURFACE_SCHEMA,
-        "surface_inventory_version": surface_document["inventory_version"],
-        "public_headers": surface_document["counts"]["public_headers"],
-        "reviewed_headers": surface_document["counts"]["reviewed_headers"],
-        "legacy_unreviewed_headers": surface_document["counts"][
-            "legacy_unreviewed_headers"
-        ],
-        "unsupported_headers": surface_document["counts"]["unsupported_headers"],
         "domains": domains,
     }
 
@@ -530,15 +553,220 @@ def compile_fixture() -> str:
             if item["kind"] == "cpp_type":
                 lines.append(f"        static_assert(sizeof({name}) > 0);")
             else:
-                lines.append(f"        auto *binding_{binding_index} = &{name};")
+                lines.append(
+                    f"        auto *volatile binding_{binding_index} = &{name};"
+                )
                 lines.append(f"        (void)binding_{binding_index};")
             binding_index += 1
-        link_probe = source_by_key[row["key"]].get("_link_probe")
-        if link_probe:
-            lines.append(f"        {link_probe}")
+        lines.append(f"        {render_link_probe(source_by_key[row['key']])}")
         lines.append("    }")
     lines.extend(["    return 0;", "}", ""])
     return "\n".join(lines)
+
+
+def render_link_probe(row: dict[str, Any]) -> str:
+    probe = row["_link_probe"]
+    binding = probe["binding"]
+    arguments = probe["arguments"]
+    operation = probe["operation"]
+    if operation == "construct":
+        return f"{binding} probe_value{{{arguments}}}; (void)probe_value;"
+    if operation == "member_call":
+        return (
+            f"{binding} probe_value{{}}; "
+            f"(void)probe_value.{probe['member']}({arguments});"
+        )
+    if operation == "function_call":
+        return f"(void){binding}({arguments});"
+    raise ValueError(f"unsupported link probe operation: {operation!r}")
+
+
+def _link_probe_problems(row: dict[str, Any]) -> list[str]:
+    key = row.get("key", "<unknown>")
+    probe = row.get("_link_probe")
+    if not isinstance(probe, dict):
+        return [f"{key} requires a structured installed consumer link probe"]
+    operation = probe.get("operation")
+    required = {"binding", "operation", "arguments"}
+    if operation == "member_call":
+        required.add("member")
+    if set(probe) != required:
+        return [f"{key} link probe fields are not exact for {operation!r}"]
+    bindings = {
+        item["qualified_name"]: item["kind"]
+        for item in row.get("bindings", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("qualified_name"), str)
+    }
+    binding = probe.get("binding")
+    if binding not in bindings:
+        return [f"{key} link probe must name an advertised binding"]
+    if not isinstance(probe.get("arguments"), str):
+        return [f"{key} link probe arguments must be a C++ argument string"]
+    if operation in {"construct", "member_call"} and bindings[binding] != "cpp_type":
+        return [f"{key} {operation} probe requires a cpp_type binding"]
+    if operation == "function_call" and bindings[binding] != "cpp_function":
+        return [f"{key} function_call probe requires a cpp_function binding"]
+    if operation == "member_call" and not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*", probe.get("member", "")
+    ):
+        return [f"{key} member_call probe has an invalid member"]
+    if operation not in {"construct", "member_call", "function_call"}:
+        return [f"{key} link probe operation is invalid"]
+    try:
+        render_link_probe(row)
+    except (KeyError, TypeError, ValueError) as error:
+        return [f"{key} link probe could not render: {error}"]
+    return []
+
+
+def history_entry(
+    manifest_document: dict[str, Any], surface_document: dict[str, Any]
+) -> dict[str, Any]:
+    material = {
+        "manifest": {
+            "schema": manifest_document["schema"],
+            "manifest_revision": manifest_document["manifest_revision"],
+            "capabilities": copy.deepcopy(manifest_document["capabilities"]),
+            "tombstones": copy.deepcopy(manifest_document["tombstones"]),
+        },
+        "surface": {
+            "schema": surface_document["schema"],
+            "inventory_version": surface_document["inventory_version"],
+            "headers": [
+                {
+                    "include": row["include"],
+                    "fingerprint": row["fingerprint"],
+                    "disposition": row["disposition"],
+                }
+                for row in surface_document["headers"]
+            ],
+            "tombstones": copy.deepcopy(surface_document["tombstones"]),
+        },
+    }
+    return {
+        **material,
+        "entry_digest": surface.canonical_digest(material),
+    }
+
+
+def history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"schema": HISTORY_SCHEMA, "entries": copy.deepcopy(entries)}
+
+
+def history_problems(
+    history: Any,
+    current_manifest: dict[str, Any],
+    current_surface: dict[str, Any],
+) -> list[str]:
+    if not isinstance(history, dict):
+        return ["capability history must be an object"]
+    if set(history) != {"schema", "entries"}:
+        return ["capability history fields must be exactly schema and entries"]
+    if history.get("schema") != HISTORY_SCHEMA:
+        return [f"capability history schema must be {HISTORY_SCHEMA}"]
+    entries = history.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return ["capability history must contain at least one entry"]
+    problems: list[str] = []
+    previous: dict[str, Any] | None = None
+    for index, entry in enumerate(entries):
+        where = f"capability history entries[{index}]"
+        if not isinstance(entry, dict) or set(entry) != {
+            "entry_digest",
+            "manifest",
+            "surface",
+        }:
+            problems.append(f"{where} fields are not exact")
+            continue
+        material = {"manifest": entry["manifest"], "surface": entry["surface"]}
+        if entry.get("entry_digest") != surface.canonical_digest(material):
+            problems.append(f"{where} digest does not match its material")
+        if previous is not None:
+            problems.extend(
+                evolution_problems(
+                    previous["manifest"],
+                    entry["manifest"],
+                    allow_unpublished_migration=False,
+                )
+            )
+            problems.extend(
+                surface_evolution_problems(
+                    previous["surface"], entry["surface"], surface.SURFACE_SCHEMA
+                )
+            )
+        previous = entry
+    current_entry = history_entry(current_manifest, current_surface)
+    if previous is not None:
+        problems.extend(
+            evolution_problems(
+                previous["manifest"],
+                current_entry["manifest"],
+                allow_unpublished_migration=False,
+            )
+        )
+        problems.extend(
+            surface_evolution_problems(
+                previous["surface"], current_entry["surface"], surface.SURFACE_SCHEMA
+            )
+        )
+    return _deduplicate(problems)
+
+
+def protected_base_problems(
+    root: pathlib.Path,
+    history: dict[str, Any],
+    current_manifest: dict[str, Any],
+    current_surface: dict[str, Any],
+) -> list[str]:
+    """Compare against protected-tip artifacts, which this checkout cannot edit."""
+    base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
+    if _git_output(root, ["rev-parse", "--is-inside-work-tree"]) != "true":
+        # Source archives have no independently addressable protected history.
+        # Their self-contained history is still checked above; PR/CI checkouts
+        # must resolve or fetch the immutable protected tip below.
+        return []
+    protected_tip = _resolve_protected_tip(root, base_ref)
+    if protected_tip is None:
+        return [
+            f"could not resolve protected capability history base {base_ref!r}; "
+            "set PULP_AGENT_CAPABILITY_BASE_REF to the CI base ref"
+        ]
+    tip_manifest = _git_json(root, protected_tip, SNAPSHOT)
+    old_manifest = tip_manifest
+    old_surface = _git_json(root, protected_tip, surface.SURFACE_SNAPSHOT)
+    old_history = _git_json(root, protected_tip, HISTORY_FILE)
+    if old_manifest is None and old_surface is None and old_history is None:
+        if len(history.get("entries", [])) != 1:
+            return ["initial capability history bootstrap must contain exactly one entry"]
+        return []
+    problems: list[str] = []
+    if old_manifest is None or old_surface is None or old_history is None:
+        return ["protected base has an incomplete capability history contract"]
+    problems.extend(append_only_history_problems(old_history, history))
+    problems.extend(
+        evolution_problems(
+            old_manifest,
+            current_manifest,
+            allow_unpublished_migration=False,
+        )
+    )
+    problems.extend(
+        surface_evolution_problems(
+            old_surface, current_surface, surface.SURFACE_SCHEMA
+        )
+    )
+    return _deduplicate(problems)
+
+
+def append_only_history_problems(previous: Any, current: Any) -> list[str]:
+    old_entries = previous.get("entries") if isinstance(previous, dict) else None
+    new_entries = current.get("entries") if isinstance(current, dict) else None
+    if not isinstance(old_entries, list) or not isinstance(new_entries, list):
+        return ["protected capability history entries are invalid"]
+    if new_entries[: len(old_entries)] != old_entries:
+        return ["capability history is not append-only relative to the protected base"]
+    return []
 
 
 def validate(doc: Any, root: pathlib.Path) -> list[str]:
@@ -563,6 +791,8 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     if not isinstance(rows, list):
         return problems
     expected_rows = {row["key"]: row for row in public_rows()}
+    for source_row in EXPORTS:
+        problems.extend(_link_probe_problems(source_row))
     expected_bindings = {
         key: {_binding_contract(item) for item in row["bindings"]}
         for key, row in expected_rows.items()
@@ -594,19 +824,10 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
         if row.get("status") == "planned":
             problems.append(f"{where} may not advertise planned work")
         version = row.get("contract_version")
-        if isinstance(version, dict):
-            major, minor = version.get("major"), version.get("minor")
-            if (
-                isinstance(major, bool)
-                or not isinstance(major, int)
-                or major < 1
-                or isinstance(minor, bool)
-                or not isinstance(minor, int)
-                or minor < 0
-            ):
-                problems.append(
-                    f"{where}.contract_version must have major >= 1 and minor >= 0"
-                )
+        if not _valid_version(version, minimum_major=1):
+            problems.append(
+                f"{where}.contract_version must have major >= 1 and minor >= 0"
+            )
         expected_digest = surface.canonical_digest(contract_payload(row))
         if row.get("contract_digest") != expected_digest:
             problems.append(f"{where}.contract_digest does not match its contract")
@@ -616,11 +837,46 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
             state = evolution.get("state")
             if state not in EVOLUTION_STATES:
                 problems.append(f"{where}.evolution.state is invalid")
-            if state == "active" and set(evolution) != {"state"}:
-                problems.append(f"{where}.evolution active state has extra fields")
+            introduced = evolution.get("introduced_in")
+            if not _valid_version(introduced):
+                problems.append(f"{where}.evolution.introduced_in is invalid")
+            elif _valid_version(version, minimum_major=1) and _version_tuple(
+                introduced
+            ) > _version_tuple(version):
+                problems.append(
+                    f"{where}.evolution.introduced_in exceeds contract_version"
+                )
+            if state == "active":
+                if set(evolution) != {"state", "introduced_in"}:
+                    problems.append(f"{where}.evolution active fields are not exact")
+                if row.get("status") == "deprecated":
+                    problems.append(f"{where} active capability may not be deprecated")
             if state == "deprecated":
-                if not isinstance(evolution.get("deprecated_in"), dict):
-                    problems.append(f"{where}.evolution.deprecated_in is required")
+                if set(evolution) != {
+                    "state",
+                    "introduced_in",
+                    "deprecated_in",
+                    "replacement_key",
+                }:
+                    problems.append(f"{where}.evolution deprecated fields are not exact")
+                deprecated = evolution.get("deprecated_in")
+                if not _valid_version(deprecated):
+                    problems.append(f"{where}.evolution.deprecated_in is invalid")
+                elif _valid_version(introduced) and _valid_version(
+                    version, minimum_major=1
+                ) and not (
+                    _version_tuple(introduced)
+                    <= _version_tuple(deprecated)
+                    <= _version_tuple(version)
+                ):
+                    problems.append(
+                        f"{where}.evolution versions must satisfy introduced <= "
+                        "deprecated <= contract"
+                    )
+                if row.get("status") != "deprecated":
+                    problems.append(
+                        f"{where} deprecated evolution requires deprecated status"
+                    )
                 replacement = evolution.get("replacement_key")
                 if replacement is not None and not isinstance(replacement, str):
                     problems.append(f"{where}.evolution.replacement_key is invalid")
@@ -659,6 +915,17 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
                 root.glob(f"core/*/include/{include}")
             ):
                 problems.append(f"{binding_where} advertises missing include {include}")
+            if isinstance(include, str):
+                expected_target = _minimal_target_for_include(include)
+                if expected_target is None:
+                    problems.append(
+                        f"{binding_where} include has no covered public target owner"
+                    )
+                elif item.get("target") != expected_target:
+                    problems.append(
+                        f"{binding_where}.target must be minimal owning target "
+                        f"{expected_target}"
+                    )
             if item.get("kind") not in BINDING_KINDS:
                 problems.append(f"{binding_where}.kind is invalid")
         if (
@@ -700,6 +967,21 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     if seen != set(expected_rows):
         problems.append("capability keys must exactly match curated exports")
 
+    replacement_edges: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        replacement = row.get("evolution", {}).get("replacement_key")
+        key = row.get("key")
+        if not isinstance(replacement, str) or not isinstance(key, str):
+            continue
+        if replacement == key:
+            problems.append(f"{key} replacement_key may not reference itself")
+        elif replacement not in seen:
+            problems.append(f"{key} replacement_key does not name a live capability")
+        else:
+            replacement_edges[key] = replacement
+
     tombstones = doc.get("tombstones")
     tombstone_keys: set[str] = set()
     if isinstance(tombstones, list):
@@ -729,6 +1011,37 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
                 problems.append(
                     f"tombstones[{index}].removed_in_manifest_revision is invalid"
                 )
+            if item.get("status") != "removed":
+                problems.append(f"tombstones[{index}].status must be removed")
+            introduced = item.get("introduced_in")
+            deprecated = item.get("deprecated_in")
+            last_version = item.get("last_contract_version")
+            if not all(
+                _valid_version(value)
+                for value in (introduced, deprecated, last_version)
+            ):
+                problems.append(f"tombstones[{index}] lifecycle versions are invalid")
+            elif not (
+                _version_tuple(introduced)
+                <= _version_tuple(deprecated)
+                <= _version_tuple(last_version)
+            ):
+                problems.append(
+                    f"tombstones[{index}] lifecycle versions must satisfy "
+                    "introduced <= deprecated <= last_contract_version"
+                )
+            replacement = item.get("replacement_key")
+            if replacement is not None:
+                if replacement == key:
+                    problems.append(f"{key} replacement_key may not reference itself")
+                elif replacement not in seen:
+                    problems.append(
+                        f"{key} replacement_key does not name a live capability"
+                    )
+                elif isinstance(key, str):
+                    replacement_edges[key] = replacement
+
+    problems.extend(_replacement_cycle_problems(replacement_edges))
 
     actual_by_domain = {
         domain: sum(
@@ -845,6 +1158,7 @@ def main() -> int:
     surface_output = surface.rendered(surface_document)
     snapshot = args.snapshot or root / SNAPSHOT
     surface_snapshot = root / surface.SURFACE_SNAPSHOT
+    history_path = root / HISTORY_FILE
     fixture = root / COMPILE_FIXTURE
 
     if args.json:
@@ -853,14 +1167,48 @@ def main() -> int:
     if args.write:
         previous = _load_optional_json(snapshot)
         previous_surface = _load_optional_json(surface_snapshot)
-        problems = evolution_problems(
-            previous,
-            doc,
-            allow_unpublished_migration=args.migrate_unpublished_v1,
+        base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
+        protected_tip = _resolve_protected_tip(root, base_ref)
+        initial_bootstrap = bool(
+            protected_tip and _git_json(root, protected_tip, SNAPSHOT) is None
         )
+        problems: list[str] = []
+        if not (args.migrate_unpublished_v1 and initial_bootstrap):
+            problems.extend(
+                evolution_problems(
+                    previous,
+                    doc,
+                    allow_unpublished_migration=args.migrate_unpublished_v1,
+                )
+            )
+            problems.extend(
+                surface_evolution_problems(
+                    previous_surface, surface_document, surface.SURFACE_SCHEMA
+                )
+            )
+        if problems:
+            return _print_problems(problems)
+        history = _load_optional_json(history_path)
+        entries = [] if args.migrate_unpublished_v1 else (
+            copy.deepcopy(history.get("entries", []))
+            if isinstance(history, dict) and history.get("schema") == HISTORY_SCHEMA
+            else []
+        )
+        if (
+            not args.migrate_unpublished_v1
+            and isinstance(previous, dict)
+            and isinstance(previous_surface, dict)
+        ):
+            previous_entry = history_entry(previous, previous_surface)
+            if not entries or entries[-1] != previous_entry:
+                entries.append(previous_entry)
+        if not entries:
+            entries.append(history_entry(doc, surface_document))
+        history = history_document(entries)
+        problems = history_problems(history, doc, surface_document)
         problems.extend(
-            surface_evolution_problems(
-                previous_surface, surface_document, surface.SURFACE_SCHEMA
+            protected_base_problems(
+                root, history, doc, surface_document
             )
         )
         if problems:
@@ -869,10 +1217,13 @@ def main() -> int:
         snapshot.write_text(output)
         surface_snapshot.parent.mkdir(parents=True, exist_ok=True)
         surface_snapshot.write_text(surface_output)
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(history, indent=2, ensure_ascii=False) + "\n")
         fixture.write_text(compile_fixture())
         print(
             f"agent-capabilities: wrote {SNAPSHOT}, {surface.SURFACE_SNAPSHOT}, "
-            f"and {COMPILE_FIXTURE} ({len(doc['capabilities'])} capabilities)"
+            f"{HISTORY_FILE}, and {COMPILE_FIXTURE} "
+            f"({len(doc['capabilities'])} capabilities)"
         )
         return 0
     if args.check:
@@ -883,6 +1234,13 @@ def main() -> int:
             stale.append(f"{surface.SURFACE_SNAPSHOT} differs from public headers")
         if not fixture.exists() or fixture.read_text() != compile_fixture():
             stale.append(f"{COMPILE_FIXTURE} differs from typed bindings")
+        history = _load_optional_json(history_path)
+        history_issues = history_problems(history, doc, surface_document)
+        if isinstance(history, dict):
+            history_issues.extend(
+                protected_base_problems(root, history, doc, surface_document)
+            )
+        stale.extend(history_issues)
         if stale:
             for item in stale:
                 print(f"agent-capabilities: STALE: {item}", file=sys.stderr)
@@ -924,6 +1282,48 @@ def _valid_digest(value: Any) -> bool:
     )
 
 
+def _valid_version(value: Any, *, minimum_major: int = 0) -> bool:
+    return bool(
+        isinstance(value, dict)
+        and set(value) == {"major", "minor"}
+        and isinstance(value.get("major"), int)
+        and not isinstance(value.get("major"), bool)
+        and value["major"] >= minimum_major
+        and isinstance(value.get("minor"), int)
+        and not isinstance(value.get("minor"), bool)
+        and value["minor"] >= 0
+    )
+
+
+def _minimal_target_for_include(include: str) -> str | None:
+    for public_root in surface.PUBLIC_ROOTS:
+        prefix = public_root["install_prefix"] + "/"
+        if include.startswith(prefix):
+            return f"Pulp::{public_root['domain']}"
+    return None
+
+
+def _version_tuple(value: dict[str, Any]) -> tuple[int, int]:
+    return value["major"], value["minor"]
+
+
+def _replacement_cycle_problems(edges: dict[str, str]) -> list[str]:
+    problems: list[str] = []
+    for start in sorted(edges):
+        path: list[str] = []
+        seen: set[str] = set()
+        current = start
+        while current in edges:
+            if current in seen:
+                cycle = path[path.index(current) :] + [current]
+                problems.append("replacement_key cycle: " + " -> ".join(cycle))
+                break
+            seen.add(current)
+            path.append(current)
+            current = edges[current]
+    return _deduplicate(problems)
+
+
 def _binding_contract(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         _identity_value(item.get("role")),
@@ -952,6 +1352,73 @@ def _load_optional_json(path: pathlib.Path) -> Any:
         return json.loads(path.read_text())
     except json.JSONDecodeError as error:
         return {"_invalid": str(error)}
+
+
+def _git_output(root: pathlib.Path, arguments: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *arguments], cwd=root, text=True, capture_output=True
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _git_json(root: pathlib.Path, revision: str, path: pathlib.Path) -> Any:
+    output = _git_output(root, ["show", f"{revision}:{path.as_posix()}"])
+    if output is None:
+        return None
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return {"_invalid": True}
+
+
+def _resolve_protected_tip(root: pathlib.Path, base_ref: str) -> str | None:
+    explicit_ref = "PULP_AGENT_CAPABILITY_BASE_REF" in os.environ
+    if explicit_ref:
+        tip = _git_output(
+            root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"]
+        )
+        if tip is not None:
+            return tip
+    candidate: str | None = None
+    event_path = (
+        os.environ.get("GITHUB_EVENT_PATH")
+        if os.environ.get("GITHUB_ACTIONS") == "true"
+        else None
+    )
+    if event_path is not None:
+        try:
+            event = json.loads(pathlib.Path(event_path).read_text())
+            candidate = event.get("pull_request", {}).get("base", {}).get("sha")
+            candidate = candidate or event.get("merge_group", {}).get("base_sha")
+            before = event.get("before")
+            if (
+                candidate is None
+                and isinstance(before, str)
+                and before != "0" * 40
+            ):
+                candidate = before
+        except (OSError, json.JSONDecodeError, AttributeError):
+            candidate = None
+    if isinstance(candidate, str) and re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
+        if _git_output(root, ["cat-file", "-e", f"{candidate}^{{commit}}"]) is None:
+            try:
+                fetched = subprocess.run(
+                    ["git", "fetch", "--no-tags", "--depth=1", "origin", candidate],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                )
+            except OSError:
+                return None
+            if fetched.returncode != 0:
+                return None
+        return candidate.lower()
+    return _git_output(root, ["rev-parse", "--verify", f"{base_ref}^{{commit}}"])
 
 
 def _print_problems(

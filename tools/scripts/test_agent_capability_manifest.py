@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import tempfile
 
 import agent_capability_manifest as manifest
 import agent_capability_surface as surface
+import json_schema_lite
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -34,6 +36,13 @@ def expect_validation_failure(document: dict, needle: str) -> None:
         result = run("--validate", str(path))
     assert result.returncode != 0, f"fixture unexpectedly passed: {needle}"
     assert needle in result.stderr, f"expected {needle!r} in {result.stderr!r}"
+
+
+def expect_schema_failure(document: dict, needle: str) -> None:
+    schema = json.loads((ROOT / manifest.MANIFEST_SCHEMA_FILE).read_text())
+    problems = json_schema_lite.validate(document, schema)
+    assert problems, "fixture unexpectedly passed the public schema"
+    assert needle in "\n".join(problems), problems
 
 
 def refresh_digest(row: dict) -> None:
@@ -130,6 +139,141 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     expect_validation_failure(wrong_absence, "expected const 'unknown'")
     checks += 1
 
+    negative_version = copy.deepcopy(canonical)
+    negative_version["capabilities"][0]["contract_version"]["minor"] = -1
+    expect_validation_failure(negative_version, "less than minimum 0")
+    checks += 1
+
+    negative_lifecycle = copy.deepcopy(canonical)
+    negative_lifecycle["capabilities"][0]["evolution"]["introduced_in"]["major"] = -1
+    refresh_digest(negative_lifecycle["capabilities"][0])
+    expect_validation_failure(negative_lifecycle, "introduced_in is invalid")
+    checks += 1
+
+    deprecated_missing_fields = copy.deepcopy(canonical)
+    row = deprecated_missing_fields["capabilities"][0]
+    row["status"] = "deprecated"
+    row["evolution"]["state"] = "deprecated"
+    expect_schema_failure(deprecated_missing_fields, "oneOf")
+    checks += 1
+
+    active_with_deprecated_fields = copy.deepcopy(canonical)
+    row = active_with_deprecated_fields["capabilities"][0]
+    row["evolution"]["deprecated_in"] = {"major": 1, "minor": 0}
+    row["evolution"]["replacement_key"] = None
+    expect_schema_failure(active_with_deprecated_fields, "oneOf")
+    checks += 1
+
+    schema_status_mismatch = copy.deepcopy(canonical)
+    schema_status_mismatch["capabilities"][0]["status"] = "deprecated"
+    expect_schema_failure(schema_status_mismatch, "oneOf")
+    checks += 1
+
+    status_mismatch = copy.deepcopy(canonical)
+    row = status_mismatch["capabilities"][0]
+    row["evolution"] = {
+        "state": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 1, "minor": 0},
+        "replacement_key": status_mismatch["capabilities"][1]["key"],
+    }
+    refresh_digest(row)
+    expect_validation_failure(status_mismatch, "requires deprecated status")
+    checks += 1
+
+    missing_replacement = copy.deepcopy(canonical)
+    row = missing_replacement["capabilities"][0]
+    row["status"] = "deprecated"
+    row["evolution"] = {
+        "state": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 1, "minor": 0},
+        "replacement_key": "audio.does-not-exist",
+    }
+    refresh_digest(row)
+    expect_validation_failure(missing_replacement, "does not name a live capability")
+    checks += 1
+
+    self_replacement = copy.deepcopy(canonical)
+    row = self_replacement["capabilities"][0]
+    row["status"] = "deprecated"
+    row["evolution"] = {
+        "state": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 1, "minor": 0},
+        "replacement_key": row["key"],
+    }
+    refresh_digest(row)
+    expect_validation_failure(self_replacement, "may not reference itself")
+    checks += 1
+
+    cycle = copy.deepcopy(canonical)
+    first, second = cycle["capabilities"][:2]
+    for row, replacement in ((first, second["key"]), (second, first["key"])):
+        row["status"] = "deprecated"
+        row["evolution"] = {
+            "state": "deprecated",
+            "introduced_in": {"major": 1, "minor": 0},
+            "deprecated_in": {"major": 1, "minor": 0},
+            "replacement_key": replacement,
+        }
+        refresh_digest(row)
+    expect_validation_failure(cycle, "replacement_key cycle")
+    checks += 1
+
+    wrong_target = copy.deepcopy(canonical)
+    wrong_target["capabilities"][0]["bindings"][0]["target"] = "Pulp::platform"
+    refresh_digest(wrong_target["capabilities"][0])
+    expect_validation_failure(wrong_target, "target must be minimal owning target")
+    checks += 1
+
+    reversed_lifecycle = copy.deepcopy(canonical)
+    row = reversed_lifecycle["capabilities"][0]
+    row["evolution"]["introduced_in"] = {"major": 2, "minor": 0}
+    refresh_digest(row)
+    expect_validation_failure(reversed_lifecycle, "introduced_in exceeds contract_version")
+    checks += 1
+
+    wrong_removed_status = copy.deepcopy(canonical)
+    wrong_removed_status["tombstones"].append({
+        "key": "audio.removed-example",
+        "last_contract_version": {"major": 1, "minor": 0},
+        "last_contract_digest": "sha256:" + "0" * 64,
+        "status": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 1, "minor": 0},
+        "removed_in_manifest_revision": 1,
+        "reason": "Synthetic tombstone proves removed status is schema-enforced.",
+        "replacement_key": None,
+    })
+    expect_validation_failure(wrong_removed_status, "expected const 'removed'")
+    checks += 1
+
+    held_probe = manifest.EXPORTS[0].pop("_link_probe")
+    try:
+        expect_problem(
+            manifest.validate(canonical, ROOT),
+            "requires a structured installed consumer link probe",
+        )
+    finally:
+        manifest.EXPORTS[0]["_link_probe"] = held_probe
+    checks += 1
+
+    held_probe = manifest.EXPORTS[0]["_link_probe"]
+    manifest.EXPORTS[0]["_link_probe"] = {
+        "binding": "not::advertised",
+        "operation": "construct",
+        "arguments": "",
+    }
+    try:
+        expect_problem(
+            manifest.validate(canonical, ROOT),
+            "link probe must name an advertised binding",
+        )
+    finally:
+        manifest.EXPORTS[0]["_link_probe"] = held_probe
+    checks += 1
+
     return checks
 
 
@@ -173,6 +317,62 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
+    active_removed = copy.deepcopy(canonical)
+    active_removed["manifest_revision"] += 1
+    old = active_removed["capabilities"].pop(0)
+    active_removed["tombstones"] = [{
+        "key": old["key"],
+        "last_contract_version": old["contract_version"],
+        "last_contract_digest": old["contract_digest"],
+        "status": "removed",
+        "introduced_in": old["evolution"]["introduced_in"],
+        "deprecated_in": old["contract_version"],
+        "removed_in_manifest_revision": active_removed["manifest_revision"],
+        "reason": "Synthetic direct removal must fail without a published window.",
+        "replacement_key": None,
+    }]
+    expect_problem(
+        manifest.evolution_problems(
+            canonical, active_removed, allow_unpublished_migration=False
+        ),
+        "only after a published deprecated revision",
+    )
+    checks += 1
+
+    deprecated = copy.deepcopy(canonical)
+    deprecated["manifest_revision"] += 1
+    old = deprecated["capabilities"][0]
+    old["contract_version"] = {"major": 2, "minor": 0}
+    old["status"] = "deprecated"
+    old["evolution"] = {
+        "state": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 2, "minor": 0},
+        "replacement_key": deprecated["capabilities"][1]["key"],
+    }
+    refresh_digest(old)
+    assert not manifest.evolution_problems(
+        canonical, deprecated, allow_unpublished_migration=False
+    )
+    removed_after_window = copy.deepcopy(deprecated)
+    removed_after_window["manifest_revision"] += 1
+    old = removed_after_window["capabilities"].pop(0)
+    removed_after_window["tombstones"] = [{
+        "key": old["key"],
+        "last_contract_version": old["contract_version"],
+        "last_contract_digest": old["contract_digest"],
+        "status": "removed",
+        "introduced_in": old["evolution"]["introduced_in"],
+        "deprecated_in": old["evolution"]["deprecated_in"],
+        "removed_in_manifest_revision": removed_after_window["manifest_revision"],
+        "reason": "Synthetic removal follows a separately published deprecated revision.",
+        "replacement_key": old["evolution"]["replacement_key"],
+    }]
+    assert not manifest.evolution_problems(
+        deprecated, removed_after_window, allow_unpublished_migration=False
+    )
+    checks += 2
+
     added = copy.deepcopy(canonical)
     added["manifest_revision"] += 1
     new_row = copy.deepcopy(added["capabilities"][0])
@@ -195,6 +395,9 @@ def exercise_evolution(canonical: dict) -> int:
             "key": "audio.never-existed",
             "last_contract_version": {"major": 1, "minor": 0},
             "last_contract_digest": "sha256:" + "0" * 64,
+            "status": "removed",
+            "introduced_in": {"major": 1, "minor": 0},
+            "deprecated_in": {"major": 1, "minor": 0},
             "removed_in_manifest_revision": orphan["manifest_revision"],
             "reason": "This synthetic key never existed in the prior manifest.",
             "replacement_key": None,
@@ -206,6 +409,102 @@ def exercise_evolution(canonical: dict) -> int:
         ),
         "capability tombstone has no removed prior key",
     )
+    checks += 1
+
+    history = manifest.history_document([
+        manifest.history_entry(
+            canonical,
+            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+        )
+    ])
+    bypass = copy.deepcopy(canonical)
+    bypass["capabilities"][0]["scheduling"] = "edited-source-and-snapshot"
+    refresh_digest(bypass["capabilities"][0])
+    expect_problem(
+        manifest.history_problems(
+            history,
+            bypass,
+            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+        ),
+        "changed without a contract_version increase",
+    )
+    checks += 1
+
+    rewritten = copy.deepcopy(history)
+    rewritten["entries"][0]["entry_digest"] = "sha256:" + "0" * 64
+    expect_problem(
+        manifest.append_only_history_problems(history, rewritten),
+        "not append-only",
+    )
+    checks += 1
+
+    protected_sha = subprocess.run(
+        ["git", "rev-parse", "origin/main^{commit}"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-shallow-base-") as temp:
+        event_path = pathlib.Path(temp) / "event.json"
+        event_path.write_text(
+            json.dumps({"pull_request": {"base": {"sha": protected_sha}}})
+        )
+        held = {
+            name: os.environ.get(name)
+            for name in (
+                "GITHUB_ACTIONS",
+                "GITHUB_EVENT_PATH",
+                "GITHUB_SHA",
+                "PULP_AGENT_CAPABILITY_BASE_REF",
+            )
+        }
+        os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+        os.environ["GITHUB_ACTIONS"] = "true"
+        os.environ["GITHUB_EVENT_PATH"] = str(event_path)
+        os.environ["GITHUB_SHA"] = "f" * 40
+        try:
+            assert manifest._resolve_protected_tip(
+                ROOT, "refs/remotes/origin/definitely-missing"
+            ) == protected_sha
+            event_base = subprocess.run(
+                ["git", "rev-parse", "HEAD^{commit}"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            event_path.write_text(
+                json.dumps({"pull_request": {"base": {"sha": event_base}}})
+            )
+            assert manifest._resolve_protected_tip(ROOT, "origin/main") == event_base
+            event_path.write_text(
+                json.dumps({"merge_group": {"base_sha": protected_sha}})
+            )
+            assert manifest._resolve_protected_tip(
+                ROOT, "refs/remotes/origin/definitely-missing"
+            ) == protected_sha
+            event_path.write_text("{}")
+            assert manifest._resolve_protected_tip(
+                ROOT, "refs/remotes/origin/definitely-missing"
+            ) is None
+        finally:
+            for name, value in held.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+    checks += 4
+
+    held_path = os.environ.get("PATH")
+    os.environ["PATH"] = ""
+    try:
+        assert manifest._git_output(ROOT, ["rev-parse", "HEAD"]) is None
+    finally:
+        if held_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = held_path
     checks += 1
 
     return checks
@@ -299,6 +598,36 @@ def exercise_surface_mutations() -> int:
         "removed reviewed header lacks a tombstone",
     )
     checks += 1
+
+    changed_reviewed = copy.deepcopy(previous_surface)
+    changed_reviewed["inventory_version"] = 2
+    changed_reviewed["headers"][0]["fingerprint"] = "sha256:" + "3" * 64
+    assert not manifest.surface_evolution_problems(
+        previous_surface, changed_reviewed, surface.SURFACE_SCHEMA
+    )
+    removed_reviewed = copy.deepcopy(changed_reviewed)
+    removed_reviewed["inventory_version"] = 3
+    removed_reviewed["headers"] = []
+    removed_reviewed["tombstones"] = [{
+        "include": "pulp/signal/reviewed.hpp",
+        "last_fingerprint": "sha256:" + "3" * 64,
+        "removed_in_inventory_version": 3,
+        "reason": "Synthetic reviewed header removal uses its immediately prior fingerprint.",
+    }]
+    assert not manifest.surface_evolution_problems(
+        changed_reviewed, removed_reviewed, surface.SURFACE_SCHEMA
+    )
+    retained_tombstone = copy.deepcopy(removed_reviewed)
+    retained_tombstone["inventory_version"] = 4
+    retained_tombstone["headers"] = [{
+        "include": "pulp/signal/other.hpp",
+        "fingerprint": "sha256:" + "4" * 64,
+        "disposition": "infrastructure",
+    }]
+    assert not manifest.surface_evolution_problems(
+        removed_reviewed, retained_tombstone, surface.SURFACE_SCHEMA
+    )
+    checks += 3
 
     orphan_surface_tombstone = copy.deepcopy(previous_surface)
     orphan_surface_tombstone["inventory_version"] = 2

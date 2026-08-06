@@ -19,8 +19,8 @@
   "properties": {
     "$schema": { "type": "string", "const": "agent-capabilities.schema.json" },
     "schema": { "type": "string", "const": "pulp.agent-capabilities.v1" },
-    "schema_minor": { "type": "integer" },
-    "manifest_revision": { "type": "integer" },
+    "schema_minor": { "type": "integer", "minimum": 0 },
+    "manifest_revision": { "type": "integer", "minimum": 1 },
     "required_features": {
       "type": "array",
       "minItems": 1,
@@ -33,26 +33,11 @@
       "required": [
         "state",
         "absence_semantics",
-        "surface_schema",
-        "surface_inventory_version",
-        "public_headers",
-        "reviewed_headers",
-        "legacy_unreviewed_headers",
-        "unsupported_headers",
         "domains"
       ],
       "properties": {
         "state": { "type": "string", "enum": ["partial", "complete"] },
         "absence_semantics": { "type": "string", "const": "unknown" },
-        "surface_schema": {
-          "type": "string",
-          "const": "pulp.agent-capability-surface.v1"
-        },
-        "surface_inventory_version": { "type": "integer" },
-        "public_headers": { "type": "integer" },
-        "reviewed_headers": { "type": "integer" },
-        "legacy_unreviewed_headers": { "type": "integer" },
-        "unsupported_headers": { "type": "integer" },
         "domains": {
           "type": "object",
           "minProperties": 1,
@@ -61,10 +46,6 @@
             "additionalProperties": false,
             "required": [
               "state",
-              "public_headers",
-              "reviewed_headers",
-              "legacy_unreviewed_headers",
-              "unsupported_headers",
               "capabilities"
             ],
             "properties": {
@@ -72,11 +53,7 @@
                 "type": "string",
                 "enum": ["partial", "complete", "not_inventoried"]
               },
-              "public_headers": { "type": "integer" },
-              "reviewed_headers": { "type": "integer" },
-              "legacy_unreviewed_headers": { "type": "integer" },
-              "unsupported_headers": { "type": "integer" },
-              "capabilities": { "type": "integer" }
+              "capabilities": { "type": "integer", "minimum": 0 }
             }
           }
         }
@@ -123,8 +100,8 @@
             "additionalProperties": false,
             "required": ["major", "minor"],
             "properties": {
-              "major": { "type": "integer" },
-              "minor": { "type": "integer" }
+              "major": { "type": "integer", "minimum": 1 },
+              "minor": { "type": "integer", "minimum": 0 }
             }
           },
           "contract_digest": {
@@ -133,25 +110,55 @@
           },
           "status": {
             "type": "string",
-            "enum": ["stable", "usable", "experimental", "partial", "unsupported"]
+            "enum": ["stable", "usable", "experimental", "partial", "unsupported", "deprecated"]
           },
           "evolution": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["state"],
-            "properties": {
-              "state": { "type": "string", "enum": ["active", "deprecated"] },
-              "deprecated_in": {
+            "oneOf": [
+              {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["major", "minor"],
+                "required": ["state", "introduced_in"],
                 "properties": {
-                  "major": { "type": "integer" },
-                  "minor": { "type": "integer" }
+                  "state": { "type": "string", "const": "active" },
+                  "introduced_in": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["major", "minor"],
+                    "properties": {
+                      "major": { "type": "integer", "minimum": 0 },
+                      "minor": { "type": "integer", "minimum": 0 }
+                    }
+                  }
                 }
               },
-              "replacement_key": { "type": ["string", "null"] }
-            }
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "introduced_in", "deprecated_in", "replacement_key"],
+                "properties": {
+                  "state": { "type": "string", "const": "deprecated" },
+                  "introduced_in": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["major", "minor"],
+                    "properties": {
+                      "major": { "type": "integer", "minimum": 0 },
+                      "minor": { "type": "integer", "minimum": 0 }
+                    }
+                  },
+                  "deprecated_in": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["major", "minor"],
+                    "properties": {
+                      "major": { "type": "integer", "minimum": 0 },
+                      "minor": { "type": "integer", "minimum": 0 }
+                    }
+                  },
+                  "replacement_key": { "type": ["string", "null"] }
+                }
+              }
+            ]
           },
           "rt_class": {
             "type": "string",
@@ -236,7 +243,27 @@
               "node_key": { "type": "string", "minLength": 1 }
             }
           }
-        }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "enum": ["stable", "usable", "experimental", "partial", "unsupported"]
+              },
+              "evolution": {
+                "properties": { "state": { "const": "active" } }
+              }
+            }
+          },
+          {
+            "properties": {
+              "status": { "const": "deprecated" },
+              "evolution": {
+                "properties": { "state": { "const": "deprecated" } }
+              }
+            }
+          }
+        ]
       }
     },
     "tombstones": {
@@ -248,6 +275,9 @@
           "key",
           "last_contract_version",
           "last_contract_digest",
+          "status",
+          "introduced_in",
+          "deprecated_in",
           "removed_in_manifest_revision",
           "reason",
           "replacement_key"
@@ -262,15 +292,34 @@
             "additionalProperties": false,
             "required": ["major", "minor"],
             "properties": {
-              "major": { "type": "integer" },
-              "minor": { "type": "integer" }
+              "major": { "type": "integer", "minimum": 0 },
+              "minor": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "status": { "type": "string", "const": "removed" },
+          "introduced_in": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["major", "minor"],
+            "properties": {
+              "major": { "type": "integer", "minimum": 0 },
+              "minor": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "deprecated_in": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["major", "minor"],
+            "properties": {
+              "major": { "type": "integer", "minimum": 0 },
+              "minor": { "type": "integer", "minimum": 0 }
             }
           },
           "last_contract_digest": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$"
           },
-          "removed_in_manifest_revision": { "type": "integer" },
+          "removed_in_manifest_revision": { "type": "integer", "minimum": 1 },
           "reason": { "type": "string", "minLength": 20 },
           "replacement_key": { "type": ["string", "null"] }
         }
@@ -281,11 +330,11 @@
       "additionalProperties": false,
       "required": ["total", "by_domain"],
       "properties": {
-        "total": { "type": "integer" },
+        "total": { "type": "integer", "minimum": 0 },
         "by_domain": {
           "type": "object",
           "minProperties": 1,
-          "additionalProperties": { "type": "integer" }
+          "additionalProperties": { "type": "integer", "minimum": 0 }
         }
       }
     },
