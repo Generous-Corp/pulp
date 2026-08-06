@@ -117,13 +117,20 @@ bool ProcessEngine::generator_running() const {
     // running" while a generation was in flight, silently. Anything that
     // matches the interpreter's exact spelling breaks on the next flag.
     //
-    // The original reason for including "python3" was to avoid matching a
-    // shell whose command line merely mentions the filename -- including the
-    // matching shell itself. "patch.py build" keeps that property: the verb
-    // is only ever on a real invocation.
+    // Do not put the probe through /bin/sh. A shell receives the whole command
+    // as argv text, so `sh -c "pgrep -f 'patch.py build'"` can itself be a
+    // match for `patch.py build`. Some shells exec the final command in place
+    // and happen to avoid it; correctness cannot depend on that optimization.
+    // ChildProcess hands these arguments directly to pgrep instead.
+    //
+    // The bracketed first character is deliberate too. It is the standard
+    // self-excluding pgrep expression: `[p]atch.py` matches `patch.py` in a
+    // generator argv, but not the literal `[p]atch.py` pattern in pgrep's own
+    // argv. That keeps this correct even without relying on pgrep's usual
+    // promise not to report itself.
     std::string out;
-    for (const char* pattern : {"patch.py build", "generate.py "})
-        if (run(std::string("pgrep -f '") + pattern + "' >/dev/null 2>&1", out) == 0)
+    for (const char* pattern : {"[p]atch.py build", "[g]enerate.py "})
+        if (run_tool("pgrep", {"-f", pattern}, out) == 0)
             return true;
     return false;
 }

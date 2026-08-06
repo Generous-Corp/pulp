@@ -57,7 +57,9 @@ using Catch::Approx;
 #include <set>
 #include <string>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -9281,6 +9283,59 @@ TEST_CASE("process engines atomically share the launch window",
     CHECK(second.try_claim_generation());
     second.release_generation_claim();
 
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("generator probe ignores itself and finds both generator commands",
+          "[build][lock][process]") {
+    // The old probe ran `pgrep -f 'patch.py build'` through /bin/sh. The
+    // shell's own argv can contain "patch.py build" unless that shell happens
+    // to exec pgrep in place. The probe must be correct independent of that
+    // optimization, and an idle engine must permit the very first build.
+    forge_modular::ProcessEngine engine({}, {});
+    CHECK_FALSE(engine.generator_running());
+    REQUIRE(engine.try_claim_generation());
+    engine.release_generation_claim();
+
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "fm-generator-process-probe";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+
+    // Run the real argv shapes, including `-u`, long enough to probe them.
+    // Each script creates a ready file before sleeping, so a missed process is
+    // a probe failure rather than a race with Python startup.
+    const char* body =
+        "import pathlib, sys, time\n"
+        "pathlib.Path(sys.argv[-1]).touch()\n"
+        "time.sleep(0.75)\n";
+    for (const char* script_name : {"patch.py", "generate.py"}) {
+        const auto script = dir / script_name;
+        const auto ready = dir / (std::string(script_name) + ".ready");
+        { std::ofstream f(script); f << body; }
+
+        std::string output;
+        std::vector<std::string> args{"-u", script.string()};
+        if (std::string(script_name) == "patch.py") args.push_back("build");
+        args.push_back(ready.string());
+        std::thread child([&] {
+            forge_modular::ProcessEngine::run_tool("python3", args, output);
+        });
+
+        for (int attempt = 0; attempt != 100 && !std::filesystem::exists(ready);
+             ++attempt)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        const bool started = std::filesystem::exists(ready);
+        const bool detected = started && engine.generator_running();
+        child.join();
+
+        INFO("generator command: " << script_name);
+        CHECK(started);
+        CHECK(detected);
+    }
+
+    CHECK_FALSE(engine.generator_running());
     std::filesystem::remove_all(dir, ec);
 }
 
