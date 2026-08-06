@@ -8,6 +8,12 @@ pulp_add_test_suite(pulp-test-timeline-model
         test_timeline_note_modifiers.cpp
         test_timeline_take_comp.cpp
     LIBRARIES pulp::timeline)
+# Modulation asserts against the interchange census as well as the model, so it
+# is its own suite rather than a source in the model one: the census is what
+# proves a macro's fan-out is observable rather than merely stored.
+pulp_add_test_suite(pulp-test-timeline-modulation
+    SOURCES test_timeline_modulation.cpp
+    LIBRARIES pulp::timeline pulp::interchange)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
         test_timeline_dawproject_import_runtime.cpp
@@ -40,7 +46,8 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 # the document model, and never pulp::playback. A member of the interface that
 # grew into an engine type would fail to build here.
 pulp_add_test_suite(pulp-test-sequencer-ui-host
-    SOURCES test_sequencer_ui_host.cpp test_timeline_viewport_projection.cpp
+    SOURCES test_sequencer_ui_host.cpp test_timeline_snap_grid.cpp
+            test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
 # Names both rungs at once, which neither rung may do for itself. The link list
 # is the point: standing above the transport and the editor is what makes "both

@@ -72,6 +72,9 @@ void census_track(const timeline::Track& track, StructureCensus& census) {
         census_clip_midi(clip, census);
     }
     census.device_placements += static_cast<std::uint64_t>(track.device_chain().size());
+    census.modulators += static_cast<std::uint64_t>(track.modulators().size());
+    census.macro_controls += static_cast<std::uint64_t>(track.macros().size());
+    census.modulation_routes += static_cast<std::uint64_t>(track.modulation_routes().size());
     for (const auto& lane : track.automation_lanes()) {
         ++census.automation_lanes;
         census.automation_points += static_cast<std::uint64_t>(lane.curve().points().size());
@@ -227,8 +230,9 @@ std::string format_finding(const Finding& finding) {
 
 std::uint64_t StructureCensus::total() const noexcept {
     return assets + sequences + tracks + clips + notes + device_placements + automation_lanes +
-           automation_points + take_lanes + takes + take_comp_segments + markers + regions +
-           scenes + slots + chord_scale_events + groove_steps + midi_lanes + midi_lane_points;
+           automation_points + modulators + macro_controls + modulation_routes + take_lanes +
+           takes + take_comp_segments + markers + regions + scenes + slots + chord_scale_events +
+           groove_steps + midi_lanes + midi_lane_points;
 }
 
 const std::vector<QuotaAxis>& quota_axes() {
@@ -244,6 +248,10 @@ const std::vector<QuotaAxis>& quota_axes() {
          &DecodeLimits::max_automation_lanes},
         {"automation_points", &StructureCensus::automation_points,
          &DecodeLimits::max_automation_points},
+        {"modulators", &StructureCensus::modulators, &DecodeLimits::max_modulators},
+        {"macro_controls", &StructureCensus::macro_controls, &DecodeLimits::max_macro_controls},
+        {"modulation_routes", &StructureCensus::modulation_routes,
+         &DecodeLimits::max_modulation_routes},
         {"take_lanes", &StructureCensus::take_lanes, &DecodeLimits::max_take_lanes},
         {"takes", &StructureCensus::takes, &DecodeLimits::max_takes},
         {"take_comp_segments", &StructureCensus::take_comp_segments,
@@ -281,6 +289,9 @@ StructureCensus census_of(const timeline::ProjectSnapshotCounts& counts) {
     census.device_placements = counts.device_placements;
     census.automation_lanes = counts.automation_lanes;
     census.automation_points = counts.automation_points;
+    census.modulators = counts.modulators;
+    census.macro_controls = counts.macro_controls;
+    census.modulation_routes = counts.modulation_routes;
     census.take_lanes = counts.take_lanes;
     census.takes = counts.takes;
     census.take_comp_segments = counts.take_comp_segments;

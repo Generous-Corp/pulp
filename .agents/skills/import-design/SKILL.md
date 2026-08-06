@@ -3120,9 +3120,12 @@ So the browser lane declares it, exactly as it already declares the paint box:
 ```
 
 - `semantics.mjs` reports the marked element's **page rectangle** (same frame as
-  `bounds` / `paint_bounds`) plus its browser-resolved colour
-  (`background-color` → border → text). A pointer no single computed colour
-  describes states its own: `data-pulp-indicator="#b8f8c0"`.
+  `bounds` / `paint_bounds`) plus its browser-resolved colour: `background-color`
+  → inside SVG, `stroke` then `fill` → border → text. A pointer no single
+  computed colour describes states its own: `data-pulp-indicator="#b8f8c0"`. An
+  unpainted pointer reports `""`, which the consumer reads as "no attribute" and
+  draws its derived tick instead. **The SVG step is not appendable to the end of
+  that list** — see "A marked indicator's colour comes from PAINT" below.
 - `lower_semantic_controls` converts that rectangle to the SAME `knob_ind_*`
   fractions the Figma hoist stamps, by projecting the box's half-extents onto
   the **radial axis** and its perpendicular. A plain width/height read is wrong
@@ -6037,6 +6040,106 @@ miter limit. `SvgPathWidget` has no setter for them, so a round-capped thick
 stroke renders with butt caps. Measured on a 1.8-unit stroke this moved ink
 coverage by <1%, which is why it is accepted rather than sent to the fallback —
 refusing on it would capture most real icons. Revisit if a design shows it.
+
+## A marked indicator's colour comes from PAINT, and `fill` is a trap
+
+`indicatorColor()` (`browser_capture/semantics.mjs`) reads the colour of the
+child the author marked `data-pulp-indicator`. The order is `background-color`
+→ **inside the SVG namespace** `stroke`, then `fill` but only on the shapes a
+fill actually paints → `border-top-color` → `color`.
+
+That order is not stylistic. Each step exists because the step beside it returns
+a *plausible* colour for the wrong kind of pointer, and a plausible colour is one
+nothing downstream can flag.
+
+Measured in headless Chrome, `getComputedStyle` on a `<div>`, on an unstyled
+`<line>` and on an `<svg>` root — all three reported identically:
+
+| property | computes to |
+|---|---|
+| `fill` | `rgb(0, 0, 0)`, opaque black, on **every** element |
+| `stroke` | `none` |
+| `border-top-color` | the inherited `color`, its initial value being `currentColor` |
+
+Three consequences, in the order they bite:
+
+- **The SVG step must sit BEFORE `border-top-color`.** An SVG element's
+  border-colour initial value is `currentColor`, so a branch appended after it
+  never runs at all: `border-top-color` answers first, with the inherited text
+  colour. On the fixture every SVG pointer came back `rgb(232, 232, 238)` — an
+  authored `#101014` needle reported as near-white, on a knob that still
+  rendered and still passed every pixel gate.
+- **The SVG step must answer even when it finds nothing.** The `color` fallback
+  behind it is that same defect wearing a different name.
+- **`fill` is read only inside SVG, and only on `path`, `polygon`, `circle`,
+  `ellipse`, `rect`.** It computes to opaque black everywhere else, so reading it
+  unguarded hands every borderless `<div>` pointer a black it never had, and
+  reading it on an `<svg>` root or a stroke-only `<line>` reports a black that
+  element paints nowhere. A namespace guard alone is NOT enough for this reason.
+
+`url(#…)` paint is a gradient or a pattern rather than a colour, and is reported
+as absent — the same call the vector lowering makes when it refuses
+`paint_reference`. An unpainted pointer reports `""`, and
+`browser_capture_ir.cpp` stamps `knob_ind_color` only `if (!color.empty())`, so
+the widget falls back to its derived tick. That is the honest answer; a confident
+wrong colour is not.
+
+**Testing this function means EXECUTING it.** It lives inside the template
+literal `semanticExpression()` returns and is evaluated in the page, so a regex
+over that string cannot tell a working precedence from a broken one — every
+ordering above yields a string containing the word `stroke`.
+`semantics.test.mjs` runs the real expression against a DOM stub whose
+`getComputedStyle` reproduces the table above, with two positive controls (a
+background-painted pointer, a border-painted one) pinning the paths that already
+worked.
+
+Two ways such a stub is silently useless:
+
+- **It must expose computed style as camelCase PROPERTIES**, not only
+  `getPropertyValue()`. The page reads `style.backgroundColor` and
+  `style.stroke`, so a stub implementing only `getPropertyValue` passes while
+  exercising nothing.
+- **It must default `fill` to black and `border-top-color` to the inherited
+  `color`.** Default `fill` to `""` and the namespace-guard case passes with the
+  guard deleted; default `border-top-color` to a constant and the ordering case
+  passes with the branch moved to the end.
+
+Prove the stub by mutating: deleting the SVG branch must turn the suite RED
+*reporting the inherited text colour*, not merely red.
+
+## Driving a real Chrome to check a capture change, without touching an SDK
+
+`PULP_BROWSER_CAPTURE_SCRIPT` overrides which **`capture.mjs`** runs, and nothing
+else. `capture.mjs` reaches its siblings by relative ES import
+(`from "./semantics.mjs"`), so the semantics module always comes from whatever
+directory that `capture.mjs` lives in: point the variable at an SDK's
+`capture.mjs` and you get the SDK's `semantics.mjs` however carefully you patched
+your own, and point it at a patched `semantics.mjs` and it is loaded as the wrong
+module entirely. Swapping capture behaviour through that variable means swapping
+the whole runtime DIRECTORY, never one file.
+
+For a change confined to the injected expression there is a shorter route with no
+SDK in it at all, which also leaves the shared SDK other lanes measure against
+untouched. Import `semanticExpression` straight from the worktree and run it in a
+browser you launched yourself:
+
+```js
+import { createEmptyProfile, launchBrowser, pageTarget, terminateBrowser }
+  from "./browser_capture/browser_process.mjs";
+import { semanticExpression } from "./browser_capture/semantics.mjs";
+// launch -> Page.navigate to a fixture -> Runtime.evaluate(semanticExpression([]))
+```
+
+Node 22 ships a built-in `WebSocket`, so the CDP client is a few dozen lines and
+needs no dependency. Importing the merged copy alongside the patched one and
+evaluating BOTH against the same loaded page yields a before/after table that
+re-running one build can never fake — and it is what tells you the two
+already-working controls did not move.
+
+Reuse `browser_process.mjs` rather than spawning Chrome directly: it already
+spawns detached with an owned profile directory, and `terminateBrowser` signals
+the process GROUP. Chrome forks renderer and GPU helpers, so killing the parent
+alone orphans them.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 

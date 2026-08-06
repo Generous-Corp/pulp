@@ -38,10 +38,19 @@ Project tuned_project(std::optional<TuningReference> project_tuning,
     return take(Project::create(std::move(input)));
 }
 
+std::uint32_t current_track_version() {
+    return current_schema_version("pulp.timeline.track");
+}
+
 std::string track_envelope(const std::string& project_json) {
     const auto begin = project_json.find(R"({"data":{"active_take_lane_id")");
     REQUIRE(begin != std::string::npos);
-    constexpr std::string_view suffix = R"(,"type_name":"pulp.timeline.track","version":8})";
+    // The encoder writes whatever version is current, which is not the version
+    // tuning was introduced at once another slice extends the track. Deriving
+    // the suffix keeps this helper from silently failing to find an envelope
+    // that is present, which reads as "no track here" rather than as a bump.
+    const auto suffix = ",\"type_name\":\"pulp.timeline.track\",\"version\":" +
+                        std::to_string(current_track_version()) + "}";
     const auto end = project_json.find(suffix, begin);
     REQUIRE(end != std::string::npos);
     return project_json.substr(begin, end - begin + suffix.size());
@@ -168,19 +177,23 @@ TEST_CASE("the track tuning migration refuses to discard an instrument override"
 
     const auto overridden =
         take(serialize_project(tuned_project(std::nullopt, mts_tuning()), registry)).json;
-    auto refused = registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 8, 7,
-                                    track_envelope(overridden), limits);
+    // Down from whatever is current to the version before tuning existed. The
+    // chain walks every intermediate step, so the tuning step is still the one
+    // that must refuse.
+    auto refused = registry.migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                    current_track_version(), 7, track_envelope(overridden),
+                                    limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 
     const auto plain =
         take(serialize_project(tuned_project(std::nullopt, std::nullopt), registry)).json;
     const auto envelope = track_envelope(plain);
-    const auto lowered = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 8, 7, envelope, limits));
+    const auto lowered = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.track",
+                                              current_track_version(), 7, envelope, limits));
     REQUIRE(lowered.find(R"("type_name":"pulp.timeline.track","version":7)") != std::string::npos);
-    const auto raised = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 7, 8, lowered, limits));
+    const auto raised = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 7,
+                                              current_track_version(), lowered, limits));
     REQUIRE(raised == envelope);
 }
 
