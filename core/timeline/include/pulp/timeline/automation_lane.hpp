@@ -3,11 +3,10 @@
 #include <pulp/runtime/result.hpp>
 #include <pulp/timeline/automation_curve.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/parameter_target.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <string_view>
 #include <type_traits>
 #include <variant>
 
@@ -17,77 +16,9 @@ namespace pulp::timeline {
  * @{
  */
 
-/// Format-neutral document target for a placed device parameter. The placement
-/// ID is a referenced Timeline identity, not a host graph node. The parameter ID
-/// is the device's stable host-facing 32-bit ID, scoped by the placement; it is
-/// not a registration index, graph port, or Timeline ItemId. Timeline preserves
-/// it verbatim, while range and metadata validation belong to the delivery layer.
-struct DeviceParameterTarget {
-    ItemId device_placement_id;
-    std::uint32_t param_id = 0;
-
-    /// Returns whether the referenced device-placement identity is nonzero.
-    constexpr bool valid() const noexcept {
-        return device_placement_id.valid();
-    }
-
-    constexpr bool operator==(const DeviceParameterTarget&) const = default;
-};
-
-/// The mixer controls a track owns directly, independent of any device it
-/// hosts. They are named rather than numbered so a document never has to agree
-/// with a host on which control a numeric index meant.
-enum class TrackMixerParameter : std::uint8_t {
-    Gain,
-    Pan,
-};
-
-/// The canonical persisted spelling of a mixer parameter, shared by the encoder,
-/// the decoder, and every interchange reader so no surface invents its own.
-constexpr std::string_view track_mixer_parameter_name(TrackMixerParameter value) noexcept {
-    switch (value) {
-    case TrackMixerParameter::Gain:
-        return "gain";
-    case TrackMixerParameter::Pan:
-        return "pan";
-    }
-    return "gain";
-}
-
-/// Parses the canonical persisted mixer-parameter spelling.
-/// @return The corresponding parameter, or `std::nullopt` for an unknown name.
-constexpr std::optional<TrackMixerParameter>
-track_mixer_parameter_from_name(std::string_view name) noexcept {
-    if (name == "gain")
-        return TrackMixerParameter::Gain;
-    if (name == "pan")
-        return TrackMixerParameter::Pan;
-    return std::nullopt;
-}
-
-/// Format-neutral document target for one of the owning track's own mixer
-/// controls. The track identity is implicit: a lane already lives on exactly one
-/// track, so carrying a track ID here would let a document express a lane whose
-/// target disagrees with its owner.
-struct TrackMixerTarget {
-    TrackMixerParameter parameter = TrackMixerParameter::Gain;
-
-    /// Returns whether the parameter names a supported track mixer control.
-    constexpr bool valid() const noexcept {
-        switch (parameter) {
-        case TrackMixerParameter::Gain:
-        case TrackMixerParameter::Pan:
-            return true;
-        }
-        return false;
-    }
-
-    constexpr bool operator==(const TrackMixerTarget&) const = default;
-};
-
 /// Exhaustive authored-target set. Adding a target category extends this
 /// variant without changing AutomationLane's factory signature or observer API.
-using AutomationTarget = std::variant<DeviceParameterTarget, TrackMixerTarget>;
+using AutomationTarget = ParameterTarget;
 
 /// Overload set for visiting an AutomationTarget with **no generic fallback**.
 ///
@@ -116,7 +47,7 @@ template <class... Fs> AutomationTargetCases(Fs...) -> AutomationTargetCases<Fs.
 /// AutomationTargetCases visit should assert on this count so widening the
 /// variant trips at compile time instead of aborting the process at run time.
 inline constexpr std::size_t kAutomationTargetAlternativeCount =
-    std::variant_size_v<AutomationTarget>;
+    kParameterTargetAlternativeCount;
 
 /// Validation failures returned when constructing an AutomationLane.
 enum class AutomationLaneErrorCode : std::uint8_t {

@@ -12,6 +12,7 @@
 #include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/modulation.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 #include <pulp/timeline/recording.hpp>
 #include <pulp/timeline/tuning.hpp>
@@ -62,6 +63,9 @@ struct TrackInput {
     std::vector<Clip> clips;
     std::vector<DevicePlacement> device_chain;
     std::vector<AutomationLane> automation_lanes;
+    std::vector<Modulator> modulators;
+    std::vector<MacroControl> macros;
+    std::vector<ModulationRoute> modulation_routes;
     std::vector<TakeLane> take_lanes;
     bool record_armed = false;
     // Zero selects the arrangement rather than a take playlist/comp lane.
@@ -194,6 +198,23 @@ class Track {
     std::span<const AutomationLane> automation_lanes() const noexcept;
     /// Finds an automation lane by identity, or returns `nullptr`.
     const AutomationLane* find_automation_lane(ItemId id) const noexcept;
+    /// Returns modulators in canonical identity order.
+    std::span<const Modulator> modulators() const noexcept;
+    /// Finds a modulator by identity, or returns `nullptr`.
+    const Modulator* find_modulator(ItemId id) const noexcept;
+    /// Returns macro controls in canonical identity order.
+    std::span<const MacroControl> macros() const noexcept;
+    /// Finds a macro control by identity, or returns `nullptr`.
+    const MacroControl* find_macro(ItemId id) const noexcept;
+    /// Returns modulation routes in canonical identity order.
+    std::span<const ModulationRoute> modulation_routes() const noexcept;
+    /// Finds a modulation route by identity, or returns `nullptr`.
+    const ModulationRoute* find_modulation_route(ItemId id) const noexcept;
+    /// Returns the routes drawing from `source_id`, in canonical identity order.
+    ///
+    /// This is the fan-out of one macro or modulator: the set a removal has to
+    /// account for, and the set an inverse has to restore.
+    std::vector<ModulationRoute> routes_from_source(ItemId source_id) const;
     /// Returns take lanes in canonical identity order.
     std::span<const TakeLane> take_lanes() const noexcept;
     /// Finds a take lane by identity, or returns `nullptr`.
@@ -788,6 +809,9 @@ enum class ItemKind : std::uint8_t {
     DevicePlacement,
     AutomationLane,
     AutomationPoint,
+    Modulator,
+    MacroControl,
+    ModulationRoute,
     TakeLane,
     Take,
     Marker,
@@ -820,6 +844,13 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
     case ItemKind::AutomationLane:
+    case ItemKind::Modulator:
+    case ItemKind::MacroControl:
+    // A route is owned by the track, not by the source it reads. Parenting it
+    // to its source would make the source's removal an ownership question the
+    // document answers twice, and would leave a route whose source is a macro
+    // and a route whose source is a modulator with different owners.
+    case ItemKind::ModulationRoute:
     case ItemKind::TakeLane:
         return track_id;
     case ItemKind::Note:

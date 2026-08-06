@@ -404,12 +404,36 @@ export interface PulpTimelineGrooveTemplate {
   velocity_strength: number | string;
 }
 
+/** `pulp.timeline.macro_control` — domain Document, schema version 1. */
+export interface PulpTimelineMacroControl {
+  id: number | string;
+  name: string;
+  value_bits: number | string;
+}
+
 /** `pulp.timeline.marker` — domain Document, schema version 1. */
 export interface PulpTimelineMarker {
   color?: number | string;
   id: number | string;
   name: string;
   position: number | string;
+}
+
+/** `pulp.timeline.modulation_route` — domain Document, schema version 1. */
+export interface PulpTimelineModulationRoute {
+  depth_bits: number | string;
+  enabled: boolean;
+  id: number | string;
+  source_id: number | string;
+  source_kind: string;
+  target: Record<string, unknown>;
+}
+
+/** `pulp.timeline.modulator` — domain Document, schema version 1. */
+export interface PulpTimelineModulator {
+  id: number | string;
+  kind: string;
+  name: string;
 }
 
 /** `pulp.timeline.project` — domain Document, schema version 3. */
@@ -485,7 +509,7 @@ export interface PulpTimelineTakeLane {
   takes: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 8. */
+/** `pulp.timeline.track` — domain Document, schema version 9. */
 export interface PulpTimelineTrack {
   active_take_lane_id: number | string;
   automation_lanes: readonly unknown[];
@@ -493,7 +517,10 @@ export interface PulpTimelineTrack {
   device_chain: readonly unknown[];
   freeze?: Record<string, unknown>;
   id: number | string;
+  macros?: readonly unknown[];
   mixer?: Record<string, unknown>;
+  modulation_routes?: readonly unknown[];
+  modulators?: readonly unknown[];
   name: string;
   record_armed: boolean;
   take_lanes: readonly unknown[];
@@ -564,7 +591,10 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.device_placement"
   | "pulp.timeline.groove_step"
   | "pulp.timeline.groove_template"
+  | "pulp.timeline.macro_control"
   | "pulp.timeline.marker"
+  | "pulp.timeline.modulation_route"
+  | "pulp.timeline.modulator"
   | "pulp.timeline.project"
   | "pulp.timeline.region"
   | "pulp.timeline.scene"
@@ -631,7 +661,10 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.device_placement": PulpTimelineDevicePlacement;
   "pulp.timeline.groove_step": PulpTimelineGrooveStep;
   "pulp.timeline.groove_template": PulpTimelineGrooveTemplate;
+  "pulp.timeline.macro_control": PulpTimelineMacroControl;
   "pulp.timeline.marker": PulpTimelineMarker;
+  "pulp.timeline.modulation_route": PulpTimelineModulationRoute;
+  "pulp.timeline.modulator": PulpTimelineModulator;
   "pulp.timeline.project": PulpTimelineProject;
   "pulp.timeline.region": PulpTimelineRegion;
   "pulp.timeline.scene": PulpTimelineScene;

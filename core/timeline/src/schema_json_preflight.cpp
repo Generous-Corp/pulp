@@ -802,7 +802,13 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"record_armed"},
             detail::JsonSpanMember{"take_lanes"},
+            // Appended rather than inserted alphabetically: the reads below
+            // index this array positionally, so a new name in the middle would
+            // silently re-point every later one.
             detail::JsonSpanMember{"tuning"},
+            detail::JsonSpanMember{"modulators"},
+            detail::JsonSpanMember{"macros"},
+            detail::JsonSpanMember{"modulation_routes"},
         };
         if (!members(data, requested))
             return false;
@@ -820,6 +826,12 @@ class StructuralScanner {
         const auto has_mixer = requested[5].found;
         const auto has_record_armed = requested[7].found;
         const auto has_take_lanes = requested[8].found;
+        const auto modulators = requested[10].span;
+        const auto macros = requested[11].span;
+        const auto routes = requested[12].span;
+        const auto has_modulators = requested[10].found;
+        const auto has_macros = requested[11].found;
+        const auto has_routes = requested[12].found;
         if (!require_shape(requested[4], StringShape, data.begin, data_path) ||
             !require_shape(requested[6], StringShape, data.begin, data_path))
             return false;
@@ -838,6 +850,14 @@ class StructuralScanner {
             }
             if (!walk_tuning(requested[9].span, data_path + "/tuning"))
                 return false;
+        }
+        const auto supports_modulation = detail::track_schema_policy.supports_modulation(version);
+        if (!supports_modulation && (has_modulators || has_macros || has_routes)) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + (has_modulators   ? "/modulators"
+                                   : has_macros ? "/macros"
+                                                : "/modulation_routes"));
+            return false;
         }
         if (!has_clips || requires_devices != has_devices ||
             requires_automation != has_automation || requires_takes != has_take_lanes ||
@@ -900,12 +920,60 @@ class StructuralScanner {
                                                                           std::to_string(index));
                             }))
             return false;
+        // Every optional modulation array is charged against its own quota here,
+        // so an untrusted document cannot spend unbounded memory on routes the
+        // way it cannot on notes or automation points.
+        if (has_modulators &&
+            !governed_array(modulators, counts_.modulators, limits_.max_modulators,
+                            path + "/data/modulators", [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.modulator",
+                                    path + "/data/modulators/" + std::to_string(index));
+                            }))
+            return false;
+        if (has_macros &&
+            !governed_array(macros, counts_.macro_controls, limits_.max_macro_controls,
+                            path + "/data/macros", [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.macro_control",
+                                    path + "/data/macros/" + std::to_string(index));
+                            }))
+            return false;
+        if (has_routes &&
+            !governed_array(routes, counts_.modulation_routes, limits_.max_modulation_routes,
+                            path + "/data/modulation_routes",
+                            [&](Span element, std::size_t index) {
+                                return walk_modulation_entry(
+                                    element, "pulp.timeline.modulation_route",
+                                    path + "/data/modulation_routes/" + std::to_string(index));
+                            }))
+            return false;
         return !has_take_lanes ||
                governed_array(take_lanes, counts_.take_lanes, limits_.max_take_lanes,
                               path + "/data/take_lanes", [&](Span element, std::size_t index) {
                                   return walk_take_lane(element, path + "/data/take_lanes/" +
                                                                      std::to_string(index));
                               });
+    }
+
+    // Preflight bounds a document's size; it does not re-validate every field,
+    // which the decoder does against the registry. Checking the envelope keeps
+    // an array of the wrong element type from being counted as modulation.
+    bool walk_modulation_entry(Span value, std::string_view expected_type,
+                               const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape))
+            return false;
+        if (type != expected_type || !require_structural_shape(valid_shape, version, path,
+                                                               value.begin, 1, 1)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        return true;
     }
 
     bool walk_take_lane(Span value, const std::string& path) {

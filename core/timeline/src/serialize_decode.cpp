@@ -29,6 +29,12 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::AutomationLane);
     if (value == "automation_point")
         return runtime::Ok(ItemKind::AutomationPoint);
+    if (value == "modulator")
+        return runtime::Ok(ItemKind::Modulator);
+    if (value == "macro_control")
+        return runtime::Ok(ItemKind::MacroControl);
+    if (value == "modulation_route")
+        return runtime::Ok(ItemKind::ModulationRoute);
     if (value == "take_lane")
         return runtime::Ok(ItemKind::TakeLane);
     if (value == "take")

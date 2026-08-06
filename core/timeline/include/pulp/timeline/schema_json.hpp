@@ -116,6 +116,12 @@ struct DecodeLimits {
     std::size_t max_automation_lanes = 100'000;
     /// Maximum automation points across all lanes.
     std::size_t max_automation_points = 5'000'000;
+    /// Maximum modulators across all tracks.
+    std::size_t max_modulators = 100'000;
+    /// Maximum macro controls across all tracks.
+    std::size_t max_macro_controls = 100'000;
+    /// Maximum modulation routes across all tracks.
+    std::size_t max_modulation_routes = 1'000'000;
     /// Maximum take lanes across all tracks.
     std::size_t max_take_lanes = 100'000;
     /// Maximum takes across all take lanes.

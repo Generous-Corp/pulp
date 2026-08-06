@@ -8,6 +8,12 @@ pulp_add_test_suite(pulp-test-timeline-model
         test_timeline_note_modifiers.cpp
         test_timeline_take_comp.cpp
     LIBRARIES pulp::timeline)
+# Modulation asserts against the interchange census as well as the model, so it
+# is its own suite rather than a source in the model one: the census is what
+# proves a macro's fan-out is observable rather than merely stored.
+pulp_add_test_suite(pulp-test-timeline-modulation
+    SOURCES test_timeline_modulation.cpp
+    LIBRARIES pulp::timeline pulp::interchange)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
         test_timeline_dawproject_import_runtime.cpp
