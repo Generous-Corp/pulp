@@ -194,3 +194,13 @@ oracle *in the test* (guarded by `#if defined(__SIZEOF_INT128__)`). The test is
 not shipped to MSVC, so it may use the wide type that the header may not — that
 verifies the portable path against the maths it replaced rather than against
 itself. `test_timebase.cpp` does this over an exhaustive small grid.
+
+## Authored trigger grids
+
+`TriggerGrid` is fixed-capacity authored track×step data, not another clock or
+transform chain. Its caller supplies the cycle origin, half-open projection
+window, and one stable random word per configured coordinate. Keep projection
+allocation-free, step-major then track-major, and block-partition invariant.
+Microtiming must remain within the per-step bounds that prevent adjacent steps
+from reversing. Groove/swing, coordinate RNG generation, generative pattern
+algorithms, transport advancement, and note lifetime remain separate owners.
