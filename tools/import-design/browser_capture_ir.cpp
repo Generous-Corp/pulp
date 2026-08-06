@@ -206,6 +206,138 @@ bool validate_semantic_report(const fs::path& path,
     return true;
 }
 
+/// A declared pointer, expressed the way the renderer wants it.
+///
+/// `Knob::paint` draws the design's own pointer as a radial stroke swept along
+/// the value arc, and takes its extent as FRACTIONS of the dial's half-extent
+/// (the same convention `hoist_captured_art_knobs` records for the Figma lane)
+/// so the numbers survive any later rescale of the control.
+///
+/// The declared rectangle is not axis-aligned with the radius it sits on: a dot
+/// at 7 o'clock is a square whose diagonal, not its width, spans the radial
+/// direction. Projecting the box's half-extents onto the radial unit vector and
+/// its perpendicular gives the true along-radius reach and across-radius width
+/// for a pointer at ANY angle, which a plain width/height read does not.
+struct DeclaredPointer {
+    float r_in = 0.0f;
+    float r_out = 0.0f;
+    float width = 0.0f;
+};
+
+std::optional<DeclaredPointer> pointer_fractions(double dial_left,
+                                                 double dial_top,
+                                                 double dial_width,
+                                                 double dial_height,
+                                                 double ind_left,
+                                                 double ind_top,
+                                                 double ind_width,
+                                                 double ind_height) {
+    const double half = std::min(dial_width, dial_height) * 0.5;
+    // Reject a box with NO extent on EITHER axis -- that carries no direction
+    // to sweep along. A box with one zero axis is a different thing and must
+    // survive: an SVG <line> or <path> drawn straight up, down, left or right
+    // reports zero extent across its own axis, because a client rect excludes
+    // stroke. The capture recovers the painted width from the stroke where it
+    // can, but where it cannot -- a shape with no stroke to read -- the right
+    // answer is a correctly PLACED pointer of defaulted thickness, not a
+    // dropped one. `&&` rather than `||` is the whole difference.
+    //
+    // This predicate exists twice, once here and once as the capture's own
+    // guard in browser_capture/semantics.mjs. They are in different languages,
+    // so neither grep finds the other; relaxing one alone leaves the other
+    // refusing the same box, one layer down and just as silently.
+    if (!(half > 0.0) || (!(ind_width > 0.0) && !(ind_height > 0.0)))
+        return std::nullopt;
+    const double cx = dial_left + dial_width * 0.5;
+    const double cy = dial_top + dial_height * 0.5;
+    const double dx = (ind_left + ind_width * 0.5) - cx;
+    const double dy = (ind_top + ind_height * 0.5) - cy;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    // A pointer centred on the dial has no radial direction to sweep along, so
+    // there is nothing to reproduce. Refuse rather than divide by zero and
+    // stamp a pointer that pivots on itself.
+    if (!(distance > 0.0)) return std::nullopt;
+    const double ux = dx / distance;
+    const double uy = dy / distance;
+    const double hx = ind_width * 0.5;
+    const double hy = ind_height * 0.5;
+    // Support function of the axis-aligned box along the radial axis, and along
+    // the axis perpendicular to it.
+    const double along = std::abs(ux) * hx + std::abs(uy) * hy;
+    const double across = std::abs(uy) * hx + std::abs(ux) * hy;
+    DeclaredPointer out;
+    out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
+    out.r_out = static_cast<float>((distance + along) / half);
+    out.width = static_cast<float>((2.0 * across) / half);
+    if (!(out.r_out > out.r_in)) return std::nullopt;
+    return out;
+}
+
+/// A browser-resolved colour as `#rrggbb` / `#rrggbbaa`.
+///
+/// `getComputedStyle` always answers in `rgb()` / `rgba()` form, and the two
+/// consumers of `knob_ind_color` do not agree on what they can read: the native
+/// materializer parses any CSS colour, the scripted bridge parses hex only and
+/// silently falls back to near-white. Normalizing here means the design's
+/// pointer colour survives BOTH paths instead of only the one that happens to
+/// be exercised. Anything else — an author-declared `oklch()`, a named colour —
+/// is carried through verbatim for the parser that can read it.
+std::string css_color_to_hex(const std::string& value) {
+    const auto open = value.find('(');
+    if (open == std::string::npos ||
+        (value.compare(0, 4, "rgb(") != 0 && value.compare(0, 5, "rgba(") != 0))
+        return value;
+    double channels[4] = {0.0, 0.0, 0.0, 1.0};
+    int count = 0;
+    std::size_t cursor = open + 1;
+    while (count < 4 && cursor < value.size()) {
+        try {
+            std::size_t consumed = 0;
+            channels[count] = std::stod(value.substr(cursor), &consumed);
+            if (consumed == 0) break;
+            cursor += consumed;
+            ++count;
+        } catch (const std::exception&) {
+            break;
+        }
+        while (cursor < value.size() &&
+               (value[cursor] == ',' || value[cursor] == ' ' ||
+                value[cursor] == '/'))
+            ++cursor;
+    }
+    if (count < 3) return value;
+    const auto byte = [](double v) {
+        return static_cast<int>(std::lround(std::clamp(v, 0.0, 255.0)));
+    };
+    char buffer[10];
+    if (count == 4 && channels[3] < 0.999) {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]),
+                      byte(channels[3] * 255.0));
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]));
+    }
+    return buffer;
+}
+
+/// A CSS-pixel page rectangle as the capture PNG's own integer pixel rectangle,
+/// serialized "x,y,w,h".
+///
+/// Rounded at the edges rather than at origin+size so a crop and the pointer
+/// inside it stay aligned: rounding a size independently of its origin can move
+/// a boundary by a pixel, which is enough to leave a sliver of the erased
+/// pointer showing at the edge of the rectangle meant to contain it.
+std::string device_pixel_rect(double left, double top,
+                              double width, double height, double dpr) {
+    const long x0 = std::lround(left * dpr);
+    const long y0 = std::lround(top * dpr);
+    const long x1 = std::lround((left + width) * dpr);
+    const long y1 = std::lround((top + height) * dpr);
+    return std::to_string(x0) + "," + std::to_string(y0) + "," +
+           std::to_string(x1 - x0) + "," + std::to_string(y1 - y0);
+}
+
 /// Lower each bound semantic candidate into a control node beneath the
 /// faithful-capture backdrop.
 ///
@@ -225,7 +357,7 @@ bool validate_semantic_report(const fs::path& path,
 /// leaving that part of the picture alone.
 int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
-                            double dx, double dy,
+                            double dx, double dy, double dpr,
                             pulp::view::IRNode& root,
                             const CapturedStyleIndex* styles,
                             bool body_is_native_underlay,
@@ -413,43 +545,45 @@ int lower_semantic_controls(const fs::path& path,
         // consumer needs no second set of names and no second code path. A
         // design that declares nothing keeps the widget's derived tick, which
         // is the common case and not a failure.
+        //
+        // `design_indicator` above is only a COLOUR -- with no geometry the
+        // engine has nothing to move, so an imported knob showed the pointer
+        // frozen wherever the capture happened to catch it.
+        //
+        // The two device-pixel rectangles are hand-off state for the sprite
+        // pass (`apply_browser_capture_knob_sprites`), which crops the control
+        // out of the panel capture and erases the pointer baked into that crop.
+        // It consumes and removes them; they are not a runtime contract. Only a
+        // knob carries them: they exist to feed that pass, which skins dials.
         const auto ind_box = object_member(candidate, "indicator_bounds");
-        if (ind_box.isObject()) {
-            const double bw = number_member(box, "width", 0.0);
-            const double bh = number_member(box, "height", 0.0);
-            const double half = std::min(bw, bh) * 0.5;
-            const double cx = number_member(box, "left", 0.0) + bw * 0.5;
-            const double cy = number_member(box, "top", 0.0) + bh * 0.5;
-            const double iw = number_member(ind_box, "width", 0.0);
-            const double ih = number_member(ind_box, "height", 0.0);
-            const double il = number_member(ind_box, "left", 0.0);
-            const double it = number_member(ind_box, "top", 0.0);
-            // The pointer runs along its LONG axis, so its two ends are the
-            // extremes of its box along that axis. Measuring both and keeping
-            // the near/far pair is what makes this work for a pointer drawn
-            // from the rim inward as well as from the hub outward.
-            const double mid_x = il + iw * 0.5;
-            const double mid_y = it + ih * 0.5;
-            const auto radius = [&](double ex, double ey) {
-                const double ddx = ex - cx, ddy = ey - cy;
-                return std::sqrt(ddx * ddx + ddy * ddy);
-            };
-            const double r_a = ih >= iw ? radius(mid_x, it) : radius(il, mid_y);
-            const double r_b = ih >= iw ? radius(mid_x, it + ih)
-                                        : radius(il + iw, mid_y);
-            const double r_out = std::max(r_a, r_b);
-            const double r_in = std::min(r_a, r_b);
-            if (half > 0.0 && r_out > r_in) {
+        if (ind_box.isObject() && box.isObject()) {
+            const double dial_left = number_member(box, "left", 0.0);
+            const double dial_top = number_member(box, "top", 0.0);
+            const double dial_w = number_member(box, "width", 0.0);
+            const double dial_h = number_member(box, "height", 0.0);
+            const double ind_left = number_member(ind_box, "left", 0.0);
+            const double ind_top = number_member(ind_box, "top", 0.0);
+            const double ind_w = number_member(ind_box, "width", 0.0);
+            const double ind_h = number_member(ind_box, "height", 0.0);
+            if (const auto pointer = pointer_fractions(
+                    dial_left, dial_top, dial_w, dial_h,
+                    ind_left, ind_top, ind_w, ind_h)) {
                 control.attributes["knob_ind_r_in"] =
-                    std::to_string(r_in / half);
+                    std::to_string(pointer->r_in);
                 control.attributes["knob_ind_r_out"] =
-                    std::to_string(r_out / half);
+                    std::to_string(pointer->r_out);
                 control.attributes["knob_ind_w"] =
-                    std::to_string(std::min(iw, ih) / half);
-                const auto ind_color =
-                    string_member(candidate, "indicator_color");
-                if (!ind_color.empty())
-                    control.attributes["knob_ind_color"] = ind_color;
+                    std::to_string(pointer->width);
+                if (const auto color =
+                        string_member(candidate, "indicator_color");
+                    !color.empty())
+                    control.attributes["knob_ind_color"] = css_color_to_hex(color);
+                if (widget == pulp::view::AudioWidgetType::knob) {
+                    control.attributes["browser_sprite_crop_px"] =
+                        device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                    control.attributes["browser_sprite_indicator_px"] =
+                        device_pixel_rect(ind_left, ind_top, ind_w, ind_h, dpr);
+                }
             }
         }
 
@@ -1149,7 +1283,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
     int styled_controls = 0;
     const int lowered = lower_semantic_controls(
-        *semantic_report, ir, control_dx, control_dy, ir.root,
+        *semantic_report, ir, control_dx, control_dy, dpr, ir.root,
         captured_styles ? &*captured_styles : nullptr, native_lowering,
         styled_controls, undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;

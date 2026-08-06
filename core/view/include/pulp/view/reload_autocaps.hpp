@@ -41,6 +41,7 @@ autocaps_function_table() {
         {"setImageSource", ReloadCapability::Filesystem},
         {"setKnobSpriteStrip", ReloadCapability::Filesystem},
         {"setKnobSpriteCore", ReloadCapability::Filesystem},
+        {"setKnobCapturedIndicator", ReloadCapability::Filesystem},
         {"setFaderSkin", ReloadCapability::Filesystem},
         {"setFaderTrackWidth", ReloadCapability::Filesystem},
         {"setFaderTrackBorder", ReloadCapability::Filesystem},

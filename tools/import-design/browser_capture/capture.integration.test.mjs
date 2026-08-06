@@ -815,3 +815,108 @@ test("real browser capture preserves WebGL through software composition",
       await rm(root, { recursive: true, force: true });
     }
   });
+
+test("a pointer drawn straight up survives the capture",
+  { timeout: 30000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    // getBoundingClientRect() does not include stroke, so an SVG <line> drawn
+    // at 12, 3, 6 or 9 o'clock reports ZERO extent across its own axis however
+    // thick it is. Twelve o'clock is the resting position of every centred
+    // bipolar parameter, so a guard that refuses a zero axis drops the
+    // commonest pointer there is -- silently, falling back to the derived tick,
+    // which renders as a plausible knob and is why no picture caught it.
+    //
+    // The rotated knob is the positive control. Every probe in the corpus
+    // carries a rotation, and the rotation is exactly what hid this: a rotated
+    // line has extent on both axes. Without an unrotated case in the same file
+    // the guard passes on the one orientation that cannot fail.
+    //
+    // The scaled knob is the second trap: stroke-width is in USER UNITS, so a
+    // 2-unit stroke in a 24-unit viewBox drawn at 96px paints 8 CSS px. Reading
+    // the stroke without the viewBox scale recovers the pointer at a quarter of
+    // its width, which looks like a hairline rather than a miss.
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-axis-aligned-pointer-"));
+    const input = path.join(root, "panel.html");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 320px; height: 160px; background: #111; }
+  .dial { position: absolute; top: 20px; width: 96px; height: 96px; }
+</style>
+<div id="up" class="dial" style="left:8px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 96 96">
+    <circle cx="48" cy="48" r="46" fill="#333"/>
+    <line data-pulp-indicator x1="48" y1="48" x2="48" y2="10"
+          stroke="#fff" stroke-width="4"/>
+  </svg>
+</div>
+<div id="turned" class="dial" style="left:112px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 96 96">
+    <circle cx="48" cy="48" r="46" fill="#333"/>
+    <line data-pulp-indicator x1="48" y1="48" x2="48" y2="10"
+          stroke="#fff" stroke-width="4" transform="rotate(38 48 48)"/>
+  </svg>
+</div>
+<div id="scaled" class="dial" style="left:216px" data-pulp-kind="knob">
+  <svg width="96" height="96" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="11.5" fill="#333"/>
+    <line data-pulp-indicator x1="12" y1="12" x2="12" y2="3"
+          stroke="#fff" stroke-width="2"/>
+  </svg>
+</div>
+`);
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--initial-width", "320",
+        "--initial-height", "160",
+        "--dpr", "2",
+        "--timeout-ms", "20000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const report = JSON.parse(
+        await readFile(path.join(output, "semantic-report.json"), "utf8"));
+      // Keyed on the dial's own left edge, which the page fixes at 8 / 112 /
+      // 216. The marked <line> also surfaces as its own candidate (it carries a
+      // data-pulp- attribute), so the kind filter is load-bearing.
+      const boxFor = (left) => {
+        const candidate = report.candidates.find(
+          (c) => c.kind === "knob" && c.bounds && Math.abs(c.bounds.left - left) < 1);
+        assert.ok(candidate, `a knob at left=${left} must be a semantic candidate`);
+        return candidate.indicator_bounds;
+      };
+
+      const up = boxFor(8);
+      assert.ok(up, "an unrotated 12 o'clock pointer must survive the capture; " +
+        "dropping it falls back to the derived tick and looks correct");
+      assert.ok(Math.abs(up.width - 4) < 0.5,
+        `a 4px stroke must arrive 4px wide, got ${up && up.width}`);
+      assert.ok(up.height > 30, "the pointer keeps its length");
+
+      const turned = boxFor(112);
+      assert.ok(turned, "the rotated control must keep working");
+      assert.ok(turned.width > 20 && turned.height > 20,
+        "a rotated pointer reports a fat axis-aligned box on both axes; this " +
+        "is the case that passed while 12 o'clock silently failed");
+
+      const scaled = boxFor(216);
+      assert.ok(scaled, "a scaled-viewBox pointer must survive too");
+      assert.ok(Math.abs(scaled.width - 8) < 0.5,
+        "stroke-width is in user units: 2 units in a 24-unit viewBox drawn at " +
+        `96px paints 8 CSS px, got ${scaled && scaled.width}`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });

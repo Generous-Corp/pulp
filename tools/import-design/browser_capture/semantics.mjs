@@ -172,17 +172,77 @@ export function semanticExpression(snapshotClickableIndexes = []) {
   //
   // Null when unmarked, which is the common case and NOT a defect: a design
   // that draws no pointer gets the widget's derived tick instead. Bounds are
-  // page coordinates, the same frame as the candidate's own.
+  // page coordinates, the same frame as the candidate's own bounds and its
+  // paint box, so a consumer can express the pointer relative to the dial
+  // without a second coordinate system.
+  //
+  // A box with NO extent on either axis is treated as unmarked: it carries no
+  // axis at all, so the lowering has no direction to sweep it along. A box with
+  // extent on one axis is a different thing entirely and must not be dropped --
+  // see strokePaintedExtent.
+  //
+  // The painted width of a stroked SVG line in CSS px, or 0 when that cannot be
+  // recovered.
+  //
+  // getBoundingClientRect() does not include stroke, so an SVG <line> drawn
+  // straight up, down, left or right reports ZERO extent across its own axis
+  // however thick it is. Twelve o'clock is the resting position of any centred
+  // bipolar parameter, so refusing a zero axis silently dropped the COMMONEST
+  // pointer orientation and fell back to the derived tick -- a plausible
+  // picture, which is why no render caught it.
+  //
+  // The stroke is in USER UNITS, not CSS px: a 2-unit stroke in a 24-unit
+  // viewBox painted at 96px is 8px on screen. Scale is therefore read off
+  // whichever axis has extent (client px per user unit) rather than assumed to
+  // be 1. That ratio is only a pure scale for an axis-aligned element -- for a
+  // rotated one it folds in the rotation -- which is exactly why it is computed
+  // here and nowhere else: a rotated pointer has extent on both axes and never
+  // reaches this path.
+  const strokePaintedExtent = marked => {
+    try {
+      if (typeof marked.getBBox !== 'function') return 0;
+      const stroke = parseFloat(window.getComputedStyle(marked).strokeWidth);
+      if (!(stroke > 0)) return 0;
+      const bb = marked.getBBox();
+      const rect = marked.getBoundingClientRect();
+      const scale = bb.height > 0 ? rect.height / bb.height
+        : bb.width > 0 ? rect.width / bb.width : 0;
+      if (!(scale > 0)) return 0;
+      return stroke * scale;
+    } catch (e) {
+      return 0;
+    }
+  };
   const indicatorBox = element => {
     try {
       const marked = element.querySelector('[data-pulp-indicator]');
       if (!marked) return null;
       const box = marked.getBoundingClientRect();
+      let { left, top, width, height } = box;
+      if (!(width > 0) && !(height > 0)) return null;
+      if (!(width > 0) || !(height > 0)) {
+        // Grown about the line's own centre, so the box still describes what is
+        // painted AND its centroid -- which is what the radial projection
+        // downstream actually reads -- is left where it was.
+        //
+        // A stroke that cannot be recovered leaves the axis at zero rather than
+        // dropping the box. The consumer places such a pointer correctly from
+        // its radial extent and falls back to a default THICKNESS, which is a
+        // thin pointer in the right place. Dropping it instead costs the whole
+        // sprite lane: with no geometry the knob keeps its captured body, the
+        // designed-body painter is reinstalled, and it comes back wearing the
+        // value arc and track ring over a face whose pointer was never erased.
+        const stroke = strokePaintedExtent(marked);
+        if (stroke > 0) {
+          if (!(width > 0)) { left -= stroke / 2; width = stroke; }
+          if (!(height > 0)) { top -= stroke / 2; height = stroke; }
+        }
+      }
       return {
-        left: box.left + window.scrollX,
-        top: box.top + window.scrollY,
-        width: box.width,
-        height: box.height
+        left: left + window.scrollX,
+        top: top + window.scrollY,
+        width,
+        height
       };
     } catch (e) {
       return null;
@@ -190,16 +250,29 @@ export function semanticExpression(snapshotClickableIndexes = []) {
   };
   // The pointer's resolved colour, read the same way the accent is: from
   // computed style, so a value set anywhere up the tree arrives resolved.
-  // Border first, because a hairline pointer is usually a border rather than a
-  // fill, and a transparent fill would otherwise win.
+  //
+  // background-color first (a dot or wedge is a filled box), then the border
+  // and text colours (a hairline drawn as a border, or a glyph). An author
+  // whose pointer is a gradient or a mask -- where no single computed colour is
+  // the right answer -- states it as the attribute's own value, which wins.
   const indicatorColor = element => {
     try {
       const marked = element.querySelector('[data-pulp-indicator]');
       if (!marked) return '';
+      const declared = (marked.getAttribute('data-pulp-indicator') || '').trim();
+      if (declared) return declared;
       const style = window.getComputedStyle(marked);
-      const bg = style.getPropertyValue('background-color').trim();
-      if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
-      return style.getPropertyValue('border-top-color').trim();
+      const opaque = value => {
+        const text = (value || '').trim();
+        if (!text || text === 'transparent') return '';
+        // rgba(...) with a zero alpha is the computed form of "not painted".
+        if (text.indexOf('rgba(') === 0 && text.replace(/ /g, '').indexOf(',0)') > 0)
+          return '';
+        return text;
+      };
+      return opaque(style.backgroundColor) ||
+        opaque(style.borderTopColor) ||
+        opaque(style.color);
     } catch (e) {
       return '';
     }

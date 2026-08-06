@@ -298,3 +298,26 @@ test("design-system component classes are admitted by the candidate gate", () =>
                                     expression.indexOf("const strong ="));
   assert.ok(!injected.includes("`"), "no backticks inside the injected region");
 });
+
+test("a declared knob indicator is carried into the candidate", () => {
+  // The pointer is DECLARED for the same reason the paint box is: a capture is
+  // one flat picture, so nothing in it distinguishes the moving dot from the
+  // face it sits on. Without this the importer has a colour and no geometry,
+  // and an imported knob's indicator stands still.
+  //
+  // These assertions are on the page-evaluated source because that is the only
+  // place the contract lives -- the expression is a template literal, so a
+  // recogniser that never reaches the emitted candidate object is a silent
+  // no-op the CDP round trip cannot see.
+  const expression = semanticExpression([]);
+  assert.match(expression, /data-pulp-indicator/);
+  assert.match(expression, /indicator_bounds: indicatorBox\(element\)/);
+  assert.match(expression, /indicator_color: indicatorColor\(element\)/);
+  // Page coordinates, matching bounds and paint_bounds, so a consumer can
+  // relate the pointer to its dial without a second coordinate system.
+  assert.match(expression, /left: box.left \+ window.scrollX/);
+  // Resolved by the browser, with the attribute's own value as the author's
+  // override for a pointer no single computed colour describes.
+  assert.match(expression, /opaque\(style.backgroundColor\)/);
+  assert.match(expression, /if \(declared\) return declared;/);
+});
