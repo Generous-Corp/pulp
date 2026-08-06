@@ -82,6 +82,19 @@ FORBIDDEN_RUNTIME_CONTROL_FIELDS = {
     "session_id",
 }
 
+# Reviewed ownership is explicit because public include prefixes do not imply
+# link ownership: source-bearing APIs can live behind specialized targets.
+REVIEWED_MINIMAL_TARGETS = {
+    "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
+    "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
+    "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
+    "pulp/signal/saturator.hpp": "Pulp::signal",
+    "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
+    "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
+    "pulp/timebase/quantize.hpp": "Pulp::timebase",
+    "pulp/timebase/tick.hpp": "Pulp::timebase",
+}
+
 
 def availability() -> dict[str, Any]:
     return {
@@ -1296,11 +1309,7 @@ def _valid_version(value: Any, *, minimum_major: int = 0) -> bool:
 
 
 def _minimal_target_for_include(include: str) -> str | None:
-    for public_root in surface.PUBLIC_ROOTS:
-        prefix = public_root["install_prefix"] + "/"
-        if include.startswith(prefix):
-            return f"Pulp::{public_root['domain']}"
-    return None
+    return REVIEWED_MINIMAL_TARGETS.get(include)
 
 
 def _version_tuple(value: dict[str, Any]) -> tuple[int, int]:

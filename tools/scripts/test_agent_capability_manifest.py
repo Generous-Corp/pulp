@@ -57,6 +57,17 @@ def expect_problem(problems: list[str], needle: str) -> None:
 def exercise_manifest_mutations(canonical: dict) -> int:
     checks = 0
 
+    assert manifest._minimal_target_for_include("pulp/signal/fft_backend.hpp") == (
+        "Pulp::signal-fft-backend"
+    )
+    checks += 1
+    assert manifest._minimal_target_for_include("pulp/signal/modal_spec.hpp") == (
+        "Pulp::signal-modal-spec"
+    )
+    checks += 1
+    assert manifest._minimal_target_for_include("pulp/signal/future_source_api.hpp") is None
+    checks += 1
+
     duplicate = copy.deepcopy(canonical)
     duplicate["capabilities"].append(copy.deepcopy(duplicate["capabilities"][0]))
     expect_validation_failure(duplicate, "duplicate capability key")
