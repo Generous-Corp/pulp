@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 3,
+  "inventory_version": 4,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -32,15 +32,15 @@
     }
   ],
   "counts": {
-    "public_headers": 345,
-    "reviewed_headers": 8,
-    "legacy_unreviewed_headers": 337,
+    "public_headers": 346,
+    "reviewed_headers": 14,
+    "legacy_unreviewed_headers": 332,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 6,
-      "capability_support": 0,
-      "infrastructure": 0,
-      "legacy_unreviewed": 337,
+      "capability_entrypoint": 8,
+      "capability_support": 3,
+      "infrastructure": 1,
+      "legacy_unreviewed": 332,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -63,9 +63,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 194,
-        "reviewed_headers": 3,
-        "legacy_unreviewed_headers": 191,
+        "public_headers": 195,
+        "reviewed_headers": 9,
+        "legacy_unreviewed_headers": 186,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2246,11 +2246,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/interpolator.hpp",
-      "fingerprint": "sha256:60024e7a07267bfd759963a94f0e7744c9d687707aab1b93f414763bd4e7371f",
+      "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",
       "include": "pulp/signal/interpolator.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.window-functions"
+      ],
+      "rationale": "The interpolator reuses the window implementation internally but does not add a distinct generator-facing window contract."
     },
     {
       "domain": "signal",
@@ -2377,6 +2379,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/mirrored_history_buffer.hpp",
+      "fingerprint": "sha256:d507271969c7fb14569e541ecb0f5cc3a0ccbc134ceaa58278eae6f9d0fccff5",
+      "include": "pulp/signal/mirrored_history_buffer.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.bounded-sample-history"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2714,11 +2727,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/resampler.hpp",
-      "fingerprint": "sha256:cba4f92de1d465864c26345d11278160690db60af94618454382f35e82d71689",
+      "fingerprint": "sha256:1bd78bf7111b9bfe5b1fd923ba0304390956ddf92337ed788b06a0b865a196e8",
       "include": "pulp/signal/resampler.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.bounded-sample-history"
+      ],
+      "rationale": "The resampler adopts the bounded history primitive for its delay storage; this slice does not introduce a new resampler contract."
     },
     {
       "domain": "signal",
@@ -2788,11 +2803,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:3b9f10b9aafb43c93d0f0fb538fa2dd1a0abff859a0989c558a2dd1997a5901b",
+      "fingerprint": "sha256:a0dbaac0cebe1f10a2ae0fb0c14d1465a0f16d2f2043c54071cfeaf114b6cd7e",
       "include": "pulp/signal/signal.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "This is the aggregate signal include surface, not an independently invocable generator capability."
     },
     {
       "domain": "signal",
@@ -2905,11 +2920,14 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/stft.hpp",
-      "fingerprint": "sha256:a21f2852fe6ee9293876298c04a31349a213225e9cf7e86cba6c8fcd5264bead",
+      "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
       "include": "pulp/signal/stft.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.bounded-sample-history",
+        "signal.window-functions"
+      ],
+      "rationale": "STFT consumes both reusable primitives while retaining its existing analysis API; it is not a newly claimed capability in this slice."
     },
     {
       "domain": "signal",
@@ -3103,11 +3121,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/windowing.hpp",
-      "fingerprint": "sha256:7196cac25d5310d34a1fe2c55d8a0555a6391096fd12247f6699495048f9237d",
+      "fingerprint": "sha256:672043aa1a9a0d0a0cd28a82cd7b7d81e57de035b963e0226c23b85b42ce1f7f",
       "include": "pulp/signal/windowing.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.window-functions"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

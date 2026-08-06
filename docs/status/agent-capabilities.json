@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 3,
+  "manifest_revision": 4,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 1
+        "capabilities": 3
       },
       "timebase": {
         "state": "partial",
@@ -228,6 +228,65 @@
       "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
     },
     {
+      "key": "signal.bounded-sample-history",
+      "domain": "signal",
+      "summary": "Prepared fixed-capacity sample history with a contiguous oldest-to-newest view.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "destruction-off-audio"
+      },
+      "state_model": "prepare allocates two mirrored copies of a fixed capacity; push, window, reset, and accessors allocate no memory afterward. The state is single-thread DSP history, not a synchronization primitive.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "sample values and prepared sample capacity",
+      "output_domain": "contiguous oldest-to-newest sample history",
+      "units": [
+        "samples",
+        "sample count"
+      ],
+      "latency": "zero",
+      "tail": "capacity-sample-history-until-overwritten-or-reset",
+      "scheduling": "sample-synchronous single-thread use",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/mirrored_history_buffer.hpp",
+          "qualified_name": "pulp::signal::MirroredHistoryBuffer<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:77d813b2f803243154a3e30607e0578377130ab87aeef45ae68f12b05b1f5427"
+    },
+    {
       "key": "signal.saturator",
       "contract_version": {
         "major": 1,
@@ -291,6 +350,66 @@
         }
       },
       "contract_digest": "sha256:3a85bb9904be17c293e502df0a149c2d8e2935c0b46a7660bb21afcbb744bc66"
+    },
+    {
+      "key": "signal.window-functions",
+      "domain": "signal",
+      "summary": "Reusable analysis-window generation and allocation-free in-place application.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "control",
+        "process": "audio-with-precomputed-window",
+        "reset": "none",
+        "release": "generated-vector-destruction-off-audio"
+      },
+      "state_model": "Stateless static utility; generate returns caller-owned allocated coefficients and apply mutates caller-owned samples without allocation.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "window size, window family, optional Kaiser parameter, and samples",
+      "output_domain": "window coefficients or in-place windowed samples",
+      "units": [
+        "samples",
+        "sample count",
+        "normalized ratio"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "control-generated and sample-array-applied",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/windowing.hpp",
+          "qualified_name": "pulp::signal::WindowFunction",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:b052957050f3e8e3d420e690a8ca720e62c73339499c254b6da1bc093b452a7a"
     },
     {
       "key": "timebase.swing",
@@ -440,14 +559,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 6,
+    "total": 8,
     "by_domain": {
       "audio": 1,
       "midi": 1,
       "music": 0,
       "offline": 0,
       "sequence": 1,
-      "signal": 1,
+      "signal": 3,
       "timebase": 2
     }
   },
@@ -2934,6 +3053,19 @@
             "enums": []
           }
         ],
+        "mirrored_history_buffer.hpp": [
+          {
+            "class": "MirroredHistoryBuffer",
+            "methods": [
+              "static_assert(std::is_arithmetic_v<SampleType>, \"MirroredHistoryBuffer requires an arithmetic sample type\")",
+              "push(SampleType sample)",
+              "window()",
+              "capacity()",
+              "empty()"
+            ],
+            "enums": []
+          }
+        ],
         "mod_matrix.hpp": [
           {
             "class": "ModMatrixT",
@@ -4529,7 +4661,9 @@
                   "hamming",
                   "blackman",
                   "flat_top",
-                  "kaiser"
+                  "kaiser",
+                  "blackman_harris",
+                  "blackman_nuttall"
                 ]
               ]
             ]
