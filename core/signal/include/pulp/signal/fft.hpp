@@ -117,7 +117,6 @@ public:
             for (int n = size; n > 1; n >>= 1) ++log2n_;
             split_real_.resize(size);
             split_imag_.resize(size);
-            vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
         }
 #endif
         // Pre-compute twiddle factors (used as fallback on non-Apple)
@@ -126,6 +125,14 @@ public:
             double angle = -2.0 * pi * i / size;
             twiddles_[i] = {std::cos(angle), std::sin(angle)};
         }
+#if PULP_FFT_HAS_VDSP
+        if constexpr (std::is_same_v<SampleType, float>) {
+            // Keep raw setup acquisition last: every vector allocation and
+            // twiddle population that can throw has completed, so constructor
+            // unwinding cannot bypass destruction of an acquired setup.
+            vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
+        }
+#endif
     }
 
     ~FftT() {

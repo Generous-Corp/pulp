@@ -403,6 +403,10 @@ TEST_CASE("FFT exposes backend readiness", "[signal][source-filter][fault]") {
     Fft moved(std::move(prepared));
     REQUIRE(moved.ready());
     REQUIRE_FALSE(prepared.ready());
+    Fft reassigned;
+    reassigned = std::move(moved);
+    REQUIRE(reassigned.ready());
+    REQUIRE_FALSE(moved.ready());
 }
 
 TEST_CASE("Autocorrelation and Levinson-Durbin recover known stable models",
