@@ -595,13 +595,18 @@ def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, i
     right, bottom = min(int((x + w) * factor), im.width), min(int((y + h) * factor), im.height)
     px = im.load()
     xs, ys = [], []
+    colors = set()
     step = max(2, (right - left) // 200)
     for sx in range(left, right, step):
         for sy in range(top, bottom, step):
             r, g, b = px[sx, sy]
+            colors.add((r, g, b))
             if r < 60 and g < 66 and b < 74:          # Forge's dark surface
                 xs.append(sx)
                 ys.append(sy)
+    if len(colors) < 8:
+        log("the editor capture is blank or nearly uniform")
+        return None
     if len(xs) < 50:
         log("could not find the editor's surface inside the host window")
         return None
@@ -611,6 +616,15 @@ def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, i
         log(f"the editor measured {ew}x{eh}, too small to be the editor")
         return None
     return ex, ey, ew, eh
+
+
+def _new_run_log(runs_dir: Path, existing: set[Path]) -> Path | None:
+    """Newest per-run generator log not present before this smoke began."""
+    try:
+        created = [p for p in runs_dir.glob("*.log") if p not in existing]
+        return max(created, key=lambda p: p.stat().st_mtime_ns) if created else None
+    except OSError:
+        return None
 
 
 def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
@@ -630,9 +644,9 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     if bad is not None:
         return bad
 
-    plugin_log = Path(os.path.expanduser(
-        "~/Library/Application Support/Forge Modular/last-run.log"))
-    before = plugin_log.stat().st_size if plugin_log.exists() else 0
+    runs_dir = Path(os.path.expanduser(
+        "~/Library/Application Support/Forge Modular/runs"))
+    existing_logs = set(runs_dir.glob("*.log")) if runs_dir.exists() else set()
     prompt = "a classic subtractive voice with a filter envelope"
     want = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40]
     trigger = Path("/tmp/pulp-daw-smoke-prompt.txt")
@@ -675,6 +689,18 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
                 "not reaching it inside this host — FAIL")
             return EXIT_FAIL
         log("the hosted plugin took the request")
+
+        plugin_log = None
+        for _ in range(100):
+            plugin_log = _new_run_log(runs_dir, existing_logs)
+            if plugin_log is not None:
+                break
+            time.sleep(0.1)
+        if plugin_log is None:
+            log("the hosted plugin consumed the request but created no per-run log — FAIL")
+            return EXIT_FAIL
+        before = 0
+        log(f"following this build's log: {plugin_log.name}")
 
         # Wait for the generation the way a person would: until the plugin's
         # log says it finished, or the cap runs out.
@@ -761,6 +787,21 @@ def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
         # an editor that opens and then throws is still a failure, and it
         # reports itself in the seconds after the window appears.
         time.sleep(5)
+        bounds = _floating_editor_bounds(args.plugin_name)
+        if bounds is None:
+            log("REAPER reported the FX shown, but no floating editor window was measurable — "
+                "INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        first_frame = _editor_rect_in(bounds)
+        time.sleep(1)
+        second_frame = _editor_rect_in(bounds)
+        if first_frame is None or second_frame is None:
+            log("the editor window did not produce two nonblank frames — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        if any(abs(a - b) > 8 for a, b in zip(first_frame, second_frame)):
+            log(f"the painted editor region was unstable: {first_frame} then {second_frame} — "
+                "INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
         session.terminate()
 
         text = session.captured_log()

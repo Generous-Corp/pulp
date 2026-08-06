@@ -98,48 +98,15 @@ TEST_CASE("the predicate walks descendants", "[view][continuous-frames]") {
     REQUIRE_FALSE(needs_continuous_frames(&root));
 }
 
-// EACH WIDGET ANSWERS FOR ITSELF, and the tree walk only asks.
-//
-// The predicate used to try six `dynamic_cast`s per node per frame, three of
-// them through multiple inheritance, and on a real UI tree that RTTI search was
-// the largest single CPU cost in an idle window -- more than the drawing it
-// gated. This pins the replacement contract rather than only its outcome: a
-// widget with an animation of its own has to report it through
-// `needs_frames_self()`, because that is the only question the walk now asks.
-TEST_CASE("a widget reports its own liveness", "[view][continuous-frames]") {
-    SECTION("a plain view is never live on its own") {
-        View v;
-        REQUIRE_FALSE(v.needs_frames_self());
-    }
-    SECTION("a time-driven shader makes the widget itself report live") {
-        Knob knob;
-        REQUIRE_FALSE(knob.needs_frames_self());
-        knob.set_custom_shader(
-            "uniform float time; half4 main(float2 p) { return half4(time); }");
-        REQUIRE(knob.needs_frames_self());
-    }
-    SECTION("an EQ analyzer with data reports live from the widget") {
-        EqCurveView eq;
-        eq.set_bounds({0, 0, 320, 160});
-        eq.set_sample_rate(48000.0f);
-        REQUIRE_FALSE(eq.needs_frames_self());
-        const std::vector<float> bins(64, -30.0f);
-        eq.set_spectrum(bins.data(), bins.size());
-        REQUIRE(eq.needs_frames_self());
-    }
-}
-
 // EVERY BRANCH THAT KEEPS THE LOOP ALIVE NEEDS A POSITIVE TEST.
 //
-// `needs_frames_self()` replaced a chain of `dynamic_cast`s, and a replacement
-// is only equivalent if each branch it subsumed still answers yes when it
-// should. The idle-side coverage below ("idle widgets do not force frames") is
+// The idle-side coverage below ("idle widgets do not force frames") is
 // satisfied by a predicate that returns false unconditionally — so on its own it
 // would let a widget whose animation stopped pinning the loop sail through the
 // whole suite, and the symptom is a knob whose glow freezes mid-fade rather than
 // anything that fails a build. These drive each widget's own animation and
-// assert the live window between "started" and "settled", through the shared
-// tree walk as well as the widget itself.
+// assert the live window between "started" and "settled" through the shared
+// tree walk.
 //
 // One host tick at 60 Hz is 16.7 ms into an 80-150 ms ease: far enough in to be
 // unambiguously moving, far short of arriving.
@@ -149,15 +116,15 @@ TEST_CASE("a widget reports its own liveness", "[view][continuous-frames]") {
 // fader stops asking once its thumb is within 0.01 of rest, a toggle once its
 // thumb is past 0.99. So the last sub-1% of travel is never painted unless
 // something else is keeping the loop alive. That is the intended trade -- an
-// invisible sliver is not worth a frame -- and it is the reason `settle()` here
-// loops on `needs_frames_self()` rather than on the underlying value.
+// invisible sliver is not worth a frame.
 namespace {
 constexpr float kTick = 1.0f / 60.0f;
 
 // Run the animation to completion the way a host does, with a bound so a
 // predicate that never settles fails as a hang-free assertion instead.
 void settle(View& v) {
-    for (int i = 0; i < 600 && v.needs_frames_self(); ++i) v.advance_animations(kTick);
+    for (int i = 0; i < 600 && needs_continuous_frames(&v); ++i)
+        v.advance_animations(kTick);
 }
 }  // namespace
 
@@ -173,7 +140,6 @@ TEST_CASE("a knob mid hover-glow keeps the tree live", "[view][continuous-frames
     knob->advance_animations(kTick); // mid-ease
     CHECK(knob->hover_glow() > 0.01f);
     CHECK(knob->hover_glow() < 0.99f);
-    CHECK(knob->needs_frames_self());
     CHECK(needs_continuous_frames(&root));
 
     settle(*knob);
@@ -192,7 +158,6 @@ TEST_CASE("a fader mid hover-scale keeps the tree live", "[view][continuous-fram
     fader->on_mouse_enter();          // thumb grows 1.0 -> 1.3
     fader->advance_animations(kTick);
     CHECK(fader->hover_scale() > 1.01f);
-    CHECK(fader->needs_frames_self());
     CHECK(needs_continuous_frames(&root));
 
     // Leaving shrinks it back; once it reaches 1.0 the fader is idle again.
@@ -214,7 +179,6 @@ TEST_CASE("a toggle mid thumb-travel keeps the tree live", "[view][continuous-fr
     toggle->advance_animations(kTick);
     CHECK(toggle->thumb_position() > 0.01f);
     CHECK(toggle->thumb_position() < 0.99f);
-    CHECK(toggle->needs_frames_self());
     CHECK(needs_continuous_frames(&root));
 
     settle(*toggle);
@@ -236,7 +200,6 @@ TEST_CASE("a scroll view mid offset-ease keeps the tree live",
     // which is why this asks for the animated path explicitly).
     scroll->scroll_by(0.0f, 120.0f, /*animate=*/true);
     CHECK(scroll->scroll_animating());
-    CHECK(scroll->needs_frames_self());
     CHECK(needs_continuous_frames(&root));
 
     settle(*scroll);

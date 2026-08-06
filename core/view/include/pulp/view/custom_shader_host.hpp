@@ -13,12 +13,8 @@ namespace pulp::view {
 /// `dynamic_cast<CustomShaderHost*>` rather than a hardcoded chain of concrete
 /// widget types.
 ///
-/// The one place that is NOT free is the render loop. `needs_continuous_frames`
-/// runs over every view on every frame, and asking it for a cast per node cost
-/// more than the drawing it gated, so it asks `View::needs_frames_self()`
-/// instead. A widget that inherits this mixin must therefore fold
-/// `shader_uses_time()` into its own `needs_frames_self()` override, or a
-/// time-driven shader on it freezes as soon as nothing else wants frames.
+/// The render loop discovers this mixin too, so a shader declaring a `time`
+/// uniform keeps its view tree live without each widget duplicating that rule.
 class CustomShaderHost {
 public:
     virtual ~CustomShaderHost() = default;

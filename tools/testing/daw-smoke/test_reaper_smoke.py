@@ -295,6 +295,49 @@ class EditorOpenMode(unittest.TestCase):
                              rs.EXIT_FAIL)
         session.cleanup.assert_called_once_with()
 
+    def test_pass_requires_two_stable_nonblank_editor_frames(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.captured_log.return_value = ""
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs.time, "sleep"), \
+             mock.patch.object(rs, "_floating_editor_bounds", return_value=(1, 2, 640, 480)), \
+             mock.patch.object(rs, "_editor_rect_in", side_effect=[(10, 20, 600, 420),
+                                                                   (11, 20, 600, 420)]) as pixels:
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_PASS)
+        self.assertEqual(pixels.call_count, 2)
+        session.cleanup.assert_called_once_with()
+
+    def test_a_shown_but_unpainted_editor_is_not_a_pass(self):
+        args = argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs.time, "sleep"), \
+             mock.patch.object(rs, "_floating_editor_bounds", return_value=(1, 2, 640, 480)), \
+             mock.patch.object(rs, "_editor_rect_in", return_value=None):
+            self.assertEqual(rs.run_editor_open_mode(pathlib.Path("/reaper"), args),
+                             rs.EXIT_INCONCLUSIVE)
+
+
+class PerRunBuildLog(unittest.TestCase):
+    def test_selects_only_a_log_created_after_the_build_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            runs = pathlib.Path(td)
+            old = runs / "old.log"
+            old.write_text("old")
+            existing = {old}
+            self.assertIsNone(rs._new_run_log(runs, existing))
+            new = runs / "20260806-120000.log"
+            new.write_text("new")
+            self.assertEqual(rs._new_run_log(runs, existing), new)
+
 
 class AuAlreadyInstalled(unittest.TestCase):
     """An AU that is already installed is the case worth proving, not a clash.

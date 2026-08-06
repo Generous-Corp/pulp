@@ -632,12 +632,6 @@ public:
     float hover_glow() const { return hover_glow_.value(); }
     void advance_animations(float dt) override;
 
-    /// Mid hover-glow, or painted by a time-driven shader.
-    bool needs_frames_self() const override {
-        return (hover_glow() > 0.01f && hover_glow() < 0.99f) ||
-               shader_uses_time();
-    }
-
     // Arc range in radians (default: 270-degree sweep)
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
     static constexpr float end_angle = 7.069f;    // 405 degrees (bottom-right via top)
@@ -933,11 +927,6 @@ public:
     // Animation accessors for testing
     float hover_scale() const { return hover_thumb_scale_.value(); }
     void advance_animations(float dt) override;
-
-    /// Thumb still growing, or painted by a time-driven shader.
-    bool needs_frames_self() const override {
-        return hover_scale() > 1.01f || shader_uses_time();
-    }
 
     /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
     /// <1 gives finer control near the bottom of the fader. Value is normalized
@@ -1263,12 +1252,6 @@ public:
     float thumb_position() const { return thumb_position_.value(); }
     float hover_opacity() const { return hover_opacity_.value(); }
     void advance_animations(float dt) override;
-
-    /// Thumb mid-travel, or painted by a time-driven shader.
-    bool needs_frames_self() const override {
-        return (thumb_position() > 0.01f && thumb_position() < 0.99f) ||
-               shader_uses_time();
-    }
 
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
