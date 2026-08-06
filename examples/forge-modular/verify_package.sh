@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Open the finished installer and read what is actually inside it.
 #
-#     verify_package.sh "Forge Modular-0.12.5.pkg"
+#     verify_package.sh "Forge Modular-0.12.5.pkg" 0.12.5 \
+#         build/rack/ForgeModular-2.0.0-mac-arm64.vcvplugin
 #
 # Run by package.sh after every build, and runnable by hand on any .pkg that
 # already exists, including one somebody else produced.
@@ -21,8 +22,15 @@
 
 set -uo pipefail
 
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
 PKG="${1:-}"
-[[ -n "$PKG" ]] || { echo "usage: verify_package.sh <path to .pkg>" >&2; exit 2; }
+[[ -n "$PKG" ]] || {
+    echo "usage: verify_package.sh <path to .pkg> [version] <current .vcvplugin>" >&2
+    exit 2
+}
 # The version this package claims to be. Taken from the file name when not
 # given, because that is the one place the released version has always been
 # right -- it is everywhere else it was wrong.
@@ -32,13 +40,113 @@ if [[ -z "$WANT_VERSION" ]]; then
     WANT_VERSION="${_base##*-}"
 fi
 [[ -f "$PKG" ]] || { echo "no such package: $PKG" >&2; exit 2; }
+EXPECTED_PACK="${3:-}"
+[[ -f "$EXPECTED_PACK" ]] || {
+    echo "current Rack build is required for exact package verification: $EXPECTED_PACK" >&2
+    exit 2
+}
+
+SOURCE_MANIFEST="$REPO/examples/forge-modular/plugin.json"
+read -r EXPECTED_SLUG EXPECTED_RACK_VERSION EXPECTED_MODULES < <(
+    /usr/bin/python3 -c '
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+print(manifest["slug"], manifest["version"], len(manifest["modules"]))
+' "$SOURCE_MANIFEST"
+) || exit 1
+EXPECTED_NAME="$(basename "$EXPECTED_PACK")"
+case "$EXPECTED_NAME" in
+    "${EXPECTED_SLUG}-${EXPECTED_RACK_VERSION}-mac-arm64.vcvplugin"|\
+    "${EXPECTED_SLUG}-${EXPECTED_RACK_VERSION}-mac-x64.vcvplugin") ;;
+    *) echo "current Rack build has the wrong identity: $EXPECTED_NAME" >&2; exit 1 ;;
+esac
+EXPECTED_MANIFEST="$WORK/expected-plugin.json"
+if ! /usr/bin/tar --zstd -xOf "$EXPECTED_PACK" \
+        "${EXPECTED_SLUG}/plugin.json" > "$EXPECTED_MANIFEST" 2>/dev/null; then
+    echo "current Rack build has no ${EXPECTED_SLUG}/plugin.json: $EXPECTED_PACK" >&2
+    exit 1
+fi
+if ! cmp -s "$SOURCE_MANIFEST" "$EXPECTED_MANIFEST"; then
+    echo "current Rack build's plugin.json does not match the current tree" >&2
+    exit 1
+fi
+EXPECTED_PACK_SHA="$(shasum -a 256 "$EXPECTED_PACK" | awk '{print $1}')"
+EXPECTED_MANIFEST_SHA="$(shasum -a 256 "$EXPECTED_MANIFEST" | awk '{print $1}')"
+EXPECTED_PLATFORM="${EXPECTED_NAME#${EXPECTED_SLUG}-${EXPECTED_RACK_VERSION}-}"
+EXPECTED_PLATFORM="${EXPECTED_PLATFORM%.vcvplugin}"
+RACK_BUILD_ROOT="$(dirname "$(cd "$(dirname "$EXPECTED_PACK")" && pwd)")"
+RACK_CACHE="$RACK_BUILD_ROOT/CMakeCache.txt"
+[[ -f "$RACK_CACHE" ]] || {
+    echo "current Rack build has no CMake provenance: $RACK_CACHE" >&2
+    exit 1
+}
+RACK_SOURCE_ROOT="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$RACK_CACHE" | tail -1)"
+RACK_SOURCE_ROOT="$(cd "$RACK_SOURCE_ROOT" 2>/dev/null && pwd)" || true
+[[ "$RACK_SOURCE_ROOT" == "$REPO" ]] || {
+    echo "current Rack build belongs to ${RACK_SOURCE_ROOT:-unknown}, not this tree" >&2
+    exit 1
+}
+grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$RACK_CACHE" || {
+    echo "current Rack build is not Release" >&2
+    exit 1
+}
+[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]] || {
+    echo "exact verification requires a clean tracked source tree" >&2
+    exit 1
+}
+EXPECTED_SOURCE_TREE_SHA="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
+RACK_SDK_DIR="$(sed -n 's/^PULP_RACK_SDK_DIR:PATH=//p' "$RACK_CACHE" | tail -1)"
+RACK_SDK_DIR="$(cd "$RACK_SDK_DIR" 2>/dev/null && pwd)" || true
+[[ -n "$RACK_SDK_DIR" && -d "$RACK_SDK_DIR" ]] || {
+    echo "current Rack build has no resolved SDK identity" >&2
+    exit 1
+}
+EXPECTED_SDK_SHA="$(/usr/bin/python3 -c '
+import hashlib, os, sys
+root = os.path.realpath(sys.argv[1])
+h = hashlib.sha256()
+for base, dirs, files in os.walk(root):
+    dirs.sort()
+    for name in sorted(files):
+        path = os.path.join(base, name)
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, root).encode()
+        h.update(len(rel).to_bytes(8, "big")); h.update(rel)
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+print(h.hexdigest())
+' "$RACK_SDK_DIR")"
+EXPECTED_BINARY="$WORK/expected-plugin.dylib"
+if ! /usr/bin/tar --zstd -xOf "$EXPECTED_PACK" \
+        "${EXPECTED_SLUG}/plugin.dylib" > "$EXPECTED_BINARY" 2>/dev/null; then
+    echo "current Rack build has no plugin.dylib" >&2
+    exit 1
+fi
+EXPECTED_BINARY_SHA="$(shasum -a 256 "$EXPECTED_BINARY" | awk '{print $1}')"
+STAGED_BINARY="$(dirname "$EXPECTED_PACK")/${EXPECTED_SLUG}/plugin.dylib"
+if [[ ! -f "$STAGED_BINARY" ]] || ! cmp -s "$STAGED_BINARY" "$EXPECTED_BINARY"; then
+    echo "current Rack archive does not match its CMake build-stage binary" >&2
+    exit 1
+fi
+EXPECTED_PROVENANCE="$WORK/expected-provenance.json"
+/usr/bin/python3 -c '
+import json, sys
+keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
+        "platform", "sdk_sha256", "source_tree_sha")
+data = dict(zip(keys, sys.argv[2:]))
+data["module_count"] = int(data["module_count"])
+with open(sys.argv[1], "w") as f:
+    json.dump(data, f, sort_keys=True, separators=(",", ":"))
+    f.write("\n")
+' "$EXPECTED_PROVENANCE" "$EXPECTED_PACK_SHA" "$EXPECTED_BINARY_SHA" \
+  "$EXPECTED_MANIFEST_SHA" "$EXPECTED_MODULES" "$EXPECTED_PLATFORM" \
+  "$EXPECTED_SDK_SHA" "$EXPECTED_SOURCE_TREE_SHA"
 
 # The one string that exists in the current shell and cannot exist in the older
 # examples/ one. Keep in step with package.sh's SHELL_MARKER.
 SHELL_MARKER="Browse marketplace"
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
 
 bad=0
 say_ok()   { echo "  ok     $1"; }
@@ -224,18 +332,57 @@ else
 fi
 
 # ── the Rack pack, by content ────────────────────────────────────────────────
-PACK="$(find "$ROOT/Contents/Resources/rack" -maxdepth 1 -name '*.vcvplugin' \
-        2>/dev/null | sort | tail -1)"
-if [[ -z "$PACK" ]]; then
+PACKS=()
+while IFS= read -r _pack; do
+    PACKS[${#PACKS[@]}]="$_pack"
+done < <(find "$ROOT/Contents/Resources/rack" -maxdepth 1 -name '*.vcvplugin' \
+         -type f 2>/dev/null | sort)
+if [[ ${#PACKS[@]} -eq 0 ]]; then
     say_bad "no .vcvplugin in the bundle: the installer promises modules it lacks"
+elif [[ ${#PACKS[@]} -ne 1 ]]; then
+    say_bad "the bundle carries ${#PACKS[@]} Rack packs instead of exactly one current build"
 else
-    mods=$(/usr/bin/tar --zstd -xOf "$PACK" 'ForgeModular/plugin.json' 2>/dev/null \
-           | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin)["modules"]))' \
-             2>/dev/null)
-    if [[ -n "$mods" && "$mods" -gt 0 ]]; then
-        say_ok "the Rack pack carries $mods modules"
+    PACK="${PACKS[0]}"
+    if [[ "$(basename "$PACK")" == "$EXPECTED_NAME" ]]; then
+        say_ok "the Rack pack has the current build name $EXPECTED_NAME"
     else
-        say_bad "the Rack pack is present but its manifest lists no modules"
+        say_bad "the Rack pack is $(basename "$PACK"), not current build $EXPECTED_NAME"
+    fi
+    pack_sha="$(shasum -a 256 "$PACK" | awk '{print $1}')"
+    if [[ "$pack_sha" == "$EXPECTED_PACK_SHA" ]]; then
+        say_ok "the Rack pack is byte-identical to the current build ($pack_sha)"
+    else
+        say_bad "the Rack pack hash is $pack_sha, not current build $EXPECTED_PACK_SHA"
+    fi
+    packed_manifest="$WORK/installed-plugin.json"
+    if /usr/bin/tar --zstd -xOf "$PACK" \
+            "${EXPECTED_SLUG}/plugin.json" > "$packed_manifest" 2>/dev/null; then
+        manifest_sha="$(shasum -a 256 "$packed_manifest" | awk '{print $1}')"
+        mods=$(/usr/bin/python3 -c '
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+print(len(manifest["modules"]))
+' "$packed_manifest" 2>/dev/null)
+        if [[ "$manifest_sha" == "$EXPECTED_MANIFEST_SHA" ]]; then
+            say_ok "the embedded plugin.json matches the current tree ($manifest_sha)"
+        else
+            say_bad "the embedded plugin.json hash is $manifest_sha, not current tree $EXPECTED_MANIFEST_SHA"
+        fi
+        if [[ "$mods" == "$EXPECTED_MODULES" ]]; then
+            say_ok "the Rack pack carries all $EXPECTED_MODULES current modules"
+        else
+            say_bad "the Rack pack carries ${mods:-0} modules, not current tree $EXPECTED_MODULES"
+        fi
+    else
+        say_bad "the Rack pack has no ${EXPECTED_SLUG}/plugin.json"
+    fi
+    provenance="$ROOT/Contents/Resources/rack/ForgeModular.provenance.json"
+    if [[ -f "$provenance" ]] && cmp -s "$provenance" "$EXPECTED_PROVENANCE"; then
+        say_ok "the Rack pack provenance binds the current source tree, SDK and binary"
+    elif [[ -f "$provenance" ]]; then
+        say_bad "the Rack pack provenance does not describe the current source tree, SDK and binary"
+    else
+        say_bad "the Rack pack has no source, SDK and binary provenance"
     fi
 fi
 

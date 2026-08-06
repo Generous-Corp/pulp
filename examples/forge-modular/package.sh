@@ -53,6 +53,160 @@ esac
 [[ -n "$BUILD_DIR" ]] || { echo "--build-dir is required" >&2; exit 2; }
 [[ -n "$OUT_DIR" ]] || { echo "--out is required" >&2; exit 2; }
 
+verify_current_rack_plugin() {
+    local pack="$1" platform="$2"
+    local source_manifest="$REPO/examples/forge-modular/plugin.json"
+    local expected_name manifest_tmp rack_dir build_root cache source_root sdk_dir
+    local staged_binary packed_binary
+
+    [[ -f "$pack" ]] || {
+        echo "no such Rack pack: $pack" >&2
+        return 1
+    }
+    read -r FM_RACK_SLUG FM_RACK_VERSION FM_RACK_MODULES < <(
+        /usr/bin/python3 -c '
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+print(manifest["slug"], manifest["version"], len(manifest["modules"]))
+' "$source_manifest"
+    ) || return 1
+    expected_name="${FM_RACK_SLUG}-${FM_RACK_VERSION}-${platform}.vcvplugin"
+    if [[ "$(basename "$pack")" != "$expected_name" ]]; then
+        echo "wrong Rack pack identity: expected $expected_name, got $(basename "$pack")" >&2
+        return 1
+    fi
+
+    manifest_tmp="$(mktemp)"
+    if ! /usr/bin/tar --zstd -xOf "$pack" \
+            "${FM_RACK_SLUG}/plugin.json" > "$manifest_tmp" 2>/dev/null; then
+        rm -f "$manifest_tmp"
+        echo "unreadable Rack pack: $pack carries no ${FM_RACK_SLUG}/plugin.json" >&2
+        return 1
+    fi
+    if ! cmp -s "$source_manifest" "$manifest_tmp"; then
+        rm -f "$manifest_tmp"
+        echo "wrong Rack pack identity: embedded plugin.json does not match the current tree" >&2
+        return 1
+    fi
+
+    rack_dir="$(cd "$(dirname "$pack")" && pwd)"
+    build_root="$(dirname "$rack_dir")"
+    cache="$build_root/CMakeCache.txt"
+    [[ -f "$cache" ]] || {
+        echo "Rack pack has no owning CMake build: $cache" >&2
+        return 1
+    }
+    source_root="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -1)"
+    source_root="$(cd "$source_root" 2>/dev/null && pwd)" || true
+    if [[ "$source_root" != "$REPO" ]]; then
+        echo "Rack pack was not built from this tree: ${source_root:-unknown}" >&2
+        return 1
+    fi
+    if ! grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' "$cache"; then
+        echo "Rack pack must come from a Release build" >&2
+        return 1
+    fi
+    if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
+        echo "Rack pack provenance requires a clean tracked source tree" >&2
+        return 1
+    fi
+    cmake --build "$build_root" --target forge-modular \
+          --parallel "${PULP_PACKAGE_JOBS:-8}"
+    if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
+        rm -f "$manifest_tmp"
+        echo "Rack rebuild changed tracked source; review and commit it before packaging" >&2
+        return 1
+    fi
+
+    : > "$manifest_tmp"
+    if ! /usr/bin/tar --zstd -xOf "$pack" \
+            "${FM_RACK_SLUG}/plugin.json" > "$manifest_tmp" 2>/dev/null; then
+        rm -f "$manifest_tmp"
+        echo "unreadable Rack pack: $pack carries no ${FM_RACK_SLUG}/plugin.json" >&2
+        return 1
+    fi
+    if ! cmp -s "$source_manifest" "$manifest_tmp"; then
+        rm -f "$manifest_tmp"
+        echo "rebuilt Rack pack's plugin.json does not match the current tree" >&2
+        return 1
+    fi
+    FM_RACK_MANIFEST_SHA="$(shasum -a 256 "$manifest_tmp" | awk '{print $1}')"
+    FM_RACK_SHA="$(shasum -a 256 "$pack" | awk '{print $1}')"
+    FM_SOURCE_TREE_SHA="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
+
+    sdk_dir="$(sed -n 's/^PULP_RACK_SDK_DIR:PATH=//p' "$cache" | tail -1)"
+    sdk_dir="$(cd "$sdk_dir" 2>/dev/null && pwd)" || true
+    [[ -n "$sdk_dir" && -d "$sdk_dir" ]] || {
+        rm -f "$manifest_tmp"
+        echo "Rack build has no resolved SDK identity" >&2
+        return 1
+    }
+    FM_RACK_SDK_SHA="$(/usr/bin/python3 -c '
+import hashlib, os, sys
+root = os.path.realpath(sys.argv[1])
+h = hashlib.sha256()
+for base, dirs, files in os.walk(root):
+    dirs.sort()
+    for name in sorted(files):
+        path = os.path.join(base, name)
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, root).encode()
+        h.update(len(rel).to_bytes(8, "big")); h.update(rel)
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+print(h.hexdigest())
+' "$sdk_dir")"
+
+    staged_binary="$rack_dir/${FM_RACK_SLUG}/plugin.dylib"
+    packed_binary="$(mktemp)"
+    if [[ ! -f "$staged_binary" ]] || \
+       ! /usr/bin/tar --zstd -xOf "$pack" \
+           "${FM_RACK_SLUG}/plugin.dylib" > "$packed_binary" 2>/dev/null; then
+        rm -f "$manifest_tmp" "$packed_binary"
+        echo "Rack pack has no build-stage plugin.dylib identity" >&2
+        return 1
+    fi
+    FM_RACK_BINARY_SHA="$(shasum -a 256 "$packed_binary" | awk '{print $1}')"
+    if ! cmp -s "$staged_binary" "$packed_binary"; then
+        rm -f "$manifest_tmp" "$packed_binary"
+        echo "Rack pack binary differs from the just-built CMake target" >&2
+        return 1
+    fi
+    rm -f "$packed_binary"
+    rm -f "$manifest_tmp"
+    [[ -n "$FM_RACK_SHA" && -n "$FM_RACK_MANIFEST_SHA" && \
+       -n "$FM_RACK_BINARY_SHA" && -n "$FM_SOURCE_TREE_SHA" && \
+       -n "$FM_RACK_SDK_SHA" && "$FM_RACK_MODULES" -gt 0 ]] || {
+        echo "unreadable Rack pack identity: $pack" >&2
+        return 1
+    }
+}
+
+write_rack_provenance() {
+    /usr/bin/python3 -c '
+import json, sys
+keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
+        "platform", "sdk_sha256", "source_tree_sha")
+data = dict(zip(keys, sys.argv[2:]))
+data["module_count"] = int(data["module_count"])
+with open(sys.argv[1], "w") as f:
+    json.dump(data, f, sort_keys=True, separators=(",", ":"))
+    f.write("\n")
+' "$1" "$FM_RACK_SHA" "$FM_RACK_BINARY_SHA" "$FM_RACK_MANIFEST_SHA" \
+  "$FM_RACK_MODULES" "$RACK_PLATFORM" "$FM_RACK_SDK_SHA" "$FM_SOURCE_TREE_SHA"
+}
+
+[[ -n "$RACK_PLUGIN" ]] || {
+    echo "--rack-plugin is required; pass the artifact produced by the current Rack build" >&2
+    exit 2
+}
+verify_current_rack_plugin "$RACK_PLUGIN" "$RACK_PLATFORM" || exit 1
+echo "[installer] rack pack: $RACK_PLUGIN"
+echo "[installer] rack pack identity: $FM_RACK_MODULES modules, manifest $FM_RACK_MANIFEST_SHA, archive $FM_RACK_SHA"
+echo "[installer] build provenance: tree $FM_SOURCE_TREE_SHA, SDK $FM_RACK_SDK_SHA, binary $FM_RACK_BINARY_SHA"
+
 # THERE ARE TWO FORGE MODULAR APPS, and this script shipped the wrong one.
 #
 #   $BUILD_DIR/modular/…              the Forge worktree build. The real shell.
@@ -256,15 +410,6 @@ echo "[installer] all four bundles report $VERSION"
 # stale pack can be newest, or the only one left after its sources changed.
 # The app's own installer pane promises "Includes the Rack plug-in" -- an
 # installer that quietly carries an old or absent one is worse than a failure.
-[[ -n "$RACK_PLUGIN" ]] || {
-    echo "--rack-plugin is required; pass the artifact produced by the current Rack build" >&2
-    exit 2
-}
-if [[ -n "$RACK_PLUGIN" && "$(basename "$RACK_PLUGIN")" != *"-$RACK_PLATFORM.vcvplugin" ]]; then
-    echo "wrong Rack pack for $TARGET_ARCH: $RACK_PLUGIN" >&2
-    exit 1
-fi
-
 # A bundle EXISTING is not a bundle with anything in it.
 #
 # CMake creates the .component/.vst3/.clap directory tree -- Info.plist,
@@ -346,18 +491,6 @@ for artifact in "$APP" "$AU" "$VST3" "$CLAP"; do
         missing=1
     fi
 done
-echo "[installer] rack pack: $RACK_PLUGIN"
-# IDENTITY, not size. A .vcvplugin is a zstd tar; a truncated download or a
-# half-written copy is still a file of plausible length. Reading the manifest
-# back out proves it is the pack we mean, and prints the module count so an
-# emptied pack cannot pass for a full one.
-if ! _fm_mods=$(/usr/bin/tar --zstd -xOf "$RACK_PLUGIN" 'ForgeModular/plugin.json' 2>/dev/null \
-        | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin)["modules"]))' 2>/dev/null) \
-   || [[ -z "$_fm_mods" || "$_fm_mods" -lt 1 ]]; then
-    echo "unreadable rack pack: $RACK_PLUGIN carries no ForgeModular/plugin.json" >&2
-    exit 1
-fi
-echo "[installer] rack pack carries $_fm_mods modules"
 [[ $missing -eq 0 ]] || { echo "build the four targets first" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
@@ -388,6 +521,8 @@ if [[ $DO_SIGN -eq 0 ]]; then
     mkdir -p "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack"
     cp "$RACK_PLUGIN" \
        "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack/"
+    write_rack_provenance \
+       "$STAGE/Applications/Forge Modular.app/Contents/Resources/rack/ForgeModular.provenance.json"
 
     PKG="$OUT_DIR/ForgeModular-$VERSION-unsigned.pkg"
     pkgbuild --root "$STAGE" \
@@ -402,10 +537,29 @@ if [[ $DO_SIGN -eq 0 ]]; then
     pkgutil --expand "$PKG" "$CHECK/expanded" >/dev/null
     [[ -x "$CHECK/expanded/Scripts/postinstall" ]] || {
         echo "unsigned package has no executable postinstall" >&2; exit 1; }
-    _unsigned_packs=$(/usr/bin/tar tzf "$CHECK/expanded/Payload" \
-        | grep -c 'Forge Modular.app/Contents/Resources/rack/.*\.vcvplugin$' || true)
-    [[ "$_unsigned_packs" -ge 1 ]] || {
-        echo "unsigned package has no bundled Rack pack" >&2; exit 1; }
+    mkdir -p "$CHECK/payload"
+    /usr/bin/tar xzf "$CHECK/expanded/Payload" -C "$CHECK/payload"
+    _unsigned_pack_dir="$CHECK/payload/Applications/Forge Modular.app/Contents/Resources/rack"
+    _unsigned_packs=()
+    while IFS= read -r _pack; do
+        _unsigned_packs[${#_unsigned_packs[@]}]="$_pack"
+    done < <(find "$_unsigned_pack_dir" -maxdepth 1 -type f -name '*.vcvplugin' \
+             2>/dev/null | sort)
+    [[ ${#_unsigned_packs[@]} -eq 1 ]] || {
+        echo "unsigned package has ${#_unsigned_packs[@]} Rack packs, expected exactly one" >&2
+        exit 1
+    }
+    [[ "$(basename "${_unsigned_packs[0]}")" == "$(basename "$RACK_PLUGIN")" ]] || {
+        echo "unsigned package carries the wrong Rack pack name" >&2; exit 1; }
+    _unsigned_sha="$(shasum -a 256 "${_unsigned_packs[0]}" | awk '{print $1}')"
+    [[ "$_unsigned_sha" == "$FM_RACK_SHA" ]] || {
+        echo "unsigned package Rack pack differs from current build" >&2; exit 1; }
+    write_rack_provenance "$CHECK/expected-provenance.json"
+    cmp -s "$CHECK/expected-provenance.json" \
+        "$_unsigned_pack_dir/ForgeModular.provenance.json" || {
+        echo "unsigned package Rack provenance differs from current build" >&2
+        exit 1
+    }
     rm -rf "$CHECK"
     echo "$PKG"
     exit 0
@@ -426,6 +580,8 @@ fi
 rm -rf "$APP/Contents/Resources/rack"
 mkdir -p "$APP/Contents/Resources/rack"
 cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
+write_rack_provenance \
+    "$APP/Contents/Resources/rack/ForgeModular.provenance.json"
 
 # The identities live in ~/.config/pulp/secrets/keychain.env as hashes, which
 # is what codesign wants anyway -- a name can match two certificates, a hash
@@ -476,4 +632,4 @@ ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
 "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
 
 PKG="$OUT_DIR/Forge Modular-$VERSION.pkg"
-"$REPO/examples/forge-modular/verify_package.sh" "$PKG" "$VERSION"
+"$REPO/examples/forge-modular/verify_package.sh" "$PKG" "$VERSION" "$RACK_PLUGIN"
