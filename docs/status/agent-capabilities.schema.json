@@ -178,6 +178,34 @@
           },
           "state_model": { "type": "string", "minLength": 1 },
           "seed_model": { "type": "string", "minLength": 1 },
+          "determinism": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "repeatability",
+              "block_partition",
+              "platform_scope",
+              "transport_history"
+            ],
+            "properties": {
+              "repeatability": {
+                "type": "string",
+                "enum": ["bit_exact", "tolerance_bounded", "statistical", "not_promised"]
+              },
+              "block_partition": {
+                "type": "string",
+                "enum": ["invariant", "fixed_partition_only", "not_applicable"]
+              },
+              "platform_scope": {
+                "type": "string",
+                "enum": ["cross_platform", "same_backend", "same_build"]
+              },
+              "transport_history": {
+                "type": "string",
+                "enum": ["input", "irrelevant"]
+              }
+            }
+          },
           "input_domain": { "type": "string", "minLength": 1 },
           "output_domain": { "type": "string", "minLength": 1 },
           "units": {
@@ -374,5 +402,39 @@
         }
       }
     }
-  }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "schema_minor": { "const": 0 },
+        "required_features": {
+          "const": [
+            "capability-contract-version-v1",
+            "coverage-state-v1",
+            "design-runtime-separation-v1",
+            "tombstones-v1",
+            "typed-bindings-v1"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "schema_minor": { "const": 1 },
+        "required_features": {
+          "const": [
+            "capability-contract-version-v1",
+            "coverage-state-v1",
+            "design-runtime-separation-v1",
+            "determinism-contract-v1",
+            "tombstones-v1",
+            "typed-bindings-v1"
+          ]
+        },
+        "capabilities": {
+          "items": { "required": ["determinism"] }
+        }
+      }
+    }
+  ]
 }

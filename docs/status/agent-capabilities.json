@@ -1,12 +1,13 @@
 {
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
-  "schema_minor": 0,
-  "manifest_revision": 1,
+  "schema_minor": 1,
+  "manifest_revision": 2,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
     "design-runtime-separation-v1",
+    "determinism-contract-v1",
     "tombstones-v1",
     "typed-bindings-v1"
   ],
@@ -47,6 +48,10 @@
   "capabilities": [
     {
       "key": "audio.instrument-voice-allocator",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "audio",
       "summary": "Prepared finite voice allocation with choke, steal, release, and termination records.",
       "rt_class": "mixed",
@@ -59,6 +64,12 @@
       },
       "state_model": "prepare allocates a fixed voice table; trigger and release mutate prepared slots only.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
       "input_domain": "voice trigger and release events",
       "output_domain": "voice allocation and termination records",
       "units": [
@@ -85,10 +96,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -97,10 +104,14 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:28cc54d7dd468a8c5877c004d6555715687dfc318e008fa06932f6ac28b62d4b"
+      "contract_digest": "sha256:5feda9328aa4290f87a259f3e81e48724f6e2e0d45f0ca7c4cf43790ad6febe1"
     },
     {
       "key": "midi.mpe-voice-tracker",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "midi",
       "summary": "Fixed-capacity MIDI 1.0 and UMP MPE note ownership and expression tracking.",
       "rt_class": "audio",
@@ -113,6 +124,12 @@
       },
       "state_model": "Fixed 128-slot note table with explicit reset and monotonic note identities.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "not_promised",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
       "input_domain": "MIDI events and UMP packets",
       "output_domain": "owned per-note expression state",
       "units": [
@@ -140,10 +157,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -152,10 +165,14 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:10a8d7d1219d9d715e96238c0211d2a06f94a65b64d607c9b4c027660b3d8709"
+      "contract_digest": "sha256:379b9ba6441196dc1a85da2d3cb5303c31b003feb5eef71930e41275fef169d0"
     },
     {
       "key": "sequence.host-transport-projector",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "sequence",
       "summary": "Prepared projection from host callback transport into Pulp playback snapshots.",
       "rt_class": "mixed",
@@ -168,6 +185,12 @@
       },
       "state_model": "Prepared tempo-map reference plus bounded callback history and playback epoch.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "not_promised",
+        "block_partition": "fixed_partition_only",
+        "platform_scope": "same_build",
+        "transport_history": "input"
+      },
       "input_domain": "host process context",
       "output_domain": "playback transport snapshot",
       "units": [
@@ -194,10 +217,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -206,10 +225,14 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:7a0929eb32c53fcf553f62fef47cf6e3b9b139447a270e24b7472c251e0f57d8"
+      "contract_digest": "sha256:415624b411001a8583ecde5da2c6a695c74e874eb4b36a46536b17d3cddf1004"
     },
     {
       "key": "signal.saturator",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "signal",
       "summary": "Stateful saturation with an explicit anti-aliasing policy.",
       "rt_class": "audio",
@@ -222,6 +245,12 @@
       },
       "state_model": "Instance state is reset explicitly; prepare/configuration precedes processing.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
       "input_domain": "audio samples",
       "output_domain": "audio samples",
       "units": [
@@ -253,10 +282,6 @@
         "catalog": "forge-catalog.json",
         "node_key": "saturator"
       },
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -265,10 +290,14 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:1cb30f14586a8359f4cdd0c96fbab66873ccb71e726e77ab25cde21fd402d59f"
+      "contract_digest": "sha256:3a85bb9904be17c293e502df0a149c2d8e2935c0b46a7660bb21afcbb744bc66"
     },
     {
       "key": "timebase.swing",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "timebase",
       "summary": "Exact rational swing projection with bounded-rounding recovery over integer document ticks.",
       "rt_class": "any",
@@ -281,6 +310,12 @@
       },
       "state_model": "Pure value and free-function transforms; unswing recovers within the documented rounding bound, and invalid inputs leave positions unchanged.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
       "input_domain": "document ticks and rational swing",
       "output_domain": "document ticks",
       "units": [
@@ -334,10 +369,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -346,10 +377,14 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:fa7edaa67f6987b95f387885145207a66efe00d689f49aa0cf9d5c9f289c9442"
+      "contract_digest": "sha256:0a468de7ae3072dd866d43617c2090348ccf8cf9bdff8000cd3bb9f0b4ac2c3f"
     },
     {
       "key": "timebase.tick",
+      "contract_version": {
+        "major": 1,
+        "minor": 1
+      },
       "domain": "timebase",
       "summary": "Saturating integer musical position on the 705600-tick quarter-note grid.",
       "rt_class": "any",
@@ -362,6 +397,12 @@
       },
       "state_model": "Value type with saturating arithmetic over signed 64-bit ticks.",
       "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
       "input_domain": "document ticks",
       "output_domain": "document ticks",
       "units": [
@@ -386,10 +427,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -398,7 +435,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:4f13ad37315f1b650d2741fa0548d1a55da1523248278401fbbacef055ee6ac2"
+      "contract_digest": "sha256:3a625bc87dedfc108ecc9be0a8872e4f531fd2110f5a01113014e788eb3158a8"
     }
   ],
   "tombstones": [],

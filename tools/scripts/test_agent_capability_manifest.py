@@ -145,6 +145,50 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     expect_validation_failure(wrong_digest, "contract_digest does not match")
     checks += 1
 
+    missing_determinism = copy.deepcopy(canonical)
+    missing_determinism["capabilities"][0].pop("determinism")
+    refresh_digest(missing_determinism["capabilities"][0])
+    expect_schema_failure(missing_determinism, "oneOf")
+    expect_validation_failure(
+        missing_determinism,
+        "requires determinism because the manifest requires determinism-contract-v1",
+    )
+    checks += 2
+
+    invalid_determinism = copy.deepcopy(canonical)
+    invalid_determinism["capabilities"][0]["determinism"]["repeatability"] = "usually"
+    refresh_digest(invalid_determinism["capabilities"][0])
+    expect_schema_failure(invalid_determinism, "is not one of")
+    checks += 1
+
+    legacy_minor_zero = copy.deepcopy(canonical)
+    legacy_minor_zero["schema_minor"] = 0
+    legacy_minor_zero["required_features"].remove("determinism-contract-v1")
+    for row in legacy_minor_zero["capabilities"]:
+        row.pop("determinism")
+        refresh_digest(row)
+    schema = json.loads((ROOT / manifest.MANIFEST_SCHEMA_FILE).read_text())
+    assert not json_schema_lite.validate(legacy_minor_zero, schema)
+    expect_validation_failure(legacy_minor_zero, "schema_minor must be exactly 1")
+    checks += 2
+
+    mismatched_minor_feature = copy.deepcopy(legacy_minor_zero)
+    mismatched_minor_feature["required_features"].append("determinism-contract-v1")
+    expect_schema_failure(mismatched_minor_feature, "oneOf")
+    checks += 1
+
+    unknown_required_feature = copy.deepcopy(canonical)
+    unknown_required_feature["required_features"].append("future-contract-v99")
+    expect_validation_failure(
+        unknown_required_feature, "required_features must be the sorted supported feature set"
+    )
+    checks += 1
+
+    malformed_required_features = copy.deepcopy(canonical)
+    malformed_required_features["required_features"] = None
+    expect_validation_failure(malformed_required_features, "expected type array")
+    checks += 1
+
     wrong_absence = copy.deepcopy(canonical)
     wrong_absence["coverage"]["absence_semantics"] = "unsupported"
     expect_validation_failure(wrong_absence, "expected const 'unknown'")
@@ -323,6 +367,132 @@ def exercise_evolution(canonical: dict) -> int:
             canonical, changed, allow_unpublished_migration=False
         ),
         "changed without a contract_version increase",
+    )
+    checks += 1
+
+    for field, weakened in (
+        ("repeatability", "not_promised"),
+        ("platform_scope", "same_build"),
+        ("transport_history", "input"),
+    ):
+        weakening = copy.deepcopy(canonical)
+        weakening["manifest_revision"] += 1
+        row = next(
+            item for item in weakening["capabilities"] if item["key"] == "timebase.tick"
+        )
+        row["determinism"][field] = weakened
+        row["contract_version"]["minor"] += 1
+        refresh_digest(row)
+        expect_problem(
+            manifest.evolution_problems(
+                canonical, weakening, allow_unpublished_migration=False
+            ),
+            "breaking change without a major increase",
+        )
+        checks += 1
+
+    partition_weakening = copy.deepcopy(canonical)
+    partition_weakening["manifest_revision"] += 1
+    row = next(
+        item
+        for item in partition_weakening["capabilities"]
+        if item["key"] == "sequence.host-transport-projector"
+    )
+    row["determinism"]["block_partition"] = "not_applicable"
+    row["contract_version"]["minor"] += 1
+    refresh_digest(row)
+    expect_problem(
+        manifest.evolution_problems(
+            canonical, partition_weakening, allow_unpublished_migration=False
+        ),
+        "breaking change without a major increase",
+    )
+    checks += 1
+
+    invariant_previous = copy.deepcopy(canonical)
+    row = next(
+        item
+        for item in invariant_previous["capabilities"]
+        if item["key"] == "sequence.host-transport-projector"
+    )
+    row["determinism"]["block_partition"] = "invariant"
+    refresh_digest(row)
+    fixed_partition = copy.deepcopy(invariant_previous)
+    fixed_partition["manifest_revision"] += 1
+    row = next(
+        item
+        for item in fixed_partition["capabilities"]
+        if item["key"] == "sequence.host-transport-projector"
+    )
+    row["determinism"]["block_partition"] = "fixed_partition_only"
+    row["contract_version"]["minor"] += 1
+    refresh_digest(row)
+    expect_problem(
+        manifest.evolution_problems(
+            invariant_previous, fixed_partition, allow_unpublished_migration=False
+        ),
+        "breaking change without a major increase",
+    )
+    checks += 1
+
+    removed_determinism = copy.deepcopy(canonical)
+    removed_determinism["manifest_revision"] += 1
+    row = removed_determinism["capabilities"][0]
+    row.pop("determinism")
+    row["contract_version"]["minor"] += 1
+    refresh_digest(row)
+    expect_problem(
+        manifest.evolution_problems(
+            canonical, removed_determinism, allow_unpublished_migration=False
+        ),
+        "breaking change without a major increase",
+    )
+    checks += 1
+
+    stronger_previous = copy.deepcopy(canonical)
+    stronger_previous["manifest_revision"] -= 1
+    row = stronger_previous["capabilities"][0]
+    row["contract_version"] = {"major": 1, "minor": 0}
+    row["determinism"]["repeatability"] = "not_promised"
+    refresh_digest(row)
+    assert not manifest.evolution_problems(
+        stronger_previous, canonical, allow_unpublished_migration=False
+    )
+    checks += 1
+
+    major_weakening = copy.deepcopy(canonical)
+    major_weakening["manifest_revision"] += 1
+    row = next(
+        item for item in major_weakening["capabilities"] if item["key"] == "timebase.tick"
+    )
+    row["determinism"]["repeatability"] = "not_promised"
+    row["contract_version"] = {"major": 2, "minor": 0}
+    refresh_digest(row)
+    assert not manifest.evolution_problems(
+        canonical, major_weakening, allow_unpublished_migration=False
+    )
+    checks += 1
+
+    successor = copy.deepcopy(canonical)
+    successor["manifest_revision"] += 1
+    successor_row = copy.deepcopy(successor["capabilities"][0])
+    successor_row["key"] += "-relaxed"
+    successor_row["contract_version"] = {"major": 1, "minor": 0}
+    successor_row["determinism"]["repeatability"] = "not_promised"
+    refresh_digest(successor_row)
+    old_row = successor["capabilities"][0]
+    old_row["status"] = "deprecated"
+    old_row["contract_version"] = {"major": 2, "minor": 0}
+    old_row["evolution"] = {
+        "state": "deprecated",
+        "introduced_in": {"major": 1, "minor": 0},
+        "deprecated_in": {"major": 2, "minor": 0},
+        "replacement_key": successor_row["key"],
+    }
+    refresh_digest(old_row)
+    successor["capabilities"].append(successor_row)
+    assert not manifest.evolution_problems(
+        canonical, successor, allow_unpublished_migration=False
     )
     checks += 1
 

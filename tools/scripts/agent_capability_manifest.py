@@ -28,8 +28,8 @@ from agent_capability_evolution import (
 
 
 SCHEMA = "pulp.agent-capabilities.v1"
-SCHEMA_MINOR = 0
-MANIFEST_REVISION = 1
+SCHEMA_MINOR = 1
+MANIFEST_REVISION = 2
 SURFACE_INVENTORY_VERSION = 1
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
@@ -55,6 +55,7 @@ REQUIRED_FEATURES = [
     "capability-contract-version-v1",
     "coverage-state-v1",
     "design-runtime-separation-v1",
+    "determinism-contract-v1",
     "tombstones-v1",
     "typed-bindings-v1",
 ]
@@ -139,6 +140,7 @@ def capability(**row: Any) -> dict[str, Any]:
 EXPORTS = [
     capability(
         key="signal.saturator",
+        contract_version={"major": 1, "minor": 1},
         domain="signal",
         summary="Stateful saturation with an explicit anti-aliasing policy.",
         rt_class="audio",
@@ -154,6 +156,12 @@ EXPORTS = [
             "processing."
         ),
         seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
         input_domain="audio samples",
         output_domain="audio samples",
         units=["samples", "decibels", "hertz", "normalized ratio"],
@@ -183,6 +191,7 @@ EXPORTS = [
     ),
     capability(
         key="audio.instrument-voice-allocator",
+        contract_version={"major": 1, "minor": 1},
         domain="audio",
         summary=(
             "Prepared finite voice allocation with choke, steal, release, and "
@@ -201,6 +210,12 @@ EXPORTS = [
             "prepared slots only."
         ),
         seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
         input_domain="voice trigger and release events",
         output_domain="voice allocation and termination records",
         units=["MIDI note", "frames", "voice index"],
@@ -229,6 +244,7 @@ EXPORTS = [
     ),
     capability(
         key="midi.mpe-voice-tracker",
+        contract_version={"major": 1, "minor": 1},
         domain="midi",
         summary=(
             "Fixed-capacity MIDI 1.0 and UMP MPE note ownership and expression "
@@ -247,6 +263,12 @@ EXPORTS = [
             "identities."
         ),
         seed_model="none",
+        determinism={
+            "repeatability": "not_promised",
+            "block_partition": "not_applicable",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
         input_domain="MIDI events and UMP packets",
         output_domain="owned per-note expression state",
         units=["MIDI note", "MIDI channel", "semitones", "normalized ratio"],
@@ -275,6 +297,7 @@ EXPORTS = [
     ),
     capability(
         key="timebase.tick",
+        contract_version={"major": 1, "minor": 1},
         domain="timebase",
         summary=(
             "Saturating integer musical position on the 705600-tick "
@@ -290,6 +313,12 @@ EXPORTS = [
         },
         state_model="Value type with saturating arithmetic over signed 64-bit ticks.",
         seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
         input_domain="document ticks",
         output_domain="document ticks",
         units=["ticks"],
@@ -317,6 +346,7 @@ EXPORTS = [
     ),
     capability(
         key="timebase.swing",
+        contract_version={"major": 1, "minor": 1},
         domain="timebase",
         summary=(
             "Exact rational swing projection with bounded-rounding recovery over "
@@ -335,6 +365,12 @@ EXPORTS = [
             "documented rounding bound, and invalid inputs leave positions unchanged."
         ),
         seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
         input_domain="document ticks and rational swing",
         output_domain="document ticks",
         units=["ticks", "rational ratio"],
@@ -402,6 +438,7 @@ EXPORTS = [
     ),
     capability(
         key="sequence.host-transport-projector",
+        contract_version={"major": 1, "minor": 1},
         domain="sequence",
         summary=(
             "Prepared projection from host callback transport into Pulp playback "
@@ -420,6 +457,12 @@ EXPORTS = [
             "epoch."
         ),
         seed_model="none",
+        determinism={
+            "repeatability": "not_promised",
+            "block_partition": "fixed_partition_only",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
         input_domain="host process context",
         output_domain="playback transport snapshot",
         units=["samples", "ticks", "beats per minute"],
@@ -873,6 +916,17 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     rows = doc.get("capabilities")
     if not isinstance(rows, list):
         return problems
+    required_features = doc.get("required_features")
+    if (
+        isinstance(required_features, list)
+        and "determinism-contract-v1" in required_features
+    ):
+        for index, row in enumerate(rows):
+            if isinstance(row, dict) and "determinism" not in row:
+                problems.append(
+                    f"capabilities[{index}] requires determinism because the manifest "
+                    "requires determinism-contract-v1"
+                )
     expected_rows = {row["key"]: row for row in public_rows()}
     for source_row in EXPORTS:
         problems.extend(_link_probe_problems(source_row))

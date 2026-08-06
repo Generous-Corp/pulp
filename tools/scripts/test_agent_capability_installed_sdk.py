@@ -16,6 +16,14 @@ import json_schema_lite
 
 
 SCHEMA = "pulp.agent-capabilities.v1"
+SUPPORTED_REQUIRED_FEATURES = {
+    "capability-contract-version-v1",
+    "coverage-state-v1",
+    "design-runtime-separation-v1",
+    "determinism-contract-v1",
+    "tombstones-v1",
+    "typed-bindings-v1",
+}
 MAINTENANCE_ONLY = {
     "agent-capability-surface.json",
     "agent-capability-surface.schema.json",
@@ -51,6 +59,41 @@ def validate_target_ownership(document: dict, owners: dict[str, str]) -> None:
                 )
 
 
+def validate_required_features(
+    document: dict, *, required_by_consumer: set[str]
+) -> None:
+    raw_features = document.get("required_features")
+    if not isinstance(raw_features, list) or any(
+        not isinstance(feature, str) for feature in raw_features
+    ):
+        raise RuntimeError(
+            "installed manifest required_features must be an array of strings"
+        )
+    advertised = set(raw_features)
+    unknown = sorted(advertised - SUPPORTED_REQUIRED_FEATURES)
+    if unknown:
+        raise RuntimeError(
+            "installed manifest requires unsupported features: " + ", ".join(unknown)
+        )
+    missing = sorted(required_by_consumer - advertised)
+    if missing:
+        raise RuntimeError(
+            "installed manifest does not provide consumer-required features: "
+            + ", ".join(missing)
+        )
+    if "determinism-contract-v1" in advertised:
+        missing_rows = sorted(
+            row.get("key", "<unknown>")
+            for row in document.get("capabilities", [])
+            if "determinism" not in row
+        )
+        if missing_rows:
+            raise RuntimeError(
+                "determinism-contract-v1 requires determinism on every live row: "
+                + ", ".join(missing_rows)
+            )
+
+
 def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dict:
     shared = prefix / "share/pulp"
     path = shared / "agent-capabilities.json"
@@ -69,6 +112,9 @@ def load_installed_manifest(prefix: pathlib.Path, owners: dict[str, str]) -> dic
             "installed manifest does not satisfy its installed schema: "
             + "; ".join(schema_problems)
         )
+    validate_required_features(
+        document, required_by_consumer={"determinism-contract-v1"}
+    )
     present_maintenance = sorted(
         name for name in MAINTENANCE_ONLY if (shared / name).exists()
     )
@@ -484,6 +530,70 @@ def main() -> int:
             )
         finally:
             manifest.write_text(original_manifest)
+
+        missing_determinism = copy.deepcopy(document)
+        missing_determinism["capabilities"][0].pop("determinism")
+        manifest.write_text(json.dumps(missing_determinism, indent=2) + "\n")
+        try:
+            expect_failure(
+                "required determinism row is missing",
+                lambda: load_installed_manifest(prefix, owners),
+            )
+        finally:
+            manifest.write_text(original_manifest)
+
+        unknown_feature = copy.deepcopy(document)
+        unknown_feature["required_features"].append("future-contract-v99")
+        expect_failure(
+            "consumer rejects an unknown required feature",
+            lambda: validate_required_features(
+                unknown_feature,
+                required_by_consumer={"determinism-contract-v1"},
+            ),
+        )
+        manifest.write_text(json.dumps(unknown_feature, indent=2) + "\n")
+        try:
+            expect_failure(
+                "unknown required feature",
+                lambda: load_installed_manifest(prefix, owners),
+            )
+        finally:
+            manifest.write_text(original_manifest)
+
+        for label, malformed in (
+            ("null required feature list", None),
+            ("numeric required feature list", 7),
+            ("non-string required feature list", [7]),
+            (
+                "mixed required feature list",
+                ["determinism-contract-v1", 7],
+            ),
+        ):
+            malformed_features = copy.deepcopy(document)
+            malformed_features["required_features"] = malformed
+            expect_failure(
+                label,
+                lambda fixture=malformed_features: validate_required_features(
+                    fixture,
+                    required_by_consumer={"determinism-contract-v1"},
+                ),
+            )
+
+        legacy_minor_zero = copy.deepcopy(document)
+        legacy_minor_zero["schema_minor"] = 0
+        legacy_minor_zero["required_features"].remove("determinism-contract-v1")
+        for row in legacy_minor_zero["capabilities"]:
+            row.pop("determinism")
+        installed_schema_document = json.loads(schema.read_text())
+        if json_schema_lite.validate(legacy_minor_zero, installed_schema_document):
+            raise RuntimeError("minor-0 compatibility fixture no longer parses")
+        expect_failure(
+            "determinism-requiring consumer rejects minor-0 unspecified contract",
+            lambda: validate_required_features(
+                legacy_minor_zero,
+                required_by_consumer={"determinism-contract-v1"},
+            ),
+        )
 
         held_manifest = manifest.with_suffix(".held")
         manifest.rename(held_manifest)
