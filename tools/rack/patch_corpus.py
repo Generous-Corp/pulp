@@ -75,6 +75,29 @@ def _get(url: str) -> bytes:
         _last_request = time.time()
 
 
+# Licences under which the AUTHOR permits redistribution, so a copy of the
+# patch itself may be kept and carried. An ALLOWLIST, not a denylist: an
+# unrecognised licence means we have not read it, and "have not read it" must
+# behave like "may not carry it". A private repository is still a copy, and the
+# user's approval covers where WE may store things, not what somebody else's
+# licence permits.
+#
+# Everything else still gets the derived layer -- ids, structure, verdicts.
+# Facts about a work are not the work, and that layer is what we re-use.
+REDISTRIBUTABLE = {
+    "wtfpl",            # do what you want, explicitly
+    "cc0-1-0",          # dedicated to the public domain
+    "cc-by-4-0",        # requires attribution, which the index carries
+    "cc-by-sa-4-0",     # attribution + share-alike on DERIVED patches
+    "mit", "apache-2-0", "bsd-3-clause", "gpl-3-0", "unlicense",
+}
+
+
+def may_store_body(license_slug: str) -> bool:
+    """Whether the author's licence permits carrying the patch itself."""
+    return (license_slug or "").strip().lower() in REDISTRIBUTABLE
+
+
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 
 
