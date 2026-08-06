@@ -133,10 +133,25 @@ template <typename SampleType = float> class DitherQuantizerT {
     static constexpr std::uint32_t default_seed = 0x2C1B3A5Du;
 
     void set_bits(SampleType bits) noexcept {
-        const SampleType sanitized = std::isfinite(bits)
-                                         ? std::clamp(bits, SampleType{1}, SampleType{24})
-                                         : SampleType{24};
-        if (sanitized != bits_) state_.reset();
+        if (!std::isfinite(bits)) {
+            bits_ = SampleType{24};
+            state_.reset();
+            return;
+        }
+        const SampleType sanitized = std::clamp(bits, SampleType{1}, SampleType{24});
+        if (sanitized != bits_) {
+            // A continuous bit-depth control changes the quantizer step every
+            // sample. Preserve the error history in signal units so shaping
+            // remains active through that glide, while applying the same
+            // four-step safety bound used by the quantizer transition. This
+            // also makes a coarse-to-fine jump safe without turning every
+            // ordinary automation sample into a state reset.
+            const SampleType error_limit = SampleType{4} * quantization_step(sanitized);
+            state_.error_1 = snap_to_zero(
+                std::clamp(state_.error_1, -error_limit, error_limit));
+            state_.error_2 = snap_to_zero(
+                std::clamp(state_.error_2, -error_limit, error_limit));
+        }
         bits_ = sanitized;
     }
     void set_dither_mode(DitherMode mode) noexcept {

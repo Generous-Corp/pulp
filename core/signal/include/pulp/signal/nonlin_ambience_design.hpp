@@ -233,6 +233,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::signal {
@@ -477,10 +478,27 @@ inline VelvetTapDesign design_velvet_tap(NonlinProgram program,
                                          double attack,
                                          const VelvetNoiseDrawT<double>& draw) noexcept {
     VelvetTapDesign result;
-    const int delay = std::clamp(
-        static_cast<int>(std::lround(position_samples +
-                                     draw.jitter * std::max(0.0, grid_samples - 1.0))),
-        0, window_samples - 1);
+    // Public fail-closed domain: a non-empty window, non-negative finite grid
+    // coordinates, normalized jitter, a ternary pulse sign, finite envelope
+    // controls, and a predelay whose largest in-window tap cannot overflow.
+    // Invalid input produces the default inaudible design before any floating
+    // to integer conversion, division, square root, or signed addition.
+    if (window_samples <= 0 || predelay_samples < 0 ||
+        predelay_samples > std::numeric_limits<int>::max() - (window_samples - 1) ||
+        !std::isfinite(position_samples) || position_samples < 0.0 ||
+        !std::isfinite(grid_samples) || grid_samples < 0.0 ||
+        !std::isfinite(draw.jitter) || draw.jitter < 0.0 || draw.jitter >= 1.0 ||
+        (draw.sign != -1 && draw.sign != 1) ||
+        !std::isfinite(gate_hold) || !std::isfinite(attack)) {
+        return result;
+    }
+
+    const double candidate = position_samples +
+                             draw.jitter * std::max(0.0, grid_samples - 1.0);
+    if (!std::isfinite(candidate)) return result;
+    const double bounded = std::clamp(candidate, 0.0,
+                                      static_cast<double>(window_samples - 1));
+    const int delay = static_cast<int>(std::lround(bounded));
     const double tau = static_cast<double>(delay) / static_cast<double>(window_samples);
     const double env = program_envelope(program, tau, gate_hold, attack);
     result.delay = predelay_samples + delay;
