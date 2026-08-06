@@ -5,6 +5,7 @@
 #include <pulp/timebase/groove_kernel.hpp>
 #include <pulp/timeline/model.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
 #include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -618,8 +619,7 @@ TEST_CASE("stable host source/frame anchor survives callback and loop partitions
     REQUIRE(reviewer_point->frame_offset == 1'666);
 }
 
-TEST_CASE("host grid projection rejects the exclusive signed frame bound",
-          "[timebase][grid]") {
+TEST_CASE("host grid projection rejects the exclusive signed frame bound", "[timebase][grid]") {
     const std::array tempo_points{TempoPoint{{0}, 60.0}};
     const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
     const std::array meter_points{MeterPoint{{0}, {4, 4}}};
@@ -635,8 +635,7 @@ TEST_CASE("host grid projection rejects the exclusive signed frame bound",
     std::array<GridProjectionPoint, 1> output{{{77, {88}, {{99}}, {{11}, {22}}, 33}}};
 
     const auto project = [&] {
-        return project_grid(tempo, meter,
-                            {BeatDivision::Quarter, GridAnchor::Timeline, true},
+        return project_grid(tempo, meter, {BeatDivision::Quarter, GridAnchor::Timeline, true},
                             std::span<const GridProjectionRange>(&range, 1), output);
     };
     const auto positive = project();
@@ -668,6 +667,85 @@ TEST_CASE("grid candidate preflight bounds incoherent remote-sample ranges", "[t
         REQUIRE(result.error == GridProjectionError::ProjectionLimitExceeded);
         REQUIRE(output[0].frame_offset == 77);
     }
+}
+
+TEST_CASE("grid projection fails closed without touching caller output", "[timebase][grid]") {
+    const std::array tempo_points{TempoPoint{{0}, 120.0}};
+    const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
+    const std::array meter_points{MeterPoint{{0}, {4, 4}}};
+    const auto meter = meter_map(meter_points);
+    const auto quarter_samples = tempo.ticks_to_samples({kTicksPerQuarter}).value;
+    const GridProjectionRange range{0,
+                                    static_cast<std::uint32_t>(quarter_samples + 1),
+                                    {0},
+                                    {0},
+                                    {kTicksPerQuarter},
+                                    {{0}},
+                                    {{kTicksPerQuarter}},
+                                    0};
+    constexpr GridProjectionPoint sentinel{77, {88}, {{99}}, {{11}, {22}}, 33};
+    std::array<GridProjectionPoint, 1> output{sentinel};
+
+    const auto too_small =
+        project_grid(tempo, meter, {BeatDivision::Eighth, GridAnchor::Timeline, true},
+                     std::span<const GridProjectionRange>(&range, 1), output);
+    REQUIRE(too_small.error == GridProjectionError::OutputTooSmall);
+    REQUIRE(too_small.count == 0);
+    REQUIRE(too_small.required == 3);
+    REQUIRE(output[0] == sentinel);
+
+    const auto invalid_anchor =
+        project_grid(tempo, meter, {BeatDivision::Quarter, static_cast<GridAnchor>(255), true},
+                     std::span<const GridProjectionRange>(&range, 1), output);
+    REQUIRE(invalid_anchor.error == GridProjectionError::InvalidAnchor);
+    REQUIRE(invalid_anchor.count == 0);
+    REQUIRE(invalid_anchor.required == 0);
+    REQUIRE(output[0] == sentinel);
+}
+
+TEST_CASE("timebase groove projection remains allocation-free", "[timebase][groove][rt-safety]") {
+    const std::array tempo_points{TempoPoint{{0}, 120.0}};
+    const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
+    const std::array meter_points{MeterPoint{{0}, {4, 4}}};
+    const auto meter = meter_map(meter_points);
+    const auto quarter_samples = tempo.ticks_to_samples({kTicksPerQuarter}).value;
+    const GridProjectionRange range{0,
+                                    static_cast<std::uint32_t>(quarter_samples + 1),
+                                    {0},
+                                    {0},
+                                    {kTicksPerQuarter},
+                                    {{0}},
+                                    {{kTicksPerQuarter}},
+                                    0};
+    std::array<GridProjectionPoint, 8> output{};
+    const std::array steps{GrooveKernelStep{{0}, 1'000}, GrooveKernelStep{{1}, 1'100}};
+
+    GridProjectionResult projected{};
+    bool created_ok = false;
+    bool transformed_ok = false;
+    bool chance_ok = false;
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        projected = project_grid(tempo, meter, {BeatDivision::Eighth, GridAnchor::Timeline, true},
+                                 std::span<const GridProjectionRange>(&range, 1), output);
+        const auto created = OrderPreservingGrooveKernel::create(
+            {{}, kStraightSwing, {kTicksPerQuarter / 2}, steps, 1'000, 1'000});
+        created_ok = static_cast<bool>(created);
+        if (created)
+            transformed_ok =
+                static_cast<bool>(created.value().apply_timing({kTicksPerQuarter / 2}));
+        chance_ok =
+            static_cast<bool>(coordinate_chance(0x1234, {{kTicksPerQuarter}, 1, 2, 3}, 1, 2));
+        allocations = probe.allocation_count();
+    }
+
+    REQUIRE(projected);
+    REQUIRE(projected.count == 3);
+    REQUIRE(created_ok);
+    REQUIRE(transformed_ok);
+    REQUIRE(chance_ok);
+    REQUIRE(allocations == 0);
 }
 
 TEST_CASE("valid maximum tempo can collapse several exact grid points onto one sample",
