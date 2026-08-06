@@ -141,7 +141,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
             // the same `knob.thumb` token the synthetic notch resolves, so a
             // theme reaches the pointer instead of a fixed near-white.
             auto color = k->resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
-            if (auto [c, ok] = parse_skin_hex(args.get<std::string>(4, "")); ok)
+            if (auto [c, ok] = parse_skin_color(args.get<std::string>(4, "")); ok)
                 color = c;
             k->set_captured_indicator(
                 static_cast<float>(args.get<double>(1, 0.0)),
