@@ -774,6 +774,83 @@ TEST_CASE("a lowered control carries what the binding-helper gate requires",
     REQUIRE(anchors.size() == 2);
 }
 
+TEST_CASE("a pointer aimed straight up projects to a hairline, not a slab",
+          "[import-design][browser-capture][ir][knob][indicator]") {
+    // Twelve o'clock, which is where every centred bipolar parameter rests.
+    //
+    // An SVG <line> drawn straight up has ZERO width in its client rect --
+    // getBoundingClientRect() does not include stroke -- so the capture recovers
+    // the painted extent from the computed stroke and hands this pass a box that
+    // is 4px wide and 38px long. This pins what the projection must then make of
+    // it, because both plausible failures render as a believable knob: dropping
+    // the box entirely falls back to the derived tick, and mistaking the length
+    // for the width paints a slab across a third of the dial.
+    //
+    // Dial (8,20,96,96) so centre (56,68) and half-extent 48. Pointer box
+    // (54,30,4,38), centre (56,49): 19px straight up from the dial centre,
+    // reaching 19px along the radius either side of that. So the radial reach is
+    // its own length and the width is its own width -- r_out = 38/48, and
+    // knob_ind_w = 4/48, NOT 38/48.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    // The summary mirrors the shared envelope() helper's declared counts, which
+    // the lowering cross-checks against; only the one candidate below matters.
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"up",
+         "bounds":{"left":8,"top":20,"width":96,"height":96},
+         "paint_bounds":{"left":8,"top":20,"width":96,"height":96},
+         "indicator_bounds":{"left":54,"top":30,"width":4,"height":38},
+         "indicator_color":"rgb(255, 255, 255)",
+         "data_pulp":{"param":"up"}}
+      ]
+    })JSON");
+    // Counts here also have to match the envelope helper: 1 colour, 1
+    // dimension, 2 strings. None of them bear on the geometry under test.
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    INFO("lowering error: " << result.error);
+    REQUIRE(result);
+
+    const pulp::view::IRNode* found = nullptr;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end() && binding->second == "up")
+                found = &node;
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+    REQUIRE(found != nullptr);
+
+    const auto& up = found->attributes;
+    REQUIRE(up.count("knob_ind_r_out") == 1);
+    CHECK(std::stof(up.at("knob_ind_r_in")) ==
+          Catch::Approx(0.0f).margin(0.001f));
+    CHECK(std::stof(up.at("knob_ind_r_out")) ==
+          Catch::Approx(0.79167f).margin(0.001f));
+    // The whole point of the case. Knob::paint multiplies this by the dial's
+    // half-extent, so 0.0833 draws the author's 4px stroke and 0.79 would draw a
+    // 38px slab.
+    CHECK(std::stof(up.at("knob_ind_w")) ==
+          Catch::Approx(0.08333f).margin(0.001f));
+}
+
 TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
           "[import-design][browser-capture][ir][knob][indicator]") {
     // A capture is one flat picture, so a knob lowered from it owns no art and

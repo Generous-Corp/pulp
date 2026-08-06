@@ -176,19 +176,67 @@ export function semanticExpression(snapshotClickableIndexes = []) {
   // paint box, so a consumer can express the pointer relative to the dial
   // without a second coordinate system.
   //
-  // A zero-extent box is treated as unmarked: it carries no axis, so the
-  // lowering has no direction to sweep it along.
+  // A box with NO extent on either axis is treated as unmarked: it carries no
+  // axis at all, so the lowering has no direction to sweep it along. A box with
+  // extent on one axis is a different thing entirely and must not be dropped --
+  // see strokePaintedExtent.
+  //
+  // The painted width of a stroked SVG line in CSS px, or 0 when that cannot be
+  // recovered.
+  //
+  // getBoundingClientRect() does not include stroke, so an SVG <line> drawn
+  // straight up, down, left or right reports ZERO extent across its own axis
+  // however thick it is. Twelve o'clock is the resting position of any centred
+  // bipolar parameter, so refusing a zero axis silently dropped the COMMONEST
+  // pointer orientation and fell back to the derived tick -- a plausible
+  // picture, which is why no render caught it.
+  //
+  // The stroke is in USER UNITS, not CSS px: a 2-unit stroke in a 24-unit
+  // viewBox painted at 96px is 8px on screen. Scale is therefore read off
+  // whichever axis has extent (client px per user unit) rather than assumed to
+  // be 1. That ratio is only a pure scale for an axis-aligned element -- for a
+  // rotated one it folds in the rotation -- which is exactly why it is computed
+  // here and nowhere else: a rotated pointer has extent on both axes and never
+  // reaches this path.
+  const strokePaintedExtent = marked => {
+    try {
+      if (typeof marked.getBBox !== 'function') return 0;
+      const stroke = parseFloat(window.getComputedStyle(marked).strokeWidth);
+      if (!(stroke > 0)) return 0;
+      const bb = marked.getBBox();
+      const rect = marked.getBoundingClientRect();
+      const scale = bb.height > 0 ? rect.height / bb.height
+        : bb.width > 0 ? rect.width / bb.width : 0;
+      if (!(scale > 0)) return 0;
+      return stroke * scale;
+    } catch (e) {
+      return 0;
+    }
+  };
   const indicatorBox = element => {
     try {
       const marked = element.querySelector('[data-pulp-indicator]');
       if (!marked) return null;
       const box = marked.getBoundingClientRect();
-      if (!(box.width > 0) || !(box.height > 0)) return null;
+      let { left, top, width, height } = box;
+      if (!(width > 0) && !(height > 0)) return null;
+      if (!(width > 0) || !(height > 0)) {
+        const stroke = strokePaintedExtent(marked);
+        // No stroke to recover means there is genuinely nothing painted across
+        // that axis. Refuse rather than invent a width: a pointer stamped at a
+        // guessed thickness is worse than one the design never declared.
+        if (!(stroke > 0)) return null;
+        // Grown about the line's own centre, so the box still describes what is
+        // painted AND its centroid -- which is what the radial projection
+        // downstream actually reads -- is left where it was.
+        if (!(width > 0)) { left -= stroke / 2; width = stroke; }
+        if (!(height > 0)) { top -= stroke / 2; height = stroke; }
+      }
       return {
-        left: box.left + window.scrollX,
-        top: box.top + window.scrollY,
-        width: box.width,
-        height: box.height
+        left: left + window.scrollX,
+        top: top + window.scrollY,
+        width,
+        height
       };
     } catch (e) {
       return null;
