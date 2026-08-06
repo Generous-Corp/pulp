@@ -18,14 +18,16 @@ namespace {
 
 constexpr double kSr = 48000.0;
 constexpr int kFrames = 128;
-constexpr double kToneHz = 750.0;  // 64 samples/period: whole cycles per block
+constexpr double kToneHz = 750.0; // 64 samples/period: whole cycles per block
 
 // TRUE STEREO: the node's two ports are L and R of one logical wire, so the
 // fixture is built with two channels rather than instanced twice. The
 // stereo-link case below depends on that being true.
 using Fixture = pulp::test::BakedNodeFixture<2>;
 
-Fixture make_fixture(const CustomNodeType& type) { return Fixture(type, kSr, kFrames); }
+Fixture make_fixture(const CustomNodeType& type) {
+    return Fixture(type, kSr, kFrames);
+}
 
 std::vector<float> sine(float amp) {
     return pulp::test::sine_block(kFrames, kToneHz, kSr, amp);
@@ -41,7 +43,8 @@ double harmonic(const std::vector<float>& x, int k) {
 
 float peak(const std::vector<float>& b) {
     float m = 0.0f;
-    for (float v : b) m = std::max(m, std::fabs(v));
+    for (float v : b)
+        m = std::max(m, std::fabs(v));
     return m;
 }
 
@@ -50,16 +53,43 @@ double gain_db(const std::vector<float>& out, float in_amp) {
     return 20.0 * std::log10(std::max(static_cast<double>(peak(out)), 1e-12) / in_amp);
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("Forge dynamics: the compressor bakes and runs",
-          "[host][baked][forge][forge-dynamics]") {
+TEST_CASE("Forge dynamics: the compressor bakes and runs", "[host][baked][forge][forge-dynamics]") {
     auto fx = make_fixture(dyn::make_feedforward_compressor_node());
     const auto tone = sine(0.5f);
     const auto out = fx.settle({tone, tone});
     for (int ch = 0; ch < 2; ++ch)
-        for (float v : out[static_cast<std::size_t>(ch)]) REQUIRE(std::isfinite(v));
+        for (float v : out[static_cast<std::size_t>(ch)])
+            REQUIRE(std::isfinite(v));
     REQUIRE(peak(out[0]) > 0.0f);
+}
+
+TEST_CASE("Forge dynamics: true-peak limiting is a registered stereo realization",
+          "[host][baked][forge][forge-dynamics][latency]") {
+    const auto linked = dyn::true_peak::make_node(5.0f, true);
+    const auto independent = dyn::true_peak::make_node(5.0f, false);
+    REQUIRE(linked.type_id.starts_with("dynamics.true_peak_limiter.la_"));
+    REQUIRE(linked.type_id.ends_with(".linked"));
+    REQUIRE(independent.type_id != linked.type_id);
+    REQUIRE(linked.num_input_ports == 2);
+    REQUIRE(linked.num_output_ports == 2);
+    REQUIRE(linked.latency_samples(kSr) == 304);
+
+    auto fx = make_fixture(linked);
+    ParamInjector injector = fx.claim_injector();
+    REQUIRE(injector.inject(immediate(dyn::true_peak::kCeilingDbtp, -6.0f)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(dyn::true_peak::kReleaseMs, 50.0f)) == InjectStatus::Ok);
+    const auto loud = sine(1.5f);
+    const auto output = fx.settle({loud, loud}, 32);
+    REQUIRE(peak(output[0]) > 0.0f);
+    REQUIRE(peak(output[0]) <= std::pow(10.0f, -6.0f / 20.0f));
+    REQUIRE(output[0] == output[1]);
+
+    const auto descriptor = dyn::true_peak::descriptor();
+    REQUIRE(descriptor.key == "true_peak_limiter");
+    REQUIRE(descriptor.realizations.size() == 4);
+    REQUIRE(descriptor.params.size() == 2);
 }
 
 TEST_CASE("Forge dynamics: injecting threshold deepens gain reduction",
@@ -81,8 +111,8 @@ TEST_CASE("Forge dynamics: injecting threshold deepens gain reduction",
     REQUIRE(inj.inject(immediate(dyn::kThresholdDb, -40.0f)) == InjectStatus::Ok);
     const double low = gain_db(fx.settle({tone, tone})[0], amp);
 
-    REQUIRE_THAT(high, WithinAbs(0.0, 0.2));  // above threshold: untouched
-    REQUIRE(low < high - 6.0);                // well below: substantial reduction
+    REQUIRE_THAT(high, WithinAbs(0.0, 0.2)); // above threshold: untouched
+    REQUIRE(low < high - 6.0);               // well below: substantial reduction
 }
 
 TEST_CASE("Forge dynamics: injecting ratio deepens gain reduction",
@@ -124,14 +154,14 @@ TEST_CASE("Forge dynamics: the stereo link survives the graph",
     // the unlinked measurement follows the linked one, and at the default
     // 120 ms release the right channel's detector is still recovering from the
     // linked pass 170 ms later — which reads as "the link is stuck on".
-    REQUIRE(inj.inject(immediate(dyn::kReleaseMs,
-                                 static_cast<float>(
-                                     pulp::signal::FeedforwardCompressor::kReleaseMsMin))) ==
+    REQUIRE(inj.inject(immediate(
+                dyn::kReleaseMs,
+                static_cast<float>(pulp::signal::FeedforwardCompressor::kReleaseMsMin))) ==
             InjectStatus::Ok);
 
     // A quiet tone on the right so there is something to attenuate, a loud one
     // on the left to drive the detector.
-    const float quiet = 0.02f;  // −34 dBFS: on its own, below threshold
+    const float quiet = 0.02f; // −34 dBFS: on its own, below threshold
     const auto loud_left = sine(0.9f);
     const auto quiet_right = sine(quiet);
 
@@ -141,8 +171,8 @@ TEST_CASE("Forge dynamics: the stereo link survives the graph",
     REQUIRE(inj.inject(immediate(dyn::kStereoLink, 0.0f)) == InjectStatus::Ok);
     const double unlinked_right = gain_db(fx.settle({loud_left, quiet_right})[1], quiet);
 
-    REQUIRE_THAT(unlinked_right, WithinAbs(0.0, 0.2));  // its own channel is quiet
-    REQUIRE(linked_right < unlinked_right - 6.0);       // the loud channel pulled it down
+    REQUIRE_THAT(unlinked_right, WithinAbs(0.0, 0.2)); // its own channel is quiet
+    REQUIRE(linked_right < unlinked_right - 6.0);      // the loud channel pulled it down
 }
 
 TEST_CASE("Forge dynamics: feedforward lookahead is a stable realization axis",
@@ -158,8 +188,7 @@ TEST_CASE("Forge dynamics: feedforward lookahead is a stable realization axis",
     REQUIRE(dyn::make_feedforward_compressor_node(-1.0f).type_id == zero.type_id);
     REQUIRE(dyn::make_feedforward_compressor_node(99.0f).type_id == ten.type_id);
     for (const auto* realization : {&zero, &three, &ten}) {
-        REQUIRE(std::none_of(realization->baked_params.begin(),
-                             realization->baked_params.end(),
+        REQUIRE(std::none_of(realization->baked_params.begin(), realization->baked_params.end(),
                              [](const CustomNodeBakedParam& p) { return p.id == 8; }));
         REQUIRE(realization->latency_samples);
     }
@@ -204,7 +233,8 @@ TEST_CASE("Forge dynamics: 0, 3, and 10 ms feedforward factories prepare and run
         auto fx = make_fixture(dyn::make_feedforward_compressor_node(lookahead_ms));
         const auto out = fx.settle({tone, tone}, 8);
         for (const auto& channel : out)
-            for (float sample : channel) REQUIRE(std::isfinite(sample));
+            for (float sample : channel)
+                REQUIRE(std::isfinite(sample));
     }
 }
 
@@ -270,12 +300,10 @@ TEST_CASE("Forge VCA realization identity is normalized and collision-free",
             dyn::vca::make_vca_compressor_node(2.0f, 4.0).type_id);
     REQUIRE(dyn::vca::make_vca_compressor_node(-1.0f).type_id == base.type_id);
     REQUIRE(dyn::vca::make_vca_compressor_node(99.0f).type_id ==
-            dyn::vca::make_vca_compressor_node(
-                static_cast<float>(dyn::vca::Comp::kLookaheadMsMax)).type_id);
+            dyn::vca::make_vca_compressor_node(static_cast<float>(dyn::vca::Comp::kLookaheadMsMax))
+                .type_id);
     REQUIRE(dyn::vca::make_vca_compressor_node(2.0f, -99.0).type_id ==
-            dyn::vca::make_vca_compressor_node(
-                2.0f, dyn::vca::Comp::kRatioKMin).type_id);
+            dyn::vca::make_vca_compressor_node(2.0f, dyn::vca::Comp::kRatioKMin).type_id);
     REQUIRE(dyn::vca::make_vca_compressor_node(2.0f, 99.0).type_id ==
-            dyn::vca::make_vca_compressor_node(
-                2.0f, dyn::vca::Comp::kRatioKMax).type_id);
+            dyn::vca::make_vca_compressor_node(2.0f, dyn::vca::Comp::kRatioKMax).type_id);
 }

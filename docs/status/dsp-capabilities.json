@@ -347,6 +347,10 @@
         },
         {
           "constant": "kTypeId",
+          "value": "dynamics.true_peak_limiter"
+        },
+        {
+          "constant": "kTypeId",
           "value": "dynamics.vca_compressor"
         },
         {
@@ -431,6 +435,23 @@
               "min": "0.0f",
               "max": "1.0f",
               "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_node",
+          "baked_params": [
+            {
+              "id": "kCeilingDbtp",
+              "min": "-24.0f",
+              "max": "0.0f",
+              "default": "-1.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "5.0f",
+              "max": "2000.0f",
+              "default": "100.0f"
             }
           ]
         },

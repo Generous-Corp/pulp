@@ -20,6 +20,7 @@ REFERENCE = ROOT / "docs/reference/advanced-dsp-api.md"
 # Public Round 2 authoring types. Values are the concrete template/struct names
 # in source; keys make failures readable and let aliases stay stable.
 TYPES: dict[str, tuple[str, str]] = {
+    "TruePeakLimiter": ("true_peak_limiter.hpp", "TruePeakLimiterT"),
     "FeedforwardCompressor": ("feedforward_compressor.hpp", "FeedforwardCompressorT"),
     "VcaCompressor": ("vca_compressor.hpp", "VcaCompressorT"),
     "DiodeBridgeGain": ("diode_bridge_compressor.hpp", "DiodeBridgeGainT"),

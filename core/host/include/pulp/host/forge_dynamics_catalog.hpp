@@ -62,6 +62,7 @@
 #include <pulp/signal/diode_bridge_compressor.hpp>
 #include <pulp/signal/feedforward_compressor.hpp>
 #include <pulp/signal/fet_compressor.hpp>
+#include <pulp/signal/true_peak_limiter.hpp>
 #include <pulp/signal/vca_compressor.hpp>
 
 #include <algorithm>
@@ -76,13 +77,13 @@ inline constexpr const char* kFeedforwardCompressorTypeId = "dynamics.feedforwar
 
 // ── Injectable param ids ──────────────────────────────────────────────────
 // Node-local; the framework namespaces per node so two nodes never collide.
-inline constexpr state::ParamID kThresholdDb = 1;      // dB
-inline constexpr state::ParamID kRatio = 2;            // :1
-inline constexpr state::ParamID kKneeDb = 3;           // dB
-inline constexpr state::ParamID kAttackMs = 4;         // ms
-inline constexpr state::ParamID kReleaseMs = 5;        // ms
-inline constexpr state::ParamID kDetectorMode = 6;     // stepped 0 = peak, 1 = RMS
-inline constexpr state::ParamID kRmsWindowMs = 7;      // ms
+inline constexpr state::ParamID kThresholdDb = 1;  // dB
+inline constexpr state::ParamID kRatio = 2;        // :1
+inline constexpr state::ParamID kKneeDb = 3;       // dB
+inline constexpr state::ParamID kAttackMs = 4;     // ms
+inline constexpr state::ParamID kReleaseMs = 5;    // ms
+inline constexpr state::ParamID kDetectorMode = 6; // stepped 0 = peak, 1 = RMS
+inline constexpr state::ParamID kRmsWindowMs = 7;  // ms
 // Param id 8 is intentionally reserved. Lookahead changes the node's latency,
 // so it is fixed by the realization factory rather than injectable automation.
 inline constexpr state::ParamID kProgramDependent = 9; // stepped 0/1
@@ -129,7 +130,7 @@ inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f
     if (fixed_lookahead_ms != 0.0)
         t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms);
     t.version = 1;
-    t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
+    t.num_input_ports = 2; // 0 = left, 1 = right (ONE logical stereo wire)
     t.num_output_ports = 2;
     t.default_name = "Compressor";
     t.lowerable = true;
@@ -282,6 +283,106 @@ inline ForgeNodeDescriptor feedforward_compressor_descriptor() {
     return d;
 }
 
+namespace true_peak {
+
+inline constexpr const char* kTypeId = "dynamics.true_peak_limiter";
+inline constexpr state::ParamID kCeilingDbtp = 1;
+inline constexpr state::ParamID kReleaseMs = 2;
+
+struct Instance {
+    signal::TruePeakLimiter limiter;
+};
+
+inline CustomNodeType make_node(float lookahead_ms = 5.0f, bool linked = true) {
+    using Limiter = signal::TruePeakLimiter;
+    const double fixed_lookahead = std::clamp(
+        std::isfinite(static_cast<double>(lookahead_ms)) ? static_cast<double>(lookahead_ms) : 5.0,
+        0.0, Limiter::maximum_lookahead_ms());
+
+    CustomNodeType type;
+    type.type_id = kTypeId;
+    type.type_id += ".la_" + detail::realization_real_token(fixed_lookahead);
+    type.type_id += linked ? ".linked" : ".independent";
+    type.version = 1;
+    type.num_input_ports = 2;
+    type.num_output_ports = 2;
+    type.default_name = "True-Peak Limiter";
+    type.lowerable = true;
+    type.latency_samples = [fixed_lookahead](double sample_rate) {
+        return Limiter::detector_latency_samples() +
+               static_cast<int>(std::ceil(fixed_lookahead * 0.001 * sample_rate));
+    };
+    type.create = []() -> void* { return new Instance{}; };
+    type.destroy = [](void* pointer) { delete static_cast<Instance*>(pointer); };
+    type.prepare = [fixed_lookahead, linked](void* pointer, double sample_rate, int) {
+        Limiter::Params params;
+        params.lookahead_ms = fixed_lookahead;
+        params.channel_link =
+            linked ? Limiter::ChannelLink::linked : Limiter::ChannelLink::independent;
+        static_cast<Instance*>(pointer)->limiter.prepare(sample_rate, 2, params);
+    };
+    type.reset = [](void* pointer) { static_cast<Instance*>(pointer)->limiter.reset(); };
+    type.baked_params.push_back({kCeilingDbtp, -24.0f, 0.0f, -1.0f});
+    type.baked_params.push_back({kReleaseMs, 5.0f, 2000.0f, 100.0f});
+    type.process_instance_baked_param = [](void* pointer, audio::BufferView<float>& output,
+                                           const audio::BufferView<const float>& input, int frames,
+                                           const BakedParamView& params) {
+        auto& limiter = static_cast<Instance*>(pointer)->limiter;
+        for (int frame = 0; frame < frames; ++frame) {
+            const auto offset = static_cast<std::int32_t>(frame);
+            limiter.set_ceiling_dbtp(params.value_at(kCeilingDbtp, offset));
+            limiter.set_release_ms(params.value_at(kReleaseMs, offset));
+            const std::array<float, 2> in{input.channel_ptr(0)[frame], input.channel_ptr(1)[frame]};
+            std::array<float, 2> out{};
+            limiter.process_frame(in, out);
+            output.channel_ptr(0)[frame] = out[0];
+            output.channel_ptr(1)[frame] = out[1];
+        }
+    };
+    return type;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    ForgeNodeDescriptor descriptor;
+    descriptor.key = "true_peak_limiter";
+    descriptor.label = "True-Peak Limiter";
+    descriptor.description =
+        "Look-ahead stereo limiter with oversampled intersample-peak detection.";
+    descriptor.axes = {
+        {"lookahead_ms",
+         "Lookahead",
+         "Fixed lookahead and matching host latency.",
+         {{"zero", "0 ms", 0.0f}, {"five", "5 ms", 5.0f}, {"ten", "10 ms", 10.0f}}},
+        {"channel_link",
+         "Channel link",
+         "Linked preserves the stereo image; independent limits each channel separately.",
+         {{"linked", "Linked", 1.0f}, {"independent", "Independent", 0.0f}}},
+    };
+    descriptor.realizations = {
+        {"linked_0ms",
+         make_node(0.0f, true).type_id,
+         {{"lookahead_ms", "zero"}, {"channel_link", "linked"}}},
+        {"linked_5ms",
+         make_node(5.0f, true).type_id,
+         {{"lookahead_ms", "five"}, {"channel_link", "linked"}}},
+        {"linked_10ms",
+         make_node(10.0f, true).type_id,
+         {{"lookahead_ms", "ten"}, {"channel_link", "linked"}}},
+        {"independent_5ms",
+         make_node(5.0f, false).type_id,
+         {{"lookahead_ms", "five"}, {"channel_link", "independent"}}},
+    };
+    descriptor.params = {
+        {"ceiling_dbtp", kCeilingDbtp, "Ceiling", "dBTP", "Maximum reconstructed peak level.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"release_ms", kReleaseMs, "Release", "ms", "Gain-reduction recovery time.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+    };
+    return descriptor;
+}
+
+} // namespace true_peak
+
 // ── The VCA lineage (Blackmer/dbx) ────────────────────────────────────────
 //
 // One node type. Nothing here changes topology and nothing changes latency
@@ -292,15 +393,15 @@ inline constexpr const char* kTypeId = "dynamics.vca_compressor";
 
 // Node-local ids; the framework namespaces per node, so these numbers may
 // restart at 1 without colliding with the feedforward member's.
-inline constexpr state::ParamID kThresholdDb = 1;     // dB
-inline constexpr state::ParamID kRatio = 2;           // :1
-inline constexpr state::ParamID kKneeDb = 3;          // dB, 0 = hard, > 0 = OverEasy
-inline constexpr state::ParamID kTimeMs = 4;          // ms — ONE control, both directions
-inline constexpr state::ParamID kMakeupDb = 5;        // dB
-inline constexpr state::ParamID kMix = 6;             // 0..1
-inline constexpr state::ParamID kNegativeRatio = 7;   // stepped 0/1 — "infinity+"
-inline constexpr state::ParamID kNegRatioAmount = 8;  // :1, negative
-inline constexpr state::ParamID kCeilingDb = 9;       // dB, positive magnitude
+inline constexpr state::ParamID kThresholdDb = 1;    // dB
+inline constexpr state::ParamID kRatio = 2;          // :1
+inline constexpr state::ParamID kKneeDb = 3;         // dB, 0 = hard, > 0 = OverEasy
+inline constexpr state::ParamID kTimeMs = 4;         // ms — ONE control, both directions
+inline constexpr state::ParamID kMakeupDb = 5;       // dB
+inline constexpr state::ParamID kMix = 6;            // 0..1
+inline constexpr state::ParamID kNegativeRatio = 7;  // stepped 0/1 — "infinity+"
+inline constexpr state::ParamID kNegRatioAmount = 8; // :1, negative
+inline constexpr state::ParamID kCeilingDb = 9;      // dB, positive magnitude
 
 using Comp = signal::VcaCompressor;
 
@@ -329,7 +430,7 @@ inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
         0.0, Comp::kLookaheadMsMax);
     const double fixed_attack_release_k =
         std::clamp(std::isfinite(attack_release_k) ? attack_release_k : Comp::kRatioKDefault,
-        Comp::kRatioKMin, Comp::kRatioKMax);
+                   Comp::kRatioKMin, Comp::kRatioKMax);
     CustomNodeType t;
     t.type_id = kTypeId;
     if (fixed_lookahead_ms != 0.0 || fixed_attack_release_k != Comp::kRatioKDefault) {
@@ -468,7 +569,7 @@ inline ForgeNodeDescriptor vca_compressor_descriptor() {
     return d;
 }
 
-}  // namespace vca
+} // namespace vca
 
 // ── The FET lineage (1176) ────────────────────────────────────────────────
 //
@@ -479,14 +580,14 @@ namespace fet {
 
 inline constexpr const char* kTypeId = "dynamics.fet_compressor";
 
-inline constexpr state::ParamID kInputGainDb = 1;        // dB — the only lever in
-inline constexpr state::ParamID kOutputGainDb = 2;       // dB — makeup
-inline constexpr state::ParamID kRatio = 3;              // stepped 0..4, see kRatioSteps
-inline constexpr state::ParamID kAttackUs = 4;           // µs
-inline constexpr state::ParamID kReleaseMs = 5;          // ms
-inline constexpr state::ParamID kKneeDb = 6;             // dB
-inline constexpr state::ParamID kTransformerAmount = 7;  // 0..1
-inline constexpr state::ParamID kMix = 8;                // 0..1
+inline constexpr state::ParamID kInputGainDb = 1;       // dB — the only lever in
+inline constexpr state::ParamID kOutputGainDb = 2;      // dB — makeup
+inline constexpr state::ParamID kRatio = 3;             // stepped 0..4, see kRatioSteps
+inline constexpr state::ParamID kAttackUs = 4;          // µs
+inline constexpr state::ParamID kReleaseMs = 5;         // ms
+inline constexpr state::ParamID kKneeDb = 6;            // dB
+inline constexpr state::ParamID kTransformerAmount = 7; // 0..1
+inline constexpr state::ParamID kMix = 8;               // 0..1
 
 /// The ratio switch's positions, in injection order: 4:1, 8:1, 12:1, 20:1,
 /// all-buttons-in. ABI is the documented distinct circuit state, not a fifth
@@ -561,7 +662,7 @@ inline CustomNodeType make_fet_compressor_node() {
             s->compressor.set_output_gain_db(params.value_at(kOutputGainDb, offset));
             const int step =
                 std::clamp(static_cast<int>(std::lround(params.value_at(kRatio, offset))), 0,
-                static_cast<int>(kRatioSteps));
+                           static_cast<int>(kRatioSteps));
             s->compressor.set_ratio(static_cast<signal::FetRatio>(step));
             s->compressor.set_attack_us(params.value_at(kAttackUs, offset));
             s->compressor.set_release_ms(params.value_at(kReleaseMs, offset));
@@ -614,7 +715,7 @@ inline ForgeNodeDescriptor fet_compressor_descriptor() {
     return d;
 }
 
-}  // namespace fet
+} // namespace fet
 
 // ── The diode-bridge lineage ──────────────────────────────────────────────
 //
@@ -628,16 +729,16 @@ inline constexpr const char* kTypeId = "dynamics.diode_bridge_compressor";
 /// Feedforward detection — the same bridge, sensed from the input.
 inline constexpr const char* kFeedforwardTypeId = "dynamics.diode_bridge_compressor_feedforward";
 
-inline constexpr state::ParamID kThresholdDb = 1;   // dB
-inline constexpr state::ParamID kRatio = 2;         // :1, kLimitRatio and above = limit
-inline constexpr state::ParamID kKneeDb = 3;        // dB
-inline constexpr state::ParamID kAttackMs = 4;      // ms
-inline constexpr state::ParamID kReleaseMs = 5;     // ms
-inline constexpr state::ParamID kMakeupDb = 6;      // dB, positive only
-inline constexpr state::ParamID kCharacter = 7;     // 0..1, bridge + transformer drive
-inline constexpr state::ParamID kMixPercent = 8;    // %
-inline constexpr state::ParamID kScHpfHz = 9;       // Hz — LF de-sensitisation
-inline constexpr state::ParamID kAutoRelease = 10;  // stepped 0/1
+inline constexpr state::ParamID kThresholdDb = 1;  // dB
+inline constexpr state::ParamID kRatio = 2;        // :1, kLimitRatio and above = limit
+inline constexpr state::ParamID kKneeDb = 3;       // dB
+inline constexpr state::ParamID kAttackMs = 4;     // ms
+inline constexpr state::ParamID kReleaseMs = 5;    // ms
+inline constexpr state::ParamID kMakeupDb = 6;     // dB, positive only
+inline constexpr state::ParamID kCharacter = 7;    // 0..1, bridge + transformer drive
+inline constexpr state::ParamID kMixPercent = 8;   // %
+inline constexpr state::ParamID kScHpfHz = 9;      // Hz — LF de-sensitisation
+inline constexpr state::ParamID kAutoRelease = 10; // stepped 0/1
 
 using Comp = signal::DiodeBridgeCompressor;
 
@@ -769,6 +870,6 @@ inline ForgeNodeDescriptor diode_bridge_compressor_descriptor() {
     return d;
 }
 
-}  // namespace diode
+} // namespace diode
 
-}  // namespace pulp::host::dynamics
+} // namespace pulp::host::dynamics

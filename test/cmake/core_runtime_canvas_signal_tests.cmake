@@ -182,6 +182,11 @@ pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality
     LIBRARIES pulp::signal pulp::audio-analysis)
+# True-peak look-ahead limiting: independent higher-rate reconstruction oracle,
+# latency, channel-link, deterministic partitioning, and realtime storage.
+pulp_add_test_suite(pulp-test-true-peak-limiter
+    SOURCES test_true_peak_limiter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 # Fundamental-frequency estimator for harmonically-dense oscillator output plus
 # the f0(t) trajectory extractor — proven accurate to well under a cent, and
 # proven to beat the shipped zero-crossing detector on dense material.
