@@ -1,10 +1,16 @@
 // PulpSynth test — validates the synth processes audio with MIDI input
 
 #include "pulp_synth.hpp"
+#include <pulp/audio/analysis/audio_spectrum.hpp>
+#include <pulp/audio/buffer.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/signal/oscillator.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 using namespace pulp::examples;
 using namespace pulp::format;
@@ -93,7 +99,78 @@ std::vector<float> render_with_midi(
     return out_l;
 }
 
+pulp::test::audio::AliasReport analyze_saw(const std::vector<double>& signal,
+                                           double f0) {
+    constexpr double sample_rate = 48'000.0;
+    pulp::audio::Buffer<float> buffer(1, static_cast<int>(signal.size()));
+    for (int index = 0; index < static_cast<int>(signal.size()); ++index)
+        buffer.channel(0)[index] = static_cast<float>(signal[static_cast<std::size_t>(index)]);
+
+    pulp::test::audio::AliasOptions options;
+    options.num_harmonics = static_cast<int>(std::ceil(3.0 * sample_rate / f0));
+    options.analysis_length = static_cast<int>(signal.size());
+    options.max_alias_frequency_hz = 20'000.0;
+    return pulp::test::audio::measure_aliasing(std::as_const(buffer).view(), f0,
+                                               sample_rate, options);
+}
+
 }  // namespace
+
+TEST_CASE("PulpSynth opt-in minBLEP saw consumes the public oscillator primitive",
+          "[examples][synth][minblep]") {
+    constexpr int sample_count = 8192;
+    HeadlessHost host(create_pulp_synth);
+    host.prepare(48'000, sample_count, 0, 2);
+    host.state().set_value(kOscWaveform, 4.0f);
+    host.state().set_value(kFilterCutoff, 20'000.0f);
+    host.state().set_value(kFilterReso, 0.1f);
+    host.state().set_value(kFilterEnv, 0.0f);
+
+    pulp::midi::MidiBuffer midi;
+    midi.add(pulp::midi::MidiEvent::note_on(0, 96, 100));
+    const auto output = render_with_midi(host, midi, sample_count);
+    REQUIRE(std::ranges::all_of(output, [](float sample) { return std::isfinite(sample); }));
+    REQUIRE(rms_of(output) > 0.001f);
+}
+
+TEST_CASE("PulpSynth minBLEP consumer records lower saw alias than its legacy path",
+          "[examples][synth][minblep][alias]") {
+    constexpr double sample_rate = 48'000.0;
+    constexpr double f0 = 6301.0;
+    constexpr int warmup = 128;
+    constexpr int fit_length = 8192;
+    MinBlepSaw minimum;
+    pulp::signal::Oscillator legacy;
+    legacy.set_sample_rate(static_cast<float>(sample_rate));
+    legacy.set_frequency(static_cast<float>(f0));
+    legacy.set_waveform(pulp::signal::Oscillator::Waveform::saw);
+    legacy.reset();
+
+    std::vector<double> minimum_output;
+    std::vector<double> legacy_output;
+    minimum_output.reserve(fit_length);
+    legacy_output.reserve(fit_length);
+    for (int index = 0; index < fit_length + warmup; ++index) {
+        const double minimum_sample = minimum.next(f0 / sample_rate);
+        const double legacy_sample = legacy.next();
+        if (index >= warmup) {
+            minimum_output.push_back(minimum_sample);
+            legacy_output.push_back(legacy_sample);
+        }
+    }
+
+    const auto minimum_alias = analyze_saw(minimum_output, f0);
+    const auto legacy_alias = analyze_saw(legacy_output, f0);
+    REQUIRE_FALSE(minimum_alias.has_unresolved_in_band_alias);
+    REQUIRE_FALSE(legacy_alias.has_unresolved_in_band_alias);
+    REQUIRE(minimum_alias.worst_alias_db > minimum_alias.detection_floor_db);
+    REQUIRE(legacy_alias.worst_alias_db > legacy_alias.detection_floor_db);
+    REQUIRE(minimum.dropped_events() == 0);
+    INFO("PulpSynth public consumer legacy=" << legacy_alias.worst_alias_db
+                                               << " dB minBLEP="
+                                               << minimum_alias.worst_alias_db << " dB");
+    REQUIRE(legacy_alias.worst_alias_db - minimum_alias.worst_alias_db >= 30.0);
+}
 
 // Master gain at -60 dB takes the note-on output well under the
 // audible floor. Guards against a future refactor that forgets to

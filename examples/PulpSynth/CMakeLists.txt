@@ -5,7 +5,8 @@
 # ── Tests ──────────────────────────────────────────────────────────────────
 if(PULP_BUILD_TESTS)
     add_executable(pulp-synth-test test_pulp_synth.cpp)
-    target_link_libraries(pulp-synth-test PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+    target_link_libraries(pulp-synth-test PRIVATE
+        pulp::format pulp::signal pulp::audio-analysis Catch2::Catch2WithMain)
     target_include_directories(pulp-synth-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(pulp-synth-test)
 endif()
