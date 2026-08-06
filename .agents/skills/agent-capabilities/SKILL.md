@@ -47,6 +47,13 @@ For a new public header or symbol:
 4. Increase `SURFACE_INVENTORY_VERSION` for any ledger change. Increase
    `MANIFEST_REVISION` whenever the installed manifest changes.
 
+For overloaded C++ free functions, keep the public `qualified_name` as the real
+API name and give each overload a distinct binding role. Use private generator
+metadata for an explicit `static_cast` address expression so the generated
+compile fixture proves the intended signature without leaking fixture syntax
+into the installed contract. Each overload still needs its own operational
+probe with arguments that select and invoke that overload.
+
 A new TSP algorithm is therefore detected automatically but not advertised by
 guesswork: the new/changed public header fails the ledger gate until its owner
 makes the explicit registration or non-capability classification.
