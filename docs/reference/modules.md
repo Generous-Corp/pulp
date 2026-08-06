@@ -878,7 +878,7 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, and a no-mute latch policy |
 | Pitched Feedback Delay | `pitched_feedback_delay.hpp` | Delay with a latency-bearing processor inside the feedback loop, tempo sync, freeze-aware feedback gating, and a computed minimum delay |
 | Control Smoother | `latency_aware_control_smoother.hpp` | Closed-form one-pole smoothing with attack/release asymmetry, semitone/ratio domains, block-size-independent trajectories |
-| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Kaiser window functions for FFT analysis |
+| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Blackman-Harris, Blackman-Nuttall, flat-top, and Kaiser windows for FFT analysis |
 
 #### Math and utilities
 
@@ -893,6 +893,7 @@ mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
 | Routing matrix | `audio_matrix_mixer.hpp` | Fixed-capacity signed audio routing with continuous gain automation and explicit headroom policy |
 | Mid/side | `mid_side.hpp` | Orthonormal stereo encode/decode and mono-safe width |
 | N-way routing | `nway_crossfade.hpp`, `path_switcher.hpp`, `path_latency_aligner.hpp` | Constant-power path morphing, click-free selection, and exact latency alignment |
+| Mirrored History Buffer | `mirrored_history_buffer.hpp` | Fixed-capacity single-thread sample history with a contiguous oldest-to-newest view and deterministic wrap cost |
 | Panner | `panner.hpp` | Stereo and surround panning with equal-power or linear law |
 | Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
 | Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |
