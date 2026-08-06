@@ -94,13 +94,14 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/pitch.hpp": "Pulp::music",
     "pulp/music/spelling.hpp": "Pulp::music",
     "pulp/music/voicing.hpp": "Pulp::music",
-     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/sos_cascade.hpp": "Pulp::signal",
     "pulp/signal/fft_backend.hpp": "Pulp::signal-fft-backend",
     "pulp/signal/modal_spec.hpp": "Pulp::signal-modal-spec",
+    "pulp/signal/mirrored_history_buffer.hpp": "Pulp::signal",
     "pulp/signal/osc/minblep.hpp": "Pulp::signal",
+    "pulp/signal/windowing.hpp": "Pulp::signal",
     "pulp/timebase/quantize.hpp": "Pulp::timebase",
     "pulp/timebase/tick.hpp": "Pulp::timebase",
     "pulp/timebase/beat_division.hpp": "Pulp::timebase",
@@ -109,7 +110,6 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/timebase/groove_kernel.hpp": "Pulp::timebase",
     "pulp/timebase/ratchet.hpp": "Pulp::timebase",
     "pulp/timebase/trigger_grid.hpp": "Pulp::timebase",
- }
 }
 
 
@@ -129,8 +129,9 @@ def binding(
     qualified_name: str,
     target: str,
     header_fingerprint: str,
+    address_expression: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "role": role,
         "kind": kind,
         "include": include,
@@ -139,6 +140,9 @@ def binding(
         "availability": availability(),
         "_header_fingerprint": header_fingerprint,
     }
+    if address_expression is not None:
+        result["_address_expression"] = address_expression
+    return result
 
 
 def capability(**row: Any) -> dict[str, Any]:
@@ -313,7 +317,7 @@ EXPORTS = [
             "arguments": "8, pulp::signal::WindowFunction::Type::hann",
         }],
     ),
-+    capability(
+    capability(
         key="signal.saturator",
         contract_version={"major": 1, "minor": 1},
         domain="signal",
@@ -804,7 +808,7 @@ EXPORTS = [
             },
         ],
     ),
-+    capability(
+    capability(
         key="timebase.tick",
         contract_version={"major": 1, "minor": 1},
         domain="timebase",
@@ -1266,7 +1270,7 @@ EXPORTS = [
             ),
         }],
     ),
-+    capability(
+    capability(
         key="sequence.host-transport-projector",
         contract_version={"major": 1, "minor": 1},
         domain="sequence",
@@ -1335,7 +1339,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "header remains outside this slice's generator-facing claims."
         ),
     },
-     {
     {
         "include": "pulp/music/chord.hpp",
         "fingerprint": "sha256:24dd445d17537d186ecdfd4181102b4cb0d3409363d7ab62c5f700736969a222",
@@ -1374,7 +1377,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "curated spelling, recognition, and voicing operations."
         ),
     },
-     {
     {
         "include": "pulp/signal/interpolator.hpp",
         "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",
@@ -1395,7 +1397,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "storage; this slice does not introduce a new resampler contract."
         ),
     },
-+    {
+    {
         "include": "pulp/signal/stft.hpp",
         "fingerprint": "sha256:a326b986439d9382932a05682db29f862c0fb371a27acf701eea41d3ec873a32",
         "disposition": "capability_support",
@@ -1408,7 +1410,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "analysis API; it is not a newly claimed capability in this slice."
         ),
     },
-     {
     {
         "include": "pulp/signal/fast_math.hpp",
         "fingerprint": "sha256:040569eb66723784d089120ecb679b78df4f206678a77a2f2881e0a874456de4",
@@ -1453,7 +1454,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:457eacf11d8d8c8fdc47012ddc0255a233f249d9ce07dc86f2c701fc5d93892d",
+        "fingerprint": "sha256:957d2e652931e29de41e360044c05ede7f21511097e3dbf6272908c4d7d8ee08",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1623,8 +1624,15 @@ def compile_fixture() -> str:
             if item["kind"] == "cpp_type":
                 lines.append(f"        static_assert(sizeof({name}) > 0);")
             else:
+                source_binding = next(
+                    candidate
+                    for candidate in source_by_key[row["key"]]["bindings"]
+                    if candidate["role"] == item["role"]
+                    and candidate["qualified_name"] == name
+                )
+                address = source_binding.get("_address_expression", f"&{name}")
                 lines.append(
-                    f"        auto *volatile binding_{binding_index} = &{name};"
+                    f"        auto *volatile binding_{binding_index} = {address};"
                 )
                 lines.append(f"        (void)binding_{binding_index};")
             binding_index += 1
