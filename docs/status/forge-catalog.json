@@ -856,6 +856,20 @@
       ]
     },
     {
+      "key": "true_peak_limiter",
+      "label": "True-Peak Limiter",
+      "description": "Look-ahead stereo limiter with oversampled intersample-peak detection.",
+      "realization_axes": [
+        {"key": "lookahead_ms", "label": "Lookahead", "description": "Fixed lookahead and matching host latency.", "values": [{"token": "zero", "label": "0 ms", "value": 0}, {"token": "five", "label": "5 ms", "value": 5}, {"token": "ten", "label": "10 ms", "value": 10}]},
+        {"key": "channel_link", "label": "Channel link", "description": "Linked preserves the stereo image; independent limits each channel separately.", "values": [{"token": "linked", "label": "Linked", "value": 1}, {"token": "independent", "label": "Independent", "value": 0}]}
+      ],
+      "realizations": [{"mode": "linked_0ms", "type_id": "dynamics.true_peak_limiter.la_0000000000000000.linked", "settings": {"lookahead_ms": "zero", "channel_link": "linked"}}, {"mode": "linked_5ms", "type_id": "dynamics.true_peak_limiter.la_4014000000000000.linked", "settings": {"lookahead_ms": "five", "channel_link": "linked"}}, {"mode": "linked_10ms", "type_id": "dynamics.true_peak_limiter.la_4024000000000000.linked", "settings": {"lookahead_ms": "ten", "channel_link": "linked"}}, {"mode": "independent_5ms", "type_id": "dynamics.true_peak_limiter.la_4014000000000000.independent", "settings": {"lookahead_ms": "five", "channel_link": "independent"}}],
+      "parameters": [
+        {"key": "ceiling_dbtp", "label": "Ceiling", "unit": "dBTP", "kind": "continuous", "curve": "linear", "description": "Maximum reconstructed peak level.", "choices": [], "contracts": [{"realization_mode": "linked_0ms", "min": -24, "max": 0, "default": -1}, {"realization_mode": "linked_5ms", "min": -24, "max": 0, "default": -1}, {"realization_mode": "linked_10ms", "min": -24, "max": 0, "default": -1}, {"realization_mode": "independent_5ms", "min": -24, "max": 0, "default": -1}], "realization_modes": []},
+        {"key": "release_ms", "label": "Release", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Gain-reduction recovery time.", "choices": [], "contracts": [{"realization_mode": "linked_0ms", "min": 5, "max": 2000, "default": 100}, {"realization_mode": "linked_5ms", "min": 5, "max": 2000, "default": 100}, {"realization_mode": "linked_10ms", "min": 5, "max": 2000, "default": 100}, {"realization_mode": "independent_5ms", "min": 5, "max": 2000, "default": 100}], "realization_modes": []}
+      ]
+    },
+    {
       "key": "vca_compressor",
       "label": "VCA Compressor",
       "description": "Fast VCA-style compressor with OverEasy knee and optional negative-ratio behavior.",

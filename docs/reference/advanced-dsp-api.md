@@ -110,6 +110,35 @@ infinity represents a complete mute and has zero linear gain.
 lineage exposes `gain_reduction()` using this convention without changing the
 sign or behavior of its existing `gain_reduction_db()` method. `Compressor`,
 `Limiter`, and `NoiseGate` expose the same telemetry contract.
+### `TruePeakLimiter`
+
+`prepare(sample_rate, channels, params)` fixes the explicit channel count and
+allocates the look-ahead and monotonic-peak queues off the audio thread. The
+plain control domains are ceiling `[-24, 0]` dBTP, look-ahead `[0, 20]` ms,
+release `[5, 2000]` ms, and `ChannelLink::{linked,independent}`. Look-ahead and
+link policy are topology controls supplied at prepare time; ceiling and release
+may change between blocks through `set_ceiling_dbtp()` and `set_release_ms()`.
+
+The detector reconstructs four phases with a 129-tap, beta-10.5 Kaiser-windowed
+sinc interpolator. Its causal linear-phase delay is 64 base-rate samples. The
+limiter reserves a 0.20 dB detector guard; the test gate compares it with an
+independent 16x, 257-tap, beta-14 polyphase sinc oracle over phase-shifted
+near-Nyquist, multitone, impulse, and planted sample-peak material. The reported
+host latency and tail are exactly `64 + ceil(lookahead_ms * sample_rate / 1000)`
+base-rate samples. The ceiling is a reconstructed-signal contract over the
+documented detector/oracle domain, not merely a clamp on stored samples.
+
+Linked mode applies the maximum peak across channels without moving the stereo
+image; independent mode maintains one peak queue and gain envelope per channel.
+`gain_reduction_db(channel)` is the current non-negative attenuation magnitude.
+A non-finite input clears bounded history, emits a zero frame, and increments
+`fault_count()`.
+
+- Lifecycle and topology: `prepare()`, `reset()`, `prepared()`, `channel_count()`, `channel_link()`.
+- Controls: `set_ceiling_dbtp()`, `ceiling_dbtp()`, `lookahead_ms()`, `set_release_ms()`, `release_ms()`.
+- Processing: `process_frame()`, `process_interleaved()`.
+- Host and telemetry: `latency_samples()`, `tail_samples()`, `gain_reduction_db()`, `fault_count()`.
+- Detector inspection: `interpolation_factor()`, `interpolation_taps()`, `detector_latency_samples()`, `detector_guard_db()`, `maximum_supported_sample_rate()`, `maximum_lookahead_ms()`, `detector_phases()`.
 
 ### `FeedforwardCompressor`
 

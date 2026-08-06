@@ -699,6 +699,7 @@ a working convolution and would hide the bug. Assert
 |-----------|--------|-------------|
 | Envelope Follower | `dynamics_contract.hpp` | Exact peak/RMS envelope timing, stereo detector linking, and canonical gain-reduction telemetry; `BallisticsFilter` retains its legacy nominal timing for render compatibility |
 | Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
+| True-peak limiter | `true_peak_limiter.hpp` | Multichannel look-ahead limiter with 4x intersample detection, explicit channel linking, latency, tail, and gain-reduction telemetry |
 | DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
 | Gain | `gain.hpp` | Scalar gain stage; pair with `smoothed_value.hpp`, `log_ramped_value.hpp`, or audio `apply_gain_ramp()` when transitions need de-clicking |
 | Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |

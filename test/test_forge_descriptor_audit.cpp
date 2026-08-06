@@ -44,19 +44,18 @@ std::set<std::string> realization_modes(const ForgeCatalogExportNode& node) {
 
 const ForgeCatalogExportRealization& require_realization(const ForgeCatalogExportNode& node,
                                                          std::string_view mode) {
-    const auto found = std::find_if(node.realizations.begin(), node.realizations.end(),
-                                    [mode](const auto& realization) {
-                                        return realization.mode == mode;
-                                    });
+    const auto found =
+        std::find_if(node.realizations.begin(), node.realizations.end(),
+                     [mode](const auto& realization) { return realization.mode == mode; });
     REQUIRE(found != node.realizations.end());
     return *found;
 }
 
-const CustomNodeBakedParam& require_baked_param(
-    const ForgeCatalogExportRealization& realization, pulp::state::ParamID id) {
-    const auto found = std::find_if(realization.baked_params.begin(),
-                                    realization.baked_params.end(),
-                                    [id](const auto& param) { return param.id == id; });
+const CustomNodeBakedParam& require_baked_param(const ForgeCatalogExportRealization& realization,
+                                                pulp::state::ParamID id) {
+    const auto found =
+        std::find_if(realization.baked_params.begin(), realization.baked_params.end(),
+                     [id](const auto& param) { return param.id == id; });
     REQUIRE(found != realization.baked_params.end());
     return *found;
 }
@@ -291,7 +290,7 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(findings.empty());
-    REQUIRE(nodes.size() == 77);
+    REQUIRE(nodes.size() == 78);
 
     for (const auto& node : nodes) {
         INFO("node " << node.descriptor.key);
@@ -359,6 +358,8 @@ TEST_CASE("dynamic Forge families export every supported finite realization", "[
 
     REQUIRE(realization_modes(require_node(nodes, "feedforward_compressor")) ==
             std::set<std::string>{"lookahead_10ms", "lookahead_3ms", "zero_lookahead"});
+    REQUIRE(realization_modes(require_node(nodes, "true_peak_limiter")) ==
+            std::set<std::string>{"independent_5ms", "linked_0ms", "linked_10ms", "linked_5ms"});
     REQUIRE(realization_modes(require_node(nodes, "vca_compressor")) ==
             std::set<std::string>{"default", "lookahead_10ms_k4", "lookahead_3ms_k4",
                                   "zero_latency_k2", "zero_latency_k8"});
@@ -376,12 +377,12 @@ TEST_CASE("dynamic Forge families export every supported finite realization", "[
     const auto& flanger = require_node(nodes, "flanger");
     const auto* depth = find_param(flanger.descriptor, "depth_ms");
     REQUIRE(depth != nullptr);
-    const auto& one_ms = require_baked_param(require_realization(flanger, "through_zero_1ms"),
-                                             depth->id);
+    const auto& one_ms =
+        require_baked_param(require_realization(flanger, "through_zero_1ms"), depth->id);
     REQUIRE(one_ms.max_value == 1.0f);
     REQUIRE(one_ms.default_value == 1.0f);
-    const auto& two_ms = require_baked_param(require_realization(flanger, "through_zero_2ms"),
-                                             depth->id);
+    const auto& two_ms =
+        require_baked_param(require_realization(flanger, "through_zero_2ms"), depth->id);
     REQUIRE(two_ms.max_value == 2.0f);
     REQUIRE(two_ms.default_value == 1.5f);
 }
