@@ -137,6 +137,28 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     expect_validation_failure(count_drift, "counts must exactly match")
     checks += 1
 
+    reversed_enum = copy.deepcopy(canonical)
+    enum_pair = next(
+        pair
+        for classes in reversed_enum["compatibility"]["signal_vocabulary"]["entries"].values()
+        for class_row in classes
+        for pair in class_row["enums"]
+    )
+    enum_pair.reverse()
+    expect_schema_failure(reversed_enum, "expected type")
+    checks += 1
+
+    scalar_enum_values = copy.deepcopy(canonical)
+    enum_pair = next(
+        pair
+        for classes in scalar_enum_values["compatibility"]["signal_vocabulary"]["entries"].values()
+        for class_row in classes
+        for pair in class_row["enums"]
+    )
+    enum_pair[1] = enum_pair[1][0]
+    expect_schema_failure(scalar_enum_values, "expected type array")
+    checks += 1
+
     unknown_field = copy.deepcopy(canonical)
     unknown_field["capabilities"][0]["schedulling"] = "typo"
     expect_validation_failure(unknown_field, "unexpected property 'schedulling'")

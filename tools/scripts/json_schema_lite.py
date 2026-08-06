@@ -15,8 +15,8 @@ checked — the schema either validates for real or the run errors out.
 Supported keywords:
     type, const, enum, required, properties, additionalProperties,
     propertyNames, minProperties, maxProperties, items, minItems,
-    maxItems, uniqueItems, minLength, maxLength, pattern, minimum, maximum,
-    oneOf
+    maxItems, uniqueItems, prefixItems, minLength, maxLength, pattern, minimum,
+    maximum, oneOf
 
 Ignored (annotation-only) keywords:
     $schema, $id, title, description, $comment, examples, default
@@ -46,6 +46,7 @@ _SUPPORTED = frozenset(
         "minProperties",
         "maxProperties",
         "items",
+        "prefixItems",
         "minItems",
         "maxItems",
         "uniqueItems",
@@ -121,6 +122,8 @@ def _preflight_schema(schema: Any, path: str) -> None:
         _preflight_schema(child, f"{path}.properties[{key!r}]")
     if "items" in schema:
         _preflight_schema(schema["items"], f"{path}.items")
+    for index, child in enumerate(schema.get("prefixItems", [])):
+        _preflight_schema(child, f"{path}.prefixItems[{index}]")
     if "propertyNames" in schema:
         _preflight_schema(schema["propertyNames"], f"{path}.propertyNames")
     if "additionalProperties" in schema:
@@ -210,8 +213,12 @@ def _validate_array(document: list, schema: dict, path: str) -> list[str]:
     ):
         errors.append(f"{path}: array items are not unique")
     if "items" in schema:
-        for i, item in enumerate(document):
+        start = len(schema.get("prefixItems", []))
+        for i, item in enumerate(document[start:], start=start):
             errors.extend(_validate(item, schema["items"], f"{path}[{i}]"))
+    for i, item_schema in enumerate(schema.get("prefixItems", [])):
+        if i < len(document):
+            errors.extend(_validate(document[i], item_schema, f"{path}[{i}]"))
     return errors
 
 

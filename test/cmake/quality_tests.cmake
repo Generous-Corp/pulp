@@ -29,6 +29,7 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_capability_handoff.py")
     set(_pulp_agent_capability_installed_args
         --build-dir "${CMAKE_BINARY_DIR}"
+        --audio-archive "$<TARGET_FILE:pulp-audio>"
         --cmake "${CMAKE_COMMAND}"
         --generator "${CMAKE_GENERATOR}"
         "--config=$<CONFIG>")

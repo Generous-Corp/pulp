@@ -417,6 +417,7 @@ def configure_build_run(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-dir", type=pathlib.Path, required=True)
+    parser.add_argument("--audio-archive", type=pathlib.Path, required=True)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--generator")
     parser.add_argument("--config", default="")
@@ -431,6 +432,15 @@ def main() -> int:
     if configuration and not configuration.replace("_", "").isalnum():
         raise RuntimeError(f"invalid build configuration: {configuration!r}")
     build_dir = args.build_dir.resolve()
+    audio_archive = args.audio_archive.resolve()
+    if not audio_archive.is_file():
+        raise RuntimeError(f"Pulp::audio target artifact is missing: {audio_archive}")
+    try:
+        audio_archive.relative_to(build_dir)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Pulp::audio target artifact is outside the build tree: {audio_archive}"
+        ) from exc
     cache = (build_dir / "CMakeCache.txt").read_text()
     source_line = next(
         (line for line in cache.splitlines() if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL=")),
@@ -631,21 +641,6 @@ def main() -> int:
         )
         if imported_match is None:
             raise RuntimeError("could not locate installed pulp-audio imported artifact")
-        archive_name = pathlib.Path(imported_match.group(1)).name
-        archive_candidates = [
-            path.resolve() for path in build_dir.rglob(archive_name) if path.is_file()
-        ]
-        if configuration:
-            configured_candidates = [
-                path for path in archive_candidates if configuration in path.parts
-            ]
-            if configured_candidates:
-                archive_candidates = configured_candidates
-        if len(archive_candidates) != 1:
-            raise RuntimeError(
-                f"expected one build-tree artifact for Pulp::audio, got {archive_candidates}"
-            )
-        audio_archive = archive_candidates[0]
         export_config.write_text(
             original_export.replace(imported_match.group(1), audio_archive.as_posix())
         )

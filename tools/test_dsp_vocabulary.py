@@ -19,6 +19,7 @@ mysteriously stopped using the SDK.
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import subprocess
 import sys
@@ -50,6 +51,24 @@ MIN_HEADERS = 120
 
 
 def main():
+    spec = importlib.util.spec_from_file_location("pulp_dsp_vocabulary_test", EXTRACTOR)
+    assert spec is not None and spec.loader is not None
+    extractor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(extractor)
+    fixture = """
+struct Fixture {
+    float process(float input) {
+        std::vector<float> work(static_cast<std::size_t>(4));
+        return calibration_tables(input);
+    }
+    int declared(int amount);
+};
+"""
+    parsed = extractor.public_methods(fixture, "Fixture")
+    if parsed != ["process(float input)", "declared(int amount)"]:
+        print(f"FAIL: inline method bodies leaked into the API surface: {parsed}")
+        return 1
+
     r = subprocess.run([sys.executable, EXTRACTOR, "--json"],
                        capture_output=True, text=True)
     if r.returncode != 0:
@@ -65,6 +84,18 @@ def main():
     n_headers = len(doc)
     n_classes = sum(len(v) for v in doc.values())
     bad = 0
+
+    malformed = [
+        f"{row.get('class')}.{method}"
+        for classes in doc.values()
+        for row in classes
+        if isinstance(row, dict)
+        for method in row.get("methods", [])
+        if not isinstance(method, str) or method.count("(") != method.count(")")
+    ]
+    if malformed:
+        print(f"  WRONG  malformed method signatures: {malformed[:5]}")
+        bad += 1
 
     print(f"  {n_classes} classes across {n_headers} headers")
     if n_classes < MIN_CLASSES or n_headers < MIN_HEADERS:

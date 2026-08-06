@@ -140,6 +140,27 @@ def public_methods(text: str, cls: str):
             body.append(c)
         i += 1
     src = "".join(body)
+
+    # Keep declarations at class-body depth and mask inline method bodies.
+    # Searching the raw class text mistakes local declarations and return
+    # expressions for member functions (for example `std::vector work(...)`
+    # or `return calibration_tables(...)`). Preserve newlines so the anchored
+    # declaration regex below retains its line semantics.
+    visible = []
+    depth = 0
+    for char in src:
+        if char == "{":
+            visible.append(char if depth <= 1 else " ")
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+            visible.append(char if depth <= 1 else " ")
+        elif depth <= 1 or char == "\n":
+            visible.append(char)
+        else:
+            visible.append(" ")
+    src = "".join(visible)
+
     # Only the public section: templates here are public-first, and a private:
     # marker ends what a caller may touch.
     cut = re.search(r"\bprivate\s*:", src)

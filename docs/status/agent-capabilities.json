@@ -554,7 +554,7 @@
               "latency_samples_for_oversampling(int factor)",
               "cutoff_hz()",
               "requested_cutoff_hz_for(Voicing voicing, double knob01, double modulation_octaves = 0.0)",
-              "log_frequency_table(cutoff, calibration_tables(voicing)"
+              "oversampling()"
             ],
             "enums": [
               [
@@ -612,7 +612,7 @@
               "process(SampleType* buffer, int num_samples)",
               "set_coefficients(const BiquadCoefficientsT<U>& c)",
               "coefficients()",
-              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType{0})"
+              "set_coefficients(Type type, SampleType freq_hz, SampleType q, SampleType sample_rate, SampleType gain_db = SampleType{ })"
             ],
             "enums": [
               [
@@ -646,8 +646,7 @@
               "set_attack_shunt(bool active)",
               "snap_denormals()",
               "branch_resistance()",
-              "center_frequency_hz()",
-              "bridged_t_center_frequency(bridged_t_shunt_resistance(r_e_, comps_)"
+              "center_frequency_hz()"
             ],
             "enums": []
           }
@@ -769,7 +768,6 @@
               "update(double character_amount)",
               "process_diffuser(double x, double decorrelation)",
               "process_cloud(double x, double decorrelation)",
-              "process_cloud(process_diffuser(x, decorrelation)",
               "tick_modulation()"
             ],
             "enums": []
@@ -780,7 +778,6 @@
             "class": "Langevin",
             "methods": [
               "value(double x)",
-              "coth(x)",
               "derivative(double x)",
               "second_derivative(double x)",
               "coth(double x)"
@@ -1035,7 +1032,6 @@
               "add(std::uint64_t elements)",
               "add_repeated(std::uint64_t elements_per_allocation, std::uint64_t repetitions)",
               "add_retained_bytes(std::uint64_t bytes)",
-              "checked_capacity_sum(total_, bytes, std::numeric_limits<std::uint64_t>::max()",
               "total()"
             ],
             "enums": []
@@ -1106,7 +1102,6 @@
               "set_lookahead_ms(SampleType ms)",
               "lookahead_ms()",
               "latency_samples()",
-              "process_with_sidechain(input, input)",
               "process_with_sidechain(SampleType input, SampleType sidechain)",
               "process_with_sidechain(SampleType* buffer, const SampleType* sidechain, int num_samples)",
               "gain_reduction_db()"
@@ -1146,7 +1141,6 @@
             "class": "ConvolverIrSwapperT",
             "methods": [
               "stage_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size)",
-              "stage_ir(std::move(next)",
               "stage_ir(std::unique_ptr<ConvolverIrStateT<SampleType>> next)",
               "try_consume()",
               "retire(std::unique_ptr<ConvolverIrStateT<SampleType>>& displaced)",
@@ -1201,7 +1195,7 @@
               "attack_ms()",
               "hold_ms()",
               "decay_ms()",
-              "trigger(SampleType peak = SampleType{1})",
+              "trigger(SampleType peak = SampleType{ })",
               "is_active()",
               "value()"
             ],
@@ -1226,7 +1220,6 @@
               "push(SampleType sample)",
               "read(SampleType delay_samples)",
               "read(int delay_samples)",
-              "read(delay_samples)",
               "discard_history()",
               "max_delay()"
             ],
@@ -1260,8 +1253,7 @@
               "shape(double s, double beta)",
               "shape_antiderivative(double s, double beta)",
               "max_operating_amplitude(double beta)",
-              "third_harmonic_ratio(double s, double beta)",
-              "shape(0.5 * (s + previous_shaped_)"
+              "third_harmonic_ratio(double s, double beta)"
             ],
             "enums": []
           },
@@ -1272,8 +1264,7 @@
               "set_character(double character01)",
               "set_adaa(bool on)",
               "saturate(double u)",
-              "saturate_antiderivative(double u)",
-              "saturate(0.5 * (u + previous_input_)"
+              "saturate_antiderivative(double u)"
             ],
             "enums": []
           },
@@ -1647,15 +1638,15 @@
               "set_oversampling(OutputOversampling factor)",
               "oversampling()",
               "latency_samples_for(OutputOversampling factor)",
-              "halfband_latency_samples()",
               "latency_samples()",
-              "latency_samples_for(oversampling_)",
               "has_tail()",
               "set_drive(double amount)",
               "set_fold(double amount)",
               "set_level(double level)",
               "set_ahd_ms(double attack_ms, double hold_ms, double decay_ms)",
-              "set_ahd_enabled(bool enabled)"
+              "set_ahd_enabled(bool enabled)",
+              "ahd_enabled()",
+              "ahd_gain()"
             ],
             "enums": [
               [
@@ -1903,7 +1894,7 @@
               "set_decay_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "trigger(SampleType velocity = SampleType{1})",
+              "trigger(SampleType velocity = SampleType{ })",
               "gate_on()",
               "gate_off()",
               "next()",
@@ -1924,7 +1915,7 @@
               "set_decay_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "trigger(SampleType velocity = SampleType{1})",
+              "trigger(SampleType velocity = SampleType{ })",
               "gate_on()",
               "gate_off()",
               "next()",
@@ -1948,7 +1939,7 @@
               "set_release_curve(float c)",
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
-              "note_on(SampleType velocity = SampleType{1})",
+              "note_on(SampleType velocity = SampleType{ })",
               "note_off()",
               "gate_on()"
             ],
@@ -1968,7 +1959,7 @@
               "set_curve(double c)",
               "set_loop(bool on, int count = 0)",
               "set_depth(SampleType d)",
-              "trigger(SampleType velocity = SampleType{1})",
+              "trigger(SampleType velocity = SampleType{ })",
               "gate_on()",
               "gate_off()"
             ],
@@ -1991,17 +1982,15 @@
               "tanh(float x)",
               "sin(float x)",
               "cos(float x)",
-              "sin(x + 1.5707963f)",
               "exp2(float x)",
-              "ldexpf(1.0f, i)",
               "log2(float x)",
               "pow(float base, float exp)",
-              "exp2(exp * log2(base)",
               "db_to_gain(float db)",
-              "exp2(db * 0.16609640f)",
               "gain_to_db(float gain)",
-              "log2(gain)",
-              "rcp(float x)"
+              "rcp(float x)",
+              "rsqrt(float x)",
+              "clamp_unit(float x)",
+              "soft_clip(float x)"
             ],
             "enums": []
           }
@@ -2013,8 +2002,7 @@
               "process(SampleType x, SampleType g)",
               "process(SampleType x, SampleType g, double fractional_delay)",
               "set_delay(int samples)",
-              "delay()",
-              "finite_or_zero(static_cast<SampleType>(delayed - g * w)"
+              "delay()"
             ],
             "enums": []
           },
@@ -2128,8 +2116,7 @@
               "push(SampleType x)",
               "written()",
               "readable_through()",
-              "read(double position)",
-              "hermite4(at(i - 1)"
+              "read(double position)"
             ],
             "enums": []
           },
@@ -2169,7 +2156,6 @@
             "methods": [
               "process(int channel, SampleType x)",
               "configure(double tank_rate)",
-              "rng(kOffsetSeed + static_cast<std::uint32_t>(i)",
               "injection_weight(double shimmer, int active_n)"
             ],
             "enums": []
@@ -2302,7 +2288,6 @@
           {
             "class": "FftT",
             "methods": [
-              "constexpr(std::is_same_v<SampleType, float>)",
               "size()",
               "forward(std::complex<SampleType>* data)",
               "inverse(std::complex<SampleType>* data)",
@@ -2339,19 +2324,15 @@
             "class": "FilterDesign",
             "methods": [
               "lowpass(float freq_hz, float Q, float sample_rate)",
-              "normalize(a0, { (1.0f - cos_w0)",
               "highpass(float freq_hz, float Q, float sample_rate)",
-              "normalize(a0, { (1.0f + cos_w0)",
               "bandpass(float freq_hz, float Q, float sample_rate)",
-              "normalize(a0, { alpha, 0.0f, -alpha, -2.0f * cos_w0, 1.0f - alpha })",
               "notch(float freq_hz, float Q, float sample_rate)",
-              "normalize(a0, { 1.0f, -2.0f * cos_w0, 1.0f, -2.0f * cos_w0, 1.0f - alpha })",
               "allpass(float freq_hz, float Q, float sample_rate)",
-              "normalize(a0, { 1.0f - alpha, -2.0f * cos_w0, 1.0f + alpha, -2.0f * cos_w0, 1.0f - alpha })",
               "peaking_eq(float freq_hz, float Q, float gain_db, float sample_rate)",
-              "normalize(a0, { 1.0f + alpha * A, -2.0f * cos_w0, 1.0f - alpha * A, -2.0f * cos_w0, 1.0f - alpha / A })",
               "low_shelf(float freq_hz, float gain_db, float sample_rate, float S = 1.0f)",
-              "normalize(a0, { A * ((A + 1.0f)"
+              "high_shelf(float freq_hz, float gain_db, float sample_rate, float S = 1.0f)",
+              "butterworth_lowpass(int order, float freq_hz, float sample_rate)",
+              "butterworth_highpass(int order, float freq_hz, float sample_rate)"
             ],
             "enums": []
           }
@@ -2361,7 +2342,6 @@
             "class": "FiniteStretchBuilderT",
             "methods": [
               "step()",
-              "finalize_one()",
               "prepare_status()",
               "processor_prepare_status()",
               "failure()",
@@ -2392,7 +2372,6 @@
               "set_coefficients(std::vector<SampleType> coeffs)",
               "order()",
               "lowpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)",
-              "h(static_cast<size_t>(num_taps)",
               "highpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)"
             ],
             "enums": []
@@ -2447,7 +2426,6 @@
             "class": "FreezeHoldT",
             "methods": [
               "checked_retained_bytes(const Config& config, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
               "set_frozen(bool frozen)",
               "is_engaged()",
               "is_latched()",
@@ -2584,7 +2562,6 @@
             "methods": [
               "process(bool a, bool b)",
               "process(const bool* gates, int count)",
-              "process(ha, hb)",
               "set_op(GateOp op)",
               "op()",
               "apply_reset_edge()",
@@ -2638,8 +2615,7 @@
               "degree_count()",
               "degree_semitone(int index)",
               "map_midi(int midi_note, int interval_steps)",
-              "map_hz(double f0_hz, int interval_steps)",
-              "map_midi(midi, interval_steps)"
+              "map_hz(double f0_hz, int interval_steps)"
             ],
             "enums": []
           },
@@ -2655,11 +2631,11 @@
               "voice_interval(int voice)",
               "set_voice_detune_cents(int voice, double cents)",
               "voice_detune_cents(int voice)",
-              "valid(voice)",
               "set_voice_level_db(int voice, double db)",
               "voice_level_db(int voice)",
               "set_voice_enabled(int voice, bool on)",
-              "voice_enabled(int voice)"
+              "voice_enabled(int voice)",
+              "set_dry_level_db(double db)"
             ],
             "enums": []
           }
@@ -2669,17 +2645,11 @@
             "class": "IirDesign",
             "methods": [
               "chebyshev1_lowpass(int order, float freq_hz, float ripple_db, float sample_rate)",
-              "cheb1_cascade(order, freq_hz, ripple_db, sample_rate, /*highpass=*/false)",
               "chebyshev1_highpass(int order, float freq_hz, float ripple_db, float sample_rate)",
-              "cheb1_cascade(order, freq_hz, ripple_db, sample_rate, /*highpass=*/true)",
               "chebyshev2_lowpass(int order, float stop_freq_hz, float stop_atten_db, float sample_rate)",
-              "cheb2_cascade(order, stop_freq_hz, stop_atten_db, sample_rate, /*highpass=*/false)",
               "chebyshev2_highpass(int order, float stop_freq_hz, float stop_atten_db, float sample_rate)",
-              "cheb2_cascade(order, stop_freq_hz, stop_atten_db, sample_rate, /*highpass=*/true)",
               "elliptic_lowpass(int order, float freq_hz, float passband_ripple_db, float stopband_attn_db, float sample_rate)",
-              "elliptic_cascade(order, freq_hz, passband_ripple_db, stopband_attn_db, sample_rate, /*highpass=*/false)",
-              "elliptic_highpass(int order, float freq_hz, float passband_ripple_db, float stopband_attn_db, float sample_rate)",
-              "elliptic_cascade(order, freq_hz, passband_ripple_db, stopband_attn_db, sample_rate, /*highpass=*/true)"
+              "elliptic_highpass(int order, float freq_hz, float passband_ripple_db, float stopband_attn_db, float sample_rate)"
             ],
             "enums": []
           }
@@ -3039,7 +3009,6 @@
             "class": "SampleHoldT",
             "methods": [
               "process(SampleType input, bool clock)",
-              "process(input, static_cast<double>(trigger)",
               "set_threshold(SampleType threshold)",
               "set_glide_ms(SampleType ms)",
               "set_glide_mode(typename SlewLimiterT<SampleType>::Mode m)",
@@ -3181,12 +3150,9 @@
             "class": "MultichannelPhaseCoordinatorT",
             "methods": [
               "checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
               "reference_magnitudes()",
               "num_bins()",
-              "process_group(std::complex<SampleType>* const* frames, int num_bins, int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType{0})",
-              "sum(SampleType{0}, SampleType{0})",
-              "r(std::cos(rot)"
+              "process_group(std::complex<SampleType>* const* frames, int num_bins, int analysis_hop, int synthesis_hop, SampleType reset_amount = SampleType{ })"
             ],
             "enums": []
           }
@@ -3207,7 +3173,6 @@
             "class": "NoiseMorpherT",
             "methods": [
               "checked_retained_bytes(int num_bins, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
               "num_bins()",
               "push_envelope(const SampleType* noise_mag)",
               "advance()",
@@ -3251,14 +3216,7 @@
               "max_time_ratio()",
               "max_pitch_semitones()",
               "fft_size()",
-              "recommend_window(const SampleType* const* in, long frames, int channels, double sample_rate)",
-              "x(static_cast<size_t>(frames)",
-              "fail(err, \"out_frames must equal round(in_frames * time_ratio)",
-              "varispeed_render(in, in_frames, out, out_frames, opts.time_ratio)",
-              "inter(static_cast<size_t>(ch)",
-              "ip(static_cast<size_t>(ch)",
-              "pp(static_cast<size_t>(ch)",
-              "fail(err, \"pitch stage failed\")"
+              "recommend_window(const SampleType* const* in, long frames, int channels, double sample_rate)"
             ],
             "enums": []
           }
@@ -3318,8 +3276,7 @@
             "class": "VcoTuning",
             "methods": [
               "frequency_hz(double control_volts)",
-              "phase_increment(double control_volts, double sample_rate)",
-              "frequency_hz(control_volts)"
+              "phase_increment(double control_volts, double sample_rate)"
             ],
             "enums": []
           },
@@ -3366,7 +3323,6 @@
             "class": "LofiWtOscillator",
             "methods": [
               "set_tables(std::vector<std::vector<double>> tables, int bit_depth = kDefaultBitDepth)",
-              "table(table_length_, 0.0)",
               "set_scan(double pos)",
               "set_reconstruction(bool enabled)",
               "set_oversample_factor(int factor)",
@@ -3483,15 +3439,7 @@
               "configure(const PhaseVocoderConfig& config)",
               "config()",
               "time_stretch(const std::vector<SampleType>& input, double factor)",
-              "resample_linear(input, target)",
-              "out(out_len, SampleType{0})",
-              "norm(out_len, SampleType{0})",
-              "fft(N)",
-              "buf(N)",
-              "prev_phase(N, 0.0)",
-              "sum_phase(N, 0.0)",
-              "pitch_shift(const std::vector<SampleType>& input, double semitones)",
-              "resample_linear(stretched, input.size()"
+              "pitch_shift(const std::vector<SampleType>& input, double semitones)"
             ],
             "enums": []
           }
@@ -3586,10 +3534,8 @@
               "eval_complex(const std::vector<SampleType>& coeffs, std::complex<SampleType> z)",
               "roots_quadratic(SampleType a, SampleType b, SampleType c)",
               "multiply(const std::vector<SampleType>& a, const std::vector<SampleType>& b)",
-              "result(a.size()",
               "add(const std::vector<SampleType>& a, const std::vector<SampleType>& b)",
               "scale(const std::vector<SampleType>& p, SampleType s)",
-              "result(p.size()",
               "derivative(const std::vector<SampleType>& p)"
             ],
             "enums": []
@@ -3635,7 +3581,6 @@
               "process(SampleType input)",
               "process(SampleType* data, int num_samples)",
               "get()",
-              "process_impl(input, std::index_sequence_for<Processors...>{})",
               "size()"
             ],
             "enums": []
@@ -3682,17 +3627,15 @@
               "set_ratio(double input_rate, double output_rate)",
               "process_block_detailed(const SampleType* const* input, std::size_t in_count, SampleType* const* output, std::size_t out_capacity)",
               "process_block(const SampleType* const* input, std::size_t in_count, SampleType* const* output, std::size_t out_capacity)",
-              "process_block_detailed(input, in_count, output, out_capacity)",
               "process_block_mono_detailed(const SampleType* input, std::size_t in_count, SampleType* output, std::size_t out_capacity)",
-              "process_block_detailed(in_ptrs, in_count, out_ptrs, out_capacity)",
               "process_block_mono(const SampleType* input, std::size_t in_count, SampleType* output, std::size_t out_capacity)",
-              "process_block_mono_detailed(input, in_count, output, out_capacity)",
               "max_output_for(std::size_t in_count)",
               "taps_per_phase()",
               "phases()",
               "prototype_length()",
               "input_rate()",
-              "output_rate()"
+              "output_rate()",
+              "channels()"
             ],
             "enums": []
           }
@@ -3931,8 +3874,7 @@
               "set_bypassed(bool bypassed)",
               "bypassed()",
               "fading()",
-              "wet_mix()",
-              "constexpr(requires { processor_.reset()"
+              "wet_mix()"
             ],
             "enums": []
           }
@@ -3972,7 +3914,6 @@
             "class": "SpectralEnvelopeShifterT",
             "methods": [
               "checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
               "num_bins()",
               "order()",
               "process_group(std::complex<SampleType>* const* frames, int channels, int num_bins, SampleType warp)"
@@ -4004,10 +3945,6 @@
             "class": "ColorMapper",
             "methods": [
               "map(float t)",
-              "map_inferno(t)",
-              "map_viridis(t)",
-              "map_grayscale(t)",
-              "map_heat(t)",
               "set_ramp(ColorRamp ramp)",
               "ramp()"
             ],
@@ -4018,15 +3955,11 @@
             "methods": [
               "configure(int fft_size, float sample_rate, FrequencyScale scale = FrequencyScale::logarithmic)",
               "bin_to_display(int bin)",
-              "hz_to_display(freq)",
               "display_to_bin(float display_pos)",
-              "hz_to_bin(freq)",
               "bin_to_hz(int bin)",
               "hz_to_bin(float hz)",
               "hz_to_display(float hz)",
-              "hz_to_mel(hz)",
               "display_to_hz(float pos)",
-              "mel_to_hz(pos * hz_to_mel(nyquist_)",
               "num_bins()",
               "nyquist()",
               "scale()"
@@ -4062,7 +3995,6 @@
               "amplitude(std::size_t index)",
               "set_level(SampleType level)",
               "level()",
-              "snap_to_zero(level_ * sum)",
               "peak_bound()"
             ],
             "enums": []
@@ -4083,9 +4015,9 @@
               "stage_pulse_count(int s)",
               "set_stage_gate_mode(int s, StageGateMode m)",
               "stage_gate_mode(int s)",
-              "in_range(s)",
               "set_stage_slide(int s, bool on)",
-              "stage_slide(int s)"
+              "stage_slide(int s)",
+              "set_stage_skip(int s, bool on)"
             ],
             "enums": []
           }
@@ -4101,8 +4033,8 @@
               "num_bins()",
               "fft_size()",
               "hop_size()",
-              "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType{-120.0f})",
-              "latest_magnitude_db(SampleType floor_db = SampleType{-120.0f})"
+              "to_db(SampleType* magnitudes, int count, SampleType floor_db = SampleType{ })",
+              "latest_magnitude_db(SampleType floor_db = SampleType{ })"
             ],
             "enums": []
           }
@@ -4113,7 +4045,6 @@
             "methods": [
               "process(const SampleType* mag)",
               "checked_retained_bytes(const StnConfig& config, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
               "num_bins()",
               "center_magnitude()",
               "latency_frames()"
@@ -4198,9 +4129,7 @@
             "class": "TransientPhasePolicyT",
             "methods": [
               "checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
-              "charge(target_max_bytes)",
-              "analyze(const std::complex<SampleType>* const* frames, int channels, int num_bins)",
-              "sum(SampleType{0}, SampleType{0})"
+              "analyze(const std::complex<SampleType>* const* frames, int channels, int num_bins)"
             ],
             "enums": []
           }
@@ -4227,7 +4156,6 @@
             "methods": [
               "process(SampleType run, SampleType reset_in, SampleType clock)",
               "process(SampleType run, SampleType reset_in)",
-              "process(run, reset_in, SampleType{0})",
               "set_refractory_ms(double ms)",
               "set_thresholds(double high, double low)",
               "latency_samples()"
@@ -4386,8 +4314,6 @@
               "set_lag_ms(double ms)",
               "gain_for(SampleType control)",
               "next_gain(SampleType control)",
-              "gain_for(lag_.next()",
-              "next_gain(control)",
               "control()"
             ],
             "enums": [
@@ -4557,10 +4483,10 @@
               "current_band()",
               "is_crossfading()",
               "band_max_frequency_hz(std::size_t i)",
-              "make_sine(std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
-              "make_saw(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
-              "make_square(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})",
-              "make_triangle(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{48000.0f})"
+              "make_sine(std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{ })",
+              "make_saw(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{ })",
+              "make_square(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{ })",
+              "make_triangle(std::size_t bands = 10, std::size_t table_length = 2048, SampleType reference_sample_rate = SampleType{ })"
             ],
             "enums": []
           },
@@ -4580,8 +4506,7 @@
           {
             "class": "WindowFunction",
             "methods": [
-              "generate(int size, Type type, SampleType param = SampleType{0.0f})",
-              "w(size)",
+              "generate(int size, Type type, SampleType param = SampleType{ })",
               "apply(SampleType* buffer, const std::vector<SampleType>& window)"
             ],
             "enums": [
@@ -4627,7 +4552,6 @@
             "methods": [
               "process(const SampleType* const* in, SampleType* const* out, int n)",
               "load_impulse_response(const SampleType* const* ir_channels, int ir_channel_count, int ir_length, double ir_sample_rate)",
-              "work(static_cast<std::size_t>(ir_channel_count)",
               "set_ir_gain_db(double db)",
               "set_predelay_ms(double ms)",
               "set_true_stereo(bool on)",
@@ -4638,7 +4562,8 @@
               "set_highcut_hz(double hz)",
               "set_normalize_mode(IrNormalizeMode mode)",
               "set_tail_trim_db(double db)",
-              "set_tail_fade_ms(double ms)"
+              "set_tail_fade_ms(double ms)",
+              "set_resample_taps_per_phase(int taps)"
             ],
             "enums": []
           }
@@ -4651,12 +4576,7 @@
               "log2_size()",
               "forward_cost()",
               "inverse_cost()",
-              "done()",
-              "begin_forward_from_ring(const SampleType* ring, std::size_t base, std::size_t mask)",
-              "begin_inverse_in_place()",
-              "cancel()",
-              "advance(const SlicedFftPlanT& plan, std::complex<SampleType>* data, long budget)",
-              "w(static_cast<SampleType>(tw.real()"
+              "transform_real_padded(const double* src, int src_len, std::complex<SampleType>* dst)"
             ],
             "enums": [
               [
