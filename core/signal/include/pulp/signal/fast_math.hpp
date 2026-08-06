@@ -1,28 +1,26 @@
 #pragma once
 
 /// @file fast_math.hpp
-/// Fast math approximations for real-time audio DSP.
-/// All functions are branchless and SIMD-friendly (no conditionals in hot path).
+/// Scalar math helpers for real-time audio DSP.
 
-#include <algorithm>  // std::max / std::min, used by clamp()
+#include <algorithm> // std::max / std::min, used by clamp()
+#include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <cmath>
 
 namespace pulp::signal {
 
-/// Fast approximations of common math functions optimized for audio DSP.
+/// Math helpers optimized for audio DSP.
 ///
 /// RT contract: all functions are stateless scalar math helpers and allocate no
 /// memory.
 ///
-/// These trade precision for speed — typically accurate to 3-5 decimal
-/// places, which is more than sufficient for audio processing where
-/// the output is ultimately quantized to 16/24/32-bit samples.
+/// Functions documented as approximations trade precision for speed. Functions
+/// without that label retain the standard-library numerical contract.
 ///
 /// @code
 /// float out = FastMath::tanh(input);       // ~4x faster than std::tanh
-/// float freq = FastMath::exp2(pitch);       // ~3x faster than std::exp2
+/// float freq = FastMath::exp2(pitch);
 /// float phase = FastMath::sin(angle);       // ~5x faster than std::sin
 /// float db = FastMath::log2(amplitude);     // ~3x faster than std::log2
 /// @endcode
@@ -41,8 +39,10 @@ struct FastMath {
     /// https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
     static float tanh(float x) {
         // Clamp to avoid overflow in the polynomial
-        if (x < -4.0f) return -1.0f;
-        if (x > 4.0f) return 1.0f;
+        if (x < -4.0f)
+            return -1.0f;
+        if (x > 4.0f)
+            return 1.0f;
         float x2 = x * x;
         float num = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
         float den = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
@@ -56,9 +56,11 @@ struct FastMath {
         constexpr float two_pi = 6.28318530f;
         // Wrap to [0, 2*pi)
         x = std::fmod(x, two_pi);
-        if (x < 0) x += two_pi;
+        if (x < 0)
+            x += two_pi;
         // Map to [-pi, pi]
-        if (x > pi) x -= two_pi;
+        if (x > pi)
+            x -= two_pi;
         // Parabolic approximation with correction
         constexpr float B = 4.0f / pi;
         constexpr float C = -4.0f / (pi * pi);
@@ -73,17 +75,16 @@ struct FastMath {
         return sin(x + 1.5707963f); // x + pi/2
     }
 
-    /// Fast exp2 approximation (2^x, max error ~0.06% for any x).
+    /// Computes 2^x with the platform's standard float exp2 semantics.
+    ///
+    /// NaN propagates, positive infinity and finite overflow produce positive
+    /// infinity, and negative infinity and finite underflow produce positive
+    /// zero. Subnormal results and representable integer powers are preserved.
+    /// This deliberately uses the standard implementation: a polynomial plus
+    /// `ldexp` measured slower on supported Apple hardware while weakening
+    /// these edge contracts.
     static float exp2(float x) {
-        // Schraudolph's method with polynomial refinement
-        float xi = std::floor(x);
-        float xf = x - xi;
-        // Polynomial for 2^frac on [0, 1]
-        float p = 1.0f + xf * (0.6931472f + xf * (0.2402265f + xf * 0.0558015f));
-        // Multiply by 2^integer part via bit manipulation
-        int32_t i = static_cast<int32_t>(xi);
-        // ldexpf is well-optimized on all platforms
-        return p * ldexpf(1.0f, i);
+        return std::exp2(x);
     }
 
     /// Fast log2 approximation (max error ~0.007 for x > 0).
@@ -104,7 +105,8 @@ struct FastMath {
 
     /// Fast pow(base, exp) via exp2(exp * log2(base)).
     static float pow(float base, float exp) {
-        if (base <= 0) return 0;
+        if (base <= 0)
+            return 0;
         return exp2(exp * log2(base));
     }
 
@@ -115,7 +117,8 @@ struct FastMath {
 
     /// Fast linear gain to dB: 20 * log10(gain) = 20 * log2(gain) / log2(10).
     static float gain_to_db(float gain) {
-        if (gain <= 0) return -200.0f;
+        if (gain <= 0)
+            return -200.0f;
         return log2(gain) * 6.0205999f; // 20 / log2(10) ≈ 6.0205999
     }
 
@@ -145,8 +148,10 @@ struct FastMath {
 
     /// Soft clipping (polynomial saturation, no discontinuity).
     static float soft_clip(float x) {
-        if (x <= -1.5f) return -1.0f;
-        if (x >= 1.5f) return 1.0f;
+        if (x <= -1.5f)
+            return -1.0f;
+        if (x >= 1.5f)
+            return 1.0f;
         return x - (x * x * x) / 6.75f;
     }
 };
@@ -171,7 +176,7 @@ struct FastMath {
 /// emitter) both route through it, so the per-node bit-exact null test stays
 /// green under either setting.
 #ifndef PULP_SIGNAL_FAST_LADDER_TANH
-#define PULP_SIGNAL_FAST_LADDER_TANH 0  // default: exact std::tanh (fidelity)
+#define PULP_SIGNAL_FAST_LADDER_TANH 0 // default: exact std::tanh (fidelity)
 #endif
 
 /// The ladder's `float` saturator, gated by `PULP_SIGNAL_FAST_LADDER_TANH`.
