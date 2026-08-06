@@ -451,6 +451,10 @@ docs:
     path: reference/fractional-delay.md
     kind: reference
     summary: Shared fractional-delay interpolation and history primitives for feedforward and feedback compositions
+  - slug: nonlinear-shaping
+    path: reference/nonlinear-shaping.md
+    kind: reference
+    summary: Oversampled wavefolding, harmonic shaping, and ring-modulation primitives
 
   - slug: cli
     path: reference/cli.md
