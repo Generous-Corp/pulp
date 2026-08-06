@@ -250,6 +250,12 @@ usually means the processor emitted (almost) nothing, which is the finding.
 ## Discipline that keeps it trustworthy
 
 - **Release only.** A Debug DSP/UI build mismeasures levels and timing.
+- **Do not assume a polynomial is faster than the platform math library.**
+  `FastMath::exp2` delegates to the standard float implementation because a
+  cubic-plus-`ldexp` path measured slower on supported Apple hardware while
+  losing NaN, infinity, overflow, underflow, and subnormal semantics. A
+  replacement needs a repeatable Release benchmark over pitch and audio-rate FM
+  domains as well as dense numerical and product-level error proofs.
 - **Analyzer Determinism Contract** — every spectral/estimator assertion declares
   its stimulus, window (rectangular for a bin-coherent tone or an impulse; Hann
   for broadband — a Hann window annihilates an impulse at n=0), warm-up trim,
