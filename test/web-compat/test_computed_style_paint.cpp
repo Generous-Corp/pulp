@@ -10,6 +10,7 @@
 // invented equivalents.
 
 #include <catch2/catch_test_macros.hpp>
+#include "../paint_probe.hpp"
 #include "test_helpers.hpp"
 
 #include <algorithm>
@@ -39,35 +40,14 @@ Frame shoot(View& root, uint32_t w, uint32_t h) {
 
 bool near(int a, int b, int tol) { return std::abs(a - b) <= tol; }
 
-/// Whether this build can actually put pixels in a buffer.
-///
-/// Every case in this file samples rendered pixels, so without a working
-/// rasteriser they all fail — and they fail as "the colour is wrong" rather
-/// than "there was no colour", which sends a reader looking for a paint bug
-/// that is not there. The sanitizer lane does exactly this: it never enables
-/// Skia, so this whole file went red on a build that was never able to run it.
-///
-/// A runtime probe rather than a build flag, because the same emptiness comes
-/// from a missing Skia AND from a Skia that has no device to draw on. Cached:
-/// the answer cannot change within a run.
-bool paint_available() {
-    static const bool ok = [] {
-        TestEnvironment env(8, 8);
-        env.run("setBackground('', '#ff0000');");
-        return shoot(env.root, 8, 8).ok();
-    }();
-    return ok;
-}
-
 /// A skip that names its missing dependency. Silence would read as coverage.
-#define REQUIRE_PAINT()                                                       \
-    do {                                                                      \
-        if (!paint_available()) {                                             \
-            WARN("SKIPPED: this build cannot rasterise (no Skia surface) — "  \
-                 "the computed-style paint cases are NOT covered by this run"); \
-            return;                                                           \
-        }                                                                     \
-    } while (0)
+///
+/// The probe itself is shared (test/paint_probe.hpp) because this file was not
+/// the only one sampling rendered pixels: the same no-rasteriser build fails
+/// the native-filter and browser-capture suites too, and a guard that lives in
+/// one file only fixes one file.
+#define REQUIRE_PAINT() \
+    PULP_SKIP_WITHOUT_PAINT("the computed-style paint cases")
 
 
 }  // namespace

@@ -134,6 +134,12 @@ catch_discover_tests(pulp-test-design-export
 # View but never a paint would pass the latter and still draw a hard edge.
 pulp_add_test_suite(pulp-test-native-filter-render LIBRARIES pulp::view)
 
+# The shared rasteriser probe that decides whether the pixel-sampling suites
+# run or skip. Runs on every lane and is meaningful on both sides of the
+# answer, so a build without Skia still proves the probe agrees with what the
+# renderer does there.
+pulp_add_test_suite(pulp-test-paint-probe LIBRARIES pulp::view)
+
 # A design's accent reaching its controls. Tokens are copied by name, so a
 # design naming `primary` leaves `knob.arc` unset and every knob falls back to
 # the built-in blue whatever the design said.

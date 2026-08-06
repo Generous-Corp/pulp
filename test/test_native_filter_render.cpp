@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "paint_probe.hpp"
+
 #include <pulp/view/css_effect_parse.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
@@ -113,6 +115,10 @@ DesignIR dot_with_shadow(const std::string& blend, bool inset = false) {
 /// does not. Counted rather than compared: the point is whether the halo
 /// exists at all, and a count says that without depending on what a blend mode
 /// does to the halo's colour.
+///
+/// Reads the Skia raster buffer, so a case calling this must first call
+/// PULP_SKIP_WITHOUT_PAINT. Without it the case fails on a no-Skia lane at the
+/// REQUIRE below, as a paint bug that is not there.
 int halo_pixels(const DesignIR& ir) {
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
@@ -142,6 +148,10 @@ struct Rgb {
 /// The centre pixel of the rendered tree, from the Skia raster path's own
 /// buffer. No PNG encode/decode round-trip, so the value read is the value
 /// composited.
+///
+/// Reads the Skia raster buffer, so a case calling this must first call
+/// PULP_SKIP_WITHOUT_PAINT. Without it the case fails on a no-Skia lane at the
+/// REQUIRE below, as a paint bug that is not there.
 Rgb render_centre(const DesignIR& ir) {
     auto root = build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root != nullptr);
@@ -209,6 +219,7 @@ TEST_CASE("the CSS blend parser maps the additive keywords",
 
 TEST_CASE("plus-lighter composites additively in the native tree",
           "[view][blend][design]") {
+    PULP_SKIP_WITHOUT_PAINT("additive compositing in the native tree");
     // A bar of (200,107,55) over a ground of (72,50,33). Additive compositing
     // gives (272,157,88), which clamps to (255,157,88) — brighter than either
     // input in every channel. Source-over leaves the bar's own colour.
@@ -241,6 +252,7 @@ TEST_CASE("plus-lighter composites additively in the native tree",
 
 TEST_CASE("a blend mode does not delete the node's outset shadow",
           "[view][blend][shadow][design]") {
+    PULP_SKIP_WITHOUT_PAINT("a blend layer's effect on an outset shadow");
     // A compositing layer's bounds are a CLIP, and an outset shadow paints
     // INSIDE that layer. Sized to the border box, the layer threw the shadow
     // away — every pixel of it, because a 16px glow on a 24px box is almost
@@ -270,6 +282,7 @@ TEST_CASE("a blend mode does not delete the node's outset shadow",
 
 TEST_CASE("an inset shadow does not grow a blend node's layer",
           "[view][blend][shadow][design]") {
+    PULP_SKIP_WITHOUT_PAINT("an inset shadow's effect on a blend layer");
     // The other half of the contract, and the reason the extent is computed
     // from the shadow list rather than padded by a constant. An inset shadow
     // paints inside the padding box by definition, so it must contribute

@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "paint_probe.hpp"
 #include "tools/import-design/browser_capture_ir.hpp"
 
 #include <pulp/view/design_import.hpp>
@@ -65,6 +66,12 @@ bool any_capture_node(const pulp::view::IRNode& node) {
 /// The panel rendered from its own lowered nodes, as PNG bytes at the capture's
 /// device scale — the same materialize-then-raster path `pulp import-design`
 /// uses, so what is measured is what ships.
+///
+/// The `skia` backend below is a request, not a guarantee: without Skia the
+/// capture falls back to CoreGraphics, which composites no filters. The PNG is
+/// then non-empty and wrong rather than absent, so the failure surfaces as a
+/// similarity of 0 instead of an empty buffer. A case calling this must first
+/// call PULP_SKIP_WITHOUT_PAINT.
 std::vector<uint8_t> render_panel() {
     BrowserCaptureIrOptions options;
     options.native_panel_lowering = true;
@@ -144,6 +151,7 @@ void require_filter_matches_chrome(const std::vector<uint8_t>& reference,
 
 TEST_CASE("a non-blur backdrop-filter paints what Chrome painted",
           "[browser-capture][native-lowering][backdrop-filter]") {
+    PULP_SKIP_WITHOUT_PAINT("non-blur backdrop-filter against Chrome's pixels");
     const auto reference = read_bytes(fixture_dir() / "browser.png");
     REQUIRE_FALSE(reference.empty());
     const auto render = render_panel();
@@ -160,6 +168,7 @@ TEST_CASE("a non-blur backdrop-filter paints what Chrome painted",
 
 TEST_CASE("a two-function backdrop-filter list composes in order",
           "[browser-capture][native-lowering][backdrop-filter]") {
+    PULP_SKIP_WITHOUT_PAINT("backdrop-filter list ordering");
     // `grayscale(1) brightness(1.6)` — greyed first, then brightened. Applied
     // in the other order the result is a brightened colour then greyed, which
     // clamps differently and lands on a different grey. One entry handled and
