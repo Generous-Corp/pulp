@@ -64,6 +64,25 @@ def main() -> int:
     else:
         check(False, "recovered source cannot be written inside the repository")
 
+    with tempfile.TemporaryDirectory() as tmp:
+        link = os.path.join(tmp, "repo-link")
+        os.symlink(R.REPOSITORY, link)
+        try:
+            R.external_output_path(os.path.join(link, "recovered.txt"))
+        except ValueError:
+            check(True, "a parent symlink cannot bypass the repository fence")
+        else:
+            check(False, "a parent symlink cannot bypass the repository fence")
+        target = os.path.join(R.REPOSITORY, "would-overwrite.txt")
+        output_link = os.path.join(tmp, "recovered.txt")
+        os.symlink(target, output_link)
+        try:
+            R.external_output_path(output_link)
+        except ValueError:
+            check(True, "an output-file symlink cannot overwrite the repository")
+        else:
+            check(False, "an output-file symlink cannot overwrite the repository")
+
     known = ("The oscillator produces a waveform while an envelope shapes "
              "amplitude and the filter removes frequency bands. ") * 4
     block = R.decode_block(known, language)

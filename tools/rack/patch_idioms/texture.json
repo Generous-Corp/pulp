@@ -289,26 +289,6 @@
       "is": "A source repeatedly re-triggered into short windows, so the ear hears a cloud of fragments rather than a continuous signal.",
       "sounds_right_when": "the texture is made of audible particles whose density can change.",
       "source": "Roads' granular synthesis, as approximated in modular",
-      "listen_for": {
-        "sounds_like": "a continuous but internally animated surface whose particles have begun to fuse, not a row of separately countable ticks",
-        "confusable_with": "a slow pulse train below the fusion boundary, or a flat sustained tone with no audible particle motion",
-        "expect": [
-          {
-            "field": "onsets.per_second",
-            "op": ">=",
-            "value": 20,
-            "why": "below twenty detected events a second this is still a sequence of separate grains, not yet the perceptually fused cloud the request names",
-            "grounding": "The lower edge is transferred from the 20 to 30 events-per-second echo-to-reverberation transition described in Roads Chapter 23; it is an experiment-ready lower bound, not a claim that all source material fuses at one universal rate.",
-            "source_evidence": {
-              "work": "Curtis Roads, The Computer Music Tutorial",
-              "chapter": 23,
-              "epub_member": "index_split_013.html",
-              "sha256": "c7b7d6f3abfe705125976ace3cf92ca60be26e0171898516cc0c0c3aa0b2fb2e",
-              "locator": "Temporal integration, echo density and reverberation transition"
-            }
-          }
-        ]
-      },
       "at_least": {
         "amplifier": 1,
         "clock": 1

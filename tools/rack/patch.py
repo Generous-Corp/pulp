@@ -27,6 +27,8 @@ import re
 import time
 import sys
 
+from module_kinds import is_audio_interface
+
 
 def find_claude() -> str:
     """Where the model CLI is, asked of the one place that knows.
@@ -1045,6 +1047,13 @@ def place_physical_targets(patch: dict, inv: dict) -> list[str]:
         target["id"] = param_id
         target["value"] = value
     return []
+
+
+def prepare_and_lint(patch: dict, inv: dict) -> tuple[dict, list[str]]:
+    """Resolve physical targets, lay out panels, and report every known fault."""
+    physical_errs = place_physical_targets(patch, inv)
+    patch = reflow(patch, inv)
+    return patch, physical_errs + lint(patch, inv)
 
 
 def lint(patch: dict, inv: dict) -> list[str]:
@@ -3591,12 +3600,6 @@ def module_activity(report: str, patch: dict) -> list:
     return named
 
 
-def is_audio_interface(module: dict) -> bool:
-    """Whether a Core module is an actual speaker-facing audio interface."""
-    return (module.get("plugin") == "Core" and
-            str(module.get("model", "")).startswith("Audio"))
-
-
 def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     """The specific silent output upstream of the listener, even on a live module.
 
@@ -4239,7 +4242,6 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # Physical values are instructions to the generator, not fields Rack
         # understands. Resolve them while the inventory still carries the
         # scan-5 unit metadata, before linting or writing the patch.
-        physical_errs = place_physical_targets(patch, inv)
         # Lay the panels out BEFORE judging them.
         #
         # Positions are arithmetic, not something the model should be graded
@@ -4248,10 +4250,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         # so the overlap check rejected attempt after attempt for the one
         # fault the very next line could fix, burning model calls on
         # "LFO overlaps SEQ by 2HP". Fix it, then judge what is left.
-        patch = reflow(patch, inv)
-        errs = lint(patch, inv)
-        if physical_errs:
-            errs = physical_errs + errs
+        patch, errs = prepare_and_lint(patch, inv)
         if errs:
             # The LINT's reasons, not `report` -- that is the gate's, and the
             # gate has not run when a patch is rejected here. Passing it

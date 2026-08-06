@@ -607,7 +607,7 @@ def check_give_up_still_ends_the_run() -> tuple:
     # LINT -- that patch names modules Rack cannot create, so the file would
     # not open. Only the two idiom branches and the silent one build one.
     gen = src[src.index("def generate("):src.index("def main(argv)")]
-    lint_branch = gen[gen.index("errs = lint("):
+    lint_branch = gen[gen.index("patch, errs = prepare_and_lint("):
                       gen.index("verdict, report = audibility(")]
     if "Shortfall(" in lint_branch or "better(" in lint_branch:
         bad += 1

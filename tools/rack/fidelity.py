@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 import crash_watch                                              # noqa: E402
 import fetch_sdk                                                # noqa: E402
 import measure_ranges as mr                                     # noqa: E402
+from module_kinds import is_audio_interface                     # noqa: E402
 
 PROBE_PLUGIN = "ForgeProbe"
 PROBE_MODEL = "PROBE"
@@ -170,21 +171,6 @@ def drop_scratch(scratch: str) -> None:
 
 # Modules that reach a sound card. Removed before a run: a patch under test is
 # an oscillator, the harness is unattended, and the machine is somebody's desk.
-AUDIO_MODELS = {("Core", "AudioInterface"), ("Core", "AudioInterface2"),
-                ("Core", "AudioInterface16"), ("Core", "Audio"),
-                ("Core", "Audio2"), ("Core", "Audio8"), ("Core", "Audio16")}
-
-
-def is_audio_interface(mod: dict) -> bool:
-    if (mod.get("plugin"), mod.get("model")) in AUDIO_MODELS:
-        return True
-    # By name as well as by slug: Rack has renamed these across versions and a
-    # module that slips through reaches a speaker, which is the one failure
-    # here that is not merely a wrong answer.
-    return (mod.get("plugin") == "Core"
-            and str(mod.get("model", "")).startswith("Audio"))
-
-
 def sources_feeding(patch: dict, module_ids: set) -> list[tuple[int, int]]:
     """(moduleId, outputId) for every cable that ends in one of `module_ids`.
 

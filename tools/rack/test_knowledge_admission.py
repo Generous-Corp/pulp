@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Candidate quarantine and semantic dedupe controls."""
+"""Candidate quarantine and canonical-claim dedupe controls."""
 import copy
 import os
 import sys
@@ -26,7 +26,7 @@ def main() -> int:
         print(f"  WRONG  admission metadata failed lint: {problems[:3]}")
         bad += 1
     else:
-        print("  ok     canonical locator and semantic fingerprint pass lint")
+        print("  ok     canonical locator and canonical claim fingerprint pass lint")
 
     duplicate = copy.deepcopy(all_entries)
     clone = copy.deepcopy(candidate)
@@ -35,17 +35,17 @@ def main() -> int:
     clone["anchor"]["page"] = 231
     duplicate[clone["id"]] = clone
     got = knowledge.problems(duplicate, idiom_check.load_idioms())
-    if not any("duplicates the semantic claim" in problem for problem in got):
-        print("  WRONG  a duplicate guidance row escaped semantic dedupe")
+    if not any("duplicates the canonical claim" in problem for problem in got):
+        print("  WRONG  a duplicate guidance row escaped canonical dedupe")
         bad += 1
     else:
         print("  ok     corroboration must attach to one row, not duplicate it")
 
     broken = copy.deepcopy(all_entries)
-    broken["post-multiplier-low-pass"]["semantic_fingerprint"] = "0" * 64
+    broken["post-multiplier-low-pass"]["canonical_claim_fingerprint"] = "0" * 64
     got = knowledge.problems(broken, idiom_check.load_idioms())
     if not any("does not match its canonical claim" in problem for problem in got):
-        print("  WRONG  a stale semantic fingerprint escaped lint")
+        print("  WRONG  a stale canonical claim fingerprint escaped lint")
         bad += 1
     else:
         print("  ok     canonical claim edits require a new fingerprint")

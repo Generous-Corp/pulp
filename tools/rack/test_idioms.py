@@ -1297,24 +1297,14 @@ def check_book_guidance_tranche() -> int:
     else:
         print("  ok     a changed canonical topology fails the quarantine")
 
-    # THE ROADS RECORD REACHES THE GENERATOR. Its numeric lower edge also has
-    # a real false side: nineteen events must fail and twenty must pass. This
-    # pins the boundary the catalogue A/B evaluator consumes without inventing
-    # a second tolerance in test code.
+    # THE ROADS RECORD REACHES THE GENERATOR only through the optional
+    # technique layer. The always-on idiom owns topology, never sourced bounds.
     text = patch_vocabulary.for_prompt("a granular cloud", idioms)
     if "event-fusion-density" not in text or "20 events per second" not in text:
         print("  WRONG  Roads' event-fusion guidance never reaches the model")
         bad += 1
     else:
         print("  ok     Roads' event-fusion record and number reach the model")
-    expect = idioms["granular-cloud"]["listen_for"]["expect"][0]
-    passes = lambda actual: actual >= expect["value"]  # its declared >= op
-    if (expect["field"] != "onsets.per_second" or expect["op"] != ">=" or
-            passes(19) or not passes(20)):
-        print("  WRONG  the event-fusion expectation has no working failure edge")
-        bad += 1
-    else:
-        print("  ok     19 events/s fails and 20 events/s passes the listen gate")
 
     # MATCHED OFF/ON, WITHOUT CHECKOUT TRICKS. OFF must remove only optional
     # catalogue/technique prose. The idiom and its topology remain byte-for-
@@ -1335,7 +1325,8 @@ def check_book_guidance_tranche() -> int:
     if topology not in off or topology not in on:
         print("  WRONG  the book-guidance switch changed the idiom topology")
         bad += 1
-    elif "event-fusion-density" in off or "event-fusion-density" not in on:
+    elif ("event-fusion-density" in off or "20 events per second" in off or
+          "event-fusion-density" not in on or "20 events per second" not in on):
         print("  WRONG  FORGE_BOOK_GUIDANCE does not isolate the book layer")
         bad += 1
     else:

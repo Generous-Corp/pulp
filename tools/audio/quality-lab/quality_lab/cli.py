@@ -184,6 +184,7 @@ def _cmd_catalogue_ab(args: argparse.Namespace) -> int:
     try:
         report = reference_free.compare_files(
             args.without, args.with_catalogue, args.expectations,
+            args.experiment,
             args.holdout_without or None, args.holdout_with or None)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"[quality-lab catalogue-ab] ERROR — {exc}")
@@ -393,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
     cab.add_argument("with_catalogue", help="catalogue-on WAV")
     cab.add_argument("--expectations", required=True,
                      help="JSON target/min/max rules with tolerance and source citation")
+    cab.add_argument("--experiment", required=True,
+                     help="content-bound off/on generation manifest")
     cab.add_argument("--holdout-without", default="",
                      help="second catalogue-off render (must accompany --holdout-with)")
     cab.add_argument("--holdout-with", default="",

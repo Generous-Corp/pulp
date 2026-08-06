@@ -40,4 +40,17 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rack-physical-targets PROPERTIES
         LABELS "rack;portmap"
         TIMEOUT 60)
+
+    foreach(_rack_safety_test IN ITEMS
+            knowledge-admission
+            recover-subset-font-pdf
+            corpus-audit)
+        string(REPLACE "-" "_" _rack_safety_file "${_rack_safety_test}")
+        add_test(NAME rack-${_rack_safety_test}
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_${_rack_safety_file}.py)
+        set_tests_properties(rack-${_rack_safety_test} PROPERTIES
+            LABELS "rack;safety"
+            TIMEOUT 60)
+    endforeach()
 endif()

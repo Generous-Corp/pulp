@@ -178,10 +178,10 @@ fi
 # does not read .gitignore -- so they shipped once, inside a signed installer.
 # Checked here as well as at staging because this runs against the built
 # artifact, which is the only thing that can prove what a user would receive.
-leaked="$(find "$ROOT/Contents/Resources" \( -name .corpus -o -name .git \) \
+leaked="$(find "$ROOT/Contents/Resources" \( -name .corpus -o -name .sweeps -o -name .git \) \
           2>/dev/null | head -1)"
 if [[ -z "$leaked" ]]; then
-    say_ok "no fetched reference texts ride along in the payload"
+    say_ok "no fetched reference texts or local sweep attempts ride along in the payload"
 else
     say_bad "the payload carries $leaked — a signed installer would
          redistribute somebody else's copyrighted text"

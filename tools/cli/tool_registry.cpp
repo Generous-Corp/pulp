@@ -715,15 +715,28 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
     auto venv_path = venv_dir / ".venv";
 
     if (!force && fs::exists(venv_path)) {
-        // Already installed
 #ifdef _WIN32
         result.binary_path = venv_dir / "run.bat";
 #else
         result.binary_path = venv_dir / "run.sh";
 #endif
-        result.ok = fs::exists(result.binary_path);
-        result.installed_version = tool.pinned_version;
-        return result;
+        const auto manifest_path = venv_dir / "manifest.json";
+        const std::string version_field =
+            "\"version\": \"" + tool.pinned_version + "\"";
+        const std::string compact_version_field =
+            "\"version\":\"" + tool.pinned_version + "\"";
+        const std::string manifest_content = fs::exists(manifest_path)
+            ? read_file(manifest_path) : std::string{};
+        const bool version_ok = fs::exists(manifest_path) &&
+            (manifest_content.find(version_field) != std::string::npos ||
+             manifest_content.find(compact_version_field) != std::string::npos);
+        if (fs::exists(result.binary_path) && version_ok) {
+            result.ok = true;
+            result.installed_version = tool.pinned_version;
+            return result;
+        }
+        // A venv without the current manifest is stale. Reinstall it instead
+        // of reporting the registry pin as if it described the installed code.
     }
 
     // Create venv

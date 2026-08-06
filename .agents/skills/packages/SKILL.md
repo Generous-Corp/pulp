@@ -356,6 +356,13 @@ its `pinned_version` in the same change. Rule + rationale:
 The check runs anywhere `validate_registry.py` runs (its
 `test_package_validation_tools.py` unit suite covers the new rule).
 
+For `python_pip` tools, the managed venv manifest is also the installed-version
+authority. `pulp tool install` may reuse an existing venv only when its wrapper
+exists and `manifest.json` records the current registry pin; a missing or stale
+manifest must reinstall. Never report the registry pin as the installed version
+without checking that manifest, or a pin bump can leave users running old code
+while the CLI claims they are current.
+
 ## Related extend surfaces
 
 `packages`, `kits`, `content`, and `installable-tools` are Pulp's four ways to

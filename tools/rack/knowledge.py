@@ -91,8 +91,8 @@ def load(path: str | None = None, include_candidates: bool = False) -> dict:
     return out
 
 
-def semantic_fingerprint(claim: str) -> str:
-    """Stable identity for a claim, independent of its presentation prose."""
+def canonical_claim_fingerprint(claim: str) -> str:
+    """Stable exact identity for the one canonical wording of a claim."""
     normal = re.sub(r"\s+", " ", claim.strip().lower())
     return hashlib.sha256(normal.encode("utf-8")).hexdigest()
 
@@ -134,16 +134,16 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
             bad.append(f"{eid} has status {status!r}, which is not one of "
                        f"{STATUSES}")
         claim = entry.get("claim")
-        fingerprint = entry.get("semantic_fingerprint")
+        fingerprint = entry.get("canonical_claim_fingerprint")
         if status != "admitted" or claim or fingerprint:
             if not claim or not fingerprint:
                 bad.append(f"{eid} is admission-tracked but has no claim and "
-                           "semantic_fingerprint")
-            elif semantic_fingerprint(claim) != fingerprint:
-                bad.append(f"{eid} has a semantic fingerprint that does not "
+                           "canonical_claim_fingerprint")
+            elif canonical_claim_fingerprint(claim) != fingerprint:
+                bad.append(f"{eid} has a canonical claim fingerprint that does not "
                            "match its canonical claim")
             elif fingerprint in fingerprints:
-                bad.append(f"{eid} duplicates the semantic claim already held "
+                bad.append(f"{eid} duplicates the canonical claim already held "
                            f"by {fingerprints[fingerprint]}; attach its source "
                            "as corroborating evidence to that row")
             else:

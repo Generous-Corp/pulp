@@ -209,6 +209,28 @@ def fetch(limit: int) -> int:
 
             f0 = files[0]
 
+            # Decide permission BEFORE downloading or writing the body. The
+            # derived index row is still useful, but an unknown licence grants
+            # neither redistribution nor private archival permission.
+            lic = doc.get("license") or {}
+            if not may_store_body(lic.get("slug", "")):
+                held[pid] = {
+                    "id": doc.get("id"), "title": doc.get("title", ""),
+                    "url": doc.get("url", ""),
+                    "author": (doc.get("author") or {}).get("name", ""),
+                    "license": lic.get("name", ""),
+                    "license_slug": lic.get("slug", ""),
+                    "excerpt": (doc.get("excerpt") or "")[:400],
+                    "tags": [t.get("name") for t in (doc.get("tags") or [])],
+                    "categories": [c.get("name") for c in
+                                   (doc.get("categories") or [])],
+                    "body_quarantined": "licence outside storage allowlist",
+                    "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                }
+                print(f"  patch {pid}: licence {lic.get('slug') or 'unknown'} "
+                      "does not permit body storage — metadata only")
+                continue
+
             # A "patch" can be 87 MB, because people bundle samples and
             # wavetables with one. We want the wiring, which is kilobytes, and
             # a download that size is minutes of somebody's bandwidth for a
@@ -241,7 +263,6 @@ def fetch(limit: int) -> int:
             with open(os.path.join(PATCH_DIR, name), "wb") as out:
                 out.write(blob)
 
-            lic = doc.get("license") or {}
             held[pid] = {
                 "id": doc.get("id"),
                 "title": doc.get("title", ""),

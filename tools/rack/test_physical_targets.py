@@ -127,12 +127,29 @@ def test_inventory_tells_the_model_the_physical_form() -> int:
     return bad
 
 
+def test_physical_and_structural_errors_arrive_in_one_retry() -> int:
+    inv = inventory()
+    patch = {"modules": [
+        {"id": 1, "plugin": "Fundamental", "model": "VCO", "pos": [0, 0],
+         "params": [{"id": 0, "physical": 440.0, "unit": "ms"}]},
+        {"id": 2, "plugin": "Missing", "model": "Nope", "pos": [10, 0]},
+    ], "cables": []}
+    _, errs = P.prepare_and_lint(patch, inv)
+    bad = check(any("not ms" in error for error in errs),
+                "the retry receives the physical-unit fault", str(errs))
+    bad += check(any("not installed" in error for error in errs),
+                 "the same retry also receives the independent lint fault",
+                 str(errs))
+    return bad
+
+
 def main() -> int:
     bad = 0
     for fn in (test_real_differing_unit_is_written_as_a_knob_position,
                test_refusals_are_atomic,
                test_cello_rate_uses_our_manifest_shape_and_round_trips,
-               test_inventory_tells_the_model_the_physical_form):
+               test_inventory_tells_the_model_the_physical_form,
+               test_physical_and_structural_errors_arrive_in_one_retry):
         print(f"{fn.__name__}:")
         bad += fn()
     print("\n" + ("all good" if bad == 0 else f"FAILED ({bad})"))

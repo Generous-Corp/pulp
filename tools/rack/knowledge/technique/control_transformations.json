@@ -16,7 +16,7 @@
         "softened sum and difference tones"
       ],
       "claim": "low-pass filtering after ring modulation suppresses brittle high-frequency products while preserving the sum-and-difference structure",
-      "semantic_fingerprint": "b8177c86ba3b1b3aeb6c8b0cdfab787620aa3efe1b538e19ecb95bc24912b337",
+      "canonical_claim_fingerprint": "b8177c86ba3b1b3aeb6c8b0cdfab787620aa3efe1b538e19ecb95bc24912b337",
       "what": "A product signal followed by a low-pass stage, with the cutoff chosen against the new spectrum rather than inherited from either input. The multiplication still creates sum-and-difference components; the following stage decides how much of their upper, brittle region remains.",
       "why": "Multiplication creates components above and below the input frequencies, often adding a dense high-frequency edge. Filtering the result acts on those newly created components. Filtering either input first is not equivalent because it changes which products are created in the first place.",
       "listen_for": {

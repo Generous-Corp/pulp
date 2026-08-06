@@ -87,6 +87,7 @@ python -m quality_lab.cli compare golden.wav candidate.wav --profile added-hf --
 python -m quality_lab.cli analyze catalogue-on.wav --json on-features.json
 python -m quality_lab.cli catalogue-ab catalogue-off.wav catalogue-on.wav \
     --expectations cello-expectations.json \
+    --experiment cello-experiment.json \
     --holdout-without catalogue-off-2.wav --holdout-with catalogue-on-2.wav \
     --json cello-ab.json
 
@@ -142,15 +143,14 @@ inputs exit 2.
 
 An expectations file names one `target`, `min`, or `max` per metric and a physical
 `tolerance`. Keep the source location in the file so the resulting JSON report remains
-traceable to the original book rather than a derived corpus row. For the Forge book
-experiment the authoritative originals are under
-`/Users/danielraffel/Documents/synth-refs/` (for example, cite the Welsh PDF and page):
+traceable to the original book rather than a derived corpus row. Cite the
+operator's authoritative local copy and page in machine-local experiment metadata:
 
 ```json
 {
   "schema_version": 1,
   "source": {
-    "path": "/Users/danielraffel/Documents/synth-refs/Welshs Synthesizer Cookbook by Fred Welsh (z-lib.pdf",
+    "path": "/absolute/path/to/owned-or-authorized-source.pdf",
     "page": 42,
     "claim": "cello amplitude modulation rate"
   },
@@ -162,6 +162,12 @@ experiment the authoritative originals are under
 
 `catalogue-ab` requires `source.path` plus either `source.page` or a string
 `source.locator`; it refuses an untraceable expectations file.
+
+It also requires a content-bound experiment manifest. Each `working` and
+`holdout` row records a distinct `pair_id`, the prompt, inventory digest, model,
+and `without`/`with` arms containing `guidance: off|on`, attempt number, and the
+exact WAV SHA-256. The command verifies every digest, controlled field, and
+holdout independence before it can emit a causal catalogue verdict.
 
 The other supported keys are `spectral_centroid_hz`, `hf_energy_fraction`,
 `spectral_flux`, and `hnr_db`. These are measurement fields, not universal quality

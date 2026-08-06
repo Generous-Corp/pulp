@@ -182,6 +182,7 @@ def walk(pm: dict, roles: dict):
             yield {
                 "patch": meta.get("id"), "coverage": coverage,
                 "patch_sha256": meta.get("sha256"),
+                "source_author": meta.get("author", ""),
                 "src": src, "dst": dst, "s": s, "d": d,
                 "s_index": c.get("outputId"), "d_index": c.get("inputId"),
                 "s_kinds": placeable(s[0], s[1], out_kinds, roles) if s else None,
@@ -297,23 +298,25 @@ def _signal(name: str, role, direction: str) -> str | None:
 def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     """Corroborated, non-authoritative port hints for unscanned modules.
 
-    Evidence is deduplicated per patch body and per proposed fact. Conflicting
-    signal meanings quarantine a port. Nothing here edits the port map: a real
-    CARTOG scan always outranks this report.
+    Evidence is deduplicated per source author and proposed fact. Revisions,
+    metadata edits, and multiple uploads from one author therefore cannot
+    manufacture corroboration. Anonymous uploads conservatively count as one
+    source. Nothing here edits the port map: a real CARTOG scan always wins.
     """
     evidence: dict[tuple, set] = collections.defaultdict(set)
     for row in rows:
-        patch_key = row.get("patch_sha256") or f"id:{row.get('patch')}"
+        author = " ".join(str(row.get("source_author") or "").lower().split())
+        evidence_key = f"author:{author}" if author else "author:unknown"
         if row["s"] is None and row["d"] is not None:
             signal = _signal(row["d"][0], row["d"][1], "in")
             if signal:
                 key = (*row["src"], "output", row["s_index"], signal)
-                evidence[key].add(patch_key)
+                evidence[key].add(evidence_key)
         if row["d"] is None and row["s"] is not None:
             signal = _signal(row["s"][0], row["s"][1], "out")
             if signal:
                 key = (*row["dst"], "input", row["d_index"], signal)
-                evidence[key].add(patch_key)
+                evidence[key].add(evidence_key)
 
     by_port: dict[tuple, set[str]] = collections.defaultdict(set)
     for plugin, model, direction, index, signal in evidence:
@@ -342,7 +345,7 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
         "schema": "forge.patchstorage_usage_priors.v1",
         "source": "patchstorage.com",
         "policy": "inferred hints only; never override CARTOG or certify quality",
-        "minimum_distinct_patch_support": min_support,
+        "minimum_distinct_author_support": min_support,
         "admitted": admitted,
         "quarantine": quarantine,
     }

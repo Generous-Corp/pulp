@@ -91,10 +91,10 @@ ditto "$REPO/tools/rack" "$TOOLS_DEST"
 # So prune, then PROVE the prune worked. A silent failure here redistributes
 # somebody else's book under our signature, which is the one outcome that
 # cannot be fixed after release.
-for junk in .corpus __pycache__ .git .DS_Store .pytest_cache; do
+for junk in .corpus .sweeps __pycache__ .git .DS_Store .pytest_cache; do
     find "$TOOLS_DEST" -name "$junk" -maxdepth 3 -exec rm -rf {} + 2>/dev/null || true
 done
-leaked="$(find "$TOOLS_DEST" \( -name .corpus -o -name .git -o -name __pycache__ \) \
+leaked="$(find "$TOOLS_DEST" \( -name .corpus -o -name .sweeps -o -name .git -o -name __pycache__ \) \
           2>/dev/null | head -3)"
 if [[ -n "$leaked" ]]; then
     echo "staging failed: unshippable material survived the prune:" >&2

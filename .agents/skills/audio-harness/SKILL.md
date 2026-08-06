@@ -532,7 +532,9 @@ harness or `ctest`.
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   retaining original Rack voltage levels in the fidelity report. Run `quality-lab analyze`
   for one-render features, then `quality-lab catalogue-ab off.wav on.wav --expectations
-  cited.json --holdout-without off-2.wav --holdout-with on-2.wav`. Every expectation must
+  cited.json --experiment experiment.json --holdout-without off-2.wav --holdout-with
+  on-2.wav`. The content-bound experiment manifest records prompt, inventory digest, model,
+  guidance state, attempt, pair identity, and exact WAV digests. Every expectation must
   name exactly one target/min/max plus a positive tolerance and cite `source.path` with a
   page or locator. The A/B turns those physical expectations into normalized errors and
   reuses `goodhart_guard`: a working-pair win is not the headline result until an

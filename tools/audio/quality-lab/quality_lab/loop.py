@@ -98,6 +98,11 @@ def goodhart_guard(cand: CandidateScore, champ: CandidateScore,
         if not pareto_improves(holdout_cand, holdout_champ, thresholds):
             return {"accepted": False, "needs_ear": False,
                     "reason": "improves the working set but NOT the held-out slice (overfit risk)"}
+        if holdout_cand.confidence < min_confidence:
+            return {"accepted": False, "needs_ear": True,
+                    "reason": (f"held-out Pareto win but confidence "
+                               f"{holdout_cand.confidence:.2f} < {min_confidence} "
+                               "— NEEDS-EAR")}
     if cand.confidence < min_confidence:
         return {"accepted": False, "needs_ear": True,
                 "reason": f"Pareto win but confidence {cand.confidence:.2f} < {min_confidence} — NEEDS-EAR"}

@@ -8,6 +8,7 @@ Goodhart guard across those errors.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -19,6 +20,9 @@ from . import audio_io, dsp, loop
 
 SCHEMA = "quality_lab.reference_free.v1"
 AB_SCHEMA = "quality_lab.catalogue_ab.v1"
+EXPERIMENT_SCHEMA = "quality_lab.catalogue_experiment.v1"
+MIN_AUDIBLE_RMS = 1e-7
+HF_MIN_BINS = 8
 
 
 def _amplitude_modulation(y: np.ndarray, sr: int) -> tuple[float, float]:
@@ -61,11 +65,13 @@ def analyze_samples(y: np.ndarray, sr: int) -> dict[str, Any]:
     am_hz, am_confidence = _amplitude_modulation(x, sr)
     metrics = {
         "spectral_centroid_hz": dsp.spectral_centroid_hz(freqs, mag),
-        "hf_energy_fraction": dsp.hf_energy_fraction(freqs, mag, 8000.0),
         "spectral_flux": dsp.mean_spectral_flux(x, sr),
         "hnr_db": dsp.harmonic_to_noise_ratio_db(x, sr),
         "amplitude_modulation_hz": am_hz,
     }
+    if dsp.hf_band_bin_count(sr, 8000.0) >= HF_MIN_BINS:
+        metrics["hf_energy_fraction"] = dsp.hf_energy_fraction(
+            freqs, mag, 8000.0)
     return {
         "schema": SCHEMA,
         "sample_rate": int(sr),
@@ -73,11 +79,17 @@ def analyze_samples(y: np.ndarray, sr: int) -> dict[str, Any]:
         "duration_s": float(x.size / sr),
         "metrics": {k: float(v) for k, v in metrics.items()},
         "confidence": {"amplitude_modulation_hz": am_confidence},
+        "audibility": {"rms": audio_io.rms(x),
+                        "minimum_rms": MIN_AUDIBLE_RMS},
     }
 
 
 def analyze_file(path: str) -> dict[str, Any]:
-    y, sr = audio_io.load_wav(path)
+    y, sr, channels = audio_io.load_wav_multichannel(path)
+    if channels != 1:
+        raise ValueError(
+            f"reference-free catalogue scoring requires mono listener audio; "
+            f"{path} has {channels} channels")
     report = analyze_samples(y, sr)
     report["input"] = os.path.abspath(path)
     return report
@@ -115,6 +127,9 @@ def score(report: dict[str, Any], expectations: dict[str, Any],
     if not rules:
         raise ValueError("expectations must contain a non-empty metrics object")
     measured = report.get("metrics") or {}
+    measured_rms = float((report.get("audibility") or {}).get("rms", 0.0))
+    if not math.isfinite(measured_rms) or measured_rms < MIN_AUDIBLE_RMS:
+        raise ValueError(f"{label} is silent or below the audibility floor")
     unknown = sorted(set(rules) - set(measured))
     if unknown:
         raise ValueError(f"unknown reference-free metric(s): {', '.join(unknown)}")
@@ -127,24 +142,79 @@ def score(report: dict[str, Any], expectations: dict[str, Any],
     return loop.CandidateScore(label=label, scores=scores, confidence=confidence)
 
 
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
+    """Validate a content-bound record of the controlled generation arms."""
+    with open(path) as source:
+        doc = json.load(source)
+    if doc.get("schema") != EXPERIMENT_SCHEMA:
+        raise ValueError(f"experiment manifest schema must be {EXPERIMENT_SCHEMA}")
+    splits = ["working"] + (["holdout"] if has_holdout else [])
+    for split in splits:
+        row = doc.get(split) or {}
+        missing = [key for key in
+                   ("pair_id", "prompt", "inventory_sha256", "model", "arms")
+                   if not row.get(key)]
+        if missing:
+            raise ValueError(f"experiment {split} lacks {', '.join(missing)}")
+        for arm, state in (("without", "off"), ("with", "on")):
+            arm_doc = (row.get("arms") or {}).get(arm) or {}
+            if arm_doc.get("guidance") != state or not arm_doc.get("attempt"):
+                raise ValueError(
+                    f"experiment {split}.{arm} must record guidance={state} and attempt")
+            actual = _sha256(wavs[f"{split}.{arm}"])
+            if arm_doc.get("wav_sha256") != actual:
+                raise ValueError(f"experiment {split}.{arm} WAV digest does not match")
+    if has_holdout:
+        for key in ("prompt", "inventory_sha256", "model"):
+            if doc["working"][key] != doc["holdout"][key]:
+                raise ValueError(f"working and holdout must use the same {key}")
+        if doc["working"]["pair_id"] == doc["holdout"]["pair_id"]:
+            raise ValueError("holdout pair_id must be independent of the working pair")
+        digests = [doc[split]["arms"][arm]["wav_sha256"]
+                   for split in splits for arm in ("without", "with")]
+        if len(set(digests)) != len(digests):
+            raise ValueError("working and holdout WAV bodies must all be distinct")
+    doc["manifest_sha256"] = _sha256(path)
+    return doc
+
+
 def compare_files(without_wav: str, with_wav: str, expectations_path: str,
+                  experiment_path: str,
                   holdout_without: str | None = None,
                   holdout_with: str | None = None) -> dict[str, Any]:
     """Compare catalogue-off/on renders against the same explicit expectations."""
     with open(expectations_path) as fh:
         expectations = json.load(fh)
     source = expectations.get("source") or {}
-    if not source.get("path") or not ("page" in source or source.get("locator")):
+    page = source.get("page")
+    locator = source.get("locator")
+    has_page = isinstance(page, int) and not isinstance(page, bool) and page > 0
+    has_locator = isinstance(locator, str) and bool(locator.strip())
+    if not source.get("path") or not (has_page or has_locator):
         raise ValueError(
-            "catalogue expectations need source.path and source.page or source.locator")
+            "catalogue expectations need source.path and a positive source.page "
+            "or non-empty source.locator")
+    if bool(holdout_without) != bool(holdout_with):
+        raise ValueError("holdout-without and holdout-with must be supplied together")
+    wavs = {"working.without": without_wav, "working.with": with_wav}
+    if holdout_without and holdout_with:
+        wavs.update({"holdout.without": holdout_without,
+                     "holdout.with": holdout_with})
+    experiment = _experiment(experiment_path, wavs, bool(holdout_without))
     without = analyze_file(without_wav)
     with_catalogue = analyze_file(with_wav)
     champ = score(without, expectations, "catalogue-off")
     cand = score(with_catalogue, expectations, "catalogue-on")
     holdout = None
     holdout_cand = holdout_champ = None
-    if bool(holdout_without) != bool(holdout_with):
-        raise ValueError("holdout-without and holdout-with must be supplied together")
     if holdout_without and holdout_with:
         ho_without = analyze_file(holdout_without)
         ho_with = analyze_file(holdout_with)
@@ -161,6 +231,7 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
                                 thresholds=thresholds)
     return {
         "schema": AB_SCHEMA,
+        "experiment": experiment,
         "expectations": expectations,
         "working": {
             "without": without,

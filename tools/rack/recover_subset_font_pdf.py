@@ -34,12 +34,14 @@ TEXT_SUFFIXES = (".md", ".sc", ".txt")
 ALPHA = "abcdefghijklmnopqrstuvwxyz"
 FREQUENCY_ORDER = "etaoinshrdlcumfpgwybvkxjqz"
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPOSITORY = os.path.abspath(os.path.join(HERE, "..", ".."))
+REPOSITORY = os.path.realpath(os.path.join(HERE, "..", ".."))
 
 
 def external_output_path(path: str) -> str:
     """Resolve an output path and reject destinations inside the repository."""
-    destination = os.path.abspath(os.path.expanduser(path))
+    # realpath resolves both an existing output-file symlink and every existing
+    # parent symlink. A lexical /tmp path can otherwise land inside the checkout.
+    destination = os.path.realpath(os.path.expanduser(path))
     try:
         inside_repository = os.path.commonpath(
             (destination, REPOSITORY)) == REPOSITORY
@@ -469,6 +471,9 @@ def main(argv: list[str]) -> int:
             space_candidates=3 if args.deep_search else 1)
         destination = external_output_path(args.output)
         os.makedirs(os.path.dirname(destination), exist_ok=True)
+        # Re-resolve after creating parents so a just-created path component
+        # cannot change which side of the repository fence receives the text.
+        destination = external_output_path(destination)
         with open(destination, "w", encoding="utf-8") as output:
             output.write("# Machine-recovered subset-font text; imperfect.\n")
             output.write(recovered)
