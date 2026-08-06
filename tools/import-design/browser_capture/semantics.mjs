@@ -255,6 +255,34 @@ export function semanticExpression(snapshotClickableIndexes = []) {
   // and text colours (a hairline drawn as a border, or a glyph). An author
   // whose pointer is a gradient or a mask -- where no single computed colour is
   // the right answer -- states it as the attribute's own value, which wins.
+  //
+  // An SVG pointer is painted by NEITHER background nor border: a line or a
+  // path carries its colour in stroke, a filled arrowhead in fill, and both
+  // leave background-color transparent. Walking past them lands such a pointer
+  // on the inherited text colour, and an authored #101014 needle arrived as
+  // rgb(232, 232, 238) -- near-black reported as near-white, on a knob that
+  // still rendered and still passed every pixel gate.
+  //
+  // The SVG branch sits BETWEEN background and border, and answers even when it
+  // finds nothing, because both of its neighbours would otherwise answer for
+  // it. An SVG element's border-color initial value is currentColor, so a
+  // branch appended after borderTopColor never runs at all; and the color
+  // fallback behind it is the original defect by another name.
+  //
+  // fill computes to opaque BLACK on every element -- a div, an svg root, a g,
+  // a stroke-only line -- rather than to none. That is why the branch is
+  // namespace-guarded AND why fill is consulted only on the shapes a fill
+  // actually paints: reading it unguarded hands every borderless div pointer a
+  // black it never had, and reading it on an svg root reports a black that
+  // element paints nowhere. url(#...) paint is a gradient or a pattern rather
+  // than a colour, and is absent for the same reason the vector lowering
+  // refuses paint_reference.
+  //
+  // An unpainted pointer reports nothing, and the consumer draws the widget's
+  // derived tick. That is the honest answer; a confident wrong colour is not.
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const fillPaintedShapes =
+    new Set(['path', 'polygon', 'circle', 'ellipse', 'rect']);
   const indicatorColor = element => {
     try {
       const marked = element.querySelector('[data-pulp-indicator]');
@@ -264,15 +292,24 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       const style = window.getComputedStyle(marked);
       const opaque = value => {
         const text = (value || '').trim();
-        if (!text || text === 'transparent') return '';
+        if (!text || text === 'transparent' || text === 'none') return '';
+        // A paint server reference names a gradient or a pattern; no single
+        // colour describes it, so it is reported as no colour at all.
+        if (text.indexOf('url(') === 0) return '';
         // rgba(...) with a zero alpha is the computed form of "not painted".
         if (text.indexOf('rgba(') === 0 && text.replace(/ /g, '').indexOf(',0)') > 0)
           return '';
         return text;
       };
-      return opaque(style.backgroundColor) ||
-        opaque(style.borderTopColor) ||
-        opaque(style.color);
+      const background = opaque(style.backgroundColor);
+      if (background) return background;
+      if (marked.namespaceURI === svgNamespace) {
+        const stroked = opaque(style.stroke);
+        if (stroked) return stroked;
+        if (!fillPaintedShapes.has(marked.tagName.toLowerCase())) return '';
+        return opaque(style.fill);
+      }
+      return opaque(style.borderTopColor) || opaque(style.color);
     } catch (e) {
       return '';
     }
