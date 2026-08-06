@@ -172,25 +172,42 @@ class AudioMatrixMixerT {
         for (std::size_t input = 0; input < inputs_; ++input)
             std::copy_n(inputs[input], frames, scratch_.data() + input * max_block_size_);
 
-        std::array<SampleType, MaxOutputs> row_scales{};
-        for (std::size_t frame = 0; frame < frames; ++frame) {
-            if (policy_ == MatrixHeadroomPolicy::NormalizePeak) {
+        if (policy_ == MatrixHeadroomPolicy::Raw) {
+            for (std::size_t frame = 0; frame < frames; ++frame) {
                 for (std::size_t output = 0; output < outputs_; ++output) {
-                    SampleType absolute_sum{};
+                    SampleType sum{};
                     for (std::size_t input = 0; input < inputs_; ++input)
-                        absolute_sum += std::abs(cells_[index(output, input)].current);
-                    row_scales[output] = SampleType{1} / std::max(SampleType{1}, absolute_sum);
+                        sum += scratch_[input * max_block_size_ + frame] *
+                               cells_[index(output, input)].current;
+                    outputs[output][frame] = sum;
                 }
-            } else {
-                std::fill_n(row_scales.begin(), outputs_, SampleType{1});
+                advance_ramps();
+            }
+            return true;
+        }
+
+        using AccumulatorType =
+            std::conditional_t<(sizeof(SampleType) < sizeof(double)), double, long double>;
+        std::array<AccumulatorType, MaxOutputs> row_scales{};
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            for (std::size_t output = 0; output < outputs_; ++output) {
+                AccumulatorType absolute_sum{};
+                for (std::size_t input = 0; input < inputs_; ++input)
+                    absolute_sum += static_cast<AccumulatorType>(
+                        std::abs(cells_[index(output, input)].current));
+                row_scales[output] =
+                    AccumulatorType{1} / std::max(AccumulatorType{1}, absolute_sum);
             }
 
             for (std::size_t output = 0; output < outputs_; ++output) {
-                SampleType sum{};
+                AccumulatorType sum{};
                 for (std::size_t input = 0; input < inputs_; ++input)
-                    sum += scratch_[input * max_block_size_ + frame] *
-                           cells_[index(output, input)].current;
-                outputs[output][frame] = sum * row_scales[output];
+                    sum += static_cast<AccumulatorType>(
+                               scratch_[input * max_block_size_ + frame]) *
+                           static_cast<AccumulatorType>(
+                               cells_[index(output, input)].current);
+                outputs[output][frame] =
+                    static_cast<SampleType>(sum * row_scales[output]);
             }
             advance_ramps();
         }
