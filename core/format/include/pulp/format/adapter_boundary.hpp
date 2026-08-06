@@ -496,8 +496,9 @@ struct MpeSidecar {
     /// voices: the generic sidecar has no knowledge of the processor's allocator.
     /// Deactivation adapters therefore call `Processor::release()` first, and a
     /// live reset is paired with `ProcessContext::reset_requested` so the
-    /// processor clears its own DSP/voice state. Off the audio thread.
-    void reset() {
+    /// processor clears its own DSP/voice state. Fixed-storage and audio-thread
+    /// safe; performs no allocation and invokes no callbacks.
+    void reset() noexcept {
         tracker.reset();
         buffer.clear();
         current_sample_offset = 0;

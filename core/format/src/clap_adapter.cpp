@@ -75,9 +75,9 @@ void mark_queued_value_emitted(PulpClapPlugin* self, state::ParamID id) {
     }
 }
 
-void drain_outbound_param_events(PulpClapPlugin* self,
+bool drain_outbound_param_events(PulpClapPlugin* self,
                                  const clap_output_events_t* out) {
-    if (!out || !out->try_push) return;
+    if (!out || !out->try_push) return false;
 
     OutboundParamEvent queued{};
     while (self->pending_outbound_param_event ||
@@ -114,10 +114,11 @@ void drain_outbound_param_events(PulpClapPlugin* self,
         }
         if (!pushed) {
             self->pending_outbound_param_event = queued;
-            return;
+            return false;
         }
         self->pending_outbound_param_event.reset();
     }
+    return true;
 }
 
 constexpr std::size_t kRealtimeMidiEventCapacity = state::ParameterEventQueue::kCapacity;
@@ -1102,6 +1103,150 @@ static void clap_phase_clear_constant_mask(const clap_process_t* process) {
     }
 }
 
+static constexpr std::array<uint8_t, 5> kOutboundReleaseControllers{
+    64, 66, 120, 121, 123};
+
+static int outbound_release_controller_index(const midi::MidiEvent& event) {
+    if (!event.is_cc())
+        return -1;
+    const auto controller = event.cc_number();
+    if ((controller == 64 || controller == 66) && event.cc_value() >= 64)
+        return -1;
+    for (std::size_t i = 0; i < kOutboundReleaseControllers.size(); ++i)
+        if (controller == kOutboundReleaseControllers[i])
+            return static_cast<int>(i);
+    return -1;
+}
+
+static bool is_outbound_release(const midi::MidiEvent& event) {
+    return event.is_note_off() || (event.is_note_on() && event.velocity() == 0) ||
+           outbound_release_controller_index(event) >= 0;
+}
+
+static void clear_outbound_channel_debt(PulpClapPlugin* self, uint8_t channel) {
+    const std::size_t note_base = static_cast<std::size_t>(channel) * 128;
+    std::fill_n(self->outbound_note_release_debt.begin() + note_base, 128, uint8_t{0});
+    const std::size_t control_base =
+        static_cast<std::size_t>(channel) * kOutboundReleaseControllers.size();
+    std::fill_n(self->outbound_control_release_debt.begin() + control_base,
+                kOutboundReleaseControllers.size(), uint8_t{0});
+}
+
+static void record_outbound_release_debt(PulpClapPlugin* self,
+                                         const midi::MidiEvent& event) {
+    if (!is_outbound_release(event))
+        return;
+    const auto channel = event.channel();
+    if (self->outbound_panic_debt[channel])
+        return;
+    uint8_t* counter = nullptr;
+    if (event.is_note_off() || (event.is_note_on() && event.velocity() == 0)) {
+        counter = &self->outbound_note_release_debt[
+            static_cast<std::size_t>(channel) * 128 + event.note()];
+    } else {
+        const auto index = outbound_release_controller_index(event);
+        counter = &self->outbound_control_release_debt[
+            static_cast<std::size_t>(channel) * kOutboundReleaseControllers.size() +
+            static_cast<std::size_t>(index)];
+    }
+    if (*counter != std::numeric_limits<uint8_t>::max()) {
+        ++*counter;
+        return;
+    }
+    clear_outbound_channel_debt(self, channel);
+    self->outbound_panic_debt[channel] = true;
+}
+
+static bool push_outbound_short(const clap_output_events_t* out_events,
+                                const midi::MidiEvent& event, uint32_t time) {
+    clap_event_midi_t output{};
+    output.header.size = sizeof(output);
+    output.header.type = CLAP_EVENT_MIDI;
+    output.header.time = time;
+    output.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    output.header.flags = 0;
+    output.port_index = 0;
+    output.data[0] = event.data()[0];
+    output.data[1] = event.size() > 1 ? event.data()[1] : uint8_t{0};
+    output.data[2] = event.size() > 2 ? event.data()[2] : uint8_t{0};
+    return out_events->try_push(out_events, &output.header);
+}
+
+struct OutboundReleaseDrainResult {
+    bool host_accepting = true;
+    bool debt_remaining = false;
+};
+
+static OutboundReleaseDrainResult drain_outbound_release_debt(
+    PulpClapPlugin* self, const clap_output_events_t* out_events) {
+    // A hostile or recovering host can leave every fixed counter saturated.
+    // Bound callback work even in that state. The persistent cursor gives
+    // every debt slot a turn; debt remaining after the budget is exhausted
+    // suppresses fresh MIDI attacks until a later block completes the drain.
+    constexpr std::size_t kMaxReleaseRetriesPerBlock = 64;
+    constexpr std::size_t kSlotsPerChannel = 1 + 128 + 5;
+    constexpr std::size_t kReleaseDebtSlotCount = 16 * kSlotsPerChannel;
+    std::size_t emitted = 0;
+    std::size_t visited = 0;
+    while (visited < kReleaseDebtSlotCount &&
+           emitted < kMaxReleaseRetriesPerBlock) {
+        const std::size_t slot = self->outbound_release_drain_cursor;
+        self->outbound_release_drain_cursor =
+            (self->outbound_release_drain_cursor + 1) % kReleaseDebtSlotCount;
+        ++visited;
+        const auto channel = static_cast<uint8_t>(slot / kSlotsPerChannel);
+        const std::size_t local = slot % kSlotsPerChannel;
+        midi::MidiEvent release;
+        uint8_t* count = nullptr;
+        bool* panic = nullptr;
+        if (local == 0) {
+            panic = &self->outbound_panic_debt[channel];
+            if (!*panic)
+                continue;
+            release = midi::MidiEvent::cc(channel, 120, 0);
+        } else if (local <= 128) {
+            count = &self->outbound_note_release_debt[
+                static_cast<std::size_t>(channel) * 128 + local - 1];
+            if (*count == 0)
+                continue;
+            release = midi::MidiEvent::note_off(
+                channel, static_cast<uint8_t>(local - 1));
+        } else {
+            const std::size_t control = local - 129;
+            count = &self->outbound_control_release_debt[
+                static_cast<std::size_t>(channel) *
+                    kOutboundReleaseControllers.size() + control];
+            if (*count == 0)
+                continue;
+            release = midi::MidiEvent::cc(
+                channel, kOutboundReleaseControllers[control], 0);
+        }
+        if (!push_outbound_short(out_events, release, 0)) {
+            self->outbound_release_drain_cursor = slot;
+            return {.host_accepting = false, .debt_remaining = true};
+        }
+        ++emitted;
+        if (panic) {
+            *panic = false;
+            clear_outbound_channel_debt(self, channel);
+        } else {
+            --*count;
+        }
+    }
+
+    const bool debt_remaining =
+        std::any_of(self->outbound_panic_debt.begin(),
+                    self->outbound_panic_debt.end(),
+                    [](bool pending) { return pending; }) ||
+        std::any_of(self->outbound_note_release_debt.begin(),
+                    self->outbound_note_release_debt.end(),
+                    [](uint8_t count) { return count != 0; }) ||
+        std::any_of(self->outbound_control_release_debt.begin(),
+                    self->outbound_control_release_debt.end(),
+                    [](uint8_t count) { return count != 0; });
+    return {.host_accepting = true, .debt_remaining = debt_remaining};
+}
+
 static void clap_phase_emit_output(
     PulpClapPlugin* self, const clap_process_t* process,
     std::span<const state::ParamInfo> all_params) {
@@ -1109,7 +1254,20 @@ static void clap_phase_emit_output(
     // Emit output parameter events for any values the plugin changed,
     // so the host can record automation
     auto* out_events = process->out_events;
-    if (out_events) {
+    if (!out_events || !out_events->try_push) {
+        // There is no host sink this block. Attacks and ordinary output may be
+        // dropped, but ownership releases must survive until a valid sink is
+        // available so a previous accepted attack cannot become a stuck note.
+        midi_out.sort();
+        for (const auto& event : midi_out)
+            record_outbound_release_debt(self, event);
+        return;
+    }
+    {
+        const auto release_drain =
+            drain_outbound_release_debt(self, out_events);
+        bool host_accepting = release_drain.host_accepting;
+        bool midi_output_allowed = !release_drain.debt_remaining;
         // Sort the sample-accurate explicit output events (offset ascending) and
         // mark the skip-set so the offset-0 snapshot fallback below does not
         // double-report a param that already emitted explicit events. Both the
@@ -1129,7 +1287,8 @@ static void clap_phase_emit_output(
         // synchronous StateStore calls. Emit them before the snapshot fallback
         // and sample-offset merge; queued VALUE events mark the skip-set so the
         // same change is not reported twice when it raced this process block.
-        drain_outbound_param_events(self, out_events);
+        if (host_accepting)
+            host_accepting = drain_outbound_param_events(self, out_events);
         // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
         // events. These are all at offset 0 (the earliest time), so emitting
         // them before the offset-ordered merge below preserves CLAP's global
@@ -1152,7 +1311,8 @@ static void clap_phase_emit_output(
                 ev.channel = -1;
                 ev.key = -1;
                 ev.value = static_cast<double>(current);
-                out_events->try_push(out_events, &ev.header);
+                if (host_accepting && !out_events->try_push(out_events, &ev.header))
+                    host_accepting = false;
             }
         }
 
@@ -1202,6 +1362,8 @@ static void clap_phase_emit_output(
         };
 
         auto emit_param = [&](const state::ParameterEvent& pe, int32_t off) {
+            if (!host_accepting)
+                return;
             clap_event_param_value_t ev{};
             ev.header.size = sizeof(ev);
             ev.header.type = CLAP_EVENT_PARAM_VALUE;
@@ -1215,25 +1377,26 @@ static void clap_phase_emit_output(
             ev.channel = -1;
             ev.key = -1;
             ev.value = static_cast<double>(pe.value);  // CLAP param values are plain domain
-            out_events->try_push(out_events, &ev.header);
+            if (!out_events->try_push(out_events, &ev.header))
+                host_accepting = false;
         };
 
         auto emit_short = [&](const midi::MidiEvent& me) {
-            clap_event_midi_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.type = CLAP_EVENT_MIDI;
-            ev.header.time = static_cast<uint32_t>(sample_at(me.sample_offset));
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.flags = 0;
-            ev.port_index = 0;
-            ev.data[0] = me.data()[0];
-            ev.data[1] = me.size() > 1 ? me.data()[1] : uint8_t{0};
-            ev.data[2] = me.size() > 2 ? me.data()[2] : uint8_t{0};
-            out_events->try_push(out_events, &ev.header);
+            if (!host_accepting || !midi_output_allowed) {
+                record_outbound_release_debt(self, me);
+                return;
+            }
+            if (!push_outbound_short(
+                    out_events, me,
+                    static_cast<uint32_t>(sample_at(me.sample_offset)))) {
+                record_outbound_release_debt(self, me);
+                host_accepting = false;
+                midi_output_allowed = false;
+            }
         };
 
         auto emit_sysex = [&](const auto& se) {
-            if (se.data.empty()) return;
+            if (se.data.empty() || !host_accepting) return;
             clap_event_midi_sysex_t ev{};
             ev.header.size = sizeof(ev);
             ev.header.type = CLAP_EVENT_MIDI_SYSEX;
@@ -1243,7 +1406,8 @@ static void clap_phase_emit_output(
             ev.port_index = 0;
             ev.buffer = se.data.data();
             ev.size = static_cast<uint32_t>(se.data.size());
-            out_events->try_push(out_events, &ev.header);
+            if (!out_events->try_push(out_events, &ev.header))
+                host_accepting = false;
         };
 
         while (pi < p_end || si < s_end || xi < x_end) {
@@ -1770,7 +1934,7 @@ void clap_params_flush(const clap_plugin_t* plugin,
         }
     }
 
-    drain_outbound_param_events(self, out);
+    (void)drain_outbound_param_events(self, out);
 }
 
 // ── Preset load extension ─────────────────────────────────────────────────

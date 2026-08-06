@@ -195,7 +195,7 @@ public:
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
-    void reset();
+    void reset() noexcept;
 
 private:
     void add_note(uint8_t ch, uint8_t note, uint8_t velocity, bool upper);

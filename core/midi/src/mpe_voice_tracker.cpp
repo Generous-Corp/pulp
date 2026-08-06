@@ -215,7 +215,7 @@ std::size_t MpeVoiceTracker::snapshot(MpeNoteState* out, std::size_t max) const 
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-void MpeVoiceTracker::reset() {
+void MpeVoiceTracker::reset() noexcept {
     for (auto& s : notes_) s = {};
     channel_pitch_bend_.fill(0.0f);
     channel_pressure_.fill(0.0f);

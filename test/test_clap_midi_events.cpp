@@ -44,6 +44,7 @@
 #if PULP_CLAP_PROCESS_RT_TRAP_TESTS
 #include "native_components/rt_test_scope.hpp"
 #endif
+#include "harness/rt_allocation_probe.hpp"
 
 #include <clap/ext/preset-load.h>
 
@@ -118,6 +119,9 @@ public:
         vtable_.try_push = [](const clap_output_events_t* list,
                               const clap_event_header_t* hdr) -> bool {
             auto* self = static_cast<OutputEventList*>(list->ctx);
+            ++self->attempt_count_;
+            if (self->events_.size() >= self->accept_limit_)
+                return false;
             std::vector<std::uint8_t> buf(hdr->size);
             std::memcpy(buf.data(), hdr, hdr->size);
             if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
@@ -134,6 +138,9 @@ public:
     }
 
     std::size_t size() const { return events_.size(); }
+    std::size_t attempt_count() const { return attempt_count_; }
+    void accept_at_most(std::size_t count) { accept_limit_ = count; }
+    void accept_all() { accept_limit_ = std::numeric_limits<std::size_t>::max(); }
     const clap_event_header_t* at(std::size_t i) const {
         return reinterpret_cast<const clap_event_header_t*>(events_[i].data());
     }
@@ -159,6 +166,8 @@ private:
     // reallocates on growth, so we reserve() in the ctor.
     std::vector<std::vector<std::uint8_t>> sysex_bodies_;
     clap_output_events_t vtable_{};
+    std::size_t accept_limit_ = std::numeric_limits<std::size_t>::max();
+    std::size_t attempt_count_ = 0;
 
 public:
     OutputEventList() { sysex_bodies_.reserve(16); events_.reserve(64); }
@@ -2626,6 +2635,26 @@ TEST_CASE("CLAP store-only param change still emits a single event at time 0",
     REQUIRE(params[0]->value == 0.625);
 }
 
+TEST_CASE("CLAP release backlog does not suppress accepted parameter output",
+          "[clap][params][out-events][midi][ownership][regression]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_output_param);
+    REQUIRE(g_output_param != nullptr);
+    g_output_param->push_events = true;
+    h.plugin.outbound_note_release_debt[3 * 128 + 60] = 2;
+
+    InputEventList events;
+    OutputEventList out;
+    REQUIRE(h.run(events, &out) == CLAP_PROCESS_CONTINUE);
+
+    auto params = out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(params.size() == 2);
+    CHECK(params[0]->header.time == 0);
+    CHECK(params[1]->header.time == 16);
+    CHECK(h.plugin.outbound_note_release_debt[3 * 128 + 60] == 1);
+}
+
 TEST_CASE("CLAP preset-load extension is exposed only for supported ids",
           "[clap][preset]") {
     g_pending_opts_mpe = false;
@@ -3620,6 +3649,208 @@ TEST_CASE("midi_out CC + pitch-bend surface on CLAP out_events",
     // pitch bend low = value & 0x7F, high = (value >> 7) & 0x7F
     REQUIRE(midis[1]->data[1] == (12345 & 0x7F));
     REQUIRE(midis[1]->data[2] == ((12345 >> 7) & 0x7F));
+}
+
+TEST_CASE("CLAP retries rejected outbound ownership releases before new attacks",
+          "[clap][midi][outbound][ownership][rt-safety]") {
+    g_pending_emit.clear();
+    g_pending_sysex.clear();
+    Harness h(make_emitting);
+    InputEventList in;
+
+    SECTION("a rejected release retries once at offset zero") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(1, 60, 100)};
+        OutputEventList attack_accepted;
+        REQUIRE(h.run(in, &attack_accepted) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(attack_accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 1);
+
+        auto release = midi::MidiEvent::note_on(1, 60, 0);
+        release.sample_offset = 12;
+        g_emitting->to_emit = {release};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 60] == 1);
+
+        auto attack = midi::MidiEvent::note_on(1, 62, 100);
+        attack.sample_offset = 8;
+        g_emitting->to_emit = {attack};
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 2);
+        CHECK(events[0]->header.time == 0);
+        CHECK((events[0]->data[0] & 0xF0) == 0x80);
+        CHECK(events[0]->data[1] == 60);
+        CHECK(events[1]->header.time == 8);
+        CHECK((events[1]->data[0] & 0xF0) == 0x90);
+        CHECK(h.plugin.outbound_note_release_debt[1 * 128 + 60] == 0);
+
+        g_emitting->to_emit.clear();
+        OutputEventList no_duplicate;
+        REQUIRE(h.run(in, &no_duplicate) == CLAP_PROCESS_CONTINUE);
+        CHECK(no_duplicate.size() == 0);
+    }
+
+    SECTION("a missing host sink retains a release") {
+        g_emitting->to_emit = {midi::MidiEvent::note_off(1, 61)};
+        REQUIRE(h.run(in, nullptr) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_note_release_debt[1 * 128 + 61] == 1);
+
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 1);
+        CHECK(events[0]->header.time == 0);
+        CHECK(events[0]->data[0] == 0x81);
+        CHECK(events[0]->data[1] == 61);
+    }
+
+    SECTION("a refusal mid-merge retains every later release") {
+        auto attack = midi::MidiEvent::note_on(2, 60, 100);
+        attack.sample_offset = 1;
+        auto first_release = midi::MidiEvent::note_off(2, 60);
+        first_release.sample_offset = 2;
+        auto second_release = midi::MidiEvent::note_off(2, 61);
+        second_release.sample_offset = 3;
+        g_emitting->to_emit = {attack, first_release, second_release};
+        OutputEventList one_slot;
+        one_slot.accept_at_most(1);
+        REQUIRE(h.run(in, &one_slot) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(one_slot.size() == 1);
+        CHECK(h.plugin.outbound_note_release_debt[2 * 128 + 60] == 1);
+        CHECK(h.plugin.outbound_note_release_debt[2 * 128 + 61] == 1);
+
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        CHECK(accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 2);
+    }
+
+    SECTION("overlapping and channel-separated releases retain multiplicity") {
+        g_emitting->to_emit = {
+            midi::MidiEvent::note_off(2, 64),
+            midi::MidiEvent::note_on(2, 64, 0),
+            midi::MidiEvent::note_off(3, 65),
+        };
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        g_emitting->to_emit.clear();
+        OutputEventList first;
+        REQUIRE(h.run(in, &first) == CLAP_PROCESS_CONTINUE);
+        auto first_events = first.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(first_events.size() == 2);
+        CHECK(first_events[0]->data[0] == 0x82);
+        CHECK(first_events[1]->data[0] == 0x83);
+
+        OutputEventList second;
+        REQUIRE(h.run(in, &second) == CLAP_PROCESS_CONTINUE);
+        auto second_events = second.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(second_events.size() == 1);
+        CHECK(second_events[0]->data[0] == 0x82);
+    }
+
+    SECTION("pedal and channel reset releases retry canonically") {
+        g_emitting->to_emit = {
+            midi::MidiEvent::cc(4, 64, 0), midi::MidiEvent::cc(4, 66, 0),
+            midi::MidiEvent::cc(4, 120, 0), midi::MidiEvent::cc(4, 121, 0),
+            midi::MidiEvent::cc(4, 123, 0),
+        };
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        g_emitting->to_emit.clear();
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 5);
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            CHECK(events[i]->header.time == 0);
+            CHECK(events[i]->data[1] ==
+                  std::array<uint8_t, 5>{64, 66, 120, 121, 123}[i]);
+        }
+    }
+
+    SECTION("repeated refusal is stable and saturation collapses to panic") {
+        std::vector<midi::MidiEvent> releases(256, midi::MidiEvent::note_off(5, 70));
+        g_emitting->to_emit = releases;
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        pulp::test::RtAllocationProbe allocations;
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK_FALSE(allocations.saw_allocation());
+        REQUIRE(h.plugin.outbound_panic_debt[5]);
+
+        g_emitting->to_emit.clear();
+        OutputEventList rejecting_again;
+        rejecting_again.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting_again) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(h.plugin.outbound_panic_debt[5]);
+
+        OutputEventList accepted;
+        REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+        auto events = accepted.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 1);
+        CHECK(events[0]->data[0] == 0xB5);
+        CHECK(events[0]->data[1] == 120);
+        CHECK(events[0]->data[2] == 0);
+        CHECK_FALSE(h.plugin.outbound_panic_debt[5]);
+    }
+
+    SECTION("retry work is bounded and later blocks eventually drain") {
+        for (std::size_t note = 0; note < 65; ++note)
+            h.plugin.outbound_note_release_debt[7 * 128 + note] = 1;
+        auto attack = midi::MidiEvent::note_on(7, 72, 100);
+        attack.sample_offset = 8;
+        g_emitting->to_emit = {attack};
+
+        OutputEventList first;
+        REQUIRE(h.run(in, &first) == CLAP_PROCESS_CONTINUE);
+        CHECK(first.attempt_count() == 64);
+        CHECK(first.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI).size() == 64);
+        CHECK(h.plugin.outbound_note_release_debt[7 * 128 + 64] == 1);
+
+        OutputEventList second;
+        REQUIRE(h.run(in, &second) == CLAP_PROCESS_CONTINUE);
+        auto events = second.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+        REQUIRE(events.size() == 2);
+        CHECK(events[0]->header.time == 0);
+        CHECK(events[0]->data[1] == 64);
+        CHECK(events[1]->header.time == 8);
+        CHECK(events[1]->data[1] == 72);
+        CHECK(h.plugin.outbound_note_release_debt[7 * 128 + 64] == 0);
+    }
+
+    SECTION("continuous low-channel debt cannot starve a high-channel release") {
+        h.plugin.outbound_note_release_debt[15 * 128 + 127] = 1;
+        g_emitting->to_emit.clear();
+        bool high_channel_drained = false;
+        for (int block = 0; block < 4; ++block) {
+            for (std::size_t note = 0; note < 128; ++note)
+                h.plugin.outbound_note_release_debt[note] = 1;
+            OutputEventList accepted;
+            REQUIRE(h.run(in, &accepted) == CLAP_PROCESS_CONTINUE);
+            CHECK(accepted.attempt_count() <= 64);
+            if (h.plugin.outbound_note_release_debt[15 * 128 + 127] == 0) {
+                high_channel_drained = true;
+                break;
+            }
+        }
+        CHECK(high_channel_drained);
+    }
+
+    SECTION("a rejected attack creates no ownership debt") {
+        g_emitting->to_emit = {midi::MidiEvent::note_on(6, 72, 100)};
+        OutputEventList rejecting;
+        rejecting.accept_at_most(0);
+        REQUIRE(h.run(in, &rejecting) == CLAP_PROCESS_CONTINUE);
+        CHECK(std::all_of(h.plugin.outbound_note_release_debt.begin(),
+                          h.plugin.outbound_note_release_debt.end(),
+                          [](uint8_t count) { return count == 0; }));
+        CHECK_FALSE(h.plugin.outbound_panic_debt[6]);
+    }
 }
 
 TEST_CASE("midi_out sysex surfaces on CLAP out_events",

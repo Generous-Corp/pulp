@@ -390,7 +390,11 @@ TEST_CASE("MpeSidecar reset clears buffer and deferred releases across reactivat
 
     MpeNoteGeneration previous_generation = sidecar.buffer[0].state.note_id;
     for (int cycle = 0; cycle < 3; ++cycle) {
-        sidecar.reset();
+        {
+            pulp::test::RtAllocationProbe probe;
+            sidecar.reset();
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
         REQUIRE(sidecar.buffer.empty());
         REQUIRE(sidecar.tracker.active_count() == 0);
         REQUIRE(sidecar.tracker.pending_note_off_count() == 0);
