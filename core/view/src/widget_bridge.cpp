@@ -333,7 +333,9 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
                            CapabilitySet granted_capabilities)
     : engine_(engine), root_(root), store_(store),
       granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface),
-      widgets_(owned_widgets_) {
+      widgets_(owned_widgets_),
+      callback_alive_(std::make_shared<BridgeCallbackState>(
+          &callback_retired_widgets_, &callback_collectable_widgets_)) {
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
@@ -421,7 +423,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 
 WidgetBridge::~WidgetBridge() {
     unregister_global_dispatch();
-    if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
+    if (callback_alive_) {
+        callback_alive_->store(false, std::memory_order_release);
+        callback_alive_->detach_retirement_queues();
+    }
     release_all_param_gesture_routes();
     // quarantine_realm() already detached this bridge's callback. A replacement
     // realm may have installed its own callback on the shared root while this

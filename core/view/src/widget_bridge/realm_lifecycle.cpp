@@ -2,6 +2,7 @@
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/ui_components.hpp>
 
+#include "bridge_dispatch.hpp"
 #include "value_widget_access.hpp"
 
 #include <algorithm>
@@ -215,6 +216,7 @@ void WidgetBridge::clear_realm(const DeadlineCheck& deadline_check) {
         auto removed = root_.remove_child(child);
         forget_widget_subtree(
             removed.get(), false, deadline_check, true);
+        retire_removed_widget(std::move(removed));
         if (deadline_check) deadline_check();
     }
     owned_widgets_.clear();
