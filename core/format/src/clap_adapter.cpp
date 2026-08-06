@@ -359,6 +359,9 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
     self->mpe.reserve(kRealtimeMidiEventCapacity);
+    // A fresh activation must never inherit tracker identities or deferred
+    // releases from an earlier activation cycle.
+    self->mpe.reset();
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
@@ -453,22 +456,33 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // spuriously raise tempo_changed / time_sig_changed /
     // transport_changed against the prior session's last block.
     self->playhead_prev = {};
+    self->reset_requested = false;
     return true;
 }
 
 void clap_deactivate(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    // Processor owns its downstream DSP/voice state; release it before the
+    // adapter drops the corresponding tracker identities.
     self->processor->release();
+    self->mpe.reset();
     clear_midi_event_buffers(*self);
     self->playhead_prev = {};
+    self->reset_requested = false;
 }
 
 bool clap_start_processing(const clap_plugin_t*) { return true; }
 void clap_stop_processing(const clap_plugin_t*) {}
 void clap_reset(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    // The processor observes the matching reset on its next ProcessContext;
+    // the adapter-owned tracker can be cleared immediately while audio is
+    // stopped. This keeps both owners on the same reset boundary without
+    // coupling the generic sidecar to a particular voice allocator.
+    self->mpe.reset();
     clear_midi_event_buffers(*self);
     self->playhead_prev = {};
+    self->reset_requested = true;
 }
 
 bool clap_param_modulation_lane(const PulpClapPlugin& self,
@@ -823,6 +837,7 @@ static pulp::format::ProcessContext clap_phase_build_context(
     ctx.num_samples = static_cast<int>(num_samples);
     ctx.process_mode = pulp::format::ProcessMode::Realtime;
     ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
+    ctx.reset_requested = self->reset_requested;
     const auto transport =
         decode_clap_transport(process->transport, ctx.sample_rate);
 
@@ -1603,8 +1618,15 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // reaches into the Processor. On contention this block passes its input
     // through — the same degradation as bypass, which is likewise "the
     // Processor did not run this block".
+    const bool bypassed = self->bypass_param_id != 0 &&
+                          self->store.get_value(self->bypass_param_id) >= 0.5f;
     auto render_lock = self->state_restore_gate.lock_for_render();
-    if (render_lock) clap_phase_prepare_sidecars(self, host_delivered_ump);
+    // Do not advance adapter-owned note identity when the processor will not
+    // observe this block. In particular, a reset request retained across
+    // bypass must keep tracker and allocator at the same boundary.
+    if (render_lock && !bypassed) {
+        clap_phase_prepare_sidecars(self, host_delivered_ump);
+    }
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag
@@ -1615,8 +1637,6 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // (null-guarded), zero any output channel without a matching input, and
     // skip the Processor entirely. Mirrors the VST3 processBlockBypassed
     // behavior.
-    const bool bypassed = self->bypass_param_id != 0 &&
-                          self->store.get_value(self->bypass_param_id) >= 0.5f;
     if (bypassed || !render_lock) {
         clap_phase_bypass_passthrough(self, process, in_channels, out_channels,
                                       main_output_f64, original_num_samples);
@@ -1625,6 +1645,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                                  ctx, native_f64, out_channels, main_output_f64,
                                  routed_output_buses, aux_output_f64, output_buses,
                                  num_samples);
+        // Consume a reset only after Processor::process() actually observed it.
+        // A bypassed or state-restore-contended block skips the processor and
+        // must preserve the request for the next real render.
+        self->reset_requested = false;
     }
 
     clap_phase_clear_constant_mask(process);

@@ -27,7 +27,7 @@ If you only need monophonic aftertouch or a global mod wheel, plain
 |--|--|
 | An MPE synth voice | Subclass `midi::MpeSynthVoice`, render your oscillator using `state().pitch_bend_semitones`, `state().pressure`, `state().timbre` |
 | An MPE synth plugin | `MpeVoiceAllocator<YourVoice>` inside the processor, dispatch `MpeBuffer` in `process()`, set `supports_mpe = true` or `node_capabilities.supports_mpe = true` in the descriptor |
-| A host that loads MPE plugins | Build an `MpeBuffer` from inbound MIDI (zone-aware) and hand it to `Processor::mpe_input()` — the CLAP adapter already does this |
+| A host that loads MPE plugins | Build an `MpeBuffer` from inbound MIDI (zone-aware) and hand it to `Processor::mpe_input()` — the CLAP, VST3, and AUv3 adapters already do this |
 | Pure MIDI 2.0 UMP work | Out of scope — direct UMP-native MPE transport is deferred |
 
 ## The three-step pattern for a new MPE synth
@@ -174,11 +174,11 @@ inherit running state via `add_note`.
 
 ### Format adapter coverage
 
-The CLAP adapter populates `MpeBuffer` from inbound MIDI. VST3 and AU
-adapters still forward plain MIDI only. Until those adapters gain direct
-`MpeBuffer` wiring, an MPE synth loaded as VST3/AU sees MIDI events but the
-`MpeBuffer` will be empty; the voice tracker inside the processor still works
-if you extract per-note data from `MidiBuffer` yourself.
+The CLAP, VST3, and AUv3 adapters populate `MpeBuffer` from inbound MIDI and
+reset their tracker state at lifecycle boundaries. AUv2 and other adapters still
+forward plain MIDI only; an MPE synth loaded through one of those formats sees
+MIDI events but the `MpeBuffer` will be empty unless the processor derives
+per-note state from `MidiBuffer` itself.
 
 ### Realtime sidecar buffers are capacity-limited
 
@@ -204,9 +204,20 @@ the tracker moves that release into its fixed FIFO and blocks fresh starts until
 it is drained. `MpeSidecar` drains it automatically at offset zero before the
 next block. A direct tracker/buffer integration must do the same by calling
 `flush_pending_note_offs()` after clearing its output and before ingesting the
-next block. At reset/deactivation, clear both tracker and downstream allocator
-state (`MpeVoiceAllocator::reset_all()`); `MpeVoiceTracker::reset()` deliberately
-does not synthesize callbacks.
+next block. Retrigger is a reattack, not glide: because the old generation's
+NoteOff is dispatched first, `MpeVoiceAllocator::last_was_glide()` remains false.
+Only genuinely overlapping held notes on a member channel count as glide.
+
+The generic sidecar cannot own a processor-specific allocator. At deactivation,
+adapters call `Processor::release()` before resetting the tracker, so an MPE
+processor must call `MpeVoiceAllocator::reset_all()` from `release()`. For an
+in-place host reset, adapters clear the tracker and raise
+`ProcessContext::reset_requested` on the next block; clear the allocator before
+dispatching that block's MPE input. Do not use `should_reset_dsp_state()` for
+voice ownership: it also includes transport jumps, which do not reset the
+adapter tracker. `MpeVoiceTracker::reset()` deliberately does not synthesize
+callbacks, and `MpeSidecar::reset()` also clears its buffer and pending-release
+FIFO.
 
 ### Scale-aware bend and voice-modulation projection
 

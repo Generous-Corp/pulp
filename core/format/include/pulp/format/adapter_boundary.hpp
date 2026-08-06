@@ -491,10 +491,17 @@ struct MpeSidecar {
         buffer.set_realtime_capacity_limit(true);
     }
 
-    /// Drop all per-note tracker state so a re-activation / transport reset does
-    /// not route a stale noteId to a voice that no longer exists. Off the audio
-    /// thread.
-    void reset() { tracker.reset(); }
+    /// Drop adapter-owned per-note state so a re-activation / processor reset
+    /// cannot route a stale noteId. This deliberately cannot reset downstream
+    /// voices: the generic sidecar has no knowledge of the processor's allocator.
+    /// Deactivation adapters therefore call `Processor::release()` first, and a
+    /// live reset is paired with `ProcessContext::reset_requested` so the
+    /// processor clears its own DSP/voice state. Off the audio thread.
+    void reset() {
+        tracker.reset();
+        buffer.clear();
+        current_sample_offset = 0;
+    }
 
     /// Per-block: when enabled, clear the buffer, run @p midi_in through the
     /// tracker (stamping each emitted expression event with its source event's

@@ -123,6 +123,12 @@ public:
     virtual void prepare(const PrepareContext& context) = 0;
 
     /// Release resources. Called on the host thread with audio stopped.
+    /// Processors that own active voices or other note-lifecycle state must
+    /// clear it here; format adapters separately reset their inbound MPE
+    /// trackers immediately after this call. For an in-place host reset, clear
+    /// the same state when `ProcessContext::reset_requested` is true. A transport
+    /// jump alone does not clear adapter tracker identities and therefore must
+    /// not clear voice ownership.
     virtual void release() {}
 
     /// Pause processing for a heavy main-thread operation (preset load,
