@@ -3057,7 +3057,6 @@
           {
             "class": "MirroredHistoryBuffer",
             "methods": [
-              "static_assert(std::is_arithmetic_v<SampleType>, \"MirroredHistoryBuffer requires an arithmetic sample type\")",
               "push(SampleType sample)",
               "window()",
               "capacity()",

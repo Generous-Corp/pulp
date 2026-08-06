@@ -181,7 +181,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::MirroredHistoryBuffer<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:d507271969c7fb14569e541ecb0f5cc3a0ccbc134ceaa58278eae6f9d0fccff5"
+                    "sha256:a008193b186b53f91576d23e8bd82209599f39c159587e8bae28f106e5374802"
                 ),
             )
         ],
