@@ -5,8 +5,14 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
 #include <pulp/signal/saturator.hpp>
+#include <pulp/timebase/beat_division.hpp>
+#include <pulp/timebase/coordinate_random.hpp>
+#include <pulp/timebase/grid_projection.hpp>
+#include <pulp/timebase/groove_kernel.hpp>
 #include <pulp/timebase/quantize.hpp>
+#include <pulp/timebase/ratchet.hpp>
 #include <pulp/timebase/tick.hpp>
+#include <pulp/timebase/trigger_grid.hpp>
 
 int main() {
     {
@@ -30,12 +36,46 @@ int main() {
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
     }
     {
+        // timebase.beat-division
+        static_assert(sizeof(pulp::timebase::BeatDivision) > 0);
+        auto *volatile binding_5 = &pulp::timebase::division_ticks;
+        (void)binding_5;
+        pulp::timebase::BeatDivision probe_value_0{pulp::timebase::BeatDivision::Quarter}; (void)probe_value_0;
+        (void)pulp::timebase::division_ticks(pulp::timebase::BeatDivision::Quarter);
+    }
+    {
+        // timebase.coordinate-random
+        static_assert(sizeof(pulp::timebase::RandomCoordinate) > 0);
+        auto *volatile binding_7 = &pulp::timebase::coordinate_chance;
+        (void)binding_7;
+        pulp::timebase::RandomCoordinate probe_value_0{pulp::timebase::TickPosition{0}, 0, 0, 0}; (void)probe_value_0;
+        (void)pulp::timebase::coordinate_chance(0, pulp::timebase::RandomCoordinate{}, 1, 2);
+    }
+    {
+        // timebase.grid-projection
+        auto *volatile binding_8 = &pulp::timebase::project_grid;
+        (void)binding_8;
+        (void)pulp::timebase::project_grid(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value(), pulp::timebase::CompiledMeterMap::compile(pulp::timebase::MeterMap{}).value(), pulp::timebase::GridProjectionRequest{}, std::span<const pulp::timebase::GridProjectionRange>{}, std::span<pulp::timebase::GridProjectionPoint>{});
+    }
+    {
+        // timebase.groove-kernel
+        auto *volatile binding_9 = &pulp::timebase::OrderPreservingGrooveKernel::create;
+        (void)binding_9;
+        (void)pulp::timebase::OrderPreservingGrooveKernel::create(pulp::timebase::GrooveKernelInput{});
+    }
+    {
+        // timebase.ratchet
+        auto *volatile binding_10 = &pulp::timebase::project_ratchet_interval<>;
+        (void)binding_10;
+        (void)pulp::timebase::project_ratchet_interval<>(pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, std::span<pulp::timebase::TickPosition>{});
+    }
+    {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto *volatile binding_5 = &pulp::timebase::swing_position;
-        (void)binding_5;
-        auto *volatile binding_6 = &pulp::timebase::unswing_position;
-        (void)binding_6;
+        auto *volatile binding_12 = &pulp::timebase::swing_position;
+        (void)binding_12;
+        auto *volatile binding_13 = &pulp::timebase::unswing_position;
+        (void)binding_13;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
@@ -44,6 +84,11 @@ int main() {
         // timebase.tick
         static_assert(sizeof(pulp::timebase::TickPosition) > 0);
         pulp::timebase::TickPosition probe_value_0{1}; (void)probe_value_0;
+    }
+    {
+        // timebase.trigger-grid
+        static_assert(sizeof(pulp::timebase::TriggerGrid<>) > 0);
+        pulp::timebase::TriggerGrid<> probe_value_0{}; (void)probe_value_0.configure(1, 1, pulp::timebase::TickDuration{1});
     }
     return 0;
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 3,
+  "inventory_version": 4,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -32,15 +32,15 @@
     }
   ],
   "counts": {
-    "public_headers": 345,
-    "reviewed_headers": 8,
-    "legacy_unreviewed_headers": 337,
+    "public_headers": 351,
+    "reviewed_headers": 15,
+    "legacy_unreviewed_headers": 336,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 6,
-      "capability_support": 0,
+      "capability_entrypoint": 12,
+      "capability_support": 1,
       "infrastructure": 0,
-      "legacy_unreviewed": 337,
+      "legacy_unreviewed": 336,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -64,13 +64,13 @@
       },
       "signal": {
         "public_headers": 194,
-        "reviewed_headers": 3,
-        "legacy_unreviewed_headers": 191,
+        "reviewed_headers": 4,
+        "legacy_unreviewed_headers": 190,
         "unsupported_headers": 2
       },
       "timebase": {
-        "public_headers": 6,
-        "reviewed_headers": 2,
+        "public_headers": 12,
+        "reviewed_headers": 8,
         "legacy_unreviewed_headers": 4,
         "unsupported_headers": 0
       }
@@ -3022,11 +3022,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/units.hpp",
-      "fingerprint": "sha256:a2bb6df8fa1cc1e8381758577cbbdb0cf5b3299c12f64ca68d656c7bb6c1645d",
+      "fingerprint": "sha256:2f0af86ba3fccbb3017339235c05b7d43b492939c111fc67e93ee2046ee6e264",
       "include": "pulp/signal/units.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "timebase.beat-division"
+      ],
+      "rationale": "The signal Division compatibility vocabulary now derives from the canonical timebase BeatDivision table. The broad signal unit-conversion header remains outside this slice's generator-facing claims."
     },
     {
       "domain": "signal",
@@ -3138,6 +3140,17 @@
     },
     {
       "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/beat_division.hpp",
+      "fingerprint": "sha256:a6f8a5abd5184d33e08c38ed24565b8ed18df756ce63688594a7a3b4ca6ed570",
+      "include": "pulp/timebase/beat_division.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.beat-division"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/compiled_meter_map.hpp",
       "fingerprint": "sha256:9e06ac7c08f950aa5cb392d27439a6db85eca47cc3e1746a6c3e7f1272bde6fb",
       "include": "pulp/timebase/compiled_meter_map.hpp",
@@ -3153,6 +3166,39 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/coordinate_random.hpp",
+      "fingerprint": "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5",
+      "include": "pulp/timebase/coordinate_random.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.coordinate-random"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/grid_projection.hpp",
+      "fingerprint": "sha256:b2f226eac6ab4171874c462a69dceca9fad0468e749c0d3195b1a7daf6a032b5",
+      "include": "pulp/timebase/grid_projection.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.grid-projection"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/groove_kernel.hpp",
+      "fingerprint": "sha256:169e0104d2ea6164d6924de224ac636eaf11d617f5b844b4a2facaf0cbaa0286",
+      "include": "pulp/timebase/groove_kernel.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.groove-kernel"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "timebase",
@@ -3176,6 +3222,17 @@
     },
     {
       "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/ratchet.hpp",
+      "fingerprint": "sha256:93f1ae1c80b5c5ad255180067adabcc331577e63a6f77b57b06255891926718d",
+      "include": "pulp/timebase/ratchet.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.ratchet"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/rational_time.hpp",
       "fingerprint": "sha256:333417397f3df67fef0d84bb91a0910d519ab58ef9a2ce7590f7e31a5b643c3f",
       "include": "pulp/timebase/rational_time.hpp",
@@ -3191,6 +3248,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "timebase.tick"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/trigger_grid.hpp",
+      "fingerprint": "sha256:6a5b7dd7f2b1185ed3a3f5c8ae1ffcf506415fe6083ec772f984010476b337ca",
+      "include": "pulp/timebase/trigger_grid.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.trigger-grid"
       ],
       "rationale": "Public binding for a curated consumer capability."
     }

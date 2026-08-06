@@ -77,6 +77,30 @@ def exercise_manifest_mutations(canonical: dict) -> int:
         "Pulp::signal-modal-spec"
     )
     checks += 1
+    for include in (
+        "pulp/timebase/beat_division.hpp",
+        "pulp/timebase/coordinate_random.hpp",
+        "pulp/timebase/grid_projection.hpp",
+        "pulp/timebase/groove_kernel.hpp",
+        "pulp/timebase/ratchet.hpp",
+        "pulp/timebase/trigger_grid.hpp",
+    ):
+        assert manifest._minimal_target_for_include(include) == "Pulp::timebase"
+        checks += 1
+    expected_timebase_keys = {
+        "timebase.beat-division",
+        "timebase.coordinate-random",
+        "timebase.grid-projection",
+        "timebase.groove-kernel",
+        "timebase.ratchet",
+        "timebase.swing",
+        "timebase.tick",
+        "timebase.trigger-grid",
+    }
+    assert {
+        row["key"] for row in canonical["capabilities"] if row["domain"] == "timebase"
+    } == expected_timebase_keys
+    checks += 1
     assert manifest._minimal_target_for_include("pulp/signal/future_source_api.hpp") is None
     checks += 1
 
