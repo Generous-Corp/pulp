@@ -103,6 +103,9 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
     std::uint64_t requested_max_bytes,
     RealtimePitchTimePreparedGeometry<SampleType>& prepared) noexcept {
     const auto target_max_bytes = std::min(requested_max_bytes, kTargetAddressMaximumBytes);
+    if (config.true_envelope_iterations < 0 ||
+        config.true_envelope_iterations > kSourceFilterMaximumEnvelopeIterations)
+        return PitchTimePrepareStatus::invalid_spectral_geometry;
     if (config.mode == PitchTimeMode::time_stretch
         && (!std::isfinite(config.max_time_ratio) || config.max_time_ratio < 1.0f))
         return PitchTimePrepareStatus::invalid_max_time_ratio;

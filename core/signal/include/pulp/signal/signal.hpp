@@ -44,6 +44,7 @@
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
+#include <pulp/signal/source_filter_analysis.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/signal/offline_stretch.hpp>

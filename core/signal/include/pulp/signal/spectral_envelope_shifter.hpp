@@ -24,11 +24,11 @@
 ///
 /// `warp == 1` is an exact bypass. No allocation after `prepare()`.
 
-#include <pulp/signal/fft.hpp>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <complex>
+#include <pulp/signal/source_filter_analysis.hpp>
 #include <vector>
 
 namespace pulp::signal {
@@ -46,22 +46,22 @@ struct SpectralEnvelopeShifterConfig {
     float max_gain_db = 60.0f;
 };
 
-template <typename SampleType = float>
-class SpectralEnvelopeShifterT {
-public:
+template <typename SampleType = float> class SpectralEnvelopeShifterT {
+  public:
     SpectralEnvelopeShifterT() = default;
 
     static bool checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes,
                                        std::uint64_t& bytes) noexcept {
         const auto bins = static_cast<std::uint64_t>(fft_size / 2 + 1);
-        std::uint64_t fft_bytes = 0;
+        CepstralEnvelopeConfigT<SampleType> analysis_config;
+        analysis_config.fft_size = fft_size;
+        analysis_config.order = fft_size / 16;
+        std::uint64_t analysis_bytes = 0;
         CheckedRetainedByteCharge charge(target_max_bytes);
-        if (!charge.add<SampleType>(bins) || !charge.add<SampleType>(bins)
-            || !charge.add<SampleType>(bins)
-            || !charge.add<std::complex<SampleType>>(static_cast<std::uint64_t>(fft_size))
-            || !checked_fft_retained_bytes<SampleType>(static_cast<std::uint64_t>(fft_size),
-                                                       target_max_bytes, fft_bytes)
-            || !charge.add_retained_bytes(fft_bytes))
+        if (!charge.add<SampleType>(bins) || !charge.add<SampleType>(bins) ||
+            !CepstralEnvelopeAnalyzerT<SampleType>::checked_retained_bytes(
+                analysis_config, target_max_bytes, analysis_bytes) ||
+            !charge.add_retained_bytes(analysis_bytes))
             return false;
         bytes = charge.total();
         return true;
@@ -71,30 +71,58 @@ public:
     /// not audio-thread safe. After prepare(), num_bins(), order(), and
     /// process_group() are allocation-free for the prepared FFT size; the frame
     /// pointers must reference exactly num_bins() bins.
-    void prepare(const SpectralEnvelopeShifterConfig& config) {
-        assert(config.fft_size >= 256 && (config.fft_size & (config.fft_size - 1)) == 0);
-        config_ = config;
-        if (config_.order <= 0)
-            config_.order = config_.fft_size / 16;
-        num_bins_ = config_.fft_size / 2 + 1;
-        fft_ = FftT<SampleType>(config_.fft_size);
+    [[nodiscard]] SourceFilterAnalysisStatus prepare(const SpectralEnvelopeShifterConfig& config) {
+        auto effective_config = config;
+        if (effective_config.order <= 0)
+            effective_config.order = effective_config.fft_size / 16;
+        CepstralEnvelopeConfigT<SampleType> analysis_config;
+        analysis_config.fft_size = effective_config.fft_size;
+        analysis_config.order = effective_config.order;
+        analysis_config.true_envelope_iterations = effective_config.true_envelope_iterations;
+        analysis_config.convergence_tolerance = SampleType{0};
+        CepstralEnvelopeAnalyzerT<SampleType> next_analyzer;
+        const auto analysis_status = next_analyzer.prepare(analysis_config);
+        if (analysis_status != SourceFilterAnalysisStatus::Ok)
+            return analysis_status;
 
-        log_mag_.assign(static_cast<size_t>(num_bins_), SampleType{0});
-        envelope_.assign(static_cast<size_t>(num_bins_), SampleType{0});
-        smooth_in_.assign(static_cast<size_t>(num_bins_), SampleType{0});
-        cepstrum_.assign(static_cast<size_t>(config_.fft_size),
-                         std::complex<SampleType>(SampleType{0}, SampleType{0}));
-        max_gain_ln_ = static_cast<SampleType>(config_.max_gain_db * 0.1151293f); // dB → ln
+        const auto commit = [&]() {
+            const auto next_num_bins = effective_config.fft_size / 2 + 1;
+            std::vector<SampleType> next_log_mag(static_cast<size_t>(next_num_bins), SampleType{0});
+            std::vector<SampleType> next_envelope(static_cast<size_t>(next_num_bins),
+                                                  SampleType{0});
+            config_ = effective_config;
+            num_bins_ = next_num_bins;
+            envelope_analyzer_ = std::move(next_analyzer);
+            log_mag_ = std::move(next_log_mag);
+            envelope_ = std::move(next_envelope);
+            max_gain_ln_ = static_cast<SampleType>(effective_config.max_gain_db * 0.1151293f);
+            return SourceFilterAnalysisStatus::Ok;
+        };
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+        try {
+            return commit();
+        } catch (const std::bad_alloc&) {
+            return SourceFilterAnalysisStatus::AllocationFailure;
+        } catch (const std::length_error&) {
+            return SourceFilterAnalysisStatus::AllocationFailure;
+        }
+#else
+        return commit();
+#endif
     }
 
-    int num_bins() const { return num_bins_; }
-    int order() const { return config_.order; }
+    int num_bins() const {
+        return num_bins_;
+    }
+    int order() const {
+        return config_.order;
+    }
 
     /// Estimate the group envelope and rescale all channels' bins by
     /// E(k * warp) / E(k). `frames` holds `channels` pointers to
     /// `num_bins()` bins (DC..Nyquist) of the same time index.
-    void process_group(std::complex<SampleType>* const* frames, int channels,
-                       int num_bins, SampleType warp) {
+    void process_group(std::complex<SampleType>* const* frames, int channels, int num_bins,
+                       SampleType warp) {
         assert(num_bins == num_bins_);
         assert(channels >= 1);
         if (warp == SampleType{1})
@@ -120,35 +148,29 @@ public:
             log_mag_[static_cast<size_t>(k)] = power / static_cast<SampleType>(channels);
             max_power = std::max(max_power, log_mag_[static_cast<size_t>(k)]);
         }
-        const SampleType floor_power = std::max(max_power * static_cast<SampleType>(1e-4),
-                                                static_cast<SampleType>(1e-24));
+        const SampleType floor_power =
+            std::max(max_power * static_cast<SampleType>(1e-4), static_cast<SampleType>(1e-24));
         for (int k = 0; k < num_bins_; ++k)
             log_mag_[static_cast<size_t>(k)] =
-                static_cast<SampleType>(0.5) * std::log(
-                    std::max(log_mag_[static_cast<size_t>(k)], floor_power));
+                static_cast<SampleType>(0.5) *
+                std::log(std::max(log_mag_[static_cast<size_t>(k)], floor_power));
 
-        // Plain cepstral lifter, then true-envelope refinement: re-smooth
-        // the pointwise max of spectrum and current envelope so the
-        // envelope rides harmonic peaks instead of averaging through them.
-        cepstral_smooth(log_mag_.data(), envelope_.data());
-        for (int it = 0; it < config_.true_envelope_iterations; ++it) {
-            for (int k = 0; k < num_bins_; ++k)
-                smooth_in_[static_cast<size_t>(k)] =
-                    std::max(log_mag_[static_cast<size_t>(k)], envelope_[static_cast<size_t>(k)]);
-            cepstral_smooth(smooth_in_.data(), envelope_.data());
-        }
+        const auto envelope_result = envelope_analyzer_.estimate(log_mag_, envelope_);
+        assert(envelope_result.ok());
+        if (!envelope_result.ok())
+            return;
 
         // Apply E(k*warp) / E(k) in the log domain with linear
         // interpolation, clamped at the spectrum edges and by max gain.
         double energy_after = 0.0;
         for (int k = 0; k < num_bins_; ++k) {
-            const SampleType pos = std::min(static_cast<SampleType>(k) * warp,
-                                            static_cast<SampleType>(num_bins_ - 1));
+            const SampleType pos =
+                std::min(static_cast<SampleType>(k) * warp, static_cast<SampleType>(num_bins_ - 1));
             const int i0 = static_cast<int>(pos);
             const int i1 = std::min(i0 + 1, num_bins_ - 1);
             const SampleType frac = pos - static_cast<SampleType>(i0);
-            const SampleType warped = envelope_[static_cast<size_t>(i0)] * (SampleType{1} - frac)
-                               + envelope_[static_cast<size_t>(i1)] * frac;
+            const SampleType warped = envelope_[static_cast<size_t>(i0)] * (SampleType{1} - frac) +
+                                      envelope_[static_cast<size_t>(i1)] * frac;
             SampleType gain_ln = warped - envelope_[static_cast<size_t>(k)];
             gain_ln = std::clamp(gain_ln, -max_gain_ln_, max_gain_ln_);
             const SampleType gain = std::exp(gain_ln);
@@ -183,7 +205,8 @@ public:
             // runaway toward Inf on a numerically-degenerate frame, NOT to limit
             // a real correction — a tight rail under-corrects and re-introduces
             // the quiet-pitch-up bug. +/-48 dB.
-            norm = std::clamp(norm, static_cast<SampleType>(1.0 / 256.0), static_cast<SampleType>(256.0));
+            norm = std::clamp(norm, static_cast<SampleType>(1.0 / 256.0),
+                              static_cast<SampleType>(256.0));
             if (std::isfinite(static_cast<double>(norm))) {
                 for (int k = 0; k < num_bins_; ++k)
                     for (int ch = 0; ch < channels; ++ch)
@@ -192,33 +215,14 @@ public:
         }
     }
 
-private:
-    // log-spectrum (num_bins) → liftered log-envelope (num_bins) via the
-    // real cepstrum: even-symmetric extension, inverse FFT, rectangular
-    // lifter keeping quefrencies |q| <= order, forward FFT.
-    void cepstral_smooth(const SampleType* log_spec, SampleType* env_out) {
-        const int n = config_.fft_size;
-        for (int k = 0; k < num_bins_; ++k)
-            cepstrum_[static_cast<size_t>(k)] = {log_spec[k], SampleType{0}};
-        for (int k = num_bins_; k < n; ++k)
-            cepstrum_[static_cast<size_t>(k)] = {log_spec[n - k], SampleType{0}};
-        fft_.inverse(cepstrum_.data());
-        for (int q = config_.order + 1; q < n - config_.order; ++q)
-            cepstrum_[static_cast<size_t>(q)] = {SampleType{0}, SampleType{0}};
-        fft_.forward(cepstrum_.data());
-        for (int k = 0; k < num_bins_; ++k)
-            env_out[k] = cepstrum_[static_cast<size_t>(k)].real();
-    }
-
+  private:
     SpectralEnvelopeShifterConfig config_;
-    FftT<SampleType> fft_{2048};
+    CepstralEnvelopeAnalyzerT<SampleType> envelope_analyzer_;
     int num_bins_ = 0;
     SampleType max_gain_ln_ = static_cast<SampleType>(6.9);
 
     std::vector<SampleType> log_mag_;
     std::vector<SampleType> envelope_;
-    std::vector<SampleType> smooth_in_;
-    std::vector<std::complex<SampleType>> cepstrum_;
 };
 
 using SpectralEnvelopeShifter = SpectralEnvelopeShifterT<float>;
