@@ -656,6 +656,30 @@ TEST_CASE("host grid projection rejects the exclusive signed frame bound", "[tim
     REQUIRE(output[0].frame_offset == 77);
 }
 
+TEST_CASE("grid projection accepts the last representable output frame", "[timebase][grid]") {
+    const std::array tempo_points{TempoPoint{{0}, 60.0}};
+    const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});
+    const std::array meter_points{MeterPoint{{0}, {4, 4}}};
+    const auto meter = meter_map(meter_points);
+    const GridProjectionRange range{std::numeric_limits<std::uint32_t>::max(),
+                                    1,
+                                    {0},
+                                    {0},
+                                    {1},
+                                    {{0}},
+                                    {{1}},
+                                    0};
+    std::array<GridProjectionPoint, 1> output{};
+
+    const auto result =
+        project_grid(tempo, meter, {BeatDivision::Quarter, GridAnchor::Timeline, true},
+                     std::span<const GridProjectionRange>(&range, 1), output);
+
+    REQUIRE(result);
+    REQUIRE(result.count == 1);
+    CHECK(output[0].frame_offset == std::numeric_limits<std::uint32_t>::max());
+}
+
 TEST_CASE("host grid projection is binary64-stable at a frame boundary", "[timebase][grid]") {
     const std::array tempo_points{TempoPoint{{0}, 60.0}};
     const auto tempo = require_compiled_tempo_map(tempo_points, {48'000, 1});

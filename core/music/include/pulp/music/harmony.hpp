@@ -138,7 +138,8 @@ constexpr bool recognition_equivalent(const ChordRecognition& lhs,
 constexpr std::optional<ChordRecognitionList>
 recognize_chord(PitchClassSet pitch_classes,
                 std::optional<PitchClass> bass = std::nullopt) noexcept {
-    if (pitch_classes.empty() || (bass && !is_valid(*bass)))
+    if (pitch_classes.empty() ||
+        (bass && (!is_valid(*bass) || !pitch_classes.contains(*bass))))
         return std::nullopt;
 
     ChordRecognitionList result;

@@ -30,7 +30,7 @@ from agent_capability_evolution import (
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 5
-SURFACE_INVENTORY_VERSION = 5
+SURFACE_INVENTORY_VERSION = 6
 HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
@@ -688,7 +688,7 @@ EXPORTS = [
                 qualified_name="pulp::music::recognize_chord",
                 target="Pulp::music",
                 header_fingerprint=(
-                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                    "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60"
                 ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
@@ -703,7 +703,7 @@ EXPORTS = [
                 qualified_name="pulp::music::recognize_chord",
                 target="Pulp::music",
                 header_fingerprint=(
-                    "sha256:78526fc61168d1b9d50f184fa9a9c3cc58986030afdfa919a2db087332c2e7a9"
+                    "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60"
                 ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
@@ -1112,7 +1112,7 @@ EXPORTS = [
                 qualified_name="pulp::timebase::project_grid",
                 target="Pulp::timebase",
                 header_fingerprint=(
-                    "sha256:b2f226eac6ab4171874c462a69dceca9fad0468e749c0d3195b1a7daf6a032b5"
+                    "sha256:cf70650f506ab6b7ca648ca906219b4837a500e8aca8c56095b6acef626bf30c"
                 ),
             )
         ],

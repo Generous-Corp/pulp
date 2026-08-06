@@ -204,7 +204,9 @@ inline GridProjectionError validate_range(const GridProjectionRange& range) noex
         return GridProjectionError::SampleRangeExceeded;
     std::uint64_t frame_end = 0;
     frame_end = static_cast<std::uint64_t>(range.frame_offset) + range.frame_count;
-    if (frame_end > std::numeric_limits<std::uint32_t>::max())
+    const auto frame_domain_end =
+        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U;
+    if (frame_end > frame_domain_end)
         return GridProjectionError::InvalidRange;
     if (range.host_beat_mapping) {
         const auto tick_start = range.has_precise_host_ticks
