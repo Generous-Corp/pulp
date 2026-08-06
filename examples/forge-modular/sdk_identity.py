@@ -6,10 +6,16 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 
 REPO = Path(__file__).resolve().parents[2]
-PROVENANCE_PATH = REPO / "tools" / "scripts" / "sdk_provenance.py"
+SCRIPTS = REPO / "tools" / "scripts"
+PROVENANCE_PATH = SCRIPTS / "sdk_provenance.py"
+# sdk_provenance owns the verification contract and may import sibling helpers
+# installed with it. Loading it by path must preserve that package-local import
+# surface, including on a combined branch where the helper set just expanded.
+sys.path.insert(0, str(SCRIPTS))
 SPEC = importlib.util.spec_from_file_location("sdk_provenance", PROVENANCE_PATH)
 PROVENANCE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
