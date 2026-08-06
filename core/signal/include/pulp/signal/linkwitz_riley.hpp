@@ -137,7 +137,9 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
     /// Retune all cutoffs together. A zero-length transition changes the live
     /// coefficients immediately. A nonzero transition logarithmically moves
     /// the bilinear-warped cutoff design values for exactly transition_samples
-    /// processed samples. Only bounded arithmetic occurs in process().
+    /// processed samples. Configuration rejects trajectories whose rounded
+    /// multiplier and accumulated product error cannot bound the final endpoint
+    /// correction. Only bounded arithmetic occurs in process().
     bool set_cutoffs(std::span<const SampleType> cutoffs,
                      std::size_t transition_samples = 0) noexcept {
         if (!prepared_ || transition_length_ != 0 || cutoffs.size() != cutoff_count_ ||
@@ -164,22 +166,18 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         if (minimum == std::numeric_limits<std::size_t>::max() || transition_samples < minimum)
             return false;
 
-        std::array<double, MaxBands - 1> proposed_multipliers{};
         bool changes_cutoff = false;
         for (std::size_t split = 0; split < cutoff_count_; ++split) {
             changes_cutoff =
                 changes_cutoff || proposed_warped_cutoffs[split] != current_warped_cutoffs_[split];
-            proposed_multipliers[split] =
-                std::exp(std::log(proposed_warped_cutoffs[split] / current_warped_cutoffs_[split]) /
-                         static_cast<double>(transition_samples));
-            if (!(std::isfinite(proposed_multipliers[split]) &&
-                  proposed_multipliers[split] > 0.0) ||
-                (proposed_warped_cutoffs[split] != current_warped_cutoffs_[split] &&
-                 proposed_multipliers[split] == 1.0))
-                return false;
         }
         if (!changes_cutoff)
             return true;
+
+        std::array<double, MaxBands - 1> proposed_multipliers{};
+        if (!transition_is_representable(proposed_warped_cutoffs, transition_samples,
+                                         &proposed_multipliers))
+            return false;
 
         target_cutoffs_ = proposed_cutoffs;
         target_warped_cutoffs_ = proposed_warped_cutoffs;
@@ -507,7 +505,74 @@ template <typename SampleType = float, std::size_t MaxBands = 8> class LinkwitzR
         if (!(std::isfinite(required) && required >= 0.0) ||
             required >= static_cast<double>(std::numeric_limits<std::size_t>::max()))
             return std::numeric_limits<std::size_t>::max();
-        return static_cast<std::size_t>(required);
+        auto candidate = static_cast<std::size_t>(required);
+        if (candidate == 0)
+            return 0;
+
+        // ceil() normally leaves enough room for floating-point roundoff. At
+        // exact integer boundaries, advance a few samples until the realized
+        // multiplier and accumulated error fit the same public rate bound.
+        constexpr std::size_t representability_search = 1024;
+        for (std::size_t attempt = 0; attempt < representability_search; ++attempt) {
+            if (transition_is_representable(target, candidate, nullptr))
+                return candidate;
+            if (candidate == std::numeric_limits<std::size_t>::max() - 1)
+                break;
+            ++candidate;
+        }
+        return std::numeric_limits<std::size_t>::max();
+    }
+
+    bool transition_is_representable(const std::array<double, MaxBands - 1>& target,
+                                     std::size_t transition_samples,
+                                     std::array<double, MaxBands - 1>* multipliers) const noexcept {
+        if (transition_samples == 0 ||
+            transition_samples == std::numeric_limits<std::size_t>::max())
+            return false;
+
+        // A product of n rounded positive factors has relative error bounded by
+        // gamma_n = n*epsilon/(1-n*epsilon). Work in log space and reserve a
+        // conservative full epsilon per multiplication. Requests too long for
+        // double precision to substantiate are rejected during configuration.
+        constexpr double epsilon = std::numeric_limits<double>::epsilon();
+        const double roundoff_product = static_cast<double>(transition_samples - 1) * epsilon;
+        if (!(std::isfinite(roundoff_product) && roundoff_product < 0.5))
+            return false;
+        const double relative_roundoff_bound = roundoff_product / (1.0 - roundoff_product);
+        const double accumulated_log_roundoff = -std::log1p(-relative_roundoff_bound);
+        const double one_multiply_log_roundoff = -std::log1p(-epsilon);
+        const double maximum_downward_log_step =
+            maximum_downward_log_slew_nepers_per_second() / sample_rate_;
+
+        for (std::size_t split = 0; split < cutoff_count_; ++split) {
+            const double total_log_distance =
+                std::log(target[split] / current_warped_cutoffs_[split]);
+            const double ideal_log_step =
+                total_log_distance / static_cast<double>(transition_samples);
+            const double multiplier = std::exp(ideal_log_step);
+            if (!(std::isfinite(multiplier) && multiplier > 0.0) ||
+                (target[split] != current_warped_cutoffs_[split] && multiplier == 1.0))
+                return false;
+
+            const double realized_log_step = std::log(multiplier);
+            const double final_log_correction =
+                std::abs(total_log_distance -
+                         static_cast<double>(transition_samples - 1) * realized_log_step);
+            const double bounded_final_log_correction =
+                final_log_correction + accumulated_log_roundoff;
+            if (!(std::isfinite(bounded_final_log_correction) &&
+                  bounded_final_log_correction <= 2.0 * std::abs(ideal_log_step)))
+                return false;
+
+            if (total_log_distance < 0.0 &&
+                (-realized_log_step + one_multiply_log_roundoff > maximum_downward_log_step ||
+                 bounded_final_log_correction > maximum_downward_log_step))
+                return false;
+
+            if (multipliers != nullptr)
+                (*multipliers)[split] = multiplier;
+        }
+        return true;
     }
 
     void advance_transition() noexcept {

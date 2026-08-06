@@ -57,7 +57,14 @@ because peaks also depend on recursive state established by prior input.
 without changing the live configuration. `max()` from
 `minimum_transition_samples()` is reserved as the invalid or unrepresentable
 sentinel and is never an accepted transition length. Upward moves may use any
-nonzero length whose per-sample multiplier differs representably from unity.
+nonzero length whose entire rounded trajectory is representable. Before a
+transition becomes live, configuration bounds the accumulated multiplication
+roundoff and the endpoint correction implied by the rounded multiplier. The
+endpoint correction may be at most two scheduled logarithmic steps and, for a
+downward move, must also remain inside the public 20-neper/second rate. This
+rejects extremely long transitions even when their multiplier differs from
+unity, because that fact alone does not prove that repeated multiplication will
+arrive near the target.
 The transcendental endpoint and slew calculations happen in `set_cutoffs()`;
 `process()` uses bounded multiply/add/divide arithmetic. It does not crossfade
 differently phased banks. A zero-length transition is an explicit immediate

@@ -743,6 +743,98 @@ TEST_CASE("N-way Linkwitz-Riley rejects unrepresentable transitions transactiona
 
     REQUIRE(rounding_edge.set_cutoffs(low, sentinel));
     REQUIRE_FALSE(rounding_edge.transitioning());
+
+    if constexpr (std::numeric_limits<std::size_t>::digits >= 63) {
+        constexpr std::uint64_t extreme_upward_samples = 5'000'000'000'000'000ULL;
+        const std::array<double, 1> upward_from{1000.0};
+        const std::array<double, 1> upward_to{2000.0};
+        Runtime extreme_upward;
+        Runtime upward_unchanged;
+        REQUIRE(extreme_upward.prepare(48000.0, upward_from));
+        REQUIRE(upward_unchanged.prepare(48000.0, upward_from));
+        for (std::size_t sample = 0; sample < 4096; ++sample) {
+            const double input = 0.25 * std::sin(0.11 * static_cast<double>(sample));
+            REQUIRE(extreme_upward.process(input).bands == upward_unchanged.process(input).bands);
+        }
+        REQUIRE_FALSE(extreme_upward.set_cutoffs(upward_to,
+                                                 static_cast<std::size_t>(extreme_upward_samples)));
+        REQUIRE_FALSE(extreme_upward.transitioning());
+        REQUIRE(extreme_upward.cutoff(0) == upward_from[0]);
+        for (std::size_t sample = 0; sample < 4096; ++sample) {
+            const double input = 0.25 * std::cos(0.13 * static_cast<double>(sample));
+            REQUIRE(extreme_upward.process(input).bands == upward_unchanged.process(input).bands);
+        }
+
+        constexpr std::uint64_t extreme_downward_samples = 5'804'820'237'218'408ULL;
+        const double extreme_sample_rate =
+            20.0 * static_cast<double>(extreme_upward_samples) / std::log(2.0);
+        const std::array<double, 1> downward_from{extreme_sample_rate * 0.2};
+        const std::array<double, 1> downward_to{extreme_sample_rate * 0.1};
+        Runtime extreme_downward;
+        Runtime downward_unchanged;
+        REQUIRE(extreme_downward.prepare(extreme_sample_rate, downward_from));
+        REQUIRE(downward_unchanged.prepare(extreme_sample_rate, downward_from));
+        REQUIRE(extreme_downward.minimum_transition_samples(downward_to) == sentinel);
+        REQUIRE_FALSE(extreme_downward.set_cutoffs(
+            downward_to, static_cast<std::size_t>(extreme_downward_samples)));
+        REQUIRE_FALSE(extreme_downward.transitioning());
+        REQUIRE(extreme_downward.cutoff(0) == downward_from[0]);
+        for (std::size_t sample = 0; sample < 4096; ++sample) {
+            const double input = 0.25 * std::sin(0.17 * static_cast<double>(sample));
+            REQUIRE(extreme_downward.process(input).bands ==
+                    downward_unchanged.process(input).bands);
+        }
+
+        Runtime accumulated_roundoff;
+        REQUIRE(accumulated_roundoff.prepare(48000.0, upward_from));
+        REQUIRE_FALSE(accumulated_roundoff.set_cutoffs(
+            upward_to, static_cast<std::size_t>(1'000'000'000'000ULL)));
+        REQUIRE_FALSE(accumulated_roundoff.transitioning());
+        REQUIRE(accumulated_roundoff.cutoff(0) == upward_from[0]);
+
+        const double roundoff_limited_sample_rate = 20.0 * 1.0e12 / std::log(2.0);
+        const std::array<double, 1> roundoff_downward_from{roundoff_limited_sample_rate * 0.2};
+        const std::array<double, 1> roundoff_downward_to{roundoff_limited_sample_rate * 0.1};
+        Runtime roundoff_limited_downward;
+        REQUIRE(roundoff_limited_downward.prepare(roundoff_limited_sample_rate,
+                                                  roundoff_downward_from));
+        REQUIRE(roundoff_limited_downward.minimum_transition_samples(roundoff_downward_to) ==
+                sentinel);
+    }
+
+    Runtime unity_multiplier;
+    const std::array<double, 1> unity_from{1000.0};
+    const std::array<double, 1> unity_to{std::nextafter(1000.0, 2000.0)};
+    REQUIRE(unity_multiplier.prepare(48000.0, unity_from));
+    REQUIRE_FALSE(unity_multiplier.set_cutoffs(unity_to, 1'000'000));
+    REQUIRE_FALSE(unity_multiplier.transitioning());
+    REQUIRE(unity_multiplier.cutoff(0) == unity_from[0]);
+
+    Runtime representable_upward;
+    REQUIRE(representable_upward.prepare(48000.0, std::array<double, 1>{1000.0}));
+    constexpr std::size_t representable_upward_samples = 1'000'000;
+    REQUIRE(representable_upward.set_cutoffs(std::array<double, 1>{2000.0},
+                                             representable_upward_samples));
+    bool upward_healthy = true;
+    for (std::size_t sample = 0; sample < representable_upward_samples; ++sample)
+        upward_healthy = upward_healthy && representable_upward.process(0.0).healthy;
+    REQUIRE(upward_healthy);
+    REQUIRE_FALSE(representable_upward.transitioning());
+    REQUIRE(representable_upward.cutoff(0) == 2000.0);
+
+    Runtime representable_downward;
+    const std::array<double, 1> ordinary_high{192000.0 * 0.2};
+    const std::array<double, 1> ordinary_low{192000.0 * 0.1};
+    REQUIRE(representable_downward.prepare(192000.0, ordinary_high));
+    const auto ordinary_required = representable_downward.minimum_transition_samples(ordinary_low);
+    REQUIRE(ordinary_required != sentinel);
+    REQUIRE(representable_downward.set_cutoffs(ordinary_low, ordinary_required));
+    bool downward_healthy = true;
+    for (std::size_t sample = 0; sample < ordinary_required; ++sample)
+        downward_healthy = downward_healthy && representable_downward.process(0.0).healthy;
+    REQUIRE(downward_healthy);
+    REQUIRE_FALSE(representable_downward.transitioning());
+    REQUIRE(representable_downward.cutoff(0) == ordinary_low[0]);
 }
 
 TEST_CASE("N-way Linkwitz-Riley downward slew remains healthy with warmed recursive state",
