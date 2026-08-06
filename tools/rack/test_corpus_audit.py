@@ -10,11 +10,14 @@ import patch_corpus
 
 
 def observation(patch: str, signal_name: str = "V/OCT",
-                signal_role: str = "Pitch") -> dict:
+                signal_role: str = "Pitch", author_id: int | None = None) -> dict:
     return {
         "patch": patch,
         "patch_sha256": patch,
         "source_author": patch,
+        "source_author_id": author_id if author_id is not None else {
+            "one": 1, "two": 2, "three": 3, "four": 4, "revision": 3,
+        }.get(patch),
         "src": ("Unmapped", "Sequencer"),
         "dst": ("Fundamental", "VCO"),
         "s": None,
@@ -38,7 +41,7 @@ def main() -> int:
     assert report["admitted"][0]["support"] == 3
     print("  ok  three distinct authors corroborate one pitch prior")
 
-    duplicate = rows + [{**observation("revision"), "source_author": "three"}]
+    duplicate = rows + [{**observation("revision"), "source_author": "renamed"}]
     report = audit.usage_prior_report(duplicate, min_support=4)
     assert not report["admitted"]
     assert report["quarantine"][0]["support"] == 3
@@ -66,6 +69,7 @@ def main() -> int:
         patch_corpus.listing = lambda page: ([{"id": 7}] if page == 1 else [])
         patch_corpus.detail = lambda _pid: {
             "id": 7, "title": "unknown terms", "license": {},
+            "author": {"id": 99, "name": "fixture"},
             "files": [{"filename": "x.vcv", "url": "body"}]}
         patch_corpus._get = lambda _url: (_ for _ in ()).throw(
             AssertionError("an unlicensed body was downloaded"))
@@ -77,6 +81,7 @@ def main() -> int:
              patch_corpus.detail, patch_corpus._get) = saved
         row = captured["patches"]["7"]
         assert "body_quarantined" in row and "file" not in row
+        assert row["author_id"] == 99
     print("  ok  an unlicensed body is never downloaded or written")
     return 0
 

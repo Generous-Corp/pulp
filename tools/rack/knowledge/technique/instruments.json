@@ -11,6 +11,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-banjo",
+      "canonical_semantic_id": "instrument-banjo",
       "names": [
         "banjo"
       ],
@@ -53,6 +54,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-cello",
+      "canonical_semantic_id": "instrument-cello",
       "names": [
         "cello"
       ],
@@ -95,6 +97,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-double-bass",
+      "canonical_semantic_id": "instrument-double-bass",
       "names": [
         "bass",
         "double",
@@ -139,6 +142,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-dulcimer",
+      "canonical_semantic_id": "instrument-dulcimer",
       "names": [
         "dulcimer"
       ],
@@ -181,6 +185,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-guitar-acoustic",
+      "canonical_semantic_id": "instrument-guitar-acoustic",
       "names": [
         "acoustic",
         "guitar",
@@ -215,6 +220,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-guitar-electric",
+      "canonical_semantic_id": "instrument-guitar-electric",
       "names": [
         "electric",
         "guitar",
@@ -249,6 +255,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-harp",
+      "canonical_semantic_id": "instrument-harp",
       "names": [
         "harp"
       ],
@@ -291,6 +298,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-kora",
+      "canonical_semantic_id": "instrument-kora",
       "names": [
         "kora"
       ],
@@ -333,6 +341,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-lute",
+      "canonical_semantic_id": "instrument-lute",
       "names": [
         "lute"
       ],
@@ -375,6 +384,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-mandocello",
+      "canonical_semantic_id": "instrument-mandocello",
       "names": [
         "mandocello"
       ],
@@ -417,6 +427,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-riti",
+      "canonical_semantic_id": "instrument-riti",
       "names": [
         "riti"
       ],
@@ -459,6 +470,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-sitar",
+      "canonical_semantic_id": "instrument-sitar",
       "names": [
         "sitar"
       ],
@@ -501,6 +513,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-standup-bass",
+      "canonical_semantic_id": "instrument-standup-bass",
       "names": [
         "bass",
         "standup",
@@ -545,6 +558,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-violin",
+      "canonical_semantic_id": "instrument-violin",
       "names": [
         "violin"
       ],
@@ -587,6 +601,7 @@
       "kind": "settings",
       "family": "strings",
       "id": "instrument-violin",
+      "canonical_semantic_id": "instrument-violin",
       "names": [
         "violin"
       ],
@@ -629,6 +644,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-bagpipes",
+      "canonical_semantic_id": "instrument-bagpipes",
       "names": [
         "bagpipes"
       ],
@@ -661,6 +677,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-bass-clarinet",
+      "canonical_semantic_id": "instrument-bass-clarinet",
       "names": [
         "bass",
         "bass clarinet",
@@ -705,6 +722,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-bassoon",
+      "canonical_semantic_id": "instrument-bassoon",
       "names": [
         "bassoon"
       ],
@@ -747,6 +765,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-clarinet",
+      "canonical_semantic_id": "instrument-clarinet",
       "names": [
         "clarinet"
       ],
@@ -789,6 +808,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-contrabassoon",
+      "canonical_semantic_id": "instrument-contrabassoon",
       "names": [
         "contrabassoon"
       ],
@@ -831,6 +851,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-didgeridoo",
+      "canonical_semantic_id": "instrument-didgeridoo",
       "names": [
         "didgeridoo"
       ],
@@ -873,6 +894,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-flute",
+      "canonical_semantic_id": "instrument-flute",
       "names": [
         "flute"
       ],
@@ -915,6 +937,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-oboe",
+      "canonical_semantic_id": "instrument-oboe",
       "names": [
         "oboe"
       ],
@@ -957,6 +980,7 @@
       "kind": "settings",
       "family": "woodwinds",
       "id": "instrument-piccolo",
+      "canonical_semantic_id": "instrument-piccolo",
       "names": [
         "piccolo"
       ],
@@ -999,6 +1023,7 @@
       "kind": "settings",
       "family": "brass",
       "id": "instrument-penny-whistle",
+      "canonical_semantic_id": "instrument-penny-whistle",
       "names": [
         "penny",
         "penny whistle",
@@ -1043,6 +1068,7 @@
       "kind": "settings",
       "family": "brass",
       "id": "instrument-saxophone",
+      "canonical_semantic_id": "instrument-saxophone",
       "names": [
         "saxophone"
       ],
@@ -1085,6 +1111,7 @@
       "kind": "settings",
       "family": "brass",
       "id": "instrument-trumpet",
+      "canonical_semantic_id": "instrument-trumpet",
       "names": [
         "trumpet"
       ],
@@ -1127,6 +1154,7 @@
       "kind": "settings",
       "family": "brass",
       "id": "instrument-tuba",
+      "canonical_semantic_id": "instrument-tuba",
       "names": [
         "tuba"
       ],
@@ -1169,6 +1197,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-accordion",
+      "canonical_semantic_id": "instrument-accordion",
       "names": [
         "accordion"
       ],
@@ -1211,6 +1240,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-celeste",
+      "canonical_semantic_id": "instrument-celeste",
       "names": [
         "celeste"
       ],
@@ -1243,6 +1273,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-clavichord",
+      "canonical_semantic_id": "instrument-clavichord",
       "names": [
         "clavichord"
       ],
@@ -1285,6 +1316,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-electric-piano",
+      "canonical_semantic_id": "instrument-electric-piano",
       "names": [
         "electric",
         "electric piano",
@@ -1319,6 +1351,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-harpsichord",
+      "canonical_semantic_id": "instrument-harpsichord",
       "names": [
         "harpsichord"
       ],
@@ -1351,6 +1384,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-organ",
+      "canonical_semantic_id": "instrument-organ",
       "names": [
         "organ"
       ],
@@ -1383,6 +1417,7 @@
       "kind": "settings",
       "family": "keyboards",
       "id": "instrument-piano",
+      "canonical_semantic_id": "instrument-piano",
       "names": [
         "piano"
       ],
@@ -1415,6 +1450,7 @@
       "kind": "settings",
       "family": "vocals",
       "id": "instrument-choir",
+      "canonical_semantic_id": "instrument-choir",
       "names": [
         "choir"
       ],
@@ -1457,6 +1493,7 @@
       "kind": "settings",
       "family": "vocals",
       "id": "instrument-whistling",
+      "canonical_semantic_id": "instrument-whistling",
       "names": [
         "whistling"
       ],
@@ -1499,6 +1536,7 @@
       "kind": "settings",
       "family": "tuned percussion",
       "id": "instrument-bell",
+      "canonical_semantic_id": "instrument-bell",
       "names": [
         "bell"
       ],
@@ -1541,6 +1579,7 @@
       "kind": "settings",
       "family": "tuned percussion",
       "id": "instrument-bongos",
+      "canonical_semantic_id": "instrument-bongos",
       "names": [
         "bongos"
       ],
@@ -1573,6 +1612,7 @@
       "kind": "settings",
       "family": "tuned percussion",
       "id": "instrument-glockenspiel",
+      "canonical_semantic_id": "instrument-glockenspiel",
       "names": [
         "glockenspiel"
       ],
@@ -1605,6 +1645,7 @@
       "kind": "settings",
       "family": "tuned percussion",
       "id": "instrument-xylophone",
+      "canonical_semantic_id": "instrument-xylophone",
       "names": [
         "xylophone"
       ],
@@ -1647,6 +1688,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-bass-drum",
+      "canonical_semantic_id": "instrument-bass-drum",
       "names": [
         "bass",
         "bass drum",
@@ -1681,6 +1723,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-clap",
+      "canonical_semantic_id": "instrument-clap",
       "names": [
         "clap"
       ],
@@ -1723,6 +1766,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-claves",
+      "canonical_semantic_id": "instrument-claves",
       "names": [
         "claves"
       ],
@@ -1755,6 +1799,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-cowbell",
+      "canonical_semantic_id": "instrument-cowbell",
       "names": [
         "cowbell"
       ],
@@ -1787,6 +1832,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-cowbell-analog-drum-machine",
+      "canonical_semantic_id": "instrument-cowbell-analog-drum-machine",
       "names": [
         "(analog",
         "cowbell",
@@ -1823,6 +1869,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-side-stick",
+      "canonical_semantic_id": "instrument-side-stick",
       "names": [
         "side",
         "side stick",
@@ -1857,6 +1904,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-snare-drum",
+      "canonical_semantic_id": "instrument-snare-drum",
       "names": [
         "drum",
         "snare",
@@ -1891,6 +1939,7 @@
       "kind": "settings",
       "family": "untuned percussion",
       "id": "instrument-wheels-of-steel",
+      "canonical_semantic_id": "instrument-wheels-of-steel",
       "names": [
         "steel",
         "wheels",
@@ -1925,6 +1974,7 @@
       "kind": "settings",
       "family": "leads",
       "id": "instrument-brass-section",
+      "canonical_semantic_id": "instrument-brass-section",
       "names": [
         "brass",
         "brass section",
@@ -1969,6 +2019,7 @@
       "kind": "settings",
       "family": "leads",
       "id": "instrument-mono-solo",
+      "canonical_semantic_id": "instrument-mono-solo",
       "names": [
         "mono",
         "mono solo",
@@ -2013,6 +2064,7 @@
       "kind": "settings",
       "family": "leads",
       "id": "instrument-r-b-slide",
+      "canonical_semantic_id": "instrument-r-b-slide",
       "names": [
         "r&b slide",
         "slide"
@@ -2046,6 +2098,7 @@
       "kind": "settings",
       "family": "leads",
       "id": "instrument-screaming-sync",
+      "canonical_semantic_id": "instrument-screaming-sync",
       "names": [
         "screaming",
         "screaming sync",
@@ -2090,6 +2143,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-bass-of-the-time-lords",
+      "canonical_semantic_id": "instrument-bass-of-the-time-lords",
       "names": [
         "bass",
         "bass of the time lords",
@@ -2125,6 +2179,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-detroit-bass",
+      "canonical_semantic_id": "instrument-detroit-bass",
       "names": [
         "bass",
         "detroit",
@@ -2159,6 +2214,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-deutsche-bass",
+      "canonical_semantic_id": "instrument-deutsche-bass",
       "names": [
         "bass",
         "deutsche",
@@ -2193,6 +2249,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-digita-l-bass",
+      "canonical_semantic_id": "instrument-digita-l-bass",
       "names": [
         "bass",
         "digita",
@@ -2227,6 +2284,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-funk-bass",
+      "canonical_semantic_id": "instrument-funk-bass",
       "names": [
         "bass",
         "funk",
@@ -2261,6 +2319,7 @@
       "kind": "settings",
       "family": "bass",
       "id": "instrument-growling-bass",
+      "canonical_semantic_id": "instrument-growling-bass",
       "names": [
         "bass",
         "growling",
@@ -2295,6 +2354,7 @@
       "kind": "settings",
       "family": "pads",
       "id": "instrument-android-dreams",
+      "canonical_semantic_id": "instrument-android-dreams",
       "names": [
         "android",
         "android dreams",
@@ -2339,6 +2399,7 @@
       "kind": "settings",
       "family": "pads",
       "id": "instrument-celestial-wash",
+      "canonical_semantic_id": "instrument-celestial-wash",
       "names": [
         "celestial",
         "celestial wash",
@@ -2383,6 +2444,7 @@
       "kind": "settings",
       "family": "pads",
       "id": "instrument-aurora",
+      "canonical_semantic_id": "instrument-aurora",
       "names": [
         "aurora"
       ],
@@ -2425,6 +2487,7 @@
       "kind": "settings",
       "family": "pads",
       "id": "instrument-galactic-cathedral",
+      "canonical_semantic_id": "instrument-galactic-cathedral",
       "names": [
         "cathedral",
         "galactic",
@@ -2469,6 +2532,7 @@
       "kind": "settings",
       "family": "pads",
       "id": "instrument-galactic-chapel",
+      "canonical_semantic_id": "instrument-galactic-chapel",
       "names": [
         "chapel",
         "galactic",
@@ -2503,6 +2567,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-cat",
+      "canonical_semantic_id": "instrument-cat",
       "names": [
         "cat"
       ],
@@ -2545,6 +2610,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-joumey-to-the-core",
+      "canonical_semantic_id": "instrument-joumey-to-the-core",
       "names": [
         "core",
         "joumey",
@@ -2579,6 +2645,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-kazoo",
+      "canonical_semantic_id": "instrument-kazoo",
       "names": [
         "kazoo"
       ],
@@ -2621,6 +2688,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-laser",
+      "canonical_semantic_id": "instrument-laser",
       "names": [
         "laser"
       ],
@@ -2653,6 +2721,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-motor",
+      "canonical_semantic_id": "instrument-motor",
       "names": [
         "motor"
       ],
@@ -2695,6 +2764,7 @@
       "kind": "settings",
       "family": "sound effects",
       "id": "instrument-wind",
+      "canonical_semantic_id": "instrument-wind",
       "names": [
         "wind"
       ],

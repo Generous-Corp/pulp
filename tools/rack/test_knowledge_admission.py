@@ -35,11 +35,11 @@ def main() -> int:
     clone["anchor"]["page"] = 231
     duplicate[clone["id"]] = clone
     got = knowledge.problems(duplicate, idiom_check.load_idioms())
-    if not any("duplicates the canonical claim" in problem for problem in got):
+    if not any("duplicates the canonical semantic identity" in problem for problem in got):
         print("  WRONG  a duplicate guidance row escaped canonical dedupe")
         bad += 1
     else:
-        print("  ok     corroboration must attach to one row, not duplicate it")
+        print("  ok     semantic duplicates attach evidence to one row despite wording")
 
     broken = copy.deepcopy(all_entries)
     broken["post-multiplier-low-pass"]["canonical_claim_fingerprint"] = "0" * 64

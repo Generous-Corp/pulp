@@ -10,7 +10,7 @@
       "install_method": "python_pip",
       "source_dir": "tools/audio/quality-lab",
       "module": "quality_lab.cli",
-      "pinned_version": "0.1.1",
+      "pinned_version": "0.1.2",
       "requires_tools": ["uv"],
       "managed_by_pulp": true,
       "bundleable": false,

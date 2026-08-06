@@ -218,6 +218,7 @@ def fetch(limit: int) -> int:
                     "id": doc.get("id"), "title": doc.get("title", ""),
                     "url": doc.get("url", ""),
                     "author": (doc.get("author") or {}).get("name", ""),
+                    "author_id": (doc.get("author") or {}).get("id"),
                     "license": lic.get("name", ""),
                     "license_slug": lic.get("slug", ""),
                     "excerpt": (doc.get("excerpt") or "")[:400],
@@ -268,6 +269,7 @@ def fetch(limit: int) -> int:
                 "title": doc.get("title", ""),
                 "url": doc.get("url", ""),
                 "author": (doc.get("author") or {}).get("name", ""),
+                "author_id": (doc.get("author") or {}).get("id"),
                 # Provenance, per patch. Anything derived from this corpus can
                 # name where it came from and under what terms, and anything
                 # whose licence turns out not to permit a use can be found and

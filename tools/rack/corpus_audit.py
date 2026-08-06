@@ -183,6 +183,7 @@ def walk(pm: dict, roles: dict):
                 "patch": meta.get("id"), "coverage": coverage,
                 "patch_sha256": meta.get("sha256"),
                 "source_author": meta.get("author", ""),
+                "source_author_id": meta.get("author_id"),
                 "src": src, "dst": dst, "s": s, "d": d,
                 "s_index": c.get("outputId"), "d_index": c.get("inputId"),
                 "s_kinds": placeable(s[0], s[1], out_kinds, roles) if s else None,
@@ -305,8 +306,10 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     """
     evidence: dict[tuple, set] = collections.defaultdict(set)
     for row in rows:
-        author = " ".join(str(row.get("source_author") or "").lower().split())
-        evidence_key = f"author:{author}" if author else "author:unknown"
+        author_id = row.get("source_author_id")
+        evidence_key = (f"patchstorage-author:{author_id}"
+                        if isinstance(author_id, int) and not isinstance(author_id, bool)
+                        and author_id > 0 else "patchstorage-author:unknown")
         if row["s"] is None and row["d"] is not None:
             signal = _signal(row["d"][0], row["d"][1], "in")
             if signal:

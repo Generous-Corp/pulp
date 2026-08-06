@@ -124,7 +124,7 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
     entries = entries if entries is not None else load(include_candidates=True)
     bad: list[str] = []
     slugs = set(idioms or {})
-    fingerprints: dict[str, str] = {}
+    semantic_ids: dict[str, str] = {}
 
     for eid, entry in sorted(entries.items()):
         prose = _our_prose(entry)
@@ -135,6 +135,15 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
                        f"{STATUSES}")
         claim = entry.get("claim")
         fingerprint = entry.get("canonical_claim_fingerprint")
+        semantic_id = entry.get("canonical_semantic_id")
+        if not isinstance(semantic_id, str) or not semantic_id.strip():
+            bad.append(f"{eid} has no reviewer-assigned canonical_semantic_id")
+        elif semantic_id in semantic_ids:
+            bad.append(f"{eid} duplicates the canonical semantic identity already "
+                       f"held by {semantic_ids[semantic_id]}; attach its source "
+                       "as corroborating evidence to that row")
+        else:
+            semantic_ids[semantic_id] = eid
         if status != "admitted" or claim or fingerprint:
             if not claim or not fingerprint:
                 bad.append(f"{eid} is admission-tracked but has no claim and "
@@ -142,12 +151,6 @@ def problems(entries: dict | None = None, idioms: dict | None = None) -> list[st
             elif canonical_claim_fingerprint(claim) != fingerprint:
                 bad.append(f"{eid} has a canonical claim fingerprint that does not "
                            "match its canonical claim")
-            elif fingerprint in fingerprints:
-                bad.append(f"{eid} duplicates the canonical claim already held "
-                           f"by {fingerprints[fingerprint]}; attach its source "
-                           "as corroborating evidence to that row")
-            else:
-                fingerprints[fingerprint] = eid
         evidence = entry.get("evidence") or []
         if status != "admitted" and not evidence:
             bad.append(f"{eid} is {status} with no canonical source locator")

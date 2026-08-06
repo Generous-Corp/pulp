@@ -564,6 +564,11 @@ def write_audio_artifact(path: str, frames: list[list[float]],
     if count <= 0 or sample_rate <= 0:
         raise ValueError("the audio capture is empty")
     audio_channels = [ch[:count] for ch in audio_channels]
+    source_rms = rms(audio_channels[0])
+    if source_rms < SILENCE:
+        raise ValueError(
+            f"the primary listener tap is below the {SILENCE:g} V RMS "
+            "audibility floor; normalization would manufacture an artifact")
     peak = max(abs(float(x)) for ch in audio_channels for x in ch)
     gain = 0.95 / peak if peak > 1e-12 else 1.0
     pcm = array.array("h")
@@ -582,7 +587,8 @@ def write_audio_artifact(path: str, frames: list[list[float]],
         out.writeframes(pcm.tobytes())
     return {"path": os.path.abspath(path), "channels": len(audio_channels),
             "frames": count, "sample_rate": int(round(sample_rate)),
-            "source_peak_volts": peak, "normalization_gain": gain}
+            "source_peak_volts": peak, "source_rms_volts": source_rms,
+            "normalization_gain": gain}
 
 
 # ── Structural fidelity ──────────────────────────────────────────────────────

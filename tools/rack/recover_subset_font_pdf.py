@@ -25,6 +25,7 @@ import math
 import os
 import random
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,47 @@ def external_output_path(path: str) -> str:
         inside_repository = False
     if inside_repository:
         raise ValueError("recovered source output must be outside the repository")
+    return destination
+
+
+def write_external_output(path: str, text: str) -> str:
+    """Write outside the checkout without following a swapped path component."""
+    destination = external_output_path(path)
+    parent = os.path.dirname(destination)
+    os.makedirs(parent, exist_ok=True)
+    destination = external_output_path(destination)
+    parent = os.path.dirname(destination)
+    parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    parent_flags |= getattr(os, "O_NOFOLLOW", 0)
+    parent_fd = os.open(parent, parent_flags)
+    try:
+        # Resolve the already-open directory, not the pathname checked before
+        # open. If an attacker swapped the parent between those operations,
+        # this is the directory we would actually write through.
+        fd_link = (f"/dev/fd/{parent_fd}" if os.path.exists("/dev/fd")
+                   else f"/proc/self/fd/{parent_fd}")
+        opened_parent = external_output_path(os.path.realpath(fd_link))
+        if os.path.basename(destination) in ("", ".", ".."):
+            raise ValueError("recovery output must name a regular file")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        output_fd = os.open(os.path.basename(destination), flags, 0o600,
+                            dir_fd=parent_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(output_fd).st_mode):
+                raise ValueError("recovery output must be a regular file")
+            # Keep the checked open-parent value live and explicit: the file
+            # descriptor is relative to this directory, not to the old path.
+            if not opened_parent:
+                raise ValueError("could not resolve opened output directory")
+            with os.fdopen(output_fd, "w", encoding="utf-8") as output:
+                output_fd = -1
+                output.write(text)
+        finally:
+            if output_fd >= 0:
+                os.close(output_fd)
+    finally:
+        os.close(parent_fd)
     return destination
 
 
@@ -469,14 +511,9 @@ def main(argv: list[str]) -> int:
             xml, model, args.minimum_characters,
             args.first_page, args.last_page,
             space_candidates=3 if args.deep_search else 1)
-        destination = external_output_path(args.output)
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        # Re-resolve after creating parents so a just-created path component
-        # cannot change which side of the repository fence receives the text.
-        destination = external_output_path(destination)
-        with open(destination, "w", encoding="utf-8") as output:
-            output.write("# Machine-recovered subset-font text; imperfect.\n")
-            output.write(recovered)
+        destination = write_external_output(
+            args.output,
+            "# Machine-recovered subset-font text; imperfect.\n" + recovered)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"recovery failed: {error}", file=sys.stderr)
         return 2

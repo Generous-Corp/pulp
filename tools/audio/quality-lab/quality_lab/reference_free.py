@@ -21,8 +21,29 @@ from . import audio_io, dsp, loop
 SCHEMA = "quality_lab.reference_free.v1"
 AB_SCHEMA = "quality_lab.catalogue_ab.v1"
 EXPERIMENT_SCHEMA = "quality_lab.catalogue_experiment.v1"
-MIN_AUDIBLE_RMS = 1e-7
+# Below -80 dBFS, detector values are too easily dominated by render noise,
+# denormals, or a leaked control/DC value to support a perceptual claim.
+MIN_AUDIBLE_RMS = 1e-4
 HF_MIN_BINS = 8
+
+
+def _audible_band_rms(y: np.ndarray, sr: int) -> float:
+    """RMS energy between 20 Hz and 20 kHz, excluding DC and infrasonics."""
+    x = np.asarray(y, dtype=np.float64)
+    if x.size == 0 or sr <= 0:
+        return 0.0
+    spectrum = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(x.size, 1.0 / sr)
+    band = (freqs >= 20.0) & (freqs <= min(20000.0, sr / 2.0))
+    if not np.any(band):
+        return 0.0
+    weights = np.full(spectrum.size, 2.0)
+    weights[0] = 1.0
+    if x.size % 2 == 0:
+        weights[-1] = 1.0
+    mean_square = float(np.sum(weights[band] * np.abs(spectrum[band]) ** 2)
+                        / (x.size * x.size))
+    return math.sqrt(max(0.0, mean_square))
 
 
 def _amplitude_modulation(y: np.ndarray, sr: int) -> tuple[float, float]:
@@ -80,18 +101,28 @@ def analyze_samples(y: np.ndarray, sr: int) -> dict[str, Any]:
         "metrics": {k: float(v) for k, v in metrics.items()},
         "confidence": {"amplitude_modulation_hz": am_confidence},
         "audibility": {"rms": audio_io.rms(x),
+                        "audible_band_rms": _audible_band_rms(x, sr),
                         "minimum_rms": MIN_AUDIBLE_RMS},
     }
 
 
 def analyze_file(path: str) -> dict[str, Any]:
     y, sr, channels = audio_io.load_wav_multichannel(path)
-    if channels != 1:
-        raise ValueError(
-            f"reference-free catalogue scoring requires mono listener audio; "
-            f"{path} has {channels} channels")
+    selected = 0
+    if channels > 1:
+        # Catalogue targets describe timbre, not spatial image. A mean downmix
+        # can erase an anti-phase stereo signal and manufacture silence, so use
+        # the loudest actual listener channel and disclose that bounded choice.
+        levels = [audio_io.rms(y[:, channel]) for channel in range(channels)]
+        selected = int(np.argmax(levels))
+        y = y[:, selected]
     report = analyze_samples(y, sr)
     report["input"] = os.path.abspath(path)
+    report["channel_handling"] = {
+        "input_channels": channels,
+        "analysis": "mono" if channels == 1 else "loudest-listener-channel",
+        "selected_channel": selected,
+    }
     return report
 
 
@@ -127,7 +158,8 @@ def score(report: dict[str, Any], expectations: dict[str, Any],
     if not rules:
         raise ValueError("expectations must contain a non-empty metrics object")
     measured = report.get("metrics") or {}
-    measured_rms = float((report.get("audibility") or {}).get("rms", 0.0))
+    measured_rms = float((report.get("audibility") or {}).get(
+        "audible_band_rms", 0.0))
     if not math.isfinite(measured_rms) or measured_rms < MIN_AUDIBLE_RMS:
         raise ValueError(f"{label} is silent or below the audibility floor")
     unknown = sorted(set(rules) - set(measured))
@@ -150,6 +182,15 @@ def _sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def _pcm_sha256(path: str) -> str:
+    """Hash decoded samples so a rewrapped/re-encoded copy is not independent."""
+    samples, sr, channels = audio_io.load_wav_multichannel(path)
+    digest = hashlib.sha256()
+    digest.update(f"{sr}:{channels}:".encode("ascii"))
+    digest.update(np.asarray(samples, dtype="<f8").tobytes())
+    return digest.hexdigest()
+
+
 def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
     """Validate a content-bound record of the controlled generation arms."""
     with open(path) as source:
@@ -160,28 +201,61 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
     for split in splits:
         row = doc.get(split) or {}
         missing = [key for key in
-                   ("pair_id", "prompt", "inventory_sha256", "model", "arms")
+                   ("pair_id", "prompt", "inventory_sha256", "model",
+                    "audibility_gate", "arms")
                    if not row.get(key)]
         if missing:
             raise ValueError(f"experiment {split} lacks {', '.join(missing)}")
         for arm, state in (("without", "off"), ("with", "on")):
             arm_doc = (row.get("arms") or {}).get(arm) or {}
-            if arm_doc.get("guidance") != state or not arm_doc.get("attempt"):
+            attempt = arm_doc.get("attempt")
+            seed = arm_doc.get("seed")
+            generation_id = arm_doc.get("generation_id")
+            if (arm_doc.get("guidance") != state
+                    or not isinstance(attempt, int) or isinstance(attempt, bool)
+                    or attempt <= 0
+                    or not isinstance(seed, int) or isinstance(seed, bool)
+                    or not isinstance(generation_id, str)
+                    or not generation_id.strip()):
                 raise ValueError(
-                    f"experiment {split}.{arm} must record guidance={state} and attempt")
+                    f"experiment {split}.{arm} must record guidance={state}, "
+                    "a positive integer attempt, integer seed, and generation_id")
             actual = _sha256(wavs[f"{split}.{arm}"])
             if arm_doc.get("wav_sha256") != actual:
                 raise ValueError(f"experiment {split}.{arm} WAV digest does not match")
+        without = row["arms"]["without"]
+        with_guidance = row["arms"]["with"]
+        if without["attempt"] != with_guidance["attempt"]:
+            raise ValueError(f"experiment {split} arms must use the same attempt")
+        if without["seed"] != with_guidance["seed"]:
+            raise ValueError(f"experiment {split} arms must use the same seed")
+        gate = row["audibility_gate"]
+        if gate != {"analysis": "audible-band-rms-v1",
+                    "minimum_rms": MIN_AUDIBLE_RMS}:
+            raise ValueError(
+                f"experiment {split} audibility_gate must record the exact "
+                "Quality Lab audible-band RMS configuration")
     if has_holdout:
-        for key in ("prompt", "inventory_sha256", "model"):
+        for key in ("prompt", "inventory_sha256", "model", "audibility_gate"):
             if doc["working"][key] != doc["holdout"][key]:
                 raise ValueError(f"working and holdout must use the same {key}")
         if doc["working"]["pair_id"] == doc["holdout"]["pair_id"]:
             raise ValueError("holdout pair_id must be independent of the working pair")
+        if (doc["working"]["arms"]["without"]["seed"]
+                == doc["holdout"]["arms"]["without"]["seed"]):
+            raise ValueError("holdout must use a seed independent of the working pair")
         digests = [doc[split]["arms"][arm]["wav_sha256"]
                    for split in splits for arm in ("without", "with")]
         if len(set(digests)) != len(digests):
             raise ValueError("working and holdout WAV bodies must all be distinct")
+        pcm_digests = [_pcm_sha256(wavs[f"{split}.{arm}"])
+                       for split in splits for arm in ("without", "with")]
+        if len(set(pcm_digests)) != len(pcm_digests):
+            raise ValueError("working and holdout decoded audio must all be distinct")
+    generation_ids = [doc[split]["arms"][arm]["generation_id"]
+                      for split in splits for arm in ("without", "with")]
+    if len(set(generation_ids)) != len(generation_ids):
+        raise ValueError("every experiment arm needs a distinct generation_id")
     doc["manifest_sha256"] = _sha256(path)
     return doc
 
@@ -198,7 +272,9 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
     locator = source.get("locator")
     has_page = isinstance(page, int) and not isinstance(page, bool) and page > 0
     has_locator = isinstance(locator, str) and bool(locator.strip())
-    if not source.get("path") or not (has_page or has_locator):
+    source_path = source.get("path")
+    has_path = isinstance(source_path, str) and bool(source_path.strip())
+    if not has_path or not (has_page or has_locator):
         raise ValueError(
             "catalogue expectations need source.path and a positive source.page "
             "or non-empty source.locator")

@@ -82,6 +82,13 @@ def main() -> int:
             check(True, "an output-file symlink cannot overwrite the repository")
         else:
             check(False, "an output-file symlink cannot overwrite the repository")
+        try:
+            R.write_external_output(output_link, "must not land\n")
+        except (OSError, ValueError):
+            check(not os.path.exists(target),
+                  "the descriptor-relative writer never follows an output symlink")
+        else:
+            check(False, "the descriptor-relative writer followed an output symlink")
 
     known = ("The oscillator produces a waveform while an envelope shapes "
              "amplitude and the filter removes frequency bands. ") * 4

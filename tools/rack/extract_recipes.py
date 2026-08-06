@@ -288,11 +288,13 @@ def to_entries(recipes: list) -> list:
             })
         if not numbers:
             continue
+        semantic_id = "instrument-" + re.sub(r"[^a-z0-9]+", "-",
+                                               r["name"].lower()).strip("-")
         out.append({
             "kind": "settings",
             "family": (r.get("section") or "").lower() or None,
-            "id": "instrument-" + re.sub(r"[^a-z0-9]+", "-",
-                                         r["name"].lower()).strip("-"),
+            "id": semantic_id,
+            "canonical_semantic_id": semantic_id,
             "names": sorted({r["name"].lower()} |
                             {w for w in r["name"].lower().split()
                              if len(w) > 3}),

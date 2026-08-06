@@ -10,6 +10,7 @@
   "entries": [
     {
       "id": "pitch-analysis-eligibility",
+      "canonical_semantic_id": "pitch-analysis-eligibility",
       "names": [
         "pitch evidence",
         "pitch tracker eligibility",
@@ -58,6 +59,7 @@
     },
     {
       "id": "event-fusion-density",
+      "canonical_semantic_id": "event-fusion-density",
       "names": [
         "event fusion",
         "grain density",

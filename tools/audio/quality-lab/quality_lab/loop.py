@@ -92,20 +92,22 @@ def goodhart_guard(cand: CandidateScore, champ: CandidateScore,
     """Decide whether `cand` may be PROPOSED for promotion over `champ`. Requires a Pareto
     improvement on the working set AND (when provided) the held-out slice, and confidence
     >= the bar. Never returns an auto-apply — `accepted` means 'propose to a human'."""
+    low_confidence = [("candidate", cand), ("baseline", champ)]
+    if holdout_cand is not None:
+        low_confidence.append(("held-out candidate", holdout_cand))
+    if holdout_champ is not None:
+        low_confidence.append(("held-out baseline", holdout_champ))
+    for label, score in low_confidence:
+        if score.confidence < min_confidence:
+            return {"accepted": False, "needs_ear": True,
+                    "reason": (f"{label} confidence {score.confidence:.2f} "
+                               f"< {min_confidence} — NEEDS-EAR")}
     if not pareto_improves(cand, champ, thresholds):
         return {"accepted": False, "needs_ear": False, "reason": "not a Pareto improvement on the working set"}
     if holdout_cand is not None and holdout_champ is not None:
         if not pareto_improves(holdout_cand, holdout_champ, thresholds):
             return {"accepted": False, "needs_ear": False,
                     "reason": "improves the working set but NOT the held-out slice (overfit risk)"}
-        if holdout_cand.confidence < min_confidence:
-            return {"accepted": False, "needs_ear": True,
-                    "reason": (f"held-out Pareto win but confidence "
-                               f"{holdout_cand.confidence:.2f} < {min_confidence} "
-                               "— NEEDS-EAR")}
-    if cand.confidence < min_confidence:
-        return {"accepted": False, "needs_ear": True,
-                "reason": f"Pareto win but confidence {cand.confidence:.2f} < {min_confidence} — NEEDS-EAR"}
     scope = "working + held-out slices" if holdout_cand is not None else "working set"
     return {"accepted": True, "needs_ear": False,
             "reason": f"Pareto improvement on {scope}"}

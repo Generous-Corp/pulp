@@ -9,6 +9,7 @@
   "entries": [
     {
       "id": "post-multiplier-low-pass",
+      "canonical_semantic_id": "post-multiplier-low-pass",
       "status": "candidate",
       "kind": "technique",
       "names": [

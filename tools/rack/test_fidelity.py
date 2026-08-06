@@ -510,6 +510,16 @@ def test_audio_artifact_contains_only_audio_taps() -> int:
                          "the artifact keeps the capture length and sample rate")
         bad += check(meta["source_peak_volts"] == 5.0,
                      "artifact metadata preserves the original voltage peak")
+        bad += check(meta["source_rms_volts"] > F.SILENCE,
+                     "artifact metadata preserves the original audibility")
+        try:
+            F.write_audio_artifact(
+                os.path.join(d, "silent.wav"), [[1e-6] * 100],
+                [(1, 0, "audio")], 48000.0)
+            bad += check(False, "peak normalization cannot amplify silence")
+        except ValueError as exc:
+            bad += check("audibility floor" in str(exc),
+                         "peak normalization cannot amplify silence", str(exc))
         return bad
 
 
