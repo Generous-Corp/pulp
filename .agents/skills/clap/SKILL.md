@@ -624,6 +624,18 @@ The adapter handles every host shape: pure MIDI 1.0 (`CLAP_EVENT_NOTE_*`
 The UMP buffer shape lives in `core/midi/include/pulp/midi/ump_buffer.hpp`
 and the CLAP adapter's `ump_buffer` sidecar.
 
+### MPE reset ownership spans adapter and Processor
+
+`clap_reset()` clears the adapter-owned MPE tracker immediately and carries
+`ProcessContext::reset_requested` to the next block that actually reaches
+`Processor::process()`. A bypassed block or a block that loses the
+state-restore gate must not prepare the MPE sidecar or consume that request:
+doing either advances tracker identity while the Processor's voice allocator
+did not run. On deactivation, call `Processor::release()` before resetting the
+sidecar so an MPE Processor can clear its allocator while the corresponding
+adapter identities are still at the same lifecycle boundary. See the `mpe`
+skill for the processor-side `release()` and reset contract.
+
 ### CLAP event types are enumerators, not preprocessor macros
 
 When gating on a new CLAP event type, **do not** write
