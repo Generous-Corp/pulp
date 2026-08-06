@@ -107,7 +107,7 @@ TEST_CASE("Timeline quota axes cover every declared structural ceiling", "[timel
     // sweep would then never exercise. The count is asserted so that adding a
     // structural ceiling to DecodeLimits without a matching axis fails here
     // rather than silently narrowing the sweep.
-    REQUIRE(quota_axes().size() == 19);
+    REQUIRE(quota_axes().size() == 22);
 
     DecodeLimits limits;
     for (const auto& axis : quota_axes()) {

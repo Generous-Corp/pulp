@@ -46,7 +46,7 @@ void visit_clip_owned_identities(const Clip& clip, ItemId track, Visitor&& visit
 }
 
 // The authoritative enumeration of everything one track owns. A track owns
-// eight identity kinds across four levels, two of them parented by a lane
+// eleven identity kinds across four levels, two of them parented by a lane
 // rather than by the track, so any caller that needs the owned set — a whole
 // sequence, or one track lifted out of it — walks this one traversal instead
 // of restating the list.
@@ -69,6 +69,15 @@ void visit_track_owned_identities(const Track& track, Visitor&& visitor) {
                                        .track = track.id(),
                                        .lane = lane.id()});
     }
+    for (const auto& modulator : track.modulators())
+        visitor(ModelOwnedIdentity{
+            .id = modulator.id, .kind = ItemKind::Modulator, .track = track.id()});
+    for (const auto& macro : track.macros())
+        visitor(ModelOwnedIdentity{
+            .id = macro.id, .kind = ItemKind::MacroControl, .track = track.id()});
+    for (const auto& route : track.modulation_routes())
+        visitor(ModelOwnedIdentity{
+            .id = route.id, .kind = ItemKind::ModulationRoute, .track = track.id()});
     for (const auto& lane : track.take_lanes()) {
         visitor(ModelOwnedIdentity{.id = lane.id(),
                                    .kind = ItemKind::TakeLane,

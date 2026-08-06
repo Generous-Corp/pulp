@@ -16,6 +16,7 @@ struct TrackSchemaVersionPolicy {
     std::uint32_t freeze_introduced_version;
     std::uint32_t mixer_introduced_version;
     std::uint32_t tuning_introduced_version;
+    std::uint32_t modulation_introduced_version;
 
     [[nodiscard]] constexpr bool requires_device_chain(std::uint32_t version) const noexcept {
         return version >= device_chain_introduced_version;
@@ -46,10 +47,17 @@ struct TrackSchemaVersionPolicy {
     [[nodiscard]] constexpr bool supports_tuning(std::uint32_t version) const noexcept {
         return version >= tuning_introduced_version;
     }
+
+    // Modulators, macro controls, and modulation routes entered the schema
+    // together at v9. All three are optional members whose absence is the empty
+    // collection, so a track that authored none is byte-identical to its v8 form.
+    [[nodiscard]] constexpr bool supports_modulation(std::uint32_t version) const noexcept {
+        return version >= modulation_introduced_version;
+    }
 };
 
 inline constexpr TrackSchemaVersionPolicy track_schema_policy{
-    "pulp.timeline.track", 1, 8, 2, 3, 4, 5, 6, 7, 8,
+    "pulp.timeline.track", 1, 9, 2, 3, 4, 5, 6, 7, 8, 9,
 };
 static_assert(
     track_schema_policy.oldest_readable_version > 0 &&
@@ -87,6 +95,12 @@ static_assert(
     track_schema_policy.tuning_introduced_version > track_schema_policy.mixer_introduced_version &&
     track_schema_policy.tuning_introduced_version <= track_schema_policy.current_version &&
     !track_schema_policy.supports_tuning(track_schema_policy.tuning_introduced_version - 1) &&
-    track_schema_policy.supports_tuning(track_schema_policy.tuning_introduced_version));
+    track_schema_policy.supports_tuning(track_schema_policy.tuning_introduced_version) &&
+    track_schema_policy.modulation_introduced_version >
+        track_schema_policy.tuning_introduced_version &&
+    track_schema_policy.modulation_introduced_version <= track_schema_policy.current_version &&
+    !track_schema_policy.supports_modulation(track_schema_policy.modulation_introduced_version -
+                                             1) &&
+    track_schema_policy.supports_modulation(track_schema_policy.modulation_introduced_version));
 
 } // namespace pulp::timeline::detail

@@ -224,15 +224,66 @@ struct DeclaredPointer {
     float width = 0.0f;
 };
 
+/// The pointer's box, as the capture recorded it.
+///
+/// `left`/`top`/`width`/`height` are the painted footprint in page CSS px --
+/// what `getBoundingClientRect` measures, plus any stroke the capture could
+/// recover. That box is axis-aligned with the SCREEN, so for a rotated pointer
+/// it is the box the shape's diagonal sweeps rather than the shape: a 4x38
+/// needle at 38 degrees measures 26.5x32.4, and a width read off it is ten times
+/// the truth.
+///
+/// `intrinsic_*` and the matrix are the same pointer described in its OWN
+/// coordinate space, which is the only description a rotation does not distort.
+/// `oriented` says whether the capture supplied them; a report that predates
+/// them, or an element that could answer neither of the two APIs, leaves it
+/// false and the footprint is all there is.
+struct IndicatorBox {
+    double left = 0.0;
+    double top = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    bool oriented = false;
+    double intrinsic_width = 0.0;
+    double intrinsic_height = 0.0;
+    // The intrinsic box centre transformed into page coordinates. An
+    // asymmetric SVG shape need not paint pixels symmetrically inside its
+    // geometry box, so its client-rect centre is only an erasure hint.
+    double center_x = 0.0;
+    double center_y = 0.0;
+    // The linear part of element space -> page, column-major as CSS writes it:
+    // local x maps to (a, b), local y to (c, d).
+    double a = 1.0;
+    double b = 0.0;
+    double c = 0.0;
+    double d = 1.0;
+};
+
 std::optional<DeclaredPointer> pointer_fractions(double dial_left,
                                                  double dial_top,
                                                  double dial_width,
                                                  double dial_height,
-                                                 double ind_left,
-                                                 double ind_top,
-                                                 double ind_width,
-                                                 double ind_height) {
+                                                 const IndicatorBox& ind) {
     const double half = std::min(dial_width, dial_height) * 0.5;
+    if (!(half > 0.0)) return std::nullopt;
+    // The pointer's two half-extent VECTORS in page coordinates.
+    //
+    // Without an element space to read, these are the footprint's own axes and
+    // the projection below is a support function of an axis-aligned box, which
+    // is what this has always computed. With one, they are the images of the
+    // element's own axes -- identical for an unrotated pointer, and the whole
+    // fix for a rotated one, because the element's box is the shape and the
+    // footprint is only the box the shape sweeps.
+    double xx = ind.width * 0.5;
+    double xy = 0.0;
+    double yx = 0.0;
+    double yy = ind.height * 0.5;
+    if (ind.oriented) {
+        xx = ind.a * ind.intrinsic_width * 0.5;
+        xy = ind.b * ind.intrinsic_width * 0.5;
+        yx = ind.c * ind.intrinsic_height * 0.5;
+        yy = ind.d * ind.intrinsic_height * 0.5;
+    }
     // Reject a box with NO extent on EITHER axis -- that carries no direction
     // to sweep along. A box with one zero axis is a different thing and must
     // survive: an SVG <line> or <path> drawn straight up, down, left or right
@@ -242,16 +293,31 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     // answer is a correctly PLACED pointer of defaulted thickness, not a
     // dropped one. `&&` rather than `||` is the whole difference.
     //
+    // Measured on the axes actually used, not on the footprint. A rotated line
+    // is zero-width in its own space and fat in its footprint, so a guard left
+    // behind on the footprint would pass exactly the box it should refuse.
+    //
     // This predicate exists twice, once here and once as the capture's own
     // guard in browser_capture/semantics.mjs. They are in different languages,
     // so neither grep finds the other; relaxing one alone leaves the other
     // refusing the same box, one layer down and just as silently.
-    if (!(half > 0.0) || (!(ind_width > 0.0) && !(ind_height > 0.0)))
-        return std::nullopt;
+    const double x_extent = std::hypot(xx, xy);
+    const double y_extent = std::hypot(yx, yy);
+    if (!(x_extent > 0.0) && !(y_extent > 0.0)) return std::nullopt;
     const double cx = dial_left + dial_width * 0.5;
     const double cy = dial_top + dial_height * 0.5;
-    const double dx = (ind_left + ind_width * 0.5) - cx;
-    const double dy = (ind_top + ind_height * 0.5) - cy;
+    // New captures carry the transformed intrinsic-box centre. The footprint
+    // centre remains the compatibility fallback: it is exact for rectangular
+    // HTML pointers and lines, but an asymmetric SVG path may paint unevenly
+    // inside the geometry box and therefore produce an off-centre client rect.
+    const double pointer_cx = ind.oriented
+                                  ? ind.center_x
+                                  : ind.left + ind.width * 0.5;
+    const double pointer_cy = ind.oriented
+                                  ? ind.center_y
+                                  : ind.top + ind.height * 0.5;
+    const double dx = pointer_cx - cx;
+    const double dy = pointer_cy - cy;
     const double distance = std::sqrt(dx * dx + dy * dy);
     // A pointer centred on the dial has no radial direction to sweep along, so
     // there is nothing to reproduce. Refuse rather than divide by zero and
@@ -259,12 +325,13 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     if (!(distance > 0.0)) return std::nullopt;
     const double ux = dx / distance;
     const double uy = dy / distance;
-    const double hx = ind_width * 0.5;
-    const double hy = ind_height * 0.5;
-    // Support function of the axis-aligned box along the radial axis, and along
-    // the axis perpendicular to it.
-    const double along = std::abs(ux) * hx + std::abs(uy) * hy;
-    const double across = std::abs(uy) * hx + std::abs(ux) * hy;
+    // Support function of the box along the radial axis, and along the axis
+    // perpendicular to it.
+    const double along =
+        std::abs(xx * ux + xy * uy) + std::abs(yx * ux + yy * uy);
+    const double across =
+        std::abs(xy * ux - xx * uy) + std::abs(yy * ux - yx * uy);
+    if (!std::isfinite(along) || !std::isfinite(across)) return std::nullopt;
     DeclaredPointer out;
     out.r_in = static_cast<float>(std::max(0.0, distance - along) / half);
     out.r_out = static_cast<float>((distance + along) / half);
@@ -547,43 +614,101 @@ int lower_semantic_controls(const fs::path& path,
         // is the common case and not a failure.
         //
         // `design_indicator` above is only a COLOUR -- with no geometry the
-        // engine has nothing to move, so an imported knob showed the pointer
-        // frozen wherever the capture happened to catch it.
+        // engine has nothing to move, so an imported control showed the
+        // indicator frozen wherever the capture happened to catch it.
         //
         // The two device-pixel rectangles are hand-off state for the sprite
-        // pass (`apply_browser_capture_knob_sprites`), which crops the control
-        // out of the panel capture and erases the pointer baked into that crop.
-        // It consumes and removes them; they are not a runtime contract. Only a
-        // knob carries them: they exist to feed that pass, which skins dials.
+        // pass (`apply_browser_capture_control_sprites`), which crops the
+        // control out of the panel capture and erases the indicator baked into
+        // that crop. It consumes and removes them; they are not a runtime
+        // contract. Knobs use the cleaned crop as their disc. Faders use it to
+        // cover the frozen thumb while the marked thumb art is hoisted into a
+        // value-driven overlay.
         const auto ind_box = object_member(candidate, "indicator_bounds");
         if (ind_box.isObject() && box.isObject()) {
             const double dial_left = number_member(box, "left", 0.0);
             const double dial_top = number_member(box, "top", 0.0);
             const double dial_w = number_member(box, "width", 0.0);
             const double dial_h = number_member(box, "height", 0.0);
-            const double ind_left = number_member(ind_box, "left", 0.0);
-            const double ind_top = number_member(ind_box, "top", 0.0);
-            const double ind_w = number_member(ind_box, "width", 0.0);
-            const double ind_h = number_member(ind_box, "height", 0.0);
-            if (const auto pointer = pointer_fractions(
-                    dial_left, dial_top, dial_w, dial_h,
-                    ind_left, ind_top, ind_w, ind_h)) {
-                control.attributes["knob_ind_r_in"] =
-                    std::to_string(pointer->r_in);
-                control.attributes["knob_ind_r_out"] =
-                    std::to_string(pointer->r_out);
-                control.attributes["knob_ind_w"] =
-                    std::to_string(pointer->width);
-                if (const auto color =
-                        string_member(candidate, "indicator_color");
-                    !color.empty())
-                    control.attributes["knob_ind_color"] = css_color_to_hex(color);
-                if (widget == pulp::view::AudioWidgetType::knob) {
+            IndicatorBox ind;
+            ind.left = number_member(ind_box, "left", 0.0);
+            ind.top = number_member(ind_box, "top", 0.0);
+            ind.width = number_member(ind_box, "width", 0.0);
+            ind.height = number_member(ind_box, "height", 0.0);
+            // The pointer in its OWN space, when the capture could describe it
+            // there. Both halves or neither: an element size without the matrix
+            // that scales it reads SVG user units as CSS px, which is the
+            // viewBox error one layer along, and a matrix without a size has
+            // nothing to scale.
+            const auto intrinsic = object_member(ind_box, "intrinsic");
+            const auto matrix = array_member(ind_box, "transform");
+            if (intrinsic.isObject() && matrix.size() >= 6) {
+                const auto component = [&](uint32_t index) {
+                    return matrix[index].getWithDefault<double>(
+                        std::numeric_limits<double>::quiet_NaN());
+                };
+                const double a = component(0);
+                const double b = component(1);
+                const double c = component(2);
+                const double d = component(3);
+                const double e = component(4);
+                const double f = component(5);
+                const double ix = number_member(intrinsic, "x", 0.0);
+                const double iy = number_member(intrinsic, "y", 0.0);
+                const double iw = number_member(intrinsic, "width", -1.0);
+                const double ih = number_member(intrinsic, "height", -1.0);
+                if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c) &&
+                    std::isfinite(d) && std::isfinite(e) && std::isfinite(f) &&
+                    std::isfinite(ix) && std::isfinite(iy) && iw >= 0.0 &&
+                    ih >= 0.0) {
+                    ind.oriented = true;
+                    ind.intrinsic_width = iw;
+                    ind.intrinsic_height = ih;
+                    ind.a = a;
+                    ind.b = b;
+                    ind.c = c;
+                    ind.d = d;
+                    const double local_cx = ix + iw * 0.5;
+                    const double local_cy = iy + ih * 0.5;
+                    ind.center_x = a * local_cx + c * local_cy + e;
+                    ind.center_y = b * local_cx + d * local_cy + f;
+                }
+            }
+            if (widget == pulp::view::AudioWidgetType::knob) {
+                if (const auto pointer = pointer_fractions(
+                        dial_left, dial_top, dial_w, dial_h, ind)) {
+                    control.attributes["knob_ind_r_in"] =
+                        std::to_string(pointer->r_in);
+                    control.attributes["knob_ind_r_out"] =
+                        std::to_string(pointer->r_out);
+                    control.attributes["knob_ind_w"] =
+                        std::to_string(pointer->width);
+                    if (const auto color =
+                            string_member(candidate, "indicator_color");
+                        !color.empty())
+                        control.attributes["knob_ind_color"] = css_color_to_hex(color);
                     control.attributes["browser_sprite_crop_px"] =
                         device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                    // The PAINTED footprint, deliberately: this pass crops the
+                    // control out of the panel capture and erases the pointer
+                    // baked into that crop, so it wants every pixel the pointer
+                    // covers. For a rotated needle that is the fat box -- the
+                    // one thing the geometry above must not use and this must.
                     control.attributes["browser_sprite_indicator_px"] =
-                        device_pixel_rect(ind_left, ind_top, ind_w, ind_h, dpr);
+                        device_pixel_rect(ind.left, ind.top, ind.width,
+                                          ind.height, dpr);
                 }
+            } else if (widget == pulp::view::AudioWidgetType::fader &&
+                       dial_w > 0.0 && dial_h > 0.0 &&
+                       ind.width > 0.0 && ind.height > 0.0) {
+                // A fader indicator is a translating thumb, not a radial
+                // pointer. Preserve the rectangles directly: the sprite pass
+                // needs the authored pixels and the runtime derives its travel
+                // from the fader orientation/value.
+                control.attributes["browser_sprite_crop_px"] =
+                    device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
+                control.attributes["browser_sprite_indicator_px"] =
+                    device_pixel_rect(ind.left, ind.top, ind.width, ind.height, dpr);
             }
         }
 

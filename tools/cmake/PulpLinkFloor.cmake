@@ -61,7 +61,7 @@ endif()
 # carries the editor would claim, and such a consumer should pair it with
 # REQUIRE timeline timeline_editor — a tier alone cannot say the editor arrived.
 set(PULP_LINK_FLOOR_TIER_sequencer-editor
-    platform runtime timebase timeline timeline_editor)
+    platform runtime music timebase timeline timeline_editor)
 
 # A loadable plugin binary: the format adapter it is packaged as, and the
 # audio/MIDI types that adapter and the engine both speak.
@@ -73,13 +73,13 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 # belongs) and does not reach `timeline_editor` at all. A plugin that genuinely
 # carries the editor states so with REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
-    platform runtime timebase audio midi format)
+    platform runtime music timebase audio midi format)
 
 # A loadable sequencer plugin that owns both the document and editor rungs.
 # This is the union of the two bounds above, not a larger application tier: a
 # plugin claiming it still has to name timeline and timeline_editor in REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
-    platform runtime timebase timeline timeline_editor audio midi format)
+    platform runtime music timebase timeline timeline_editor audio midi format)
 
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.

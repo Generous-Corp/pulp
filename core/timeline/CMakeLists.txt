@@ -24,6 +24,8 @@ target_link_libraries(pulp-timeline
     PUBLIC
         pulp::runtime
         pulp::timebase
+    PRIVATE
+        pulp::music
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
