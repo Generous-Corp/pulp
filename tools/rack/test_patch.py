@@ -1052,7 +1052,7 @@ def check_unjudged_patch_is_kept() -> tuple:
     P.reflow = lambda pch, inv: pch
     P.configure_audio = lambda pch: None
     try:
-        got, _ = P.generate("a plain drone, nothing clever", {}, None)
+        got, _, _ = P.generate("a plain drone, nothing clever", {}, None)
     except SystemExit as exc:
         got = None
         why = str(exc)
@@ -3186,6 +3186,22 @@ def main():
     # First, and outside the skip below: these need no installed Rack, and the
     # skip returns 0 — so a check placed after it does not run on a machine
     # without Fundamental and reports success anyway.
+    # What a FAILED run hands over, and whether the retry says anything the
+    # previous attempt did not already know. Its own file for the same reason
+    # test_affordances has one, and called here for the same reason too.
+    import test_handover
+    hand_bad = hand_ran = 0
+    for _check in (test_handover.check_retry_names_a_real_jack,
+                   test_handover.check_inventory_says_when_ports_are_unknown,
+                   test_handover.check_a_failed_run_hands_over_its_patch,
+                   test_handover.check_the_best_attempt_is_the_one_kept,
+                   test_handover.check_attempts_are_kept_without_being_asked,
+                   test_handover.check_give_up_still_ends_the_run,
+                   test_handover.check_the_loop_gives_up_holding_a_patch):
+        _b, _r = _check()
+        hand_bad += _b
+        hand_ran += _r
+
     layout_bad, layout_ran = check_layout()
     parts_bad, parts_ran = check_buildable_from_parts()
     acq_bad, acq_ran = check_acquisition()
@@ -3224,9 +3240,9 @@ def main():
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
     acq_bad += (vp_bad + mel_bad + beh_bad + aff_bad +
-                ln_bad + rl_bad + ip_bad + sf_bad)
+                ln_bad + rl_bad + ip_bad + sf_bad + hand_bad)
     acq_ran += (vp_ran + mel_ran + beh_ran + aff_ran +
-                ln_ran + rl_ran + ip_ran + sf_ran)
+                ln_ran + rl_ran + ip_ran + sf_ran + hand_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
