@@ -60,7 +60,12 @@ def manifest_evolution_problems(
         new_nonbinding = contract_payload(new)
         old_nonbinding.pop("bindings", None)
         new_nonbinding.pop("bindings", None)
+        old_determinism = old_nonbinding.pop("determinism", None)
+        new_determinism = new_nonbinding.pop("determinism", None)
         breaking = breaking or old_nonbinding != new_nonbinding
+        breaking = breaking or _determinism_weakened(
+            old_determinism, new_determinism
+        )
         if breaking and new_version[0] <= old_version[0]:
             problems.append(f"{key} has a breaking change without a major increase")
 
@@ -199,3 +204,49 @@ def _binding_identity(item: dict[str, Any]) -> tuple[Any, ...]:
         item.get("target"),
         json.dumps(item.get("availability"), sort_keys=True),
     )
+
+
+def _determinism_weakened(old: Any, new: Any) -> bool:
+    """Return whether a same-key determinism promise became less useful.
+
+    A missing pre-v1 contract is unspecified, so publishing a first explicit
+    promise is additive. Removing an explicit promise is always weakening.
+    `not_applicable` is a semantic category rather than an ordering point;
+    changing to or from it is conservatively breaking.
+    """
+    if old is None:
+        return False
+    if new is None:
+        return True
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return old != new
+
+    repeatability = {
+        "not_promised": 0,
+        "statistical": 1,
+        "tolerance_bounded": 2,
+        "bit_exact": 3,
+    }
+    platform_scope = {"same_build": 0, "same_backend": 1, "cross_platform": 2}
+    if repeatability.get(new.get("repeatability"), -1) < repeatability.get(
+        old.get("repeatability"), -1
+    ):
+        return True
+    if platform_scope.get(new.get("platform_scope"), -1) < platform_scope.get(
+        old.get("platform_scope"), -1
+    ):
+        return True
+
+    old_partition = old.get("block_partition")
+    new_partition = new.get("block_partition")
+    if old_partition != new_partition:
+        if "not_applicable" in {old_partition, new_partition}:
+            return True
+        if old_partition == "invariant" and new_partition == "fixed_partition_only":
+            return True
+
+    if old.get("transport_history") == "irrelevant" and new.get(
+        "transport_history"
+    ) == "input":
+        return True
+    return False

@@ -550,6 +550,41 @@ latency/tail/scheduling categories. Signal rows may reference a semantic node
 key in `forge-catalog.json`; they never copy that catalog's numeric ranges,
 defaults, choices, or product policy.
 
+Schema minor 1 adds the required feature `determinism-contract-v1`. Its
+per-row `determinism` object is deliberately separate from `seed_model` and
+answers four different questions:
+
+- `repeatability` is `bit_exact`, `tolerance_bounded`, `statistical`, or
+  `not_promised` for identical declared inputs and initial state;
+- `block_partition` says whether results are `invariant`, require the same
+  `fixed_partition_only`, or are `not_applicable` to the API;
+- `platform_scope` limits the promise to `cross_platform`, `same_backend`, or
+  `same_build`; and
+- `transport_history` says whether prior transport is an `input` or
+  `irrelevant`.
+
+`tolerance_bounded` is a determinism class, not a universal numeric tolerance;
+the algorithm's typed contract and tests remain authoritative for its actual
+error bounds. Minor-0 documents still parse against the installed schema and a
+missing `determinism` field means **unspecified**, not deterministic. A consumer
+that requires determinism must require `determinism-contract-v1`, reject a
+manifest that does not advertise it, and reject every unknown entry in
+`required_features`. When the feature is advertised, every live row must carry
+all four fields; the installed schema enforces that implication while retaining
+an explicit minor-0 branch for the pre-determinism document.
+
+The initial six promises are intentionally no broader than their implementation
+and tests support:
+
+| Key | Repeatability | Partition | Platform | Transport | Basis |
+|---|---|---|---|---|---|
+| `audio.instrument-voice-allocator` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Integer, fixed-slot event state machine; no floating-point or external history |
+| `midi.mpe-voice-tracker` | `not_promised` | `not_applicable` | `same_build` | `irrelevant` | Synchronous event state machine, but floating expression normalization has neither a published numerical bound nor a whole-sequence repeatability proof |
+| `sequence.host-transport-projector` | `not_promised` | `fixed_partition_only` | `same_build` | `input` | Floating beat/tick projection depends on callback partition and prior transport state, without a published repeatability bound or repeated-history proof |
+| `signal.saturator` | `bit_exact` | `not_applicable` | `same_build` | `irrelevant` | Per-sample API whose reset/re-render test is bit-identical across every shape and alias policy; same-build scope contains platform math-library variance |
+| `timebase.swing` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Pure rational/integer tick transform with tested bounded integer recovery |
+| `timebase.tick` | `bit_exact` | `not_applicable` | `cross_platform` | `irrelevant` | Fixed-width integer value type with saturating arithmetic |
+
 The first inventory covers representative public signal processing, instrument
 voice allocation, MPE note ownership, exact tick/swing timebase types, and host
 transport projection. Swing projection uses an exact rational ratio; inverse
@@ -585,6 +620,14 @@ Any installed-manifest change also increases `manifest_revision`; any ledger
 change increases its `inventory_version`. Removed keys and headers leave
 permanent tombstones, so consumers can distinguish removal from an incomplete
 inventory and stable keys cannot be silently reused.
+
+Determinism participates in each row's canonical `contract_digest`. An additive
+or stronger promise requires at least a capability minor increase. Weakening or
+removing an existing promise is a breaking same-key change and requires a major
+increase; alternatively, retain the original key and publish the weaker
+semantics under a new successor key. The evolution selftests exercise every
+determinism axis, missing-field downgrade, strengthening, and successor-key
+paths.
 
 Capability removal has a published-window rule: a live capability must first
 ship with both `status: deprecated` and `evolution.state: deprecated` in the

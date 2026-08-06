@@ -56,6 +56,13 @@ For an existing capability change:
 - Increase the capability major version when a binding is removed, renamed, or
   replaced, or when lifecycle, RT, state, seed, domain, units, latency, tail, or
   scheduling semantics change incompatibly.
+- Keep `seed_model` and `determinism` separate. When
+  `determinism-contract-v1` is required, every live row must declare
+  repeatability, block-partition behavior, platform scope, and whether transport
+  history is an input. Strengthening a determinism promise is additive;
+  weakening or removing one requires a major increase or a new successor key.
+- Treat a minor-0 row with no `determinism` as unspecified. Consumers that
+  require determinism must reject it and must reject unknown required features.
 - Leave the capability version unchanged for summary-only wording. The generated
   digest excludes the summary but covers the material contract.
 - Keep numeric parameter ranges/defaults/choices in `forge-catalog.json`; use a
