@@ -45,6 +45,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -162,6 +163,66 @@ float peak(const std::vector<float>& b) {
     float m = 0.0f;
     for (float v : b) m = std::max(m, std::fabs(v));
     return m;
+}
+
+double normalized_band_energy(const std::vector<float>& samples, double lo, double hi) {
+    constexpr int kBins = 24;
+    double total = 0.0;
+    for (int bin = 0; bin < kBins; ++bin) {
+        const double frequency = lo + (hi - lo) * (bin + 0.5) / kBins;
+        double re = 0.0;
+        double im = 0.0;
+        for (std::size_t n = 0; n < samples.size(); ++n) {
+            const double phase = 2.0 * std::numbers::pi * frequency * n;
+            re += samples[n] * std::cos(phase);
+            im -= samples[n] * std::sin(phase);
+        }
+        total += re * re + im * im;
+    }
+    return total / kBins;
+}
+
+struct RampOracleState {
+    float error_1 = 0.0f;
+    float error_2 = 0.0f;
+    std::uint32_t rng = 0x2C1B3A5Du;
+};
+
+std::uint32_t ramp_oracle_next(RampOracleState& state) {
+    auto x = state.rng;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    state.rng = x;
+    return x;
+}
+
+float ramp_oracle_unit(RampOracleState& state) {
+    return static_cast<float>(static_cast<double>(ramp_oracle_next(state)) /
+                              4294967296.0);
+}
+
+// Independent transcription of the time-varying quantizer. It deliberately
+// shares no production transition/helper, so the baked ramp test catches both
+// a per-sample reset and a wrong state-rescaling policy.
+float ramp_oracle_sample(float input, float bits,
+                         pulp::signal::NoiseShapingOrder order,
+                         RampOracleState& state) {
+    const float step = std::exp2(-(std::clamp(bits, 1.0f, 24.0f) - 1.0f));
+    const float limit = 4.0f * step;
+    state.error_1 = std::clamp(state.error_1, -limit, limit);
+    state.error_2 = std::clamp(state.error_2, -limit, limit);
+    float feedback = 0.0f;
+    if (order == pulp::signal::NoiseShapingOrder::first)
+        feedback = -state.error_1;
+    else if (order == pulp::signal::NoiseShapingOrder::second)
+        feedback = -2.0f * state.error_1 + state.error_2;
+    const float dither = (ramp_oracle_unit(state) - ramp_oracle_unit(state)) * step;
+    const float output = std::round((input + feedback + dither) / step) * step;
+    const float error = std::clamp(output - input - feedback, -limit, limit);
+    state.error_2 = state.error_1;
+    state.error_1 = error;
+    return output;
 }
 
 pulp::state::ParameterEvent immediate(pulp::state::ParamID id, float value,
@@ -434,6 +495,70 @@ TEST_CASE("Forge lo-fi: bitcrush exposes fixed output-correctness realizations",
     CHECK(descriptor.axes.front().values.size() == 4);
     CHECK(descriptor.realizations.size() == 4);
     CHECK(descriptor.params.size() == 2);
+}
+
+TEST_CASE("Forge lo-fi: shaped bitcrush survives a continuous bit-depth ramp",
+          "[host][baked][forge][forge-lofi][dither][automation][spectrum]") {
+    constexpr int kRampFrames = 4096;
+    constexpr int kRampBlocks = kRampFrames / kFrames;
+    constexpr float kInput = 0.137f;
+
+    auto render = [&](pulp::signal::NoiseShapingOrder order) {
+        BakedFixture fx(lofi::make_bitcrush_node(pulp::signal::DitherMode::tpdf, order));
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+
+        pulp::state::ParameterEventQueue initial;
+        REQUIRE(initial.push(immediate(lofi::kBitcrushBitDepth, 8.0f)));
+        REQUIRE(initial.push(immediate(lofi::kBitcrushRateDiv, 1.0f)));
+        REQUIRE(inj.inject(initial) == InjectStatus::Ok);
+        const std::vector<float> dc(static_cast<std::size_t>(kFrames), kInput);
+        (void)run_block(*fx.result.processor, dc);
+
+        const pulp::state::ParameterEvent ramp{
+            lofi::kBitcrushBitDepth, 0, 10.0f, kRampFrames};
+        REQUIRE(inj.inject(ramp) == InjectStatus::Ok);
+
+        RampOracleState oracle;
+        for (int n = 0; n < kFrames; ++n)
+            (void)ramp_oracle_sample(kInput, 8.0f, order, oracle);
+
+        std::vector<float> errors;
+        errors.reserve(kRampFrames);
+        int oracle_matches = 0;
+        for (int block = 0; block < kRampBlocks; ++block) {
+            const auto output = run_block(*fx.result.processor, dc);
+            for (int k = 0; k < kFrames; ++k) {
+                const int n = block * kFrames + k;
+                const float bits = 8.0f + 2.0f * static_cast<float>(n) /
+                                              static_cast<float>(kRampFrames);
+                const float expected = ramp_oracle_sample(kInput, bits, order, oracle);
+                oracle_matches += output[static_cast<std::size_t>(k)] == expected;
+                errors.push_back(output[static_cast<std::size_t>(k)] - kInput);
+            }
+        }
+        CHECK(oracle_matches == kRampFrames);
+        return errors;
+    };
+
+    const auto flat = render(pulp::signal::NoiseShapingOrder::none);
+    const auto first = render(pulp::signal::NoiseShapingOrder::first);
+    const auto second = render(pulp::signal::NoiseShapingOrder::second);
+    CHECK(first != flat);
+    CHECK(second != flat);
+    CHECK(second != first);
+
+    auto tilt = [](const std::vector<float>& errors) {
+        return normalized_band_energy(errors, 0.30, 0.47) /
+               normalized_band_energy(errors, 0.02, 0.10);
+    };
+    const double flat_tilt = tilt(flat);
+    const double first_tilt = tilt(first);
+    const double second_tilt = tilt(second);
+    INFO("8->10-bit ramp tilt: flat=" << flat_tilt << " first=" << first_tilt
+                                      << " second=" << second_tilt);
+    CHECK(first_tilt > flat_tilt * 1.4);
+    CHECK(second_tilt > first_tilt * 1.8);
 }
 
 // ── Delay: time + feedback are live on the baked feedback echo ───────────

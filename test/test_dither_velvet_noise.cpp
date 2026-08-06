@@ -294,6 +294,40 @@ TEST_CASE("Dither quantizer clears non-finite and overload-poisoned state",
     CHECK(std::abs(quantizer.state().error_1) <= 4.0 * pulp::signal::quantization_step(8.0));
 }
 
+TEST_CASE("Dither quantizer preserves bounded feedback across bit-depth automation",
+          "[signal][dither][automation][state]") {
+    DitherQuantizer64 quantizer;
+    quantizer.set_bits(8.0);
+    quantizer.set_dither_mode(DitherMode::tpdf);
+    quantizer.set_noise_shaping(NoiseShapingOrder::second);
+    quantizer.set_seed(kSeed);
+    quantizer.reset();
+    for (int n = 0; n < 128; ++n)
+        (void)quantizer.process(0.137);
+    REQUIRE(quantizer.state().error_1 != 0.0);
+
+    quantizer.set_bits(8.125);
+    CHECK(quantizer.state().error_1 != 0.0);
+    CHECK(std::abs(quantizer.state().error_1) <=
+          4.0 * pulp::signal::quantization_step(8.125));
+    CHECK(std::abs(quantizer.state().error_2) <=
+          4.0 * pulp::signal::quantization_step(8.125));
+
+    // A discontinuous coarse-to-fine jump retains continuity but cannot carry
+    // more than the destination quantizer's established safety bound.
+    quantizer.set_bits(20.0);
+    CHECK(quantizer.state().error_1 != 0.0);
+    CHECK(std::abs(quantizer.state().error_1) <=
+          4.0 * pulp::signal::quantization_step(20.0));
+    CHECK(std::abs(quantizer.state().error_2) <=
+          4.0 * pulp::signal::quantization_step(20.0));
+
+    quantizer.set_bits(std::numeric_limits<double>::quiet_NaN());
+    CHECK(quantizer.bits() == 24.0);
+    CHECK(quantizer.state().error_1 == 0.0);
+    CHECK(quantizer.state().error_2 == 0.0);
+}
+
 TEST_CASE("Lo-fi dither policy preserves the legacy default exactly",
           "[signal][lofi][dither][legacy]") {
     pulp::signal::LofiChain64 chain;
