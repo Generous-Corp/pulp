@@ -41,6 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import NamedTuple
 
 import crash_watch
 
@@ -310,6 +311,152 @@ def rack_argv(rack: str, user_dir: str, patch: str) -> list[str]:
     return [rack, "-h", "-u", user_dir, patch]
 
 
+SKIP_FILE = os.path.expanduser(
+    "~/Library/Application Support/Forge Modular/rack-scan-skip.json")
+
+
+def load_skips() -> dict:
+    try:
+        with open(SKIP_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def is_skipped(skips: dict, plugin: str, model: str) -> bool:
+    return f"{plugin}/{model}" in skips
+
+
+def record_skip(plugin: str, model: str, widget: str, why: str) -> None:
+    """Write down a module that takes Rack with it, so nobody meets it twice.
+
+    The list builds ITSELF. `crash_watch` already reads the faulting stack, so
+    the widget that did it is on hand at the moment we learn -- and a skip list
+    maintained by hand is one that goes stale the first time somebody is in a
+    hurry.
+
+    Written ONLY where a crash report names the death (see `measure_batch`). A
+    skip list that also collected launches which merely failed would fill up
+    with the machine's bad afternoons and quietly shrink the library forever
+    after, which is worse than no list: a module that crashes is a fact about
+    the module, a launch that wedged is a fact about the moment.
+    """
+    skips = load_skips()
+    skips[f"{plugin}/{model}"] = {
+        "widget": widget, "why": why,
+        "recorded": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    os.makedirs(os.path.dirname(SKIP_FILE), exist_ok=True)
+    tmp = SKIP_FILE + ".part"
+    with open(tmp, "w") as f:
+        json.dump(skips, f, indent=1, sort_keys=True)
+    os.replace(tmp, SKIP_FILE)
+
+
+def crashing_widget(crashes: list) -> str:
+    """The vendor widget named in a crash stack, if one is.
+
+    A constructor that loads a font is the shape this keeps taking -- headless
+    Rack has no font context -- so the frame that names a `*Widget` is the
+    useful half of the report and the rest is Rack's own unwinding.
+    """
+    for c in crashes:
+        for frame in c.frames:
+            if "Widget" in frame and "rack::" not in frame:
+                return frame.split("::")[-1][:60]
+    return ""
+
+
+class Batch(NamedTuple):
+    """What a batch of models came to, once every launch it needed was spent."""
+    #: CARTOG saw and measured these
+    measured: list[str]
+    #: a crash report names these; written to the skip list, never met again
+    skipped: list[str]
+    #: these failed with no crash report to blame them; reported, not persisted
+    failed: list[str]
+
+    def __add__(self, other: "Batch") -> "Batch":
+        return Batch(self.measured + other.measured,
+                     self.skipped + other.skipped,
+                     self.failed + other.failed)
+
+
+# The biggest patch a single launch is asked to carry.
+#
+# Bisection already turns one bad widget into one lost module rather than a
+# lost vendor, so this is not what makes the sweep safe -- it is what makes it
+# cheap. A vendor entered whole costs log2(N) doubled launches to isolate a
+# crasher, and this library's worst plugin ships 148 modules; entering in
+# chunks bounds that, and bounds how much a launch that wedges for reasons of
+# its own has to be redone. Measured launch cost is a few seconds either way,
+# so the chunking is close to free on a clean vendor.
+MAX_BATCH = int(os.environ.get("FORGE_RACK_MAX_BATCH", "32"))
+
+
+def measure_batch(rack: str, plugin: str, models: list[str],
+                  scan_window: float) -> Batch:
+    """Measure these models, halving the batch when one of them kills Rack.
+
+    A whole vendor in one patch means one bad widget loses the vendor: a
+    hundred-module plugin scans nothing because its third module's constructor
+    called `Window::loadFont` with no font context and took the process down.
+    That is not hypothetical -- it happened sixteen times in one sweep, three
+    widgets between them. Bisecting costs a few extra launches and turns each
+    of those into one lost module.
+
+    Success is CARTOG reporting it saw ALL of them, not merely that it ran. A
+    launch where Rack silently declined one module scans the rest and looks
+    clean, and the module it dropped would otherwise be recorded as measured
+    while carrying whatever an older scanner left.
+
+    A crash we can prove predates the patch -- the CoreMIDI abort -- is already
+    retried inside `run_rack`, so a crash report reaching here at batch size
+    one names this module. A failure with NO crash report does not: it is the
+    machine's, and it is reported rather than written down.
+    """
+    if not models:
+        return Batch([], [], [])
+    if len(models) > MAX_BATCH:
+        mid = len(models) // 2
+        return (measure_batch(rack, plugin, models[:mid], scan_window)
+                + measure_batch(rack, plugin, models[mid:], scan_window))
+
+    mark = crash_watch.now()
+    tmp = tempfile.mkdtemp(prefix="rack-patch-")
+    try:
+        patch = os.path.join(tmp, "measure.vcv")
+        want = write_patch(patch, plugin, models)
+        log, gave_up = run_rack(rack, patch, scan_window)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    saw = scanned_alongside(log)
+    if not gave_up and saw is not None and saw >= want:
+        return Batch(list(models), [], [])
+
+    if len(models) == 1:
+        why = gave_up or (f"CARTOG saw {saw} of {want} modules"
+                          if saw is not None else "CARTOG never scanned")
+        crashes = [c for c in crash_watch.since(mark) if not c.retryable]
+        if not crashes:
+            # Nothing crashed, so nothing here is evidence about this module.
+            print(f"    {plugin}/{models[0]}: not measured — {why}", flush=True)
+            return Batch([], [], [models[0]])
+        widget = crashing_widget(crashes)
+        record_skip(plugin, models[0], widget, why)
+        print(f"    {plugin}/{models[0]}: skipped"
+              + (f" — {widget} took Rack down" if widget else f" — {why}"),
+              flush=True)
+        return Batch([], [models[0]], [])
+
+    mid = len(models) // 2
+    print(f"    {plugin}: batch of {len(models)} did not measure "
+          f"({gave_up or f'CARTOG saw {saw} of {want}'}) — halving", flush=True)
+    return (measure_batch(rack, plugin, models[:mid], scan_window)
+            + measure_batch(rack, plugin, models[mid:], scan_window))
+
+
 def exit_verdict(log: str, crashes: list | None = None) -> str:
     """Why a launch that ended on its own did not measure anything.
 
@@ -508,47 +655,48 @@ def main(argv: list[str]) -> int:
     total_before = total_after = 0
     failures: list[str] = []
 
+    skips = load_skips()
     for plugin in plugins:
         models = only or installed_modules(plugin)
         if not models:
             print(f"{plugin}: no installed modules found — skipped")
             continue
 
-        before = measured(read_portmap(), plugin)
-        tmp = tempfile.mkdtemp(prefix="rack-patch-")
-        patch = os.path.join(tmp, "measure.vcv")
-        n = write_patch(patch, plugin, models)
+        # A module already known to take Rack down is not met again. It is
+        # named rather than silently dropped, or the library quietly shrinks
+        # by whatever was crashing the day the list was written.
+        known = [m for m in models if is_skipped(skips, plugin, m)]
+        models = [m for m in models if m not in known]
+        if known:
+            print(f"{plugin}: skipping {len(known)} known to crash Rack: "
+                  f"{', '.join(known)}")
+        if not models:
+            continue
 
+        before = measured(read_portmap(), plugin)
         print(f"{plugin}: placing {len(models)} modules and the scanner "
               f"— headless Rack opens an audio device briefly", flush=True)
-        try:
-            log, gave_up = run_rack(rack, patch, scan_window)
-        finally:
-            # `--all` is one of these per plugin, so a directory left behind
-            # each time is a directory left behind a hundred times.
-            shutil.rmtree(tmp, ignore_errors=True)
+        batch = measure_batch(rack, plugin, models, scan_window)
 
-        # Did the instrument run? Zero is what both an empty library and a
-        # broken scan look like, so read the scan's own account of itself
-        # before believing any number the map reports.
-        saw = scanned_alongside(log)
-        if gave_up:
-            failures.append(f"{plugin}: {gave_up}")
-        elif saw is None:
-            failures.append(f"{plugin}: CARTOG never scanned — is the "
-                            f"installed ForgeModular current?")
-        elif saw < n:
-            failures.append(f"{plugin}: CARTOG scanned alongside {saw} of "
-                            f"{n} modules — the patch is out of order")
+        if batch.skipped:
+            failures.append(f"{plugin}: crashed Rack and were written to the "
+                            f"skip list: {', '.join(batch.skipped)}")
+        if batch.failed:
+            failures.append(f"{plugin}: did not measure: "
+                            f"{', '.join(batch.failed)}")
 
         after = measured(read_portmap(), plugin)
         print(f"  params: {before[0]} -> {after[0]} modules   "
-              f"ranges: {before[1]} -> {after[1]} modules"
-              + (f"   (scanner saw {saw})" if saw is not None else ""))
+              f"ranges: {before[1]} -> {after[1]} modules   "
+              f"(measured {len(batch.measured)} of {len(models)})")
 
         after_map = read_portmap()
-        missing, unranged = shortfall(after_map, plugin, models)
-        stale = stale_scans(after_map, plugin, models)
+        # Asked only of the ones a launch claimed to measure. A module that
+        # crashed Rack has already been reported once, and reporting it again
+        # as unmapped buries the reason it is unmapped under a second line
+        # that does not say.
+        missing, unranged = shortfall(after_map, plugin, batch.measured)
+        stale = stale_scans(after_map, plugin, batch.measured)
         if stale:
             failures.append(f"{plugin}: left behind by an older scanner: "
                             f"{', '.join(stale)}")
