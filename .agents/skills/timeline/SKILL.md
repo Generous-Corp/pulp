@@ -1245,6 +1245,23 @@ plugin that wants only commands should not carry that distinction.
 
 Both directions are pinned by `--selftest`, so neither can be relaxed silently.
 
+### Editor snapping stays in integer ticks and restarts at authored bars
+
+`timebase::next_grid_boundary(double, double)` is a convenience for finite beat-domain
+calculations, not an authoritative editor snapper. It has no meter input, and near the signed
+tick endpoints one double ULP spans more than a thousand ticks. Converting a pointer's target
+tick through it can therefore make two exact document positions collapse onto the same grid
+answer.
+
+Keep sequencer snapping in integer ticks. Use `CompiledMeterMap::tick_to_bar()` to obtain the
+bar-local phase, generate the neighboring straight-grid candidates exactly, and only then pass
+those candidates through `swing_position()`. Restarting at each bar prevents a time-signature
+change from inheriting the previous signature's grid phase. Treat the authored bar end as a
+candidate even when a custom interval leaves a partial final cell, and pin the nearest-tie
+policy explicitly (the editor kernel chooses the later tick). Tests need both a meter change
+whose new bar starts off the tick-zero grid and the signed endpoints; an all-4/4 fixture near
+zero proves neither property.
+
 Consequences worth knowing before you touch this:
 
 - `pulp-timeline-editor` is **not header-only**. It carries `src/edit_intent.cpp`
