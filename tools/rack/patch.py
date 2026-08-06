@@ -3493,7 +3493,7 @@ ACTIVITY_HEADER = "per-module output activity:"
 
 
 def activity_rows(report: str) -> list:
-    """(module name, its output voltages) per row of the gate's activity table.
+    """(module name, per-output peak magnitudes) from the measured window.
 
     A module the gate could not instantiate has no voltages and is skipped: it
     reported nothing, which is not the same as reporting zero. Core's audio
@@ -3611,7 +3611,8 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
 
     A sequencer can emit pitch while its gate output stays at zero. Treating
     only an all-zero *module* as dead walks past that cause and blames the
-    envelope or VCA downstream. Trace silent cable outputs backward from the
+    envelope or VCA downstream. Trace outputs with zero peak over the capture
+    window backward from the
     audio interface so the retry can name `SEQ out1 'Gate'`, while preserving
     the older whole-module answer when every output is zero.
     """

@@ -565,10 +565,11 @@ def write_audio_artifact(path: str, frames: list[list[float]],
     if count <= 0 or sample_rate <= 0:
         raise ValueError("the audio capture is empty")
     audio_channels = [ch[:count] for ch in audio_channels]
-    source_rms = rms(audio_channels[0])
-    if source_rms < SILENCE:
+    source_rms_by_channel = [rms(ch) for ch in audio_channels]
+    source_rms = source_rms_by_channel[0]
+    if max(source_rms_by_channel) < SILENCE:
         raise ValueError(
-            f"the primary listener tap is below the {SILENCE:g} V RMS "
+            f"every listener tap is below the {SILENCE:g} V RMS "
             "audibility floor; normalization would manufacture an artifact")
     peak = max(abs(float(x)) for ch in audio_channels for x in ch)
     gain = 0.95 / peak if peak > 1e-12 else 1.0
@@ -594,6 +595,7 @@ def write_audio_artifact(path: str, frames: list[list[float]],
         "schema": "forge.fidelity_audio_artifact.v1",
         "wav_sha256": digest.hexdigest(),
         "source_rms_volts": source_rms,
+        "source_rms_volts_by_channel": source_rms_by_channel,
         "minimum_source_rms_volts": SILENCE,
         "source_peak_volts": peak,
     }
@@ -607,6 +609,7 @@ def write_audio_artifact(path: str, frames: list[list[float]],
     return {"path": os.path.abspath(path), "channels": len(audio_channels),
             "frames": count, "sample_rate": int(round(sample_rate)),
             "source_peak_volts": peak, "source_rms_volts": source_rms,
+            "source_rms_volts_by_channel": source_rms_by_channel,
             "normalization_gain": gain,
             "fidelity_metadata": os.path.abspath(metadata_path),
             "fidelity_metadata_sha256": metadata_digest.hexdigest()}

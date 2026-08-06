@@ -191,7 +191,8 @@ def _pcm_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
-def _fidelity_metadata(wav_path: str, arm_doc: dict, label: str) -> dict:
+def _fidelity_metadata(wav_path: str, arm_doc: dict, label: str,
+                       selected_channel: int) -> dict:
     """Validate Fidelity's content-bound pre-normalization level record."""
     metadata_path = wav_path + ".fidelity.json"
     try:
@@ -205,7 +206,17 @@ def _fidelity_metadata(wav_path: str, arm_doc: dict, label: str) -> dict:
         raise ValueError(f"experiment {label} Fidelity metadata names another WAV")
     if arm_doc.get("fidelity_metadata_sha256") != _sha256(metadata_path):
         raise ValueError(f"experiment {label} Fidelity metadata digest does not match")
-    source_rms = metadata.get("source_rms_volts")
+    per_channel = metadata.get("source_rms_volts_by_channel")
+    if per_channel is None and selected_channel == 0:
+        # Compatibility with already-produced mono artifacts. A non-zero
+        # selected channel can never fall back to channel zero.
+        per_channel = [metadata.get("source_rms_volts")]
+    if (not isinstance(per_channel, list)
+            or selected_channel < 0 or selected_channel >= len(per_channel)):
+        raise ValueError(
+            f"experiment {label} lacks source RMS for analysis channel "
+            f"{selected_channel}")
+    source_rms = per_channel[selected_channel]
     floor = metadata.get("minimum_source_rms_volts")
     if (not isinstance(source_rms, (int, float)) or isinstance(source_rms, bool)
             or not math.isfinite(float(source_rms))
@@ -239,6 +250,11 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
                                          and not row.get(key))]
         if missing:
             raise ValueError(f"experiment {split} lacks {', '.join(missing)}")
+        channel = row.get("analysis_channel")
+        if (not isinstance(channel, int) or isinstance(channel, bool)
+                or channel < 0):
+            raise ValueError(
+                f"experiment {split} analysis_channel must be a non-negative integer")
         for arm, state in (("without", "off"), ("with", "on")):
             arm_doc = (row.get("arms") or {}).get(arm) or {}
             attempt = arm_doc.get("attempt")
@@ -257,7 +273,8 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
             if arm_doc.get("wav_sha256") != actual:
                 raise ValueError(f"experiment {split}.{arm} WAV digest does not match")
             arm_doc["fidelity"] = _fidelity_metadata(
-                wavs[f"{split}.{arm}"], arm_doc, f"{split}.{arm}")
+                wavs[f"{split}.{arm}"], arm_doc, f"{split}.{arm}",
+                row["analysis_channel"])
         without = row["arms"]["without"]
         with_guidance = row["arms"]["with"]
         if without["attempt"] != with_guidance["attempt"]:
@@ -296,6 +313,26 @@ def _experiment(path: str, wavs: dict[str, str], has_holdout: bool) -> dict:
     return doc
 
 
+def _require_matched_capture(without: dict[str, Any],
+                             with_guidance: dict[str, Any],
+                             split: str) -> None:
+    """Refuse an A/B where guidance was not the only changed variable."""
+    fields = {
+        "sample rate": (without.get("sample_rate"),
+                        with_guidance.get("sample_rate")),
+        "frame count": (without.get("frames"), with_guidance.get("frames")),
+        "channel count": (
+            (without.get("channel_handling") or {}).get("input_channels"),
+            (with_guidance.get("channel_handling") or {}).get("input_channels")),
+    }
+    mismatched = [name for name, values in fields.items()
+                  if values[0] != values[1]]
+    if mismatched:
+        raise ValueError(
+            f"experiment {split} A/B arms must use the same capture format "
+            f"and window; mismatched {', '.join(mismatched)}")
+
+
 def compare_files(without_wav: str, with_wav: str, expectations_path: str,
                   experiment_path: str,
                   holdout_without: str | None = None,
@@ -324,6 +361,7 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
     working_channel = experiment["working"]["analysis_channel"]
     without = analyze_file(without_wav, working_channel)
     with_catalogue = analyze_file(with_wav, working_channel)
+    _require_matched_capture(without, with_catalogue, "working")
     champ = score(without, expectations, "catalogue-off")
     cand = score(with_catalogue, expectations, "catalogue-on")
     holdout = None
@@ -332,6 +370,7 @@ def compare_files(without_wav: str, with_wav: str, expectations_path: str,
         holdout_channel = experiment["holdout"]["analysis_channel"]
         ho_without = analyze_file(holdout_without, holdout_channel)
         ho_with = analyze_file(holdout_with, holdout_channel)
+        _require_matched_capture(ho_without, ho_with, "holdout")
         holdout_champ = score(ho_without, expectations, "catalogue-off-holdout")
         holdout_cand = score(ho_with, expectations, "catalogue-on-holdout")
         holdout = {

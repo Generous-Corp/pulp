@@ -87,6 +87,10 @@ def entries(inv: dict | None = None,
         merged[_key(entry)] = entry
 
     for entry in _read(local_path or LOCAL_PATH):
+        if inv is not None:
+            plug = inv.get(entry.get("plugin"))
+            if not plug or entry.get("pluginVersion") != plug.get("version"):
+                continue
         shipped = merged.get(_key(entry))
         if shipped is not None and _scan(entry) < _scan(shipped):
             continue

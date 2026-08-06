@@ -24,6 +24,7 @@ def _fidelity(tmp_path, stem: str, source_rms: float = 1.0) -> tuple[str, float]
         "schema": "forge.fidelity_audio_artifact.v1",
         "wav_sha256": _digest(wav),
         "source_rms_volts": source_rms,
+        "source_rms_volts_by_channel": [source_rms],
         "minimum_source_rms_volts": 5e-4,
         "source_peak_volts": source_rms * 2.0,
     }
@@ -152,6 +153,48 @@ def test_pre_normalization_level_collapse_cannot_promote(tmp_path):
         paths["holdout-off"], paths["holdout-on"])
     assert report["verdict"] == "NOT_PROVEN"
     assert "source level fell" in report["goodhart_guard"]["reason"]
+
+
+def test_catalogue_ab_requires_the_same_capture_window(tmp_path):
+    import pytest
+    paths = {}
+    for name, rate, seconds in (("off", 5.0, 4.0), ("on", 7.5, 3.0),
+                                ("holdout-off", 5.2, 4.0),
+                                ("holdout-on", 7.45, 4.0)):
+        path = tmp_path / f"{name}.wav"
+        audio_io.save_wav(str(path), _am_tone(48000, rate, seconds), 48000)
+        paths[name] = str(path)
+    expect = tmp_path / "expect.json"
+    expect.write_text(json.dumps({
+        "source": {"path": "Welsh.pdf", "page": 42},
+        "metrics": {"amplitude_modulation_hz": {
+            "target": 7.5, "tolerance": 0.5}}}))
+    with pytest.raises(ValueError, match="same capture format and window"):
+        reference_free.compare_files(
+            paths["off"], paths["on"], str(expect),
+            _manifest(tmp_path, paths),
+            paths["holdout-off"], paths["holdout-on"])
+
+
+def test_fidelity_level_is_bound_to_the_selected_channel(tmp_path):
+    import pytest
+    wav = tmp_path / "stereo.wav"
+    tone = _am_tone(48000, 7.5)
+    audio_io.save_wav(str(wav), np.stack([tone, tone], axis=1), 48000)
+    metadata = {
+        "schema": "forge.fidelity_audio_artifact.v1",
+        "wav_sha256": _digest(wav),
+        "source_rms_volts": 1.0,
+        "source_rms_volts_by_channel": [1.0, 0.01],
+        "minimum_source_rms_volts": 5e-4,
+        "source_peak_volts": 2.0,
+    }
+    sidecar = tmp_path / "stereo.wav.fidelity.json"
+    sidecar.write_text(json.dumps(metadata))
+    arm = {"fidelity_metadata_sha256": _digest(sidecar),
+           "source_rms_volts": 1.0}
+    with pytest.raises(ValueError, match="source RMS does not match"):
+        reference_free._fidelity_metadata(str(wav), arm, "stereo", 1)
 
 
 def test_catalogue_ab_needs_a_cited_source(tmp_path):

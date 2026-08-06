@@ -77,6 +77,11 @@ def main() -> int:
     check(got == [],
           "a shipped entry is dropped when the installed version differs")
 
+    write(local, [entry("Befaco", "EvenVCO", "2.4", 5, -12.0)])
+    got = portmap_seed.entries(inv_of("Befaco", "2.5"), absent, local)
+    check(got == [],
+          "a stale local scan is dropped when the installed version differs")
+
     # Ranges only started being recorded at scan 4. A local block written by
     # an older scanner has none, so preferring it would discard real bounds.
     write(local, [entry("Befaco", "EvenVCO", "2.4", 3)])

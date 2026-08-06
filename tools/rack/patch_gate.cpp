@@ -413,6 +413,15 @@ int main(int argc, char** argv) {
     // interface, so this is a rounding error against the plugins already loaded.
     std::vector<std::vector<float>> recorded(to_audio.size());
     for (auto& r : recorded) r.reserve(static_cast<std::size_t>(kRun));
+    // Peak magnitude over the measured window for every module output. A
+    // terminal voltage is not activity: a healthy gate is commonly low on
+    // the final frame. The trace feeds retry diagnosis, so it must summarize
+    // the whole capture rather than whichever phase happened to end it.
+    std::vector<std::vector<double>> output_peak(nodes.size());
+    for (size_t n = 0; n < nodes.size(); ++n) {
+        if (nodes[n].mod)
+            output_peak[n].assign(nodes[n].mod->getNumOutputs(), 0.0);
+    }
     long counted = 0;
 
     for (int i = 0; i < kWarm + kRun; ++i) {
@@ -432,6 +441,15 @@ int main(int argc, char** argv) {
         args.frame++;
         if (i < kWarm) continue;
         ++counted;
+        for (size_t n = 0; n < nodes.size(); ++n) {
+            if (!nodes[n].mod) continue;
+            for (int o = 0; o < nodes[n].mod->getNumOutputs(); ++o) {
+                const float v = nodes[n].mod->outputs[o].getVoltage();
+                if (std::isfinite(v))
+                    output_peak[n][o] = std::max(
+                        output_peak[n][o], static_cast<double>(std::fabs(v)));
+            }
+        }
         for (size_t k = 0; k < to_audio.size(); ++k) {
             Node* s = by_id[to_audio[k]->from];
             if (!s || !s->mod) continue;
@@ -446,12 +464,13 @@ int main(int argc, char** argv) {
 
     if (getenv("PATCH_GATE_TRACE")) {
         std::printf("  --    per-module output activity:\n");
-        for (Node& n : nodes) {
+        for (size_t ni = 0; ni < nodes.size(); ++ni) {
+            Node& n = nodes[ni];
             if (!n.mod) { std::printf("        %-18s (not instantiated)\n", n.model.c_str()); continue; }
             std::string line;
             for (int o = 0; o < n.mod->getNumOutputs(); ++o) {
                 char b[64];
-                std::snprintf(b, sizeof b, " out%d=%.3f", o, n.mod->outputs[o].getVoltage());
+                std::snprintf(b, sizeof b, " out%d=%.3f", o, output_peak[ni][o]);
                 line += b;
             }
             // Params too, and not as decoration. A VCA reading 0.000 with a

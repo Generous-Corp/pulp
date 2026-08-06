@@ -499,7 +499,7 @@ def test_audio_artifact_contains_only_audio_taps() -> int:
         path = os.path.join(d, "render.wav")
         meta = F.write_audio_artifact(
             path,
-            [[0.0, 2.5, -5.0], [0.0, 1.0, 2.0], [0.0, -2.5, 5.0]],
+            [[0.0, 2.5, -5.0], [0.0, 1.0, 2.0], [0.0, -1.0, 1.0]],
             [(1, 0, "audio"), (2, 0, "pitch"), (1, 1, "audio")],
             48000.0,
         )
@@ -512,9 +512,15 @@ def test_audio_artifact_contains_only_audio_taps() -> int:
                      "artifact metadata preserves the original voltage peak")
         bad += check(meta["source_rms_volts"] > F.SILENCE,
                      "artifact metadata preserves the original audibility")
+        bad += check(len(meta["source_rms_volts_by_channel"]) == 2
+                     and meta["source_rms_volts_by_channel"][0]
+                     != meta["source_rms_volts_by_channel"][1],
+                     "artifact metadata preserves audibility per channel")
         with open(meta["fidelity_metadata"]) as source:
             sidecar = json.load(source)
         bad += check(sidecar["source_rms_volts"] == meta["source_rms_volts"]
+                     and sidecar["source_rms_volts_by_channel"]
+                     == meta["source_rms_volts_by_channel"]
                      and sidecar["minimum_source_rms_volts"] == F.SILENCE,
                      "the WAV is content-bound to its pre-normalized level")
         try:
