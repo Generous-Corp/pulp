@@ -514,8 +514,38 @@ def aborted_in_coremidi(log: str) -> bool:
     return any(mark in log for mark in ABORT_MARKS)
 
 
-def launch_once(rack: str, patch: str,
-                scan_window: float) -> tuple[str, str, list]:
+class Launch(NamedTuple):
+    log: str
+    why: str                 #: empty when the scan landed
+    crashes: list
+    died: bool               #: the process ended on its own, rather than wedging
+
+
+# How long to wait for macOS to finish writing a crash report after the process
+# it describes has gone.
+#
+# It is not instant, and a single short sleep gets the answer wrong in the
+# expensive direction: with 0.6s, a module whose widget reliably killed Rack
+# was classified as "exited before it scanned" three launches running before
+# the report finally appeared, so every crasher cost four launches per bisect
+# level instead of one -- and one vendor ran into the sweep's own timeout that
+# way. Polling costs nothing on a launch that did not crash, because a report
+# either exists shortly or never does.
+CRASH_REPORT_WINDOW = float(os.environ.get("FORGE_CRASH_REPORT_WINDOW", "6"))
+
+
+def await_crash_reports(mark: float,
+                        window: float = CRASH_REPORT_WINDOW) -> list:
+    """Crash reports written since `mark`, giving macOS time to write them."""
+    deadline = time.time() + window
+    while True:
+        found = crash_watch.since(mark)
+        if found or time.time() >= deadline:
+            return found
+        time.sleep(0.25)
+
+
+def launch_once(rack: str, patch: str, scan_window: float) -> Launch:
     """One headless launch. Returns (log, "" | why it failed, crash reports).
 
     Waits on the scan rather than on a clock. Rack truncates its log at
@@ -547,6 +577,7 @@ def launch_once(rack: str, patch: str,
     log = ""
     why = ""
     crashes: list = []
+    died = False
     try:
         started = time.time()
         loading = False
@@ -565,9 +596,11 @@ def launch_once(rack: str, patch: str,
                 # session was missing when it demonstrably was not would be
                 # the tool inventing a diagnosis -- which is how a reader ends
                 # up debugging the wrong machine.
-                # macOS writes the report a moment after the process dies.
-                time.sleep(0.6)
-                crashes = crash_watch.since(mark)
+                # macOS writes the report a moment after the process dies, and
+                # how long a moment is decides whether this launch is charged
+                # to the module or to the machine.
+                died = True
+                crashes = await_crash_reports(mark)
                 why = exit_verdict(log, crashes)
                 break
             waited = time.time() - started
@@ -590,7 +623,7 @@ def launch_once(rack: str, patch: str,
         if not why and os.path.exists(measured_map):
             shutil.copy2(measured_map, PORTMAP)
         drop_scratch(scratch)
-    return log, why, crashes
+    return Launch(log, why, crashes, died)
 
 
 def run_rack(rack: str, patch: str, scan_window: float,
