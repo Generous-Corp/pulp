@@ -12,22 +12,22 @@ int main() {
     {
         // audio.instrument-voice-allocator
         static_assert(sizeof(pulp::audio::InstrumentVoiceAllocator) > 0);
-        pulp::audio::InstrumentVoiceAllocator probe_value{}; (void)probe_value.prepare(1);
+        pulp::audio::InstrumentVoiceAllocator probe_value_0{}; (void)probe_value_0.prepare(1);
     }
     {
         // midi.mpe-voice-tracker
         static_assert(sizeof(pulp::midi::MpeVoiceTracker) > 0);
-        pulp::midi::MpeVoiceTracker probe_value{}; (void)probe_value.reset();
+        pulp::midi::MpeVoiceTracker probe_value_0{}; (void)probe_value_0.reset();
     }
     {
         // sequence.host-transport-projector
         static_assert(sizeof(pulp::sequence::HostTransportProjector) > 0);
-        pulp::sequence::HostTransportProjector probe_value{}; (void)probe_value.reset();
+        pulp::sequence::HostTransportProjector probe_value_0{}; (void)probe_value_0.reset();
     }
     {
         // signal.saturator
         static_assert(sizeof(pulp::signal::SaturatorT<float>) > 0);
-        pulp::signal::SaturatorT<float> probe_value{}; (void)probe_value.prepare(48000.0);
+        pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
     }
     {
         // timebase.swing
@@ -36,12 +36,14 @@ int main() {
         (void)binding_5;
         auto *volatile binding_6 = &pulp::timebase::unswing_position;
         (void)binding_6;
+        pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
+        (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
     }
     {
         // timebase.tick
         static_assert(sizeof(pulp::timebase::TickPosition) > 0);
-        pulp::timebase::TickPosition probe_value{1}; (void)probe_value;
+        pulp::timebase::TickPosition probe_value_0{1}; (void)probe_value_0;
     }
     return 0;
 }

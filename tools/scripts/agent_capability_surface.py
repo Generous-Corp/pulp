@@ -82,17 +82,37 @@ def file_fingerprint(path: pathlib.Path) -> str:
 
 def discover_headers(root: pathlib.Path) -> dict[str, dict[str, str]]:
     headers: dict[str, dict[str, str]] = {}
+    seen_domains: set[str] = set()
+    seen_sources: set[str] = set()
+    seen_install_prefixes: set[str] = set()
     for public_root in PUBLIC_ROOTS:
+        domain = public_root["domain"]
+        source = public_root["source"]
+        install_prefix = public_root["install_prefix"]
+        if domain in seen_domains:
+            raise RuntimeError(f"duplicate public capability domain: {domain}")
+        if source in seen_sources:
+            raise RuntimeError(f"duplicate public capability source: {source}")
+        if install_prefix in seen_install_prefixes:
+            raise RuntimeError(
+                f"duplicate public capability install prefix: {install_prefix}"
+            )
+        seen_domains.add(domain)
+        seen_sources.add(source)
+        seen_install_prefixes.add(install_prefix)
+
         directory = root / public_root["source"]
         if not directory.is_dir():
-            continue
-        include_root = root / "core" / public_root["domain"] / "include"
+            raise RuntimeError(
+                f"declared public capability root is missing: {directory}"
+            )
+        include_root = root / "core" / domain / "include"
         for path in sorted(directory.rglob("*")):
             if not path.is_file():
                 continue
             include = path.relative_to(include_root).as_posix()
             headers[include] = {
-                "domain": public_root["domain"],
+                "domain": domain,
                 "source": path.relative_to(root).as_posix(),
                 "fingerprint": file_fingerprint(path),
             }

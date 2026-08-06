@@ -173,12 +173,12 @@ EXPORTS = [
             )
         ],
         forge_descriptor={"catalog": "forge-catalog.json", "node_key": "saturator"},
-        _link_probe={
+        _link_probes=[{
             "binding": "pulp::signal::SaturatorT<float>",
             "operation": "member_call",
             "member": "prepare",
             "arguments": "48000.0",
-        },
+        }],
     ),
     capability(
         key="audio.instrument-voice-allocator",
@@ -218,12 +218,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe={
+        _link_probes=[{
             "binding": "pulp::audio::InstrumentVoiceAllocator",
             "operation": "member_call",
             "member": "prepare",
             "arguments": "1",
-        },
+        }],
     ),
     capability(
         key="midi.mpe-voice-tracker",
@@ -263,12 +263,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe={
+        _link_probes=[{
             "binding": "pulp::midi::MpeVoiceTracker",
             "operation": "member_call",
             "member": "reset",
             "arguments": "",
-        },
+        }],
     ),
     capability(
         key="timebase.tick",
@@ -305,11 +305,11 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe={
+        _link_probes=[{
             "binding": "pulp::timebase::TickPosition",
             "operation": "construct",
             "arguments": "1",
-        },
+        }],
     ),
     capability(
         key="timebase.swing",
@@ -369,14 +369,29 @@ EXPORTS = [
                 ),
             ),
         ],
-        _link_probe={
-            "binding": "pulp::timebase::swing_position",
-            "operation": "function_call",
-            "arguments": (
-                "pulp::timebase::TickPosition{1}, "
-                "pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing"
-            ),
-        },
+        _link_probes=[
+            {
+                "binding": "pulp::timebase::SwingRatio",
+                "operation": "construct",
+                "arguments": "1, 2",
+            },
+            {
+                "binding": "pulp::timebase::swing_position",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::timebase::TickPosition{1}, "
+                    "pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing"
+                ),
+            },
+            {
+                "binding": "pulp::timebase::unswing_position",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::timebase::TickPosition{1}, "
+                    "pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing"
+                ),
+            },
+        ],
     ),
     capability(
         key="sequence.host-transport-projector",
@@ -416,12 +431,12 @@ EXPORTS = [
                 ),
             )
         ],
-        _link_probe={
+        _link_probes=[{
             "binding": "pulp::sequence::HostTransportProjector",
             "operation": "member_call",
             "member": "reset",
             "arguments": "",
-        },
+        }],
     ),
 ]
 
@@ -571,66 +586,107 @@ def compile_fixture() -> str:
                 )
                 lines.append(f"        (void)binding_{binding_index};")
             binding_index += 1
-        lines.append(f"        {render_link_probe(source_by_key[row['key']])}")
+        for probe in render_link_probes(source_by_key[row["key"]]):
+            lines.append(f"        {probe}")
         lines.append("    }")
     lines.extend(["    return 0;", "}", ""])
     return "\n".join(lines)
 
 
-def render_link_probe(row: dict[str, Any]) -> str:
-    probe = row["_link_probe"]
+def _render_link_probe(probe: dict[str, Any], index: int) -> str:
     binding = probe["binding"]
     arguments = probe["arguments"]
     operation = probe["operation"]
     if operation == "construct":
-        return f"{binding} probe_value{{{arguments}}}; (void)probe_value;"
+        return (
+            f"{binding} probe_value_{index}{{{arguments}}}; "
+            f"(void)probe_value_{index};"
+        )
     if operation == "member_call":
         return (
-            f"{binding} probe_value{{}}; "
-            f"(void)probe_value.{probe['member']}({arguments});"
+            f"{binding} probe_value_{index}{{}}; "
+            f"(void)probe_value_{index}.{probe['member']}({arguments});"
         )
     if operation == "function_call":
         return f"(void){binding}({arguments});"
     raise ValueError(f"unsupported link probe operation: {operation!r}")
 
 
+def render_link_probes(row: dict[str, Any]) -> list[str]:
+    return [
+        _render_link_probe(probe, index)
+        for index, probe in enumerate(row["_link_probes"])
+    ]
+
+
+def render_link_probe(row: dict[str, Any]) -> str:
+    """Render all operational probes for one installed consumer source."""
+    return " ".join(render_link_probes(row))
+
+
 def _link_probe_problems(row: dict[str, Any]) -> list[str]:
     key = row.get("key", "<unknown>")
-    probe = row.get("_link_probe")
-    if not isinstance(probe, dict):
-        return [f"{key} requires a structured installed consumer link probe"]
-    operation = probe.get("operation")
-    required = {"binding", "operation", "arguments"}
-    if operation == "member_call":
-        required.add("member")
-    if set(probe) != required:
-        return [f"{key} link probe fields are not exact for {operation!r}"]
+    probes = row.get("_link_probes")
+    if not isinstance(probes, list) or not probes:
+        return [f"{key} requires operational installed-consumer probes"]
     bindings = {
         item["qualified_name"]: item["kind"]
         for item in row.get("bindings", [])
         if isinstance(item, dict)
         and isinstance(item.get("qualified_name"), str)
     }
-    binding = probe.get("binding")
-    if binding not in bindings:
-        return [f"{key} link probe must name an advertised binding"]
-    if not isinstance(probe.get("arguments"), str):
-        return [f"{key} link probe arguments must be a C++ argument string"]
-    if operation in {"construct", "member_call"} and bindings[binding] != "cpp_type":
-        return [f"{key} {operation} probe requires a cpp_type binding"]
-    if operation == "function_call" and bindings[binding] != "cpp_function":
-        return [f"{key} function_call probe requires a cpp_function binding"]
-    if operation == "member_call" and not re.fullmatch(
-        r"[A-Za-z_][A-Za-z0-9_]*", probe.get("member", "")
-    ):
-        return [f"{key} member_call probe has an invalid member"]
-    if operation not in {"construct", "member_call", "function_call"}:
-        return [f"{key} link probe operation is invalid"]
+    problems: list[str] = []
+    probed_bindings: list[str] = []
+    for index, probe in enumerate(probes):
+        where = f"{key} link probe[{index}]"
+        if not isinstance(probe, dict):
+            problems.append(f"{where} must be an object")
+            continue
+        operation = probe.get("operation")
+        required = {"binding", "operation", "arguments"}
+        if operation == "member_call":
+            required.add("member")
+        if set(probe) != required:
+            problems.append(f"{where} fields are not exact for {operation!r}")
+            continue
+        binding = probe.get("binding")
+        if binding not in bindings:
+            problems.append(f"{where} must name an advertised binding")
+            continue
+        probed_bindings.append(binding)
+        if not isinstance(probe.get("arguments"), str):
+            problems.append(f"{where} arguments must be a C++ argument string")
+        if operation in {"construct", "member_call"} and bindings[binding] != "cpp_type":
+            problems.append(f"{where} {operation} requires a cpp_type binding")
+        if operation == "function_call" and bindings[binding] != "cpp_function":
+            problems.append(f"{where} function_call requires a cpp_function binding")
+        if operation == "member_call" and not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*", probe.get("member", "")
+        ):
+            problems.append(f"{where} member_call has an invalid member")
+        if operation not in {"construct", "member_call", "function_call"}:
+            problems.append(f"{where} operation is invalid")
+        try:
+            _render_link_probe(probe, index)
+        except (KeyError, TypeError, ValueError) as error:
+            problems.append(f"{where} could not render: {error}")
+    if len(probed_bindings) != len(set(probed_bindings)):
+        problems.append(f"{key} operational probes repeat an advertised binding")
+    missing = sorted(set(bindings) - set(probed_bindings))
+    if missing:
+        problems.append(
+            f"{key} advertised bindings lack operational probes: {', '.join(missing)}"
+        )
+    extra = sorted(set(probed_bindings) - set(bindings))
+    if extra:
+        problems.append(
+            f"{key} operational probes name unknown bindings: {', '.join(extra)}"
+        )
     try:
-        render_link_probe(row)
+        render_link_probes(row)
     except (KeyError, TypeError, ValueError) as error:
-        return [f"{key} link probe could not render: {error}"]
-    return []
+        problems.append(f"{key} operational probes could not render: {error}")
+    return problems
 
 
 def history_entry(

@@ -260,29 +260,41 @@ def exercise_manifest_mutations(canonical: dict) -> int:
     expect_validation_failure(wrong_removed_status, "expected const 'removed'")
     checks += 1
 
-    held_probe = manifest.EXPORTS[0].pop("_link_probe")
+    held_probes = manifest.EXPORTS[0].pop("_link_probes")
     try:
         expect_problem(
             manifest.validate(canonical, ROOT),
-            "requires a structured installed consumer link probe",
+            "requires operational installed-consumer probes",
         )
     finally:
-        manifest.EXPORTS[0]["_link_probe"] = held_probe
+        manifest.EXPORTS[0]["_link_probes"] = held_probes
     checks += 1
 
-    held_probe = manifest.EXPORTS[0]["_link_probe"]
-    manifest.EXPORTS[0]["_link_probe"] = {
+    held_probes = manifest.EXPORTS[0]["_link_probes"]
+    manifest.EXPORTS[0]["_link_probes"] = [{
         "binding": "not::advertised",
         "operation": "construct",
         "arguments": "",
-    }
+    }]
     try:
         expect_problem(
             manifest.validate(canonical, ROOT),
-            "link probe must name an advertised binding",
+            "must name an advertised binding",
         )
     finally:
-        manifest.EXPORTS[0]["_link_probe"] = held_probe
+        manifest.EXPORTS[0]["_link_probes"] = held_probes
+    checks += 1
+
+    swing = next(row for row in manifest.EXPORTS if row["key"] == "timebase.swing")
+    held_probes = swing["_link_probes"]
+    swing["_link_probes"] = held_probes[:-1]
+    try:
+        expect_problem(
+            manifest.validate(canonical, ROOT),
+            "advertised bindings lack operational probes",
+        )
+    finally:
+        swing["_link_probes"] = held_probes
     checks += 1
 
     return checks
@@ -525,8 +537,9 @@ def exercise_surface_mutations() -> int:
     checks = 0
     with tempfile.TemporaryDirectory(prefix="pulp-agent-surface-") as temp:
         root = pathlib.Path(temp)
+        for public_root in surface.PUBLIC_ROOTS:
+            (root / public_root["source"]).mkdir(parents=True)
         directory = root / "core/signal/include/pulp/signal"
-        directory.mkdir(parents=True)
         legacy = directory / "legacy.hpp"
         legacy.write_text("#pragma once\nstruct Existing {};\n")
         baseline = surface.baseline_document(root, [])
@@ -581,6 +594,35 @@ def exercise_surface_mutations() -> int:
             "legacy baseline digest changed",
         )
         checks += 1
+
+        missing_root = root / surface.PUBLIC_ROOTS[0]["source"]
+        missing_root.rmdir()
+        try:
+            surface.discover_headers(root)
+        except RuntimeError as error:
+            assert "declared public capability root is missing" in str(error)
+        else:
+            raise AssertionError("missing declared public root was silently ignored")
+        checks += 1
+
+    canonical_surface, surface_problems = manifest.build_surface(ROOT)
+    assert not surface_problems, surface_problems
+    surface_schema = json.loads((ROOT / surface.SURFACE_SCHEMA_FILE).read_text())
+    duplicate_root = copy.deepcopy(canonical_surface)
+    duplicate_root["roots"].append(copy.deepcopy(duplicate_root["roots"][0]))
+    expect_problem(
+        json_schema_lite.validate(duplicate_root, surface_schema),
+        "array items are not unique",
+    )
+    checks += 1
+
+    invalid_domain = copy.deepcopy(canonical_surface)
+    invalid_domain["roots"][0]["domain"] = "invented"
+    expect_problem(
+        json_schema_lite.validate(invalid_domain, surface_schema),
+        "is not one of",
+    )
+    checks += 1
 
     previous_surface = {
         "schema": surface.SURFACE_SCHEMA,
