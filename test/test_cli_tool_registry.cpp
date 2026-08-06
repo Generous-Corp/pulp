@@ -801,6 +801,8 @@ TEST_CASE("tool install helpers have deterministic local exits",
     touch_file(wrapper);
     write_file(venv_dir / "manifest.json",
                "{\"tool_id\":\"py-tool\",\"version\":\"1.0.0\"}\n");
+    write_file(venv_dir / ".venv" / ".pulp-install-complete",
+               "version=1.0.0\n");
 
     auto existing_py = install_python_tool(py, with_uv, fs::path{}, /*force=*/false);
     REQUIRE(existing_py.ok);
@@ -814,6 +816,26 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE_FALSE(stale_py.ok);  // attempted reinstall; never reported stale venv as 1.0.1
     REQUIRE(stale_py.installed_version.empty());
     REQUIRE(fs::exists(stale_package_bytes));  // failed replacement rolls back
+
+    const auto rollback_dir = venv_dir / ".venv.rollback";
+    fs::rename(venv_dir / ".venv", rollback_dir);
+    const auto interrupted_bytes = venv_dir / ".venv" / "partial-install";
+    touch_file(interrupted_bytes);
+    auto interrupted_py = install_python_tool(
+        py, with_uv, fs::path{}, /*force=*/false);
+    REQUIRE_FALSE(interrupted_py.ok);
+    REQUIRE(fs::exists(stale_package_bytes));
+    REQUIRE_FALSE(fs::exists(interrupted_bytes));
+    REQUIRE_FALSE(fs::exists(rollback_dir));
+
+    // A current-looking outer manifest must not certify restored old bytes.
+    // The in-environment completion marker remains bound to 1.0.0.
+    write_file(venv_dir / "manifest.json",
+               "{\"tool_id\":\"py-tool\",\"version\":\"1.0.1\"}\n");
+    auto false_certificate = install_python_tool(
+        py, with_uv, fs::path{}, /*force=*/false);
+    REQUIRE_FALSE(false_certificate.ok);
+    REQUIRE(fs::exists(stale_package_bytes));
 
     ToolRegistry uv_unavailable;
     ToolDescriptor uv_without_source;
@@ -1009,6 +1031,8 @@ TEST_CASE("tool install all succeeds with cached binary and python tools",
 #endif
     write_file(py_dir / "manifest.json",
                "{\"tool_id\":\"cached-py\",\"version\":\"2.0.0\"}\n");
+    write_file(py_dir / ".venv" / ".pulp-install-complete",
+               "version=2.0.0\n");
 
     ScopedOutput output;
     REQUIRE(cmd_tool({"install", "--all"}) == 0);

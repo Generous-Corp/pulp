@@ -749,10 +749,14 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
             "\"version\":\"" + tool.pinned_version + "\"";
         const std::string manifest_content = fs::exists(manifest_path)
             ? read_file(manifest_path) : std::string{};
+        const std::string completion_content = fs::exists(install_complete_path)
+            ? read_file(install_complete_path) : std::string{};
+        const bool environment_ok =
+            completion_content == "version=" + tool.pinned_version + "\n";
         const bool version_ok = fs::exists(manifest_path) &&
             (manifest_content.find(version_field) != std::string::npos ||
              manifest_content.find(compact_version_field) != std::string::npos);
-        if (fs::exists(result.binary_path) && version_ok) {
+        if (fs::exists(result.binary_path) && version_ok && environment_ok) {
             result.ok = true;
             result.installed_version = tool.pinned_version;
             return result;
@@ -825,17 +829,6 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
         return result;
     }
 
-    write_file(install_complete_path, "complete\n");
-    if (has_rollback) {
-        std::error_code remove_error;
-        fs::remove_all(rollback_path, remove_error);
-        if (remove_error) {
-            result.error = "Installed new Python environment but could not remove rollback at "
-                + rollback_path.string() + ": " + remove_error.message();
-            return result;
-        }
-    }
-
     const std::string run_module = python_run_module(tool);
 
     // Create wrapper script
@@ -867,6 +860,20 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
              << "  \"module\": \"" << json_escape(run_module) << "\",\n"
              << "  \"venv_path\": \"" << venv_path.string() << "\"\n"
              << "}\n";
+    // The in-environment marker binds the installed bytes to the registry pin.
+    // Until it exists, the next invocation restores rollback_path. The outer
+    // manifest is written last: it is the public certificate and must never
+    // describe an environment whose replacement transaction is incomplete.
+    write_file(install_complete_path, "version=" + tool.pinned_version + "\n");
+    if (has_rollback) {
+        std::error_code remove_error;
+        fs::remove_all(rollback_path, remove_error);
+        if (remove_error) {
+            result.error = "Installed new Python environment but could not remove rollback at "
+                + rollback_path.string() + ": " + remove_error.message();
+            return result;
+        }
+    }
     write_file(venv_dir / "manifest.json", manifest.str());
 
     result.ok = true;
