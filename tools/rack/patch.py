@@ -115,9 +115,46 @@ def _read_vcvplugin(path: str) -> dict | None:
         return None
 
 
+def _repair_bundled_pack() -> bool:
+    """Place the bundled Forge pack for the first logged-in user, if absent.
+
+    Installer postinstall cannot choose a home during MDM/recovery installs.
+    Inventory is the first ordinary patch path that needs the pack, so it runs
+    the same idempotent placer the installer uses before scanning.
+    """
+    global PLUGIN_DIRS
+    expected = rack_plugin_dir()
+    try:
+        if any(name == "ForgeModular" or
+               (name.startswith("ForgeModular-") and name.endswith(".vcvplugin"))
+               for name in os.listdir(expected)):
+            return False
+    except OSError:
+        pass
+
+    app = os.environ.get("FORGE_MODULAR_APP",
+                         "/Applications/Forge Modular.app")
+    placer = os.path.join(app, "Contents", "Resources", "install_pack.sh")
+    if not (os.path.isfile(placer) and os.access(placer, os.X_OK)):
+        return False
+    try:
+        import subprocess
+        result = subprocess.run(
+            [placer, "--source", app, "--home", os.path.expanduser("~")],
+            capture_output=True, text=True, timeout=30)
+    except Exception:                                           # noqa: BLE001
+        return False
+    if result.returncode != 0:
+        return False
+    if os.path.isdir(expected) and expected not in PLUGIN_DIRS:
+        PLUGIN_DIRS.append(expected)
+    return True
+
+
 def inventory() -> dict:
     """Every module this machine can patch with, keyed plugin -> model."""
     inv: dict = {}
+    _repair_bundled_pack()
 
     # Core is compiled into Rack itself rather than installed, so its modules
     # (the audio and MIDI interfaces every patch needs to be heard) appear in

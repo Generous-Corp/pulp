@@ -230,6 +230,24 @@ else
     fail "uninstall.sh removes the unpacked directory but not the .vcvplugin"
 fi
 
+# Released component packages install globally, not under the user's Library.
+# The uninstaller must name all three real payloads and elevate only when it
+# actually removes a system path.
+ran=$((ran + 1))
+if grep -q 'SYSTEM_PLUGINS="/Library/Audio/Plug-Ins"' \
+        "$FM/uninstall.sh" && \
+   grep -q '\$SYSTEM_PLUGINS/Components/Forge Modular.component' \
+        "$FM/uninstall.sh" && \
+   grep -q '\$SYSTEM_PLUGINS/VST3/Forge Modular.vst3' \
+        "$FM/uninstall.sh" && \
+   grep -q '\$SYSTEM_PLUGINS/CLAP/Forge Modular.clap' \
+        "$FM/uninstall.sh" && \
+   grep -q '/usr/bin/sudo /bin/rm -rf' "$FM/uninstall.sh"; then
+    ok "uninstall.sh removes the system-wide AU, VST3 and CLAP payloads"
+else
+    fail "uninstall.sh does not mirror the released system plug-in payloads"
+fi
+
 echo
 echo "$((ran - bad))/$ran correct"
 [ "$bad" -eq 0 ] || exit 1

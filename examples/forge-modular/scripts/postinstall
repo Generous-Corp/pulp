@@ -25,9 +25,9 @@ if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ]; then
     # No one is logged in -- an MDM push, or an install from the recovery
     # environment. There is no home directory to choose, and guessing one
     # would install the modules for somebody who never asked. The app repairs
-    # this on its first generation, so say so and let the install succeed.
+    # this on its first patch inventory, so say so and let the install succeed.
     echo "Forge Modular: no console user; the app will place the Rack modules"
-    echo "               on its first run."
+    echo "               when it first inventories patches."
     exit 0
 fi
 
@@ -35,7 +35,7 @@ USER_HOME="$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/de
              | /usr/bin/sed -n 's/^NFSHomeDirectory: //p')"
 if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
     echo "Forge Modular: could not resolve a home directory for $CONSOLE_USER;"
-    echo "               the app will place the Rack modules on its first run."
+    echo "               the app will place the Rack modules when it first inventories patches."
     exit 0
 fi
 

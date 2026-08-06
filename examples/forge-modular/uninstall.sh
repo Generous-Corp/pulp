@@ -28,15 +28,20 @@ for arg in "$@"; do
 done
 
 SUPPORT="$HOME/Library/Application Support"
-PLUGINS="$HOME/Library/Audio/Plug-Ins"
+USER_PLUGINS="$HOME/Library/Audio/Plug-Ins"
+SYSTEM_PLUGINS="/Library/Audio/Plug-Ins"
 
 # Every path this product creates, in one list, so nothing is remembered only
 # in somebody's head. Keep in step with package.sh and the first-run SDK fetch.
 SOFTWARE=(
     "/Applications/Forge Modular.app"
-    "$PLUGINS/Components/Forge Modular.component"
-    "$PLUGINS/VST3/Forge Modular.vst3"
-    "$PLUGINS/CLAP/Forge Modular.clap"
+    "$SYSTEM_PLUGINS/Components/Forge Modular.component"
+    "$SYSTEM_PLUGINS/VST3/Forge Modular.vst3"
+    "$SYSTEM_PLUGINS/CLAP/Forge Modular.clap"
+    # Clean up legacy per-user builds too; released installers use /Library.
+    "$USER_PLUGINS/Components/Forge Modular.component"
+    "$USER_PLUGINS/VST3/Forge Modular.vst3"
+    "$USER_PLUGINS/CLAP/Forge Modular.clap"
     "$SUPPORT/Forge Modular/tools"
     "$SUPPORT/Forge Modular/Rack-SDK"
     "$SUPPORT/Forge Modular/runs"
@@ -76,6 +81,10 @@ remove() {
     if [ ! -e "$path" ] && [ ! -L "$path" ]; then return; fi
     if [ "$DRY" -eq 1 ]; then
         echo "  would remove  $path"
+    elif [[ "$path" = /Applications/* || "$path" = /Library/* ]] && \
+         [ "$(id -u)" -ne 0 ]; then
+        /usr/bin/sudo /bin/rm -rf "$path" && echo "  removed  $path" || \
+            echo "  FAILED   $path" >&2
     else
         rm -rf "$path" && echo "  removed  $path" || echo "  FAILED   $path" >&2
     fi

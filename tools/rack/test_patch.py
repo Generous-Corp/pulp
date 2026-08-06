@@ -21,6 +21,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import patch as patch_mod
@@ -1615,6 +1616,80 @@ def check_installer_promises() -> tuple:
     if not bad:
         print("  ok     the installer still says what is downloaded, from "
               "where, and under what licence")
+    return bad, ran
+
+
+def check_bundled_pack_repair() -> tuple:
+    """A no-console-user install repairs the Rack pack on first inventory.
+
+    Package postinstall deliberately does not guess a home for MDM or recovery
+    installs.  The ordinary inventory path is therefore responsible for
+    running the bundled, idempotent placer once a real user launches the app.
+    """
+    bad, ran = 0, 1
+    here = os.path.dirname(os.path.abspath(__file__))
+    placer = os.path.join(here, "..", "..", "examples", "forge-modular",
+                          "install_pack.sh")
+    if not os.path.exists(placer):
+        print(f"  ok     no bundled pack placer in this tree ({placer})")
+        return 0, 0
+
+    old_dirs = P.PLUGIN_DIRS
+    old_rack_plugin_dir = P.rack_plugin_dir
+    old_app = os.environ.get("FORGE_MODULAR_APP")
+    old_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as root:
+            home = os.path.join(root, "home")
+            app = os.path.join(root, "Forge Modular.app")
+            resources = os.path.join(app, "Contents", "Resources")
+            pack_dir = os.path.join(resources, "rack")
+            expected = os.path.join(
+                home, "Library", "Application Support", "Rack2",
+                "plugins-mac-arm64")
+            foreign = os.path.join(
+                home, "Library", "Application Support", "Rack2",
+                "plugins-mac-x64", "ForgeModular")
+            os.makedirs(pack_dir)
+            os.makedirs(home)
+            os.makedirs(foreign)
+            bundled = os.path.join(
+                pack_dir, "ForgeModular-2.0.0-mac-arm64.vcvplugin")
+            with open(bundled, "w") as f:
+                f.write("scratch pack\n")
+            installed_placer = os.path.join(resources, "install_pack.sh")
+            shutil.copy2(placer, installed_placer)
+            os.chmod(installed_placer, 0o755)
+
+            # A pack for another architecture must not suppress this one.
+            P.PLUGIN_DIRS = [os.path.dirname(foreign)]
+            P.rack_plugin_dir = lambda: expected
+            os.environ["FORGE_MODULAR_APP"] = app
+            os.environ["HOME"] = home
+            first = P._repair_bundled_pack()
+            second = P._repair_bundled_pack()
+            packs = glob.glob(os.path.join(expected, "*.vcvplugin"))
+
+            if not first or second or len(packs) != 1 or \
+                    expected not in P.PLUGIN_DIRS:
+                bad += 1
+                print("  WRONG  first-user repair did not place exactly one "
+                      f"discoverable pack: first={first}, second={second}, "
+                      f"packs={packs}, dirs={P.PLUGIN_DIRS}")
+            else:
+                print("  ok     first inventory repairs one bundled Rack pack; "
+                      "later inventories are no-ops")
+    finally:
+        P.PLUGIN_DIRS = old_dirs
+        P.rack_plugin_dir = old_rack_plugin_dir
+        if old_app is None:
+            os.environ.pop("FORGE_MODULAR_APP", None)
+        else:
+            os.environ["FORGE_MODULAR_APP"] = old_app
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
     return bad, ran
 
 
@@ -3275,6 +3350,7 @@ def main():
     sf_bad, sf_ran = check_fold_agrees_across_the_seam()
     rl_bad, rl_ran = check_brand_token_reload()
     ip_bad, ip_ran = check_installer_promises()
+    rp_bad, rp_ran = check_bundled_pack_repair()
     nf_bad, nf_ran = check_named_is_fetched()
     gc_bad, gc_ran = check_gate_crash_is_not_silence()
     gs_bad, gs_ran = check_gate_survives_third_party()
@@ -3304,9 +3380,9 @@ def main():
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
     acq_bad += (vp_bad + mel_bad + beh_bad + aff_bad +
-                ln_bad + rl_bad + ip_bad + sf_bad + hand_bad)
+                ln_bad + rl_bad + ip_bad + rp_bad + sf_bad + hand_bad)
     acq_ran += (vp_ran + mel_ran + beh_ran + aff_ran +
-                ln_ran + rl_ran + ip_ran + sf_ran + hand_ran)
+                ln_ran + rl_ran + ip_ran + rp_ran + sf_ran + hand_ran)
     layout_bad += parts_bad + acq_bad; layout_ran += parts_ran + acq_ran
 
     inv = P.inventory()
