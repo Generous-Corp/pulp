@@ -38,7 +38,8 @@ enum class SosCascadeTransition {
 ///
 /// RT contract: storage is a fixed std::array. process(), reset(), prepare(),
 /// and coefficient installation perform bounded work and allocate no memory.
-template <typename SampleType = float, std::size_t MaxSections = 16> class SosCascadeT {
+template <typename SampleType = float, std::size_t MaxSections = 16>
+class SosCascadeT {
     static_assert(std::is_floating_point_v<SampleType>,
                   "SosCascadeT requires a floating-point sample type");
     static_assert(MaxSections > 0, "SosCascadeT requires non-zero storage");

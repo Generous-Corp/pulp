@@ -5,6 +5,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
 #include <pulp/signal/saturator.hpp>
+#include <pulp/signal/sos_cascade.hpp>
 #include <pulp/timebase/quantize.hpp>
 #include <pulp/timebase/tick.hpp>
 
@@ -30,12 +31,17 @@ int main() {
         pulp::signal::SaturatorT<float> probe_value_0{}; (void)probe_value_0.prepare(48000.0);
     }
     {
+        // signal.sos-cascade
+        static_assert(sizeof(pulp::signal::SosCascadeT<float>) > 0);
+        pulp::signal::SosCascadeT<float> probe_value_0{}; (void)probe_value_0.prepare(4);
+    }
+    {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto *volatile binding_5 = &pulp::timebase::swing_position;
-        (void)binding_5;
-        auto *volatile binding_6 = &pulp::timebase::unswing_position;
+        auto *volatile binding_6 = &pulp::timebase::swing_position;
         (void)binding_6;
+        auto *volatile binding_7 = &pulp::timebase::unswing_position;
+        (void)binding_7;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);

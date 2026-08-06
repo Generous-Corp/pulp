@@ -77,6 +77,10 @@ def exercise_manifest_mutations(canonical: dict) -> int:
         "Pulp::signal-modal-spec"
     )
     checks += 1
+    assert manifest._minimal_target_for_include("pulp/signal/sos_cascade.hpp") == (
+        "Pulp::signal"
+    )
+    checks += 1
     assert manifest._minimal_target_for_include("pulp/signal/future_source_api.hpp") is None
     checks += 1
 

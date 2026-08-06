@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 3,
+  "manifest_revision": 4,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 1
+        "capabilities": 2
       },
       "timebase": {
         "state": "partial",
@@ -293,6 +293,66 @@
       "contract_digest": "sha256:3a85bb9904be17c293e502df0a149c2d8e2935c0b46a7660bb21afcbb744bc66"
     },
     {
+      "key": "signal.sos-cascade",
+      "domain": "signal",
+      "summary": "Fixed-capacity transactional execution of stable normalized second-order-section cascades.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "none"
+      },
+      "state_model": "A prepared fixed-capacity section array owns recursive DF2T state; coefficient installation is whole-cascade transactional and occurs at a block boundary.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "audio samples and normalized SOS coefficients",
+      "output_domain": "audio samples",
+      "units": [
+        "samples",
+        "normalized coefficients",
+        "section count"
+      ],
+      "latency": "zero",
+      "tail": "recursive IIR decay until reset or denormal snap",
+      "scheduling": "sample-synchronous; coefficient changes at block boundaries",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/sos_cascade.hpp",
+          "qualified_name": "pulp::signal::SosCascadeT<float>",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f1364c7b9482d9c54db5f098b1f32abd4b229d0bb282159523293921b5780b76"
+    },
+    {
       "key": "timebase.swing",
       "contract_version": {
         "major": 1,
@@ -440,14 +500,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 6,
+    "total": 7,
     "by_domain": {
       "audio": 1,
       "midi": 1,
       "music": 0,
       "offline": 0,
       "sequence": 1,
-      "signal": 1,
+      "signal": 2,
       "timebase": 2
     }
   },
@@ -3885,6 +3945,23 @@
               "bypassed()",
               "fading()",
               "wet_mix()"
+            ],
+            "enums": []
+          }
+        ],
+        "sos_cascade.hpp": [
+          {
+            "class": "SosCascadeT",
+            "methods": [
+              "process(SampleType input)",
+              "process(SampleType* buffer, std::size_t num_samples)",
+              "prepared()",
+              "capacity()",
+              "size()",
+              "storage_capacity()",
+              "set_coefficients(std::span<BiquadCoefficientsT<CoefficientType>, Extent> coefficients, SosCascadeTransition transition = SosCascadeTransition::reset_state)",
+              "set_coefficients(std::span<const BiquadCoefficientsT<CoefficientType>, Extent> coefficients, SosCascadeTransition transition = SosCascadeTransition::reset_state)",
+              "coefficients(std::size_t index)"
             ],
             "enums": []
           }

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 3,
+  "inventory_version": 4,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -32,15 +32,15 @@
     }
   ],
   "counts": {
-    "public_headers": 345,
-    "reviewed_headers": 8,
-    "legacy_unreviewed_headers": 337,
+    "public_headers": 346,
+    "reviewed_headers": 12,
+    "legacy_unreviewed_headers": 334,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 6,
-      "capability_support": 0,
-      "infrastructure": 0,
-      "legacy_unreviewed": 337,
+      "capability_entrypoint": 7,
+      "capability_support": 2,
+      "infrastructure": 1,
+      "legacy_unreviewed": 334,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -63,9 +63,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 194,
-        "reviewed_headers": 3,
-        "legacy_unreviewed_headers": 191,
+        "public_headers": 195,
+        "reviewed_headers": 7,
+        "legacy_unreviewed_headers": 188,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1445,11 +1445,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/biquad.hpp",
-      "fingerprint": "sha256:4ad68251b7c150875a9a816f77c342631dd4bc886ca5f199fc01b28b97964757",
+      "fingerprint": "sha256:c9674cc3225cb8b9f3bac303189cd4e0a554a4c4d6ea5b59f7b1aaace29ebf1e",
       "include": "pulp/signal/biquad.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.sos-cascade"
+      ],
+      "rationale": "The bounded SOS executor consumes the normalized biquad coefficient type and uses its shared stability predicate and runtime section."
     },
     {
       "domain": "signal",
@@ -2237,11 +2239,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/iir_design.hpp",
-      "fingerprint": "sha256:640f0243cb1469f0e64d44a5bfcffd53227759b31797063ef3ab1ccd8617729a",
+      "fingerprint": "sha256:d45c17451d8410069e3cffd4f911f2a532d525383ff033775d0c38b7c7decb10",
       "include": "pulp/signal/iir_design.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.sos-cascade"
+      ],
+      "rationale": "The public high-order IIR design helpers produce normalized SOS coefficient vectors accepted by the bounded cascade executor."
     },
     {
       "domain": "signal",
@@ -2788,11 +2792,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/signal.hpp",
-      "fingerprint": "sha256:3b9f10b9aafb43c93d0f0fb538fa2dd1a0abff859a0989c558a2dd1997a5901b",
+      "fingerprint": "sha256:457eacf11d8d8c8fdc47012ddc0255a233f249d9ce07dc86f2c701fc5d93892d",
       "include": "pulp/signal/signal.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
     },
     {
       "domain": "signal",
@@ -2838,6 +2842,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/sos_cascade.hpp",
+      "fingerprint": "sha256:8e6d177601b3167a8033a7e51c33174169b05a8719930964562fd22d5a4b5c3a",
+      "include": "pulp/signal/sos_cascade.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sos-cascade"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

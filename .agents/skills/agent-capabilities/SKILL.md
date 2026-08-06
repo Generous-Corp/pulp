@@ -124,3 +124,8 @@ The surface fingerprint is intentionally conservative SHA-256 over full header
 bytes. Do not weaken it with regex symbol extraction. A future pinned-Clang AST
 inventory may reduce comment/private-detail churn only if its version and
 toolchain are pinned and mutation tests retain add/remove/change detection.
+
+For stateful IIR processors, do not report `tail: none` merely because latency
+is zero or the implementation snaps denormals. Name the recursive decay and its
+explicit termination conditions, and classify public coefficient/design headers
+as capability support only when the advertised executor actually consumes them.
