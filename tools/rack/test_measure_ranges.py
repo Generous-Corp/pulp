@@ -501,6 +501,101 @@ def test_an_oversized_vendor_is_entered_in_chunks() -> int:
     return bad
 
 
+# Four controls as CARTOG actually measured them, covering the three curve
+# shapes a Rack param can have and one that records no curve at all. Copied
+# from a real scan rather than invented, so the check is against the numbers
+# vendors really configure -- an invented exponential proves the arithmetic and
+# not that the scanner writes what it read.
+MEASURED = [
+    # exponential: 2^v Hz, the shape every Mutable filter uses
+    {"name": "Frequency", "minValue": 4.321928, "maxValue": 14.287712,
+     "defaultValue": 14.287712, "unit": " Hz", "displayBase": 2.0,
+     "displayMultiplier": 1.0, "displayOffset": 0.0},
+    # exponential with a multiplier: semitones above C4
+    {"name": "Frequency", "minValue": -54.0, "maxValue": 54.0,
+     "defaultValue": 0.0, "unit": " Hz", "displayBase": 1.059463,
+     "displayMultiplier": 261.62561, "displayOffset": 0.0},
+    # linear with a multiplier, written because the multiplier is not 1
+    {"name": "Pulse width", "minValue": 0.01, "maxValue": 0.99,
+     "defaultValue": 0.5, "unit": "%", "displayBase": 0.0,
+     "displayMultiplier": 100.0, "displayOffset": 0.0},
+    # a unit and no curve at all: the identity, deliberately not recorded
+    {"name": "Level", "minValue": 0.0, "maxValue": 10.0, "defaultValue": 5.0,
+     "unit": " V"},
+]
+
+
+def test_a_recorded_conversion_has_to_invert() -> int:
+    """A physical value placed through the map has to come back as itself.
+
+    What this catches is a conversion that cannot be undone -- most of all a
+    zero multiplier, which reads as a perfectly ordinary linear control and
+    maps every knob position in the range onto one physical value, so nothing
+    downstream can place a number on it at all.
+
+    What it does NOT catch, established by trying it: displayBase recorded
+    with the wrong sign. Negating it turns Rack's exponential into a logarithm
+    and back, and each is a faithful inverse of the other, so the round trip
+    closes on a conversion that puts "cutoff 40 Hz" somewhere else entirely.
+    Nothing here can catch that, because both readings are self-consistent;
+    catching it needs CARTOG to record what Rack itself displays at a known
+    position, so the map can be checked against Rack rather than against its
+    own arithmetic. Until then this is an invertibility check and is described
+    as one, rather than as a proof the numbers are right.
+    """
+    bad = 0
+    good = {"modules": [{"plugin": "V", "model": "M", "scan": 5,
+                         "params": MEASURED}]}
+    bad += check(mr.round_trip_faults(good) == [],
+                 "the four real measured shapes all round-trip",
+                 f"faults: {mr.round_trip_faults(good)}")
+
+    # A multiplier of zero: every position reads as `displayOffset`, and no
+    # physical value can be placed back onto the control.
+    broken = json.loads(json.dumps(good))
+    broken["modules"][0]["params"][0]["displayMultiplier"] = 0.0
+    faults = mr.round_trip_faults(broken)
+    bad += check(len(faults) == 1 and "Frequency" in faults[0],
+                 "a conversion that cannot be undone is caught",
+                 f"faults: {faults}")
+
+    # The limit, asserted rather than left as a comment: if this ever starts
+    # failing, the check got stronger and the docstring above is out of date.
+    signflip = json.loads(json.dumps(good))
+    signflip["modules"][0]["params"][0]["displayBase"] = -2.0
+    bad += check(mr.round_trip_faults(signflip) == [],
+                 "and a sign-flipped curve is knowingly NOT caught",
+                 f"faults: {mr.round_trip_faults(signflip)}")
+
+    # A scan too old to have looked is not held to it: below scan 5 an absent
+    # conversion means nobody asked, so there is nothing to invert.
+    old = json.loads(json.dumps(broken))
+    old["modules"][0]["scan"] = 4
+    bad += check(mr.round_trip_faults(old) == [],
+                 "and a scan that predates units is not judged by them",
+                 f"faults: {mr.round_trip_faults(old)}")
+    return bad
+
+
+def test_units_yield_counts_both_numbers() -> int:
+    """A vendor that records no units is a measurement, not a failed rescan."""
+    book = {"modules": [
+        {"plugin": "V", "model": "A", "scan": 5, "params": MEASURED},
+        {"plugin": "V", "model": "B", "scan": 5,
+         "params": [{"name": "Knob", "minValue": 0.0, "maxValue": 1.0}]},
+        {"plugin": "V", "model": "C", "scan": 4,
+         "params": [{"name": "Knob", "unit": " Hz"}]},
+        {"plugin": "V", "model": "D", "scan": 5, "params": []},
+    ]}
+    known, carrying = mr.with_units(book)
+    bad = 0
+    bad += check(known == 2, "only units-aware scans with params are counted",
+                 f"known={known}")
+    bad += check(carrying == 1, "and only one of them recorded a unit",
+                 f"carrying={carrying}")
+    return bad
+
+
 def main() -> int:
     bad = 0
     for fn in (test_scanner_is_last, test_portmap_is_a_list,
@@ -515,7 +610,9 @@ def main() -> int:
                test_a_partial_scan_is_not_a_success,
                test_a_launch_that_merely_failed_is_never_written_down,
                test_a_known_crasher_is_not_launched_again,
-               test_an_oversized_vendor_is_entered_in_chunks):
+               test_an_oversized_vendor_is_entered_in_chunks,
+               test_a_recorded_conversion_has_to_invert,
+               test_units_yield_counts_both_numbers):
         print(f"{fn.__name__}:")
         bad += fn()
     print("\n" + ("all good" if bad == 0 else f"FAILED ({bad})"))

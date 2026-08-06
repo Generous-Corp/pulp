@@ -44,6 +44,7 @@ import time
 from typing import NamedTuple
 
 import crash_watch
+import param_units
 
 # Pro before Free, because a machine with both is a machine where Pro is the
 # one being used. Overridable, because neither is guaranteed to be the build
@@ -196,6 +197,26 @@ def measured(portmap: dict, plugin: str) -> tuple[int, int]:
     with_params = sum(1 for n, _ in seen.values() if n)
     with_ranges = sum(1 for n, r in seen.values() if n and r)
     return with_params, with_ranges
+
+
+def with_units(portmap: dict) -> tuple[int, int]:
+    """(modules a units-aware scanner measured, modules that carry a unit).
+
+    The two are different and the gap is not a fault. A vendor is free to leave
+    every `configParam` unitless, and a scan that says so is a measurement --
+    so the sweep reports both numbers rather than the second alone, which on
+    its own reads as a rescan that half worked.
+    """
+    known = carrying = 0
+    for entry in (portmap.get("modules") or []):
+        if not (entry.get("params") or []):
+            continue
+        if not param_units.knows_units(entry):
+            continue
+        known += 1
+        if any("unit" in p for p in entry["params"]):
+            carrying += 1
+    return known, carrying
 
 
 def read_portmap() -> dict:
@@ -615,6 +636,41 @@ def run_rack(rack: str, patch: str, scan_window: float,
     return log, f"{attempts} launches, last: {why}"
 
 
+def round_trip_faults(portmap: dict, tolerance: float = 1e-4) -> list[str]:
+    """Params whose recorded conversion does not survive a round trip.
+
+    A unit and three conversion numbers are only worth recording if a physical
+    value placed through them comes back as itself. Nothing else in the sweep
+    would notice if they did not: a scanner emitting a sign error, or the
+    identity where a curve belonged, writes a map that parses, reports a module
+    as measured, and lands "cutoff 40 Hz" somewhere else entirely.
+
+    Checked at the control's own default, which is the one position every
+    param is guaranteed to have and to be able to express.
+    """
+    faults = []
+    for entry in (portmap.get("modules") or []):
+        if not param_units.knows_units(entry):
+            continue
+        for p in (entry.get("params") or []):
+            if "displayBase" not in p:
+                continue                # identity; nothing was recorded to check
+            raw = p.get("defaultValue")
+            if not isinstance(raw, (int, float)):
+                continue
+            display = param_units.to_display(float(raw), p)
+            if display is None:
+                continue                # not expressible there, and says so
+            back = param_units.from_display(display, p)
+            if back is None or abs(back - float(raw)) > tolerance * max(
+                    1.0, abs(float(raw))):
+                faults.append(
+                    f"{entry.get('plugin')}/{entry.get('model')} "
+                    f"{p.get('name')!r}: {raw} -> {display:g}"
+                    f"{p.get('unit','')} -> {back}")
+    return faults
+
+
 def scanned_alongside(log: str) -> int | None:
     """How many modules CARTOG saw, from Rack's own log. None if it never ran."""
     for line in reversed(log.splitlines()):
@@ -637,6 +693,22 @@ def main(argv: list[str]) -> int:
                 break
         return 2
 
+    if args[0] == "--verify":
+        # Reads the map and launches nothing, so it is the one check that can
+        # be run on a machine with no Rack and while a sweep is in flight.
+        book = read_portmap()
+        known, carrying = with_units(book)
+        faults = round_trip_faults(book)
+        print(f"modules measured by a units-aware scan: {known}   "
+              f"carrying a unit: {carrying}")
+        for f in faults[:20]:
+            print(f"  does not round-trip: {f}")
+        if faults:
+            print(f"{len(faults)} params do not round-trip")
+            return 1
+        print("every recorded conversion round-trips")
+        return 0
+
     rack = rack_binary()
     if not rack:
         print("no Rack found; set FORGE_RACK_BIN", file=sys.stderr)
@@ -654,6 +726,7 @@ def main(argv: list[str]) -> int:
     scan_window = float(os.environ.get("FORGE_RACK_SCAN_WINDOW", "180"))
     total_before = total_after = 0
     failures: list[str] = []
+    units_before = with_units(read_portmap())
 
     skips = load_skips()
     for plugin in plugins:
@@ -710,6 +783,20 @@ def main(argv: list[str]) -> int:
         total_after += after[1]
 
     print(f"\nmodules carrying measured ranges: {total_before} -> {total_after}")
+    units_after = with_units(read_portmap())
+    print(f"modules measured by a units-aware scan: "
+          f"{units_before[0]} -> {units_after[0]}   "
+          f"carrying a unit: {units_before[1]} -> {units_after[1]}")
+
+    # A conversion that does not invert is worse than one never recorded: it
+    # places a physical value confidently and wrongly, and every later reader
+    # trusts it. Checked over the whole map, because a merge carries entries
+    # forward from scanners this run never touched.
+    faults = round_trip_faults(read_portmap())
+    if faults:
+        failures.append(f"{len(faults)} recorded conversions do not "
+                        f"round-trip, e.g. {faults[0]}")
+
     if failures:
         # The failure mode this exists to catch is a run that reports success
         # over a map it did not change, so a shortfall is an exit code and not
