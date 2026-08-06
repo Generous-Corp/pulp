@@ -3192,6 +3192,10 @@ def main():
     import test_handover
     hand_bad = hand_ran = 0
     for _check in (test_handover.check_retry_names_a_real_jack,
+                   test_handover.check_the_dead_module_is_named,
+                   test_handover.check_a_repeat_escalates_to_replacement,
+                   test_handover.check_the_reader_refuses_to_guess,
+                   test_handover.check_a_stuck_idiom_escalates_too,
                    test_handover.check_inventory_says_when_ports_are_unknown,
                    test_handover.check_a_failed_run_hands_over_its_patch,
                    test_handover.check_the_best_attempt_is_the_one_kept,

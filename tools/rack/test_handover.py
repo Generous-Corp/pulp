@@ -421,6 +421,298 @@ def check_give_up_still_ends_the_run() -> tuple:
     return bad, 3
 
 
+FIXTURES = os.path.join(HERE, "test_fixtures", "silent-oscillator")
+
+
+def _attempt(n: str):
+    """One real attempt from the run that kept a dead oscillator four times.
+
+    The gate's own report and the patch it judged, unedited. See that
+    directory's README for what the run did and why these two attempts.
+    """
+    with open(os.path.join(FIXTURES, f"attempt{n}-silent.txt")) as fh:
+        report = fh.read()
+    with open(os.path.join(FIXTURES, f"attempt{n}-silent.vcv")) as fh:
+        return report, json.load(fh)
+
+
+def _cvfunk_inv() -> dict:
+    """Enough of the CV funk library for the advice to have somewhere to point.
+
+    Zephyr and three other oscillators, so "replace it" can name replacements
+    and can be seen NOT to name Zephyr itself.
+    """
+    def osc(name):
+        return {"name": name, "description": "", "tags": ["Oscillator"],
+                "inputs": ["V/Oct"], "roles_in": ["Pitch"],
+                "outputs": ["Audio"], "roles_out": ["Audio"]}
+    return {
+        "CVfunkSands": {"name": "CV funk Sands", "brand": "CV funk",
+                        "version": "2.0",
+                        "modules": {"Zephyr": osc("Zephyr"),
+                                    "Drifts": osc("Drifts"),
+                                    "Dunes": osc("Dunes")}},
+        "ALM042": {"name": "ALM", "brand": "ALM", "version": "2.0",
+                   "modules": {"CIZZLE": osc("Cizzle")}},
+    }
+
+
+def check_the_dead_module_is_named() -> tuple:
+    """The retry must NAME the module that stopped the signal.
+
+    Measured on the run in `test_fixtures/silent-oscillator/`: the context
+    already carried the whole per-module table and the instruction to "find the
+    FIRST module in the chain whose output is 0.000". The model did not act on
+    it -- four consecutive attempts kept the dead oscillator and adjusted its
+    knobs. A table plus an instruction to infer from it is not a fact; the name
+    is.
+    """
+    bad = 0
+    report, pch = _attempt("01")
+
+    found = P.dead_module(report, pch)
+    if not found or found["key"] != "CVfunkSands/Zephyr":
+        bad += 1
+        print(f"  WRONG  the module that stopped the signal is not named as "
+              f"Zephyr: {found}")
+    else:
+        print("  ok     the dead module is named: CVfunkSands/Zephyr")
+
+    # NOT the last silent module. PressedDuck reads 0.000 too and is the one
+    # the FAIL line points at, but it is silent because Zephyr is -- sending
+    # the model there is sending it to fix a consequence.
+    lines = "\n".join(P.silence_advice(report, pch, _cvfunk_inv(), []))
+    if "Zephyr" not in lines:
+        bad += 1
+        print(f"  WRONG  the advice never says Zephyr:\n{lines}")
+    elif "PressedDuck" in lines:
+        bad += 1
+        print(f"  WRONG  the advice blames PressedDuck, which is silent "
+              f"BECAUSE Zephyr is:\n{lines}")
+    else:
+        print("  ok     the advice blames the cause, not the module "
+              "downstream of it that is also reading zero")
+
+    # The voltages, so the claim can be checked rather than believed.
+    if "out0=0.000" not in lines:
+        bad += 1
+        print(f"  WRONG  the advice asserts a module is dead without the "
+              f"reading behind it:\n{lines}")
+    else:
+        print("  ok     the advice carries the voltages it read")
+
+    # A live module is never called dead. Hammer and StepWave are working in
+    # this very report, and an advice line naming one of them would send the
+    # model to rebuild a part of the patch that is correct.
+    for alive in ("Hammer", "StepWave", "EnvelopeArray"):
+        if alive in lines:
+            bad += 1
+            print(f"  WRONG  the advice names {alive}, which is producing "
+                  f"signal in this report")
+            break
+    else:
+        print("  ok     no working module is named")
+
+    # These lines are narrated into the app's transcript, so they are product
+    # copy: an em-dash reads as machine-written.
+    escalated = "\n".join(P.silence_advice(report, pch, _cvfunk_inv(),
+                                           ["CVfunkSands/Zephyr"]))
+    if "—" in lines or "—" in escalated:
+        bad += 1
+        print("  WRONG  the advice uses an em-dash")
+    else:
+        print("  ok     the advice has no em-dash in it")
+    return bad, 5
+
+
+def check_a_repeat_escalates_to_replacement() -> tuple:
+    """The same dead module twice must say REPLACE, not retune.
+
+    Four attempts in a row with the same outcome and no change of strategy is
+    the shape of the problem. Each attempt arrives knowing only its own
+    rejection, so repetition is a fact only the loop can see -- and it was not
+    telling anyone.
+    """
+    bad = 0
+    inv = _cvfunk_inv()
+    first, first_patch = _attempt("01")
+    later, later_patch = _attempt("03")
+
+    # Attempt 1: nothing has repeated yet, so nothing may claim it has.
+    opening = "\n".join(P.silence_advice(first, first_patch, inv, []))
+    if "REPLACE" in opening.upper() or "attempts running" in opening:
+        bad += 1
+        print(f"  WRONG  the FIRST attempt is told it has repeated:\n{opening}")
+    else:
+        print("  ok     the first attempt is told what is dead, and not that "
+              "it has failed before")
+
+    # Attempt 3, having seen Zephyr dead twice already. A DIFFERENT report,
+    # deliberately: replaying one report twice would pass on two identical
+    # strings without proving the repeat is detected on the module.
+    if first == later:
+        bad += 1
+        print("  WRONG  the two fixtures are identical, so this cannot show "
+              "the repeat is detected on the module rather than the text")
+    runs = ["CVfunkSands/Zephyr", "CVfunkSands/Zephyr"]
+    escalated = "\n".join(P.silence_advice(later, later_patch, inv, runs))
+    if "REPLACE" not in escalated.upper():
+        bad += 1
+        print(f"  WRONG  a module dead three attempts running is not met with "
+              f"an instruction to replace it:\n{escalated}")
+    elif "3 attempts running" not in escalated:
+        bad += 1
+        print(f"  WRONG  the escalation does not count the attempts, so "
+              f"'again' carries no weight:\n{escalated}")
+    else:
+        print("  ok     a repeat says REPLACE it, and says how many attempts")
+
+    # And names somewhere to go. "Replace it" with no alternative is an
+    # instruction the model cannot follow any better than the last one.
+    if "Drifts" not in escalated and "Dunes" not in escalated:
+        bad += 1
+        print(f"  WRONG  the escalation names no replacement:\n{escalated}")
+    elif "CVfunkSands/Zephyr," in escalated.split("take its place:")[-1]:
+        bad += 1
+        print("  WRONG  the dead module is offered as its own replacement")
+    else:
+        print("  ok     the escalation names installed replacements, and not "
+              "the module being replaced")
+
+    # A DIFFERENT module dying is not a repeat. Escalating on a run that is
+    # actually making progress would tell the model to throw away a fix that
+    # worked.
+    moved = "\n".join(P.silence_advice(later, later_patch, inv,
+                                       ["CVfunk/SomethingElse"]))
+    if "REPLACE" in moved.upper():
+        bad += 1
+        print(f"  WRONG  a run whose dead module CHANGED is told it is "
+              f"stuck:\n{moved}")
+    else:
+        print("  ok     a different dead module is progress, not a repeat")
+    return bad, 4
+
+
+def check_the_reader_refuses_to_guess() -> tuple:
+    """Every case where the report cannot name a module must name none.
+
+    A confidently wrong module is worse than silence here: it sends the model
+    to rebuild a working part of the patch, which is the failure this whole
+    layer exists to stop.
+    """
+    bad = 0
+    report, pch = _attempt("01")
+
+    # A gate that never ran, or a report from a different patch.
+    for name, rep, p in (
+            ("an empty report", "", pch),
+            ("a report with no activity table",
+             "PATCH GATE FAILED: 1 failure(s)", pch),
+            ("a report whose modules are not this patch's", report,
+             {"modules": [{"id": 1, "plugin": "X", "model": "Y"}],
+              "cables": []})):
+        if P.dead_module(rep, p) is not None:
+            bad += 1
+            print(f"  WRONG  {name} still produced a named module")
+    if not bad:
+        print("  ok     a report that cannot be matched to the patch names "
+              "nothing")
+
+    # Nothing dead at all: a patch can fail its idiom while every module is
+    # producing signal, and there is no dead module to name.
+    alive = report.replace("Zephyr             ch=1 out0=0.000 out1=0.000",
+                           "Zephyr             ch=1 out0=5.000 out1=5.000")
+    alive = alive.replace("PressedDuck        ch=1 out0=0.000 out1=0.000",
+                          "PressedDuck        ch=1 out0=2.000 out1=2.000")
+    if alive == report:
+        bad += 1
+        print("  WRONG  the substitution did not apply, so this case is not "
+              "actually being exercised")
+    elif P.dead_module(alive, pch) is not None:
+        bad += 1
+        print("  WRONG  a report with no dead module still named one")
+    else:
+        print("  ok     a report with nothing dead names nothing")
+
+    # A module the gate could not instantiate reported NOTHING, which is not
+    # the same as reporting zero. Core's audio interface is in that state in
+    # every patch, and calling it dead would name the one module that cannot
+    # be the cause.
+    rows = P.activity_rows(report)
+    if any(name == "AudioInterface2" for name, _ in rows):
+        bad += 1
+        print("  WRONG  an uninstantiated module was read as having outputs")
+    else:
+        print("  ok     an uninstantiated module is not read as dead")
+
+    # And the reader STOPS at the end of the table.
+    #
+    # Asserted against a line that would otherwise parse, not against today's
+    # report. In the shipped report the behaviour rows carry no `outN=` pairs,
+    # so they are dropped by the "no voltages, no row" filter whether or not
+    # the bound exists -- a check against the real file passes with the bound
+    # deleted, which is a test that cannot fail. The hazard is the gate one day
+    # printing a voltage below the table; this is what that looks like.
+    bounded = ("  --    per-module output activity:\n"
+               "        Zephyr             ch=1 out0=0.000 out1=0.000\n"
+               "  FAIL  every cable into the audio interface is silent\n"
+               "  --    behaviour over 6.0 s:\n"
+               "        PressedDuck out0=1.234 over 6.0 s\n")
+    got = P.activity_rows(bounded)
+    if [n for n, _ in got] != ["Zephyr"]:
+        bad += 1
+        print(f"  WRONG  the reader ran past the end of the activity table "
+              f"and read the behaviour section as modules: {[n for n, _ in got]}")
+    else:
+        print("  ok     the reader stops at the gate's next verdict line, so "
+              "a voltage printed below the table is not read as a module")
+    return bad, 5
+
+
+def check_a_stuck_idiom_escalates_too() -> tuple:
+    """The same escalation on the other failure, which needed it first.
+
+    The five-attempt idiom run had the same shape: each retry was told what it
+    failed at, none was told it had failed at the same thing before, and the
+    fifth read exactly like the first.
+    """
+    bad = 0
+    pch = _patch_using("CVfunk", "PentaSequencer")
+    missing = [GATE_REQ]
+
+    if P.stuck_note(missing, pch, []):
+        bad += 1
+        print("  WRONG  the first attempt is told it is stuck")
+    else:
+        print("  ok     the first attempt is not told it has failed before")
+
+    said = "\n".join(P.stuck_note(missing, pch, [tuple(missing)]))
+    if "2 ATTEMPTS RUNNING" not in said.upper():
+        bad += 1
+        print(f"  WRONG  a repeated requirement is not counted:\n{said}")
+    elif "CVfunk/PentaSequencer" not in said:
+        bad += 1
+        print(f"  WRONG  the escalation does not name what has been tried "
+              f"every time:\n{said}")
+    elif "MODULES" not in said.upper():
+        bad += 1
+        print(f"  WRONG  the escalation does not ask for a different module, "
+              f"which is the only thing left to change:\n{said}")
+    else:
+        print("  ok     a repeated requirement says to change which modules, "
+              "and names the ones tried")
+
+    # A different requirement failing is progress.
+    moved = P.stuck_note(missing, pch, [("something else entirely",)])
+    if moved:
+        bad += 1
+        print(f"  WRONG  a run that failed a DIFFERENT requirement is told it "
+              f"is stuck: {moved}")
+    else:
+        print("  ok     a different requirement is progress, not a repeat")
+    return bad, 3
+
+
 class _Intent:
     """What claim_idiom returns. Local, so the loop can be driven without a
     prompt that happens to word itself into the right idiom."""
@@ -603,6 +895,10 @@ def check_registered_before_the_skip() -> tuple:
 
 
 CHECKS = (check_retry_names_a_real_jack,
+          check_the_dead_module_is_named,
+          check_a_repeat_escalates_to_replacement,
+          check_the_reader_refuses_to_guess,
+          check_a_stuck_idiom_escalates_too,
           check_inventory_says_when_ports_are_unknown,
           check_a_failed_run_hands_over_its_patch,
           check_the_best_attempt_is_the_one_kept,

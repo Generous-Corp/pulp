@@ -3272,6 +3272,210 @@ def claim_idiom(prompt: str, idioms: dict, say=None):
     return intent
 
 
+#: The gate's per-module table opens with this line. Bounded rather than
+#: scanned whole: the behaviour section below it also indents its rows, and
+#: "PressedDuck out 0 over 6.0 s" parsed as a module row with no outputs.
+ACTIVITY_HEADER = "per-module output activity:"
+
+
+def activity_rows(report: str) -> list:
+    """(module name, its output voltages) per row of the gate's activity table.
+
+    A module the gate could not instantiate has no voltages and is skipped: it
+    reported nothing, which is not the same as reporting zero. Core's audio
+    interface is always in that state, and calling it dead would name the one
+    module in every patch that cannot be the cause.
+    """
+    import re
+    rows = []
+    started = False
+    for line in report.splitlines():
+        if ACTIVITY_HEADER in line:
+            started = True
+            continue
+        if not started:
+            continue
+        # The table ends at the gate's next verdict line ("  warn", "  FAIL",
+        # "  --"), all of which are indented two spaces; a row is indented far
+        # deeper.
+        if not line.startswith("        "):
+            break
+        head = line.split("|", 1)[0]
+        parts = head.split()
+        if not parts:
+            continue
+        outs = [float(v) for k, v in
+                (p.split("=", 1) for p in parts[1:] if "=" in p)
+                if k.startswith("out")]
+        if not outs:
+            continue                      # "(not instantiated)", or no outputs
+        rows.append((parts[0], outs))
+    return rows
+
+
+def dead_module(report: str, patch: dict) -> dict | None:
+    """The module that STOPPED the signal, named. -> its entry, or None.
+
+    NAMING IT IS THE WHOLE POINT. The retry context already handed the model
+    the entire per-module table and told it to "find the FIRST module in the
+    chain whose output is 0.000". It did not: four consecutive attempts kept a
+    dead oscillator and adjusted its knobs, whose params were all in range and
+    none at a silencing zero. A table plus an instruction to infer from it is
+    not a fact the model can act on; "Zephyr produced 0.000 V on every output"
+    is.
+
+    Dead means EVERY output reads zero -- a module with one quiet jack among
+    several live ones is working. The cause is a dead module with no dead
+    module feeding it, decided from the patch's own cables rather than from the
+    order the gate happened to print: everything downstream of a dead module is
+    silent as a consequence, and blaming the last one in the chain sends the
+    model to fix the wrong thing.
+    """
+    rows = activity_rows(report)
+    mods = patch.get("modules", [])
+    if not rows:
+        return None
+    # Matched BY POSITION, and then verified. The gate prints one row per
+    # module in the patch's own order, so position survives two modules of the
+    # same model in one patch where a name lookup could not tell them apart.
+    # Verified because a silently wrong pairing would name an innocent module.
+    named = []
+    for i, (name, outs) in enumerate(rows):
+        if i >= len(mods) or mods[i].get("model") != name:
+            named = []
+            break
+        named.append((mods[i], outs))
+    if not named:
+        # Fall back to unambiguous names only. A model appearing twice cannot
+        # be resolved this way, and guessing which one is dead is worse than
+        # saying nothing.
+        by_model = {}
+        for m in mods:
+            by_model.setdefault(m.get("model"), []).append(m)
+        for name, outs in rows:
+            hits = by_model.get(name) or []
+            if len(hits) != 1:
+                return None
+            named.append((hits[0], outs))
+
+    dead_ids = {m.get("id") for m, outs in named if all(v == 0.0 for v in outs)}
+    if not dead_ids:
+        return None
+    fed_by = {}
+    for c in patch.get("cables", []):
+        fed_by.setdefault(c.get("inputModuleId"), set()).add(
+            c.get("outputModuleId"))
+
+    def entry(m, outs):
+        return {"id": m.get("id"), "plugin": m.get("plugin"),
+                "model": m.get("model"), "outs": outs,
+                "key": f"{m.get('plugin')}/{m.get('model')}"}
+
+    for m, outs in named:
+        if m.get("id") not in dead_ids:
+            continue
+        if not (fed_by.get(m.get("id"), set()) & dead_ids):
+            return entry(m, outs)
+    # Every dead module has a dead feeder, which means a loop of them. The
+    # first one the gate printed is still upstream of the rest of the silence,
+    # and naming it beats naming nothing.
+    for m, outs in named:
+        if m.get("id") in dead_ids:
+            return entry(m, outs)
+    return None
+
+
+def _alternatives_for(inv: dict, dead: dict, limit: int = 4) -> list:
+    """Installed modules that could stand in for a dead one.
+
+    Shares a tag with it, and never the module itself. Its own maker first:
+    a request that named a maker still means it, and swapping within the maker
+    is the smaller change.
+    """
+    entry = (inv.get(dead["plugin"], {}).get("modules", {})
+                .get(dead["model"], {}))
+    tags = {t.casefold() for t in (entry.get("tags") or [])}
+    if not tags:
+        return []
+    out = []
+    for pslug in sorted(inv, key=lambda s: (s != dead["plugin"], s)):
+        for mslug, m in sorted(inv[pslug].get("modules", {}).items()):
+            if pslug == dead["plugin"] and mslug == dead["model"]:
+                continue
+            if tags & {t.casefold() for t in (m.get("tags") or [])}:
+                out.append(f"{pslug}/{mslug}")
+    return out[:limit]
+
+
+def silence_advice(report: str, patch: dict, inv: dict, runs: list) -> list:
+    """What to tell the model about a silent patch, given what it already tried.
+
+    `runs` is every previous attempt's dead-module key, oldest first. It is
+    what makes this escalate rather than repeat: four attempts in a row kept
+    the same dead oscillator and retuned it, and every one of those attempts
+    was told the same thing, so nothing about the fourth differed from the
+    first. Repetition is a fact about the run, and a fact the model can act on.
+    """
+    dead = dead_module(report, patch)
+    if not dead:
+        return []
+    outs = ", ".join(f"out{i}={v:.3f}" for i, v in enumerate(dead["outs"]))
+    lines = [f"{dead['key']} PRODUCED NOTHING: {outs}. Nothing downstream of "
+             f"it can make a sound, whatever else is wired correctly."]
+    # How many attempts IN A ROW ended here, this one included.
+    repeats = 1
+    for key in reversed(runs):
+        if key != dead["key"]:
+            break
+        repeats += 1
+    if repeats >= 2:
+        lines.append(
+            f"{dead['key']} has now been the dead module {repeats} attempts "
+            f"running. Changing its settings has not worked and is not going "
+            f"to. REPLACE IT with a different module and rewire that part of "
+            f"the patch; do not adjust its knobs again.")
+        alts = _alternatives_for(inv, dead)
+        if alts:
+            lines.append(f"Installed modules that could take its place: "
+                         f"{', '.join(alts)}.")
+    return lines
+
+
+def stuck_note(missing: list, patch: dict, runs: list) -> list:
+    """Say when a run is going round in a circle, and name what to change.
+
+    Same escalation as `silence_advice`, on the other failure. A retry told
+    only what it failed at arrives knowing nothing about the attempts before
+    it, so the fifth reads exactly like the first -- which is how a run spent
+    five model calls producing five near-identical patches.
+
+    Says which MODULES to change, not only which requirement is unmet: the
+    requirement had already been stated four times by then.
+    """
+    if not runs:
+        return []
+    key = tuple(sorted(missing))
+    repeats = 1
+    for previous in reversed(runs):
+        if previous != key:
+            break
+        repeats += 1
+    if repeats < 2:
+        return []
+    used = []
+    for m in patch.get("modules", []):
+        name = f"{m.get('plugin')}/{m.get('model')}"
+        if name not in used and m.get("plugin") != "Core":
+            used.append(name)
+    lines = [f"THE SAME REQUIREMENT HAS NOW FAILED {repeats} ATTEMPTS RUNNING. "
+             f"Rewiring the modules you have has not satisfied it. Change "
+             f"WHICH MODULES the patch uses for this part, using the jacks "
+             f"named below."]
+    if used:
+        lines.append(f"What you have tried each time: {', '.join(used[:8])}.")
+    return lines
+
+
 def _jacks_for_side(inv: dict, roles: dict, role: str, kind: str,
                     side: str, limit: int = 3, prefer=()) -> tuple[list, list]:
     """Installed jacks matching one end of a requirement. -> (can, cannot).
@@ -3573,6 +3777,14 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     # is what they meant, and they can. Five of them were generated, explicitly
     # kept by the transcript, and then discarded by `raise SystemExit`.
     best = None
+    # WHAT THE PREVIOUS ATTEMPTS ALREADY FAILED AT, so a retry can escalate
+    # rather than repeat. Measured: four consecutive attempts kept the same
+    # dead oscillator and adjusted its knobs, because every one of them was
+    # told exactly what the first was told. Repetition is a fact about the run
+    # and the model cannot see it -- each attempt arrives knowing only its own
+    # rejection.
+    silent_runs: list = []
+    missed_runs: list = []
 
     for attempt in range(retries + 1):
         parts = [contract, library_brief(prompt, inv),
@@ -3732,7 +3944,16 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                     for m in told:
                         print(f"    - {m}" if not m.startswith("  ")
                               else f"  {m}")
-                    ctx = (f"This has to be a {claimed.slug} patch. "
+                    # The SAME requirement missing again is a fact about the
+                    # run that no single attempt can see, and the same
+                    # escalation the silent path needs: what has not worked
+                    # twice is not going to work a third time unchanged.
+                    stuck = stuck_note(missing, patch, missed_runs)
+                    missed_runs.append(tuple(sorted(missing)))
+                    for line in stuck:
+                        print(f"    {line}", flush=True)
+                    ctx = ("\n".join(stuck) + ("\n\n" if stuck else "") +
+                           f"This has to be a {claimed.slug} patch. "
                            f"{idioms[claimed.slug].get('is', '')}\n\n"
                            "It is missing:\n" +
                            "\n".join(f"  - {m}" if not m.startswith("  ")
@@ -3793,11 +4014,25 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         for line in report.splitlines():
             if "FAIL" in line or "silent" in line:
                 print(f"    {line.strip()}", flush=True)
+        # NAME THE MODULE THAT STOPPED THE SIGNAL, and say when the same one
+        # has stopped it before. Asking the model to read the table below and
+        # infer which module that is did not work: four attempts running kept
+        # the same dead oscillator and retuned it. See silence_advice().
+        advice = silence_advice(report, patch, inv, silent_runs)
+        found = dead_module(report, patch)
+        silent_runs.append(found["key"] if found else None)
+        for line in advice:
+            print(f"    {line}", flush=True)
         # The measured output of EVERY module is in the report, so the reason
         # can be pointed at rather than guessed. A VCA reading exactly 0.000 is
         # not a level set too low -- a low level still passes something. It is
         # a CV of exactly zero, which means whatever feeds it never fired.
-        ctx = ("The patch was structurally valid but SILENT when run. Every "
+        #
+        # The named module goes FIRST, above the table it was read out of: it
+        # is the conclusion the rest of this text asks the model to reach, and
+        # burying it under 4 KB of voltages is how it got missed four times.
+        ctx = (("\n".join(advice) + "\n\n" if advice else "") +
+               "The patch was structurally valid but SILENT when run. Every "
                "cable into the audio interface carried nothing.\n\n" + report +
                "\n\nRead the per-module activity above and find the FIRST "
                "module in the chain whose output is 0.000 — that is where the "
