@@ -222,6 +222,20 @@ pulp_add_test_suite(pulp-test-windowing
 pulp_add_test_suite(pulp-test-mirrored-history-buffer
     SOURCES test_mirrored_history_buffer.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+
+# Public signal headers are consumed by WAM/WebCLAP translation units compiled
+# without an exception runtime. This small executable makes any explicit
+# throw/try/catch in the new history surface a native compile failure too.
+add_executable(pulp-test-signal-no-exceptions test_signal_no_exceptions.cpp)
+target_link_libraries(pulp-test-signal-no-exceptions PRIVATE pulp::signal)
+if(MSVC)
+    target_compile_options(pulp-test-signal-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-signal-no-exceptions PRIVATE
+        -fno-exceptions -fno-rtti)
+endif()
+add_test(NAME signal-public-headers-no-exceptions
+    COMMAND pulp-test-signal-no-exceptions)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives
     SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
